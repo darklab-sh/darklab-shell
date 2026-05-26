@@ -13,7 +13,8 @@
 
 # ── Branding ──────────────────────────────────────────────────────────────────
 
-# Name displayed in the browser tab, header, and permalink pages
+# Name displayed in the browser tab, header, and permalink pages.
+# Values longer than 20 visible characters are shortened at startup.
 # Server default if unset: "darklab_shell"
 # app_name: "darklab_shell"
 
@@ -47,12 +48,34 @@
 # Server default if unset: 50
 # recent_commands_limit: 50
 
-# Directory used for SQLite history and compressed full-output artifacts.
+# Directory used for SQLite history, compressed full-output artifacts, body-store
+# files, and the app-owned secret key file. Postgres deployments still use this
+# directory for filesystem artifacts and offloaded body-store files.
 # Leave unset for auto-detect: use /data when it is writable, otherwise fall
 # back to /tmp for local/dev runs. If set explicitly, startup requires the
 # directory to be writable.
 # Server default if unset: auto (/data if writable, otherwise /tmp)
 # data_dir: /data
+#
+# Database backend. SQLite is the default for local and single-user installs.
+# Set this to postgres to use database_url, the Postgres connection pool, and
+# app-owned Postgres migrations at startup.
+# Server default if unset: sqlite
+# database_backend: sqlite
+#
+# Postgres DSN and pool bounds. These are ignored while database_backend is
+# sqlite. DATABASE_URL, DATABASE_POOL_MIN, and DATABASE_POOL_MAX environment
+# variables can also set these values for Compose-based deployments.
+# Server defaults if unset: "", 1, 5
+# database_url: postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+# database_pool_min: 1
+# database_pool_max: 5
+#
+# Postgres JIT can make interactive page requests slower when a complex query
+# crosses Postgres' cost threshold. The app disables JIT on pooled connections
+# by default; set this to true only if your workload benefits from JIT.
+# Server default if unset: false
+# database_postgres_jit: false
 
 # Enable the built-in basic redaction model for snapshot sharing. When enabled,
 # the app applies a
@@ -90,6 +113,14 @@
 # Server default if unset: 365
 # permalink_retention_days: 365
 
+# Optional filesystem offload thresholds for large text bodies stored under
+# data_dir/body-store. Set to 0 to keep the current all-inline database shape.
+# Values accept bytes or strings like 512kb / 2mb.
+# Server defaults if unset: 0
+# runs_search_text_inline_max_bytes: 0
+# snapshots_inline_max_bytes: 0
+# intel_payload_inline_max_bytes: 0
+
 # ── Per-session Workspace Storage ────────────────────────────────────────────
 #
 # Optional app-mediated file storage for file-enabled commands and UI.
@@ -109,9 +140,9 @@
 # Session directories are created sticky + setgid, and files are group-readable
 # for the app/scanner shared group without being world-readable.
 # The Docker entrypoint normalizes WORKSPACE_ROOT ownership and permissions
-# before dropping to appuser. If you change this value, also update the matching
-# WORKSPACE_ROOT environment variable in docker-compose.yml, a Compose override,
-# or .env. .env is optional; it only supplies values consumed by Compose.
+# before dropping to appuser. In Compose deployments, set WORKSPACE_ROOT in
+# docker-compose.yml, a Compose override, or .env; the app treats that env var as
+# the runtime workspace_root override so the path only needs to live in one place.
 # Server default if unset: /tmp/darklab_shell-workspaces
 # workspace_root: /tmp/darklab_shell-workspaces
 #
@@ -131,6 +162,108 @@
 # age-based cleanup, though quotas still apply.
 # Server default if unset: 1
 # workspace_inactivity_ttl_hours: 1
+
+# ── Project Workspace Guardrails ─────────────────────────────────────────────
+#
+# Per-session and per-project caps for project workspace records. Set to 0 for
+# unlimited, though route rate limits still apply.
+# Server default if unset: 100
+# max_projects_per_session: 100
+#
+# Server default if unset: 5000
+# max_project_links_per_project: 5000
+#
+# Maximum Atlas entities linked into one project. Set to 0 for unlimited,
+# though max_project_links_per_project still applies.
+# Server default if unset: 5000
+# max_project_entities_per_project: 5000
+#
+# Maximum manual or discovered project targets. Bulk-linked Atlas entities use
+# max_project_entities_per_project instead.
+# Server default if unset: 200
+# max_project_targets_per_project: 200
+#
+# Server default if unset: 25
+# max_evidence_packages_per_project: 25
+#
+# Server default if unset: 5000
+# max_entity_labels_per_session: 5000
+#
+# Server default if unset: 20
+# max_entity_labels_per_entity: 20
+#
+# Server default if unset: 2000
+# max_entity_notes_per_session: 2000
+#
+# Evidence package final ZIP size cap in megabytes. Set to 0 for unlimited.
+# Server default if unset: 25
+# evidence_package_max_mb: 25
+#
+# Evidence package expanded-content cap before ZIP compression, in megabytes.
+# Set to 0 for unlimited.
+# Server default if unset: 500
+# evidence_package_max_uncompressed_mb: 500
+#
+# Maximum number of workspace artifacts included in one evidence package. Set
+# to 0 for unlimited.
+# Server default if unset: 100
+# evidence_package_max_artifacts: 100
+#
+# Evidence package download/build rate limits use the shared limiter and are
+# tighter than normal command/project writes because archive construction can
+# read many workspace files.
+# Server default if unset: 10
+# evidence_package_download_rate_limit_per_minute: 10
+#
+# Server default if unset: 2
+# evidence_package_download_rate_limit_per_second: 2
+
+# ── Outbound Notifications ───────────────────────────────────────────────────
+#
+# Server-side delivery guardrails for outbound notification channels. Channel
+# CRUD and concrete channel senders are built on this storage/worker foundation.
+# Server default if unset:
+# notifications:
+#   do_not_disturb: false
+#   delivery_rate_per_minute: 10
+#   http_timeout_seconds: 8
+#   test_timeout_seconds: 4
+#   http_private_host_allowlist: []  # Exact hosts, IPs, or CIDR ranges allowed for private webhook targets.
+#   smtp:
+#     host: ""
+#     port: 587
+#     user: ""
+#     password_secret_id: ""  # Environment variable name holding the SMTP password.
+#     from_address: ""
+#     tls: starttls  # starttls, ssl, or none
+#   retry:
+#     max_attempts: 6
+#     max_age_hours: 24
+#     base_delay_seconds: 30
+#   events:
+#     retention_days: 30
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+#
+# Server-side cadence settings for scheduled runs and watcher-owned schedules.
+# The scheduler worker is a separate process from Gunicorn and uses a database
+# or filesystem lock so only one worker fires due schedules.
+# Server default if unset:
+# scheduler:
+#   lock_path: ""  # Empty uses APP_DATA_DIR/scheduler.lock for SQLite.
+#   tick_seconds: 5
+#   max_per_session: 32
+#   missed_fire_policy: coalesce
+#   max_catchup_window_seconds: 3600
+#   default_timezone: UTC
+
+# ── Watchers ────────────────────────────────────────────────────────────────
+#
+# Server-side limits for change-detection monitors. Each watcher owns one
+# scheduler row, so this cap bounds both watcher state and recurring checks.
+# Server default if unset:
+# watchers:
+#   max_per_session: 32
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -162,7 +295,7 @@
 
 # ── Operator Diagnostics ─────────────────────────────────────────────────────
 #
-# GET /diag returns a JSON summary of app version, operational config, SQLite
+# GET /diag returns a JSON summary of app version, operational config, database
 # health and row counts, Redis connectivity, vendor-asset source (built-in vs
 # fallback), and per-tool availability derived from the allowlist.
 #
@@ -183,6 +316,87 @@
 # Server default if unset: [] (disabled)
 # diagnostics_allowed_cidrs:
 #   - 172.16.0.0/12
+#
+# GET /metrics exposes Prometheus-format metrics for dashboards and alerts.
+# It uses the same IP allowlist as /diag and returns 404 when the caller is not
+# allowed. Keep diagnostics_allowed_cidrs empty to hide both endpoints.
+# AI assist writes from this allowlist also bypass the per-session AI quota for
+# operator testing. The deployment-wide AI quota and worker concurrency still
+# apply, so trusted clients cannot overload a local model.
+#
+# Server default if unset: true
+# metrics_enabled: true
+#
+# Shared directory used by prometheus_client to aggregate counters/histograms
+# across Gunicorn workers. In the Docker Compose setup this lives on /tmp tmpfs
+# and is cleared on container startup by entrypoint.sh.
+# Server default if unset: /tmp/darklab_shell-prom
+# prometheus_multiproc_dir: /tmp/darklab_shell-prom
+#
+# Optional histogram bucket overrides, in seconds. The defaults cover short
+# web requests and long-running scanner commands.
+# metrics_histogram_buckets_run_duration:
+#   - 0.1
+#   - 0.5
+#   - 1
+#   - 2
+#   - 5
+#   - 10
+#   - 30
+#   - 60
+#   - 300
+#   - 900
+#   - 1800
+#   - 3600
+# metrics_histogram_buckets_http_duration:
+#   - 0.005
+#   - 0.01
+#   - 0.05
+#   - 0.1
+#   - 0.5
+#   - 1
+#   - 5
+# metrics_histogram_buckets_ai_provider_duration:
+#   - 0.1
+#   - 0.5
+#   - 1
+#   - 2
+#   - 5
+#   - 10
+#   - 30
+#   - 60
+
+# ── AI Assists ───────────────────────────────────────────────────────────────
+#
+# Optional AI provider settings for run-output summaries and safe next-command
+# drafts. The foundation is disabled by default. Provider calls use an
+# OpenAI-compatible /v1/chat/completions endpoint, and the diagnostics page can
+# probe /v1/models plus run a tiny JSON-only test prompt when enabled.
+# Server defaults if unset:
+# ai_enabled: false
+# ai_provider: openai_compatible
+# ai_base_url: ""
+# ai_model: ""
+# ai_api_key_secret_name: ""  # Existing session vault secret name, when the caller has a session.
+# ai_api_key: ""              # Environment/config fallback for operators that prefer process env.
+# ai_connect_timeout_seconds: 5
+# ai_timeout_seconds: 120
+# ai_max_input_chars: 24000
+# ai_max_output_tokens: 120
+# ai_next_commands_max_output_tokens: 180
+# ai_max_concurrent: 1
+# ai_max_queue_depth: 20
+# diagnostics_allowed_cidrs clients bypass this per-session AI write limit only.
+# The global AI write limit below still applies to every client.
+# ai_rate_limit_per_session_hour: 5
+# ai_rate_limit_global_per_minute: 2
+# ai_allow_full_output: false
+# ai_require_private_base_url: true
+# ai_base_url_allowed_cidrs: []
+# ai_prompt_version_override: ""
+# ai_feature_summary: false
+# ai_feature_next_commands: false
+# ai_feature_run_suggestions: false
 
 # ── Restricted Command Inputs ────────────────────────────────────────────────
 
@@ -204,18 +418,156 @@
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
-# Whether the /runs rate limiter is active at all. Set to false for test-only or
-# maintenance overlays where you want the app to accept runs without throttling.
+# Whether the shared /runs and /api/v1 rate limiter is active at all. Set to false
+# for test-only or maintenance overlays where you want the app to accept requests
+# without throttling.
 # Server default if unset: true
 # rate_limit_enabled: true
 
-# Maximum number of /runs requests per minute per IP
+# Maximum number of /runs and /api/v1 requests per minute per IP
 # Server default if unset: 30
 # rate_limit_per_minute: 30
 
-# Maximum number of /runs requests per second per IP
+# Maximum number of /runs and /api/v1 requests per second per IP
 # Server default if unset: 5
 # rate_limit_per_second: 5
+
+# ── External Intel Provider Defaults ─────────────────────────────────────────
+#
+# These defaults define the cache and quota contract for app-owned intel
+# providers. They do not enable a provider by themselves; provider commands
+# still require command-registry entries and matching encrypted secrets.
+
+# Normalized response cache TTLs, in seconds.
+# Server defaults if unset:
+#   Shodan IP: 86400 (24h)
+#   Shodan search: 21600 (6h)
+#   Censys host: 21600 (6h)
+#   VirusTotal domain: 21600 (6h)
+#   VirusTotal file/hash: 86400 (24h)
+#   GreyNoise IP: 3600 (1h)
+#   AlienVault OTX indicator: 21600 (6h)
+#   AbuseIPDB IP: 21600 (6h)
+#   IPinfo IP: 21600 (6h)
+#   Team Cymru IP: 86400 (24h)
+#   crt.sh domain: 86400 (24h)
+#   HIBP Pwned Passwords SHA1: 604800 (7d)
+#   NVD CVE: 86400 (24h)
+#   Vulners CVE: 86400 (24h)
+#   urlscan.io search: 21600 (6h)
+#   urlscan.io result: 86400 (24h)
+#   URLhaus host: 21600 (6h)
+#   URLhaus payload/hash: 86400 (24h)
+#   URLhaus URL: 21600 (6h)
+#   ThreatFox IOC: 21600 (6h)
+#   ThreatFox hash: 86400 (24h)
+#   SecurityTrails domain: 86400 (24h)
+#   RouteViews prefix: 21600 (6h)
+# intel_cache_ttl_shodan_ip_seconds: 86400
+# intel_cache_ttl_shodan_search_seconds: 21600
+# intel_cache_ttl_censys_host_seconds: 21600
+# intel_cache_ttl_virustotal_domain_seconds: 21600
+# intel_cache_ttl_virustotal_file_seconds: 86400
+# intel_cache_ttl_greynoise_ip_seconds: 3600
+# intel_cache_ttl_otx_indicator_seconds: 21600
+# intel_cache_ttl_abuseipdb_ip_seconds: 21600
+# intel_cache_ttl_ipinfo_ip_seconds: 21600
+# intel_cache_ttl_teamcymru_ip_seconds: 86400
+# intel_cache_ttl_crtsh_domain_seconds: 86400
+# intel_cache_ttl_hibp_password_seconds: 604800
+# intel_cache_ttl_nvd_cve_seconds: 86400
+# intel_cache_ttl_vulners_cve_seconds: 86400
+# intel_cache_ttl_urlscan_search_seconds: 21600
+# intel_cache_ttl_urlscan_result_seconds: 86400
+# intel_cache_ttl_urlhaus_host_seconds: 21600
+# intel_cache_ttl_urlhaus_payload_seconds: 86400
+# intel_cache_ttl_urlhaus_url_seconds: 21600
+# intel_cache_ttl_threatfox_ioc_seconds: 21600
+# intel_cache_ttl_threatfox_hash_seconds: 86400
+# intel_cache_ttl_securitytrails_domain_seconds: 86400
+# intel_cache_ttl_routeviews_prefix_seconds: 21600
+
+# Redis token-bucket defaults for provider calls. Buckets are per session and
+# provider so one user's lookups don't spend another user's quota.
+# Server defaults if unset:
+#   Shodan: bucket 5, refill 1 token every 1s
+#   Censys: bucket 10, refill 1 token every 6s
+#   VirusTotal Public: bucket 4, refill 1 token every 15s
+#   GreyNoise Community: bucket 50, refill 1 token every 12096s
+#   GreyNoise unauthenticated fallback: bucket 10, refill 1 token every 8640s
+#   AlienVault OTX: bucket 30, refill 1 token every 2s
+#   AbuseIPDB: bucket 20, refill 1 token every 4s
+#   IPinfo: bucket 30, refill 1 token every 2s
+#   Team Cymru: bucket 30, refill 1 token every 2s
+#   crt.sh: bucket 10, refill 1 token every 6s
+#   HIBP Pwned Passwords: bucket 10, refill 1 token every 2s
+#   NVD anonymous: bucket 5, refill 1 token every 6s
+#   Vulners: bucket 10, refill 1 token every 6s
+#   urlscan.io: bucket 10, refill 1 token every 6s
+#   URLhaus: bucket 20, refill 1 token every 3s
+#   ThreatFox: bucket 20, refill 1 token every 3s
+#   SecurityTrails: bucket 10, refill 1 token every 6s
+#   RouteViews: bucket 20, refill 1 token every 3s
+# intel_rate_limit_shodan_bucket: 5
+# intel_rate_limit_shodan_refill_seconds: 1
+# intel_rate_limit_censys_bucket: 10
+# intel_rate_limit_censys_refill_seconds: 6
+# intel_rate_limit_virustotal_public_bucket: 4
+# intel_rate_limit_virustotal_public_refill_seconds: 15
+# intel_rate_limit_greynoise_community_bucket: 50
+# intel_rate_limit_greynoise_community_refill_seconds: 12096
+# intel_rate_limit_greynoise_unauthenticated_bucket: 10
+# intel_rate_limit_greynoise_unauthenticated_refill_seconds: 8640
+# intel_rate_limit_otx_bucket: 30
+# intel_rate_limit_otx_refill_seconds: 2
+# intel_rate_limit_abuseipdb_bucket: 20
+# intel_rate_limit_abuseipdb_refill_seconds: 4
+# intel_rate_limit_ipinfo_bucket: 30
+# intel_rate_limit_ipinfo_refill_seconds: 2
+# intel_rate_limit_teamcymru_bucket: 30
+# intel_rate_limit_teamcymru_refill_seconds: 2
+# intel_rate_limit_crtsh_bucket: 10
+# intel_rate_limit_crtsh_refill_seconds: 6
+# intel_rate_limit_hibp_bucket: 10
+# intel_rate_limit_hibp_refill_seconds: 2
+# intel_rate_limit_nvd_anonymous_bucket: 5
+# intel_rate_limit_nvd_anonymous_refill_seconds: 6
+# intel_rate_limit_vulners_bucket: 10
+# intel_rate_limit_vulners_refill_seconds: 6
+# intel_rate_limit_urlscan_bucket: 10
+# intel_rate_limit_urlscan_refill_seconds: 6
+# intel_rate_limit_urlhaus_bucket: 20
+# intel_rate_limit_urlhaus_refill_seconds: 3
+# intel_rate_limit_threatfox_bucket: 20
+# intel_rate_limit_threatfox_refill_seconds: 3
+# intel_rate_limit_securitytrails_bucket: 10
+# intel_rate_limit_securitytrails_refill_seconds: 6
+# intel_rate_limit_routeviews_bucket: 20
+# intel_rate_limit_routeviews_refill_seconds: 3
+
+# Fallback negative-cache windows for quota-exhausted responses when the
+# provider response does not include a reset time.
+# Server default if unset: 21600 (6h)
+# intel_negative_cache_virustotal_quota_seconds: 21600
+# intel_negative_cache_censys_quota_seconds: 21600
+# intel_negative_cache_otx_quota_seconds: 21600
+# intel_negative_cache_abuseipdb_quota_seconds: 21600
+# intel_negative_cache_ipinfo_quota_seconds: 21600
+# intel_negative_cache_urlhaus_quota_seconds: 21600
+# intel_negative_cache_vulners_quota_seconds: 21600
+# intel_negative_cache_urlscan_quota_seconds: 21600
+# intel_negative_cache_threatfox_quota_seconds: 21600
+# intel_negative_cache_securitytrails_quota_seconds: 21600
+
+# Maximum number of interactive PTY input requests per minute per IP. This is
+# intentionally higher than /runs because normal typing can produce many small
+# terminal input events.
+# Server default if unset: 500
+# interactive_pty_input_rate_limit_per_minute: 500
+
+# Maximum number of interactive PTY input requests per second per IP.
+# Server default if unset: 10
+# interactive_pty_input_rate_limit_per_second: 10
 
 # ── Terminal ──────────────────────────────────────────────────────────────────
 
@@ -230,9 +582,28 @@
 # Server default if unset: 5000
 # max_output_lines: 5000
 
+# Pause live DOM rendering for brokered command output after this many received
+# lines. The run keeps counting output, kill controls stay active, and saved
+# previews/full-output artifacts still follow max_output_lines,
+# output_preview_max_mb, persist_full_run_output, and full_output_max_mb.
+# Set to 0 to disable the high-volume live-output pause.
+# Server default if unset: 50000
+# high_volume_output_line_threshold: 50000
+
+# While high-volume live-output mode is active, show a fresh status line after
+# this many additional received lines.
+# Server default if unset: 50000
+# high_volume_output_status_interval_lines: 50000
+
+# Hard cap for the saved run preview payload, expressed in megabytes.
+# This protects history reads from huge single-line outputs such as JSON.
+# Set to 0 for unlimited.
+# Server default if unset: 1 MB
+# output_preview_max_mb: 1MB
+
 # Persist the full output of completed runs as compressed artifact files under /data.
 # The history drawer and normal run permalink continue to use the capped preview stored
-# in SQLite; this enables a separate "view full output" page for completed runs.
+# in the configured database; this enables a separate "view full output" page for completed runs.
 # Server default if unset: true
 # persist_full_run_output: true
 
@@ -271,7 +642,7 @@
 # run_broker_active_stream_ttl_seconds: 14400
 
 # TTL for completed broker streams after history finalization. Completed run
-# restore falls back to SQLite/history artifacts after this window.
+# restore falls back to saved history rows and artifacts after this window.
 # Server default if unset: 3600
 # run_broker_completed_stream_ttl_seconds: 3600
 
@@ -293,6 +664,59 @@
 # is considered stale and another browser can reconnect/restore it.
 # Server default if unset: 75
 # run_broker_owner_stale_seconds: 75
+
+# Enable interactive PTY mode for allowlisted interactive tools such as
+# nc --interactive, telnet --interactive, mtr --interactive, ffuf --interactive,
+# and masscan --interactive. Multi-worker deployments require Redis so PTY
+# output, input, and resize events can be brokered across workers. Without
+# Redis, this mode is limited to single-worker local/dev deployments.
+# Server default if unset: false
+# interactive_pty_enabled: false
+
+# Maximum lifetime for an interactive PTY command before the server terminates
+# it, in seconds.
+# Server default if unset: 900
+# interactive_pty_max_runtime_seconds: 900
+
+# Maximum number of active interactive PTY runs allowed for one browser session.
+# Server default if unset: 4
+# interactive_pty_max_concurrent_per_session: 4
+
+# Maximum number of recent PTY events retained in local single-worker mode.
+# Server default if unset: 512
+# interactive_pty_buffer_limit: 512
+
+# Maximum UTF-8 bytes accepted in one interactive PTY input/control event.
+# Server default if unset: 4096
+# interactive_pty_input_max_bytes: 4096
+
+# How often an idle local PTY stream emits a heartbeat, in seconds.
+# Server default if unset: 15
+# interactive_pty_heartbeat_seconds: 15
+
+# How often a PTY reader checks queued input/resize control events, in seconds.
+# Server default if unset: 0.2
+# interactive_pty_control_poll_seconds: 0.2
+
+# Maximum Redis PTY events read per stream poll.
+# Server default if unset: 100
+# interactive_pty_stream_fetch_count: 100
+
+# Approximate maximum Redis PTY stream length per active run.
+# Server default if unset: 5000
+# interactive_pty_stream_maxlen: 5000
+
+# PTY snapshot publish thresholds. Larger byte/second values reduce Redis
+# writes; smaller values make cross-worker reattach snapshots fresher.
+# Server defaults if unset: 8192 bytes, 1 second, minimum 0.2 seconds.
+# interactive_pty_snapshot_publish_bytes: 8192
+# interactive_pty_snapshot_publish_seconds: 1
+# interactive_pty_snapshot_min_publish_seconds: 0.2
+
+# Maximum plain fallback entries returned when an ANSI PTY snapshot is not
+# available.
+# Server default if unset: 200
+# interactive_pty_snapshot_fallback_entry_limit: 200
 
 # ── Welcome Animation ─────────────────────────────────────────────────────────
 
@@ -364,3 +788,8 @@
 # Higher values allow that many total hint states, counting the first hint.
 # Server default if unset: 0
 # welcome_hint_rotations: 0
+
+# Enable the app tour entry points. When disabled, the welcome tour prompt,
+# visual tour links, and `tour` built-in command are hidden.
+# Server default if unset: true
+# tour_enabled: true

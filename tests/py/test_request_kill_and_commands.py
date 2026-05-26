@@ -10,15 +10,15 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
-import commands
-from builtin_commands import (
+import services.commands.registry as commands
+from services.commands.builtins import (
     _DOCUMENTED_BUILTIN_COMMANDS,
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
     _run_builtin_commands,
     resolve_builtin_command,
 )
-from commands import (
+from services.commands.registry import (
     load_welcome,
     is_command_allowed,
     validate_command,
@@ -32,7 +32,7 @@ def _command_validation_helpers():
     global _COMMAND_VALIDATION_HELPERS
     if _COMMAND_VALIDATION_HELPERS is None:
         registry = commands.load_commands_registry()
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             _COMMAND_VALIDATION_HELPERS = {
                 "allow_grouping": commands.load_allow_grouping_flags(),
                 "workspace_flags": commands._workspace_flag_specs_by_root(),
@@ -43,7 +43,6 @@ def _command_validation_helpers():
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
@@ -101,7 +100,7 @@ class TestKillRoute:
     def test_kill_returns_404_when_run_missing(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None):
+        with mock.patch("blueprints.run.pid_for_session", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -111,7 +110,7 @@ class TestKillRoute:
     def test_kill_scopes_pid_lookup_to_request_session(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None) as pid_pop:
+        with mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup:
             resp = client.post(
                 "/kill",
                 json={"run_id": "run-123"},
@@ -119,12 +118,12 @@ class TestKillRoute:
             )
 
         assert resp.status_code == 404
-        pid_pop.assert_called_once_with("run-123", "owner-session")
+        pid_lookup.assert_called_once_with("run-123", "owner-session")
 
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=1234), \
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-123"})
@@ -137,8 +136,8 @@ class TestKillRoute:
     def test_kill_still_returns_true_when_process_lookup_fails(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
-             mock.patch("blueprints.run.os.getpgid", side_effect=ProcessLookupError):
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
+             mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):
             resp = client.post("/kill", json={"run_id": "run-404"})
 
         assert resp.status_code == 200
@@ -148,9 +147,9 @@ class TestKillRoute:
     def test_kill_uses_scanner_sudo_path_when_configured(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
-             mock.patch("blueprints.run.subprocess.run") as run_cmd, \
+             mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=0)) as run_cmd, \
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-scan"})
 
@@ -159,10 +158,24 @@ class TestKillRoute:
         assert data["killed"] is True
         # pgid == pid because setsid guarantees PGID == PID at spawn time
         run_cmd.assert_called_once_with(
-            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-1234"],
+            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "--", "-1234"],
             timeout=5,
         )
         killpg.assert_not_called()
+
+    def test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=1)), \
+             mock.patch("blueprints.run.time.sleep"), \
+             mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):
+            resp = client.post("/kill", json={"run_id": "run-scan-race"})
+
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["killed"] is True
 
     def test_kill_rejects_non_object_json(self):
         client = get_client()
@@ -189,7 +202,7 @@ class TestWelcomeLoadingEdges:
 """)
             path = f.name
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -199,7 +212,7 @@ class TestWelcomeLoadingEdges:
         assert result[0]["out"] == "appuser"
 
     def test_missing_file_returns_empty(self):
-        with mock.patch("commands.WELCOME_FILE", "/missing.yaml"):
+        with mock.patch("services.commands.registry.WELCOME_FILE", "/missing.yaml"):
             assert load_welcome() == []
 
 
@@ -208,10 +221,10 @@ class TestIsCommandAllowedEdges:
         a = allow if allow is not None else ["ls", "curl", "echo", "nmap"]
         d = deny if deny is not None else []
         helpers = _command_validation_helpers()
-        with mock.patch("commands.load_command_policy", return_value=(a, d)), \
-             mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
-             mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
-             mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+        with mock.patch("services.commands.registry.load_command_policy", return_value=(a, d)), \
+             mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+             mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+             mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
             return is_command_allowed(cmd)
 
     def test_prefix_exactness_ls_does_not_allow_lsblk(self):
@@ -273,8 +286,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import session_workspace_name, write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import session_workspace_name, write_workspace_text_file
                 write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
                 target_path = os.path.join(
                     tmp,
@@ -331,8 +344,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import resolve_workspace_path, write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import resolve_workspace_path, write_workspace_text_file
                 write_workspace_text_file("session-1", "darklab/targets.txt", "ip.darklab.sh\n", cfg)
 
                 result = validate_command(
@@ -375,8 +388,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import write_workspace_text_file
                 write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
 
                 result = validate_command(
@@ -406,6 +419,35 @@ class TestIsCommandAllowedEdges:
         assert "Invalid file path: /../../scan.txt" in absolute_denied.reason
         assert "Command not allowed" not in absolute_denied.reason
 
+    def test_workspace_file_flags_treat_root_paths_as_workspace_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            from services.workspace.files import resolve_workspace_path, write_workspace_text_file
+            write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
+
+            result = validate_command(
+                "katana -list /urls.txt -d 1 -silent -o /katana-urls.txt",
+                session_id="session-1",
+                cfg=cfg,
+            )
+            expected_read = str(resolve_workspace_path("session-1", "urls.txt", cfg))
+            expected_write = str(resolve_workspace_path("session-1", "katana-urls.txt", cfg))
+
+        assert result.allowed, result.reason
+        assert result.workspace_reads == ["urls.txt"]
+        assert result.workspace_writes == ["katana-urls.txt"]
+        assert expected_read in result.exec_command
+        assert expected_write in result.exec_command
+        assert " -o /katana-urls.txt" not in result.exec_command
+
     def test_workspace_disabled_keeps_declared_file_flags_denied(self):
         registry = {
             "commands": [
@@ -418,7 +460,7 @@ class TestIsCommandAllowedEdges:
             ],
             "pipe_helpers": [],
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             result = validate_command(
                 "nmap -iL targets.txt",
                 session_id="session-1",
@@ -453,8 +495,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import write_workspace_text_file
                 write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
 
                 workspace_result = validate_command(
@@ -500,7 +542,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
             }
-            from workspace import write_workspace_text_file
+            from services.workspace.files import write_workspace_text_file
             write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
             write_workspace_text_file("session-1", "hosts.txt", "ip.darklab.sh\n", cfg)
             write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
@@ -508,7 +550,7 @@ class TestIsCommandAllowedEdges:
 
             cases = [
                 (
-                    "pd-httpx -l urls.txt -o httpx.txt",
+                    "httpx -l urls.txt -o httpx.txt",
                     ["urls.txt"],
                     ["httpx.txt"],
                 ),
@@ -528,48 +570,53 @@ class TestIsCommandAllowedEdges:
                     ["katana.txt"],
                 ),
                 (
+                    "nmap -sV -p 1-1000 ip.darklab.sh -o nmap-output.txt",
+                    [],
+                    ["nmap-output.txt"],
+                ),
+                (
                     "amass enum -df domains.txt -timeout 10",
                     ["domains.txt"],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
                     "amass subs -d darklab.sh -names",
                     [],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
-                    "amass subs -d darklab.sh -names -dir amass",
+                    "amass subs -d darklab.sh -names -dir tools/amass",
                     [],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
                     "amass subs -d darklab.sh -names -o amass-subdomains.txt",
                     [],
-                    ["amass-subdomains.txt", "amass"],
+                    ["amass-subdomains.txt", "tools/amass"],
                 ),
                 (
                     "amass track -d darklab.sh",
                     [],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
                     "amass viz -d darklab.sh -d3 -o amass-viz",
                     [],
-                    ["amass-viz", "amass"],
+                    ["amass-viz", "tools/amass"],
                 ),
             ]
 
             registry = commands.load_commands_registry()
-            with mock.patch("commands.load_commands_registry", return_value=registry):
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 command_policy = commands.load_command_policy()
                 allow_grouping = commands.load_allow_grouping_flags()
                 workspace_flags = commands._workspace_flag_specs_by_root()
                 runtime_adaptations = commands._runtime_adaptations_by_root()
 
-            with mock.patch("commands.load_command_policy", return_value=command_policy), \
-                 mock.patch("commands.load_allow_grouping_flags", return_value=allow_grouping), \
-                 mock.patch("commands._workspace_flag_specs_by_root", return_value=workspace_flags), \
-                 mock.patch("commands._runtime_adaptations_by_root", return_value=runtime_adaptations):
+            with mock.patch("services.commands.registry.load_command_policy", return_value=command_policy), \
+                 mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=allow_grouping), \
+                 mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=workspace_flags), \
+                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations):
                 results = [
                     (validate_command(command, session_id="session-1", cfg=cfg), reads, writes)
                     for command, reads, writes in cases
@@ -581,7 +628,7 @@ class TestIsCommandAllowedEdges:
                     cfg=cfg,
                 )
                 assert not denied.allowed
-                assert "managed amass session directory" in denied.reason
+                assert "managed tools/amass session directory" in denied.reason
 
                 denied = validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
@@ -596,6 +643,26 @@ class TestIsCommandAllowedEdges:
             assert result.workspace_reads == reads
             assert result.workspace_writes == writes
             assert str(tmp) in result.exec_command
+
+    def test_workspace_artifact_capture_skips_app_managed_amass_database(self):
+        from blueprints.run import _workspace_artifacts_from_validation
+
+        validation = commands.CommandValidationResult(
+            True,
+            workspace_reads=["domains.txt"],
+            workspace_writes=[
+                "tools/amass",
+                "amass-subdomains.txt",
+                "tools/amass/asset.db",
+            ],
+        )
+
+        artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+
+        assert [(item["workspace_path"], item["kind"]) for item in artifacts] == [
+            ("domains.txt", "input"),
+            ("amass-subdomains.txt", "output"),
+        ]
 
     def test_restricted_command_input_cidrs_block_inline_literal_targets(self):
         registry = {
@@ -630,7 +697,7 @@ class TestIsCommandAllowedEdges:
             "restricted_command_input_cidrs": ["10.0.0.0/8", "169.254.169.254/32"],
             "workspace_enabled": False,
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             ip_result = validate_command("probe 10.1.2.3", cfg=cfg)
             url_result = validate_command("probe -u http://169.254.169.254/latest", cfg=cfg)
             domain_result = validate_command("probe darklab.sh", cfg=cfg)
@@ -664,7 +731,7 @@ class TestIsCommandAllowedEdges:
             "restricted_command_input_cidrs": ["10.0.0.0/8"],
             "workspace_enabled": False,
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             result = validate_command("scan 10.2.0.0/16", cfg=cfg)
 
         assert not result.allowed
@@ -708,10 +775,10 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            from workspace import write_workspace_text_file
+            from services.workspace.files import write_workspace_text_file
             write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n10.9.8.7\n", cfg)
 
-            with mock.patch("commands.load_commands_registry", return_value=registry):
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 result = validate_command(
                     "scan -iL targets.txt",
                     session_id="session-1",
@@ -756,6 +823,7 @@ class TestBuiltinCommandResolution:
         assert resolve_builtin_command(":(){:|:&};:") == "fork_bomb"
         assert resolve_builtin_command("status") == "status"
         assert resolve_builtin_command("sudo") == "sudo"
+        assert resolve_builtin_command("tour") == "tour"
         assert resolve_builtin_command("tty") == "tty"
         assert resolve_builtin_command("type curl") == "type"
         assert resolve_builtin_command("uname -a") == "uname"
@@ -765,6 +833,7 @@ class TestBuiltinCommandResolution:
         assert resolve_builtin_command("who") == "who"
         assert resolve_builtin_command("whoami") == "whoami"
         assert resolve_builtin_command("ps aux") == "ps"
+        assert resolve_builtin_command("project current") == "project"
         with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
             assert resolve_builtin_command("file list") == "file"
             assert resolve_builtin_command("workspace list") is None
@@ -778,6 +847,10 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("ls") is None
             assert resolve_builtin_command("cat targets.txt") is None
             assert resolve_builtin_command("rm targets.txt") is None
+
+    def test_tour_builtin_command_is_hidden_when_disabled(self):
+        with mock.patch.dict("config.CFG", {"tour_enabled": False}):
+            assert resolve_builtin_command("tour") is None
 
     def test_commands_external_catalog_uses_commands_registry(self):
         registry = {
@@ -803,10 +876,10 @@ class TestBuiltinCommandResolution:
             "pipe_helpers": [{"root": "grep"}],
         }
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value=registry) as loader:
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value=registry) as loader:
             lines = _run_builtin_commands("commands --external")
 
-        text = "\n".join(line.get("text", "") for line in lines)
+        text = "\n".join(str(line.get("text", "")) for line in lines)
         assert loader.call_count == 1
         assert "Allowed external commands:" in text
         assert "[Registry Group]" in text
@@ -842,19 +915,19 @@ class TestBuiltinCommandResolution:
             "pipe_helpers": [],
         }
 
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             lines = _run_builtin_commands("commands info sentinel-scan")
 
-        text = "\n".join(line.get("text", "") for line in lines)
+        text = "\n".join(str(line.get("text", "")) for line in lines)
         assert "sentinel-scan" in text
         assert "Probe a target safely." in text
         assert "sentinel-scan example.test" in text
         assert "-i <value>" in text
-        assert "App handling:" not in text
-        assert "Adds `--safe` automatically when needed." not in text
+        assert "App Handling:" in text
+        assert "Adds `--safe` automatically when needed." in text
 
     def test_commands_info_unknown_root_returns_usage_hint(self):
-        with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
             lines = _run_builtin_commands("commands info nope")
 
         assert lines[0]["text"] == "commands: no catalog entry for nope"

@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
-const TEST_IP = makeTestIp(65)
+const CMD = 'hostname'
 
 test.describe('output actions', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -80,20 +78,24 @@ test.describe('output actions', () => {
   // ── Save .html ────────────────────────────────────────────────────────────
 
   test('save-html button triggers a .html file download', async ({ page }) => {
-    await page.locator('.hud-actions [data-action="save-menu"]').click()
+    const saveWrap = page.locator('.hud-actions .hud-save-wrap')
+    await saveWrap.locator('[data-action="save-menu"]').click()
+    await expect(saveWrap.locator('[data-action="save-html"]')).toBeVisible()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('.hud-actions [data-action="save-html"]').click(),
+      saveWrap.locator('[data-action="save-html"]').click(),
     ])
 
     expect(download.suggestedFilename()).toMatch(/\.html$/)
   })
 
   test('downloaded html file contains the command text', async ({ page }) => {
-    await page.locator('.hud-actions [data-action="save-menu"]').click()
+    const saveWrap = page.locator('.hud-actions .hud-save-wrap')
+    await saveWrap.locator('[data-action="save-menu"]').click()
+    await expect(saveWrap.locator('[data-action="save-html"]')).toBeVisible()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('.hud-actions [data-action="save-html"]').click(),
+      saveWrap.locator('[data-action="save-html"]').click(),
     ])
 
     const stream = await download.createReadStream()
@@ -101,7 +103,7 @@ test.describe('output actions', () => {
     for await (const chunk of stream) chunks.push(chunk)
     const html = Buffer.concat(chunks).toString('utf8')
 
-    expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain(CMD)
     expect(html).toContain('data:font/ttf;base64,')
     expect(html).not.toContain('/vendor/fonts/')
     expect(html).not.toContain('fonts.googleapis.com')
@@ -157,7 +159,6 @@ test.describe('output actions', () => {
 
 test.describe('output actions with no exportable output', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -194,7 +195,6 @@ test.describe('output actions with no exportable output', () => {
 
 test.describe('output follow helper', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page, { cancelWelcome: true })
@@ -336,7 +336,6 @@ test.describe('output follow helper', () => {
 
 test.describe('output search scopes', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page, { cancelWelcome: true })

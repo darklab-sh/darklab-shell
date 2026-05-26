@@ -9,10 +9,10 @@ import { fileURLToPath } from 'url'
 // state both start clean.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_pressable.js'), 'utf8')
-const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_dismissible.js'), 'utf8')
-const UI_FOCUS_TRAP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_focus_trap.js'), 'utf8')
-const UI_CONFIRM_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_confirm.js'), 'utf8')
+const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'), 'utf8')
+const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'), 'utf8')
+const UI_FOCUS_TRAP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'), 'utf8')
+const UI_CONFIRM_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_confirm.js'), 'utf8')
 
 function mountHost() {
   document.body.innerHTML = `
@@ -38,6 +38,7 @@ function loadHelpers() {
   delete window.showModalOverlay
   delete window.hideModalOverlay
   delete window.bindMobileSheet
+  delete window.enhanceAppSelects
   // Stubs: ui_confirm.js calls showModalOverlay/hideModalOverlay on the
   // host and refocusComposerAfterAction after resolve. Provide minimal
   // stand-ins so the primitive can exercise its own flow without loading
@@ -164,6 +165,20 @@ describe('showConfirm', () => {
       document.querySelector('[data-confirm-action-id="confirm"]').click()
       await promise
       expect(g.refocusComposerAfterAction).toHaveBeenCalledWith({ defer: true })
+    })
+
+    it('can resolve without refocusing the composer', async () => {
+      const documentClick = vi.fn()
+      document.addEventListener('click', documentClick)
+      const promise = g.showConfirm({ actions: KILL_ACTIONS, refocusOnResolve: false })
+      try {
+        document.querySelector('[data-confirm-action-id="cancel"]').click()
+        await promise
+        expect(g.refocusComposerAfterAction).not.toHaveBeenCalled()
+        expect(documentClick).not.toHaveBeenCalled()
+      } finally {
+        document.removeEventListener('click', documentClick)
+      }
     })
   })
 
@@ -389,6 +404,45 @@ describe('showConfirm', () => {
       const slot = document.querySelector('[data-confirm-content]')
       expect(slot.children.length).toBe(1)
       expect(slot.querySelector('#session-token-set-input')).toBe(input)
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('enhances form-select controls in the content slot', async () => {
+      const select = document.createElement('select')
+      select.className = 'form-select'
+      select.appendChild(new Option('One', 'one'))
+      g.enhanceAppSelects = vi.fn()
+      const promise = g.showConfirm({ content: select, actions: KILL_ACTIONS })
+      const slot = document.querySelector('[data-confirm-content]')
+      expect(g.enhanceAppSelects).toHaveBeenCalledWith(slot)
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('focuses the app-native select trigger when defaultFocus is an enhanced select', async () => {
+      const select = document.createElement('select')
+      select.className = 'form-select'
+      select.appendChild(new Option('One', 'one'))
+      g.enhanceAppSelects = vi.fn((root) => {
+        const nativeSelect = root.querySelector('select.form-select')
+        nativeSelect.classList.add('app-select-native')
+        const wrap = document.createElement('div')
+        wrap.className = 'app-select'
+        const trigger = document.createElement('button')
+        trigger.type = 'button'
+        trigger.className = 'app-select-trigger'
+        wrap.appendChild(trigger)
+        nativeSelect.insertAdjacentElement('afterend', wrap)
+      })
+
+      const promise = g.showConfirm({
+        content: select,
+        defaultFocus: select,
+        actions: KILL_ACTIONS,
+      })
+
+      expect(document.activeElement).toBe(document.querySelector('.app-select-trigger'))
       g.cancelConfirm()
       await promise
     })

@@ -2,7 +2,7 @@
 
 This guide is for developers and contributors working on darklab_shell locally. It covers setup, tests, lint/security checks, and the expected Git/GitLab merge request flow.
 
-For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
+For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOC_STANDARDS.md](DOC_STANDARDS.md).
 
 ---
 
@@ -12,6 +12,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Branch Workflow](#branch-workflow)
 - [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
+- [Adding External Commands](#adding-external-commands)
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
 - [Dependency Version Tracking](#dependency-version-tracking)
@@ -81,7 +82,7 @@ scripts pick `.venv/bin/pytest` automatically when it exists, while direct app,
 lint, and debugging commands should still run from the virtualenv:
 
 - app runs
-- `npm run lint` which runs flake8
+- `npm run lint` which runs Ruff
 - ad hoc backend debugging
 
 ### VS Code Setup
@@ -95,7 +96,7 @@ Recommended extensions:
 - `Vitest`
 - `Playwright Test for VSCode`
 - `Markdown Preview Mermaid Support`
-- `Flake8`
+- `Ruff`
 - `Bandit`
 - `ESLint`
 
@@ -131,10 +132,6 @@ Keep branches focused. If the work changes product behavior, tests, and docs, in
 
 Commit messages should describe the intent of the change, not just what files were touched. Lead with the affected area when it helps narrow scope — for example, `fix(mobile): restore scroll position on tab switch` or `feat(autocomplete): add positional hints for nmap`. Keep the subject line under 72 characters.
 
-Release branches may carry temporary merge-request and release-note drafts under `docs/release-drafts/`. Keep those drafts updated with user-facing features, fixes, risks, and validation as the branch changes so release bookkeeping is visible in normal review. Remove the draft directory before merging back to `main` unless the project intentionally wants to keep that release's draft files.
-
----
-
 ## Release Branch Merge Checklist
 
 Before merging a version branch back to `main`:
@@ -144,7 +141,6 @@ Before merging a version branch back to `main`:
 - Ensure the PROJECT_README variable in [app/config.py](app/config.py) is accurate and not branch-specific.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
 - Ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`.
-- Ensure `docs/release-drafts/` draft files are removed from git unless the project intentionally keeps that release's draft artifacts.
 - Ensure all project docs are up to date with the released version section from [CHANGELOG.md](CHANGELOG.md), including README, FEATURES, ARCHITECTURE, CONTRIBUTING, tests docs, external-command notes, and any decision docs touched by the release.
 - Ensure generated screenshots, demo media, smoke fixtures, vendor files, and docs inventories are refreshed when the release changed those surfaces.
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
@@ -156,13 +152,29 @@ Before merging a version branch back to `main`:
 
 ## Code Style
 
-**Python** — `flake8` enforces style and syntax. Configuration lives in [`.flake8`](.flake8). The main rules are: max line length 120, with per-file ignores for test files and generated content. Run `flake8 app/ tests/py/` before every commit.
+**Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
-**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`config/eslint.config.js`](config/eslint.config.js)).
+**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
 **Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
+
+---
+
+## Adding External Commands
+
+Adding a new external command usually means touching more than the command registry. Before a command ships, check the places where darklab_shell has command-specific behavior:
+
+- `app/conf/commands.yaml` for policy, autocomplete, examples, help metadata, required secrets, workspace-aware paths, runtime adaptations, interactive PTY settings, and smoke metadata.
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) for any behavior the app owns, such as rewritten flags, managed tool directories, secret handling, or workspace file rules.
+- `app/core/output_signals.py` when the command has output lines that should become findings, warnings, errors, summaries, targets, entities, or intentionally ignored noise.
+- Project and Atlas flows when command output should create durable findings or entities that appear outside the transcript.
+- `app/services/ai/next_commands.py`, `app/services/ai/prompts.py`, and `app/services/ai/suggestions.py` when AI should understand, suggest, validate, rewrite, or reject follow-up commands for that tool.
+- Command registry, output-signal, route/policy, autocomplete, smoke, and AI tests that match the changed behavior.
+- User-facing docs such as README, FEATURES, CONFIGURATION, or THEME only when the command changes what operators can see or configure.
+
+Keep command examples in sync across the registry, docs, autocomplete, smoke fixtures, and any AI prompt menus. If a tool has noisy banners, generated paths, uncommon target syntax, or special list-file behavior, add a small regression test with real sample output instead of relying on the generic parser.
 
 ---
 
@@ -176,12 +188,21 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1205 pytest + 998 Vitest + 236 Playwright = 2,439 tests**.
-That total includes 2,409 behavior tests plus 30 docs/inventory meta-tests.
+Current totals: **1796 pytest + 1247 Vitest + 253 Playwright = 3,296 tests**.
+That total includes 3,246 behavior tests plus 33 docs/inventory meta-tests.
+
+CI runs the Postgres backend lane automatically. Locally, use
+`npm run test:postgres` to run the Postgres smoke, route, and migration
+integration tests against isolated test schemas. The helper uses
+`DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable
+Docker Postgres container and removes it after the run. Use
+`bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
+profile-gated Compose Postgres service without publishing the database port.
 
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 
@@ -205,7 +226,7 @@ The checks and their scope:
 
 | Check | Tool | Scope | Run manually |
 |---|---|---|---|
-| Python style | `flake8` | `app/`, `tests/py/` | `python -m flake8 app/ tests/py/` |
+| Python style | `ruff check` | `app/`, `tests/py/` | `python -m ruff check --config .tooling/ruff.toml app/ tests/py/` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
 | Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
@@ -221,7 +242,7 @@ The checks and their scope:
 
 Run all linters at once (Python + JS/CSS/shell/Docker/YAML/Markdown + vendor): `npm run lint`
 
-Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`config/stylelint.config.mjs`](config/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
+Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
@@ -229,7 +250,7 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 ## Vendor JS Workflow
 
-The two browser libraries used at runtime — `ansi_up` and `jspdf` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
+The browser libraries used at runtime — `ansi_up`, `jspdf`, `@xterm/xterm`, and `@xterm/addon-fit` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
 
 **Regenerate vendor files after a version bump:**
 
@@ -247,7 +268,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 `vendor:check` runs automatically as part of `npm run lint` and the pre-commit hook (when `node_modules` is present).
 
-**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf` ships a UMD build that is copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
+**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
 ---
 
@@ -312,10 +333,11 @@ When choosing the test layer:
 - use `Vitest` for browser-module logic that can be covered in jsdom
 - use `Playwright` for real browser behavior such as focus, mobile layout, drag/drop, scrolling, and end-to-end flows
 
-After a Dockerfile, packaged-tool, or workspace file-flag change, run the container smoke test before merging. It builds the container, runs every command from the shared smoke corpus (`app/conf/commands.yaml` examples plus workflow steps), compares output against the stored expectations, and verifies selected workspace read/write flags through the Files API:
+After a Dockerfile, packaged-tool, or workspace file-flag change, run the container smoke test before merging. It reuses the stable smoke cache image by default, runs every command from the shared smoke corpus (`app/conf/commands.yaml` examples plus workflow steps), compares output against the stored expectations, and verifies selected workspace read/write flags through the Files API. Add `--build` when Dockerfile, base-image, or packaged-tool changes need a fresh cache-image build:
 
 ```bash
 ./scripts/container_smoke_test.sh
+./scripts/container_smoke_test.sh --build
 ```
 
 If a tool's output has intentionally changed, run the capture script first. It runs the same commands in a browser and writes the raw output to `/tmp` as a reference — it does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`, so use the output to make those edits manually:
@@ -370,9 +392,25 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 
 ## Related Docs
 
-- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
-- [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
-- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
-- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
-- [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
-- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands
+- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
+- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](FEATURES.md) - full per-feature reference
+- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

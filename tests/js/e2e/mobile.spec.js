@@ -2,9 +2,11 @@ import { test, expect } from '@playwright/test'
 import {
   createShareSnapshot,
   ensurePromptReady,
-  makeTestIp,
   setComposerValueForTest,
+  waitForActiveOutputSettled,
   waitForHistoryRuns,
+  browserSessionId,
+  seedExternalHistoryRuns,
 } from './helpers.js'
 
 const MOBILE = { width: 375, height: 812 }
@@ -14,15 +16,6 @@ const LONG_CMD = 'ping -c 4 8.8.8.8'
 // viewport and touch signals as real mobile browsers.
 test.use({ hasTouch: true, isMobile: true })
 
-// Browser specs share the same backend rate limiter, so derive a stable test-
-// scoped IP from the file/title instead of reusing one bucket for the suite.
-function testScopedIp(testInfo, baseOffset = 0) {
-  const key = `${testInfo.file}:${testInfo.title}`
-  let sum = 0
-  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
-  return makeTestIp(baseOffset + sum)
-}
-
 async function runCommandMobile(page, cmd) {
   await page.waitForFunction(
     () => {
@@ -30,15 +23,13 @@ async function runCommandMobile(page, cmd) {
       const input = document.getElementById('mobile-cmd')
       if (!activeTab || !(input instanceof HTMLInputElement)) return false
       const style = window.getComputedStyle(input)
-      const acReady =
-        typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
-      return style.display !== 'none' && style.visibility !== 'hidden' && acReady
+      return style.display !== 'none' && style.visibility !== 'hidden'
     },
     { timeout: 15_000 },
   )
   await page.locator('#mobile-cmd').focus()
   await simulateMobileKeyboard(page)
-  await setComposerValueForTest(page, cmd, { mobile: true })
+  await setComposerValueForTest(page, cmd, { mobile: true, waitForAutocomplete: false })
   const runBtn = page.locator('#mobile-run-btn')
   await expect(runBtn).toBeEnabled({ timeout: 5_000 })
   await runBtn.click()
@@ -64,6 +55,35 @@ async function openMobileKeyboard(page) {
   await simulateMobileKeyboard(page)
 }
 
+async function openMobileProjects(page) {
+  await page.locator('#hamburger-btn').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="projects"]').click()
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-mobile-root')).toBeVisible()
+  await expect(page.locator('#project-mobile-body')).not.toContainText('Loading projects...')
+}
+
+async function createMobileProject(page, name) {
+  await page.locator('#project-mobile-new-btn').click()
+  await expect(page.locator('#project-mobile-create-form')).toBeVisible()
+  await page.locator('#project-mobile-name').fill(name)
+  await page.locator('#project-mobile-create-form button[type="submit"]').click()
+  const row = page.locator('.project-mobile-row').filter({ hasText: name }).first()
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  return row
+}
+
+async function openFullMobileHistoryPanel(page) {
+  await page.locator('#hamburger-btn').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
+  const panel = page.locator('#history-panel')
+  await expect(panel).toHaveClass(/\bopen\b/)
+  await page.evaluate(async () => {
+    if (typeof refreshHistoryPanel === 'function') await refreshHistoryPanel()
+  })
+  await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible' })
+}
+
 // The e2e server (run_e2e_server.sh) writes a test config.local.yaml that adds
 // 127.0.0.0/8 to diagnostics_allowed_cidrs, so Playwright's loopback connection
 // reaches /diag without any extra header manipulation.
@@ -80,6 +100,14 @@ test.describe('diagnostics page on mobile', () => {
     await page.locator('.diag-back-btn').click()
     await expect(page.locator('header h1')).toBeVisible()
     await expect(page.locator('#hamburger-btn')).toBeVisible()
+  })
+
+  test('storage breakdown renders table sizing diagnostics', async ({ page }) => {
+    await page.setViewportSize(MOBILE)
+    await page.goto('/diag')
+    const storage = page.locator('.diag-section.s-storage')
+    await expect(storage).toContainText('Storage breakdown')
+    await expect(storage.locator('.diag-storage-table tbody tr').first()).toBeVisible()
   })
 
   // Verify parity at the shell's mobile-mode threshold (900px + touch).
@@ -106,9 +134,8 @@ test.describe('diagnostics page on desktop at threshold width', () => {
 })
 
 test.describe('mobile menu', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 101) })
-    await page.setViewportSize(MOBILE)
+test.beforeEach(async ({ page }) => {
+  await page.setViewportSize(MOBILE)
     await page.goto('/')
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
     await expect
@@ -122,11 +149,13 @@ test.describe('mobile menu', () => {
   test('mobile startup uses the mobile welcome and keeps the composer visible', async ({
     page,
   }) => {
-    await expect(page.locator('.welcome-banner')).toBeVisible()
-    await expect(page.locator('.welcome-ascii-art')).toBeVisible()
+    await expect(page.locator('.welcome-banner')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.welcome-ascii-art')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
     await expect(page.locator('.welcome-command')).toHaveCount(0)
-    await expect(page.locator('.welcome-section-header')).toContainText('Helpful hints')
+    await expect(page.locator('.welcome-section-header')).toContainText('Helpful hints', {
+      timeout: 15_000,
+    })
     await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
     // Desktop run button stays hidden; the mobile helper row stays hidden until the keyboard opens
     await expect(page.locator('#run-btn')).toBeHidden()
@@ -173,6 +202,7 @@ test.describe('mobile menu', () => {
   })
 
   test('reloading on mobile restores the active output pane at the bottom', async ({ page }) => {
+    test.setTimeout(60_000)
     // Wait for the welcome boot path to settle before running `help`. Without
     // this, under heavy parallel test load the welcome animation can still be
     // actively appending lines to the output pane when the test polls
@@ -182,36 +212,43 @@ test.describe('mobile menu', () => {
     await runCommandMobile(page, 'commands')
 
     const output = page.locator('.tab-panel.active .output')
+    await expect(output.locator('.exit-ok').last()).toContainText(
+      /\[process exited with code 0(?: in [\d.]+s)?\]/,
+      { timeout: 15_000 },
+    )
     await expect
       .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight))
       .toBe(true)
 
-    await page.evaluate(async () => {
-      const activeId = window.activeTabId
-      const activeTab = Array.isArray(window.tabs)
-        ? window.tabs.find((tab) => tab && tab.id === activeId)
-        : null
-      if (activeTab) {
-        activeTab.followOutput = false
-        activeTab.suppressOutputScrollTracking = false
-      }
-      await new Promise((resolve) => setTimeout(resolve, 32))
-      const out = document.querySelector('.tab-panel.active .output')
-      if (!out) return
-      out.scrollTop = 0
-      out.dispatchEvent(new Event('scroll'))
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    })
     await expect
       .poll(async () =>
         output.evaluate((el) => {
+          const activeId = window.activeTabId
+          const activeTab = Array.isArray(window.tabs)
+            ? window.tabs.find((tab) => tab && tab.id === activeId)
+            : null
+          if (activeTab) {
+            activeTab.followOutput = false
+            activeTab.suppressOutputScrollTracking = false
+            activeTab.outputUserScrollUntil = Date.now() + 1000
+            activeTab._outputFollowToken = (activeTab._outputFollowToken || 0) + 1
+          }
+          el.scrollTop = 0
+          el.dispatchEvent(new Event('scroll'))
           const remaining = el.scrollHeight - (el.scrollTop + el.clientHeight)
           return Math.max(0, Math.round(remaining))
         }),
       )
       .toBeGreaterThan(100)
 
-    await page.reload()
+    await waitForActiveOutputSettled(page, { timeout: 15_000 })
+    // The behavior under test is app restoration, not browser load-state timing.
+    // In CI, Chromium occasionally commits the reload but misses Playwright's
+    // domcontentloaded waiter before the app-level ready checks get a chance to
+    // run. Waiting for commit keeps the test tied to the reload boundary while
+    // `ensurePromptReady` below proves the app booted.
+    await page.reload({ waitUntil: 'commit', timeout: 15_000 })
+    await ensurePromptReady(page, { timeout: 15_000 })
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
     await expect
       .poll(async () =>
@@ -232,7 +269,7 @@ test.describe('mobile menu', () => {
   test('mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused', async ({
     page,
   }) => {
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
     await openMobileKeyboard(page)
     const input = page.locator('#mobile-cmd')
     await setComposerValueForTest(page, 'nmap -', { mobile: true })
@@ -258,7 +295,7 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile autocomplete opens above the keyboard helper row', async ({ page }) => {
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
     await openMobileKeyboard(page)
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
     await setComposerValueForTest(page, 'nmap -', { mobile: true })
@@ -295,7 +332,7 @@ test.describe('mobile menu', () => {
   test('mobile contextual autocomplete shows value hints after accepting a value-taking flag', async ({
     page,
   }) => {
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
     await openMobileKeyboard(page)
     const input = page.locator('#mobile-cmd')
     await setComposerValueForTest(page, 'curl -', { mobile: true })
@@ -450,6 +487,68 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile menu FAQ and options open overlays in the mobile shell', async ({ page }) => {
+    await page.route(/https?:\/\/[^/]+\/(?:schedules|watchers)(?:\?|$)/, async (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/schedules') {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ schedules: [] }) })
+        return
+      }
+      if (url.pathname === '/watchers') {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ watchers: [] }) })
+        return
+      }
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+    })
+
+    async function openMobileSheet(action, overlaySelector, modalSelector) {
+      await page.locator('#hamburger-btn').click()
+      await page.locator(`#mobile-menu-sheet [data-menu-action="${action}"]`).click()
+      await expect(page.locator(overlaySelector)).toHaveClass(/\bopen\b/)
+      await expect(page.locator(`${modalSelector} > .sheet-grab.gesture-handle`)).toBeVisible()
+    }
+
+    async function tapSheetHandleToClose(overlaySelector, modalSelector) {
+      const handle = page.locator(`${modalSelector} > .sheet-grab.gesture-handle`)
+      const box = await handle.boundingBox()
+      expect(box).not.toBeNull()
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      await expect(page.locator(overlaySelector)).not.toHaveClass(/\bopen\b/)
+    }
+
+    async function dragSheetHandleToClose(overlaySelector, modalSelector) {
+      const handle = page.locator(`${modalSelector} > .sheet-grab.gesture-handle`)
+      const box = await handle.boundingBox()
+      expect(box).not.toBeNull()
+      const x = box.x + box.width / 2
+      const y = box.y + box.height / 2
+      await page.evaluate(({ modalSelector, x, y }) => {
+        const grab = document.querySelector(`${modalSelector} > .sheet-grab.gesture-handle`)
+        grab.dispatchEvent(new PointerEvent('pointerdown', {
+          pointerId: 92,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y,
+          button: 0,
+          bubbles: true,
+        }))
+        grab.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId: 92,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y + 90,
+          bubbles: true,
+        }))
+        grab.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId: 92,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y + 90,
+          bubbles: true,
+        }))
+      }, { modalSelector, x, y })
+      await expect(page.locator(overlaySelector)).not.toHaveClass(/\bopen\b/)
+    }
+
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
@@ -463,6 +562,16 @@ test.describe('mobile menu', () => {
 
     await page.locator('#options-overlay').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#options-overlay')).not.toHaveClass(/open/)
+
+    await openMobileSheet('schedules', '#schedules-overlay', '#schedules-modal')
+    await tapSheetHandleToClose('#schedules-overlay', '#schedules-modal')
+    await openMobileSheet('schedules', '#schedules-overlay', '#schedules-modal')
+    await dragSheetHandleToClose('#schedules-overlay', '#schedules-modal')
+
+    await openMobileSheet('watchers', '#watchers-overlay', '#watchers-modal')
+    await tapSheetHandleToClose('#watchers-overlay', '#watchers-modal')
+    await openMobileSheet('watchers', '#watchers-overlay', '#watchers-modal')
+    await dragSheetHandleToClose('#watchers-overlay', '#watchers-modal')
   })
 
   test('mobile menu contains history and theme action buttons', async ({ page }) => {
@@ -683,6 +792,162 @@ test.describe('mobile menu', () => {
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
   })
 
+  test('mobile Projects creates, links, drills by count chip, and opens row actions', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await ensurePromptReady(page)
+    const [seededRun] = seedExternalHistoryRuns(testInfo, {
+      sessionId: await browserSessionId(page),
+      commands: ['dig mobile-project.playwright.example +short'],
+    })
+
+    await openMobileProjects(page)
+    const projectName = `Mobile Project ${Date.now()}`
+    let projectRow = await createMobileProject(page, projectName)
+
+    await projectRow.locator('[data-project-mobile-action="open-project"]').click()
+    await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+    await expect(page.locator('#project-mobile-detail-topbar')).toContainText(projectName)
+
+    await page.locator('[data-project-mobile-detail-tab="runs"]').click()
+    await page.locator('#project-mobile-detail-body [data-project-action="link-last-run"]').first().click()
+    await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
+    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
+    await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
+
+    await page.locator('[data-project-mobile-action="back-to-list"]').click()
+    await expect(page.locator('#project-mobile-list-view')).toBeVisible()
+    projectRow = page.locator('.project-mobile-row').filter({ hasText: projectName }).first()
+    const runsChip = projectRow.locator('[data-project-mobile-tab="runs"]').filter({ hasText: /1 run/ })
+    await expect(runsChip).toBeVisible({ timeout: 15_000 })
+    await runsChip.click()
+
+    await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+    await expect(page.locator('[data-project-mobile-detail-tab="runs"]')).toHaveClass(/\bis-active\b/)
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
+
+    await page.locator('#project-mobile-detail-body .project-mobile-run-row .project-mobile-row-menu-trigger').click()
+    const actionSheet = page.locator('#action-sheet-overlay')
+    await expect(actionSheet).toHaveClass(/\bopen\b/)
+    await expect(actionSheet.locator('.sheet-grab.gesture-handle')).toBeVisible()
+    await expect(actionSheet.locator('[data-project-action="edit-run-metadata"]')).toBeVisible()
+    await expect(actionSheet.locator('[data-project-action="open-run"]')).toBeVisible()
+    await expect(actionSheet.locator('[data-project-action="unlink-run"]')).toBeVisible()
+    await actionSheet.click({ position: { x: 10, y: 10 } })
+    await expect(actionSheet).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('[data-project-mobile-detail-tab="packages"]').click()
+    await page.locator('#project-mobile-detail-body [data-project-action="package-wizard-open"]').first().click()
+    await expect(page.locator('#project-package-wizard-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-package-wizard-modal > .sheet-grab.gesture-handle')).toBeVisible()
+    const wizardFooter = page.locator('#project-package-wizard-overlay .project-package-wizard-footer')
+    await expect(wizardFooter).toBeVisible()
+    await page.evaluate(() => {
+      const vv = window.visualViewport
+      if (!vv) return
+      try {
+        Object.defineProperty(vv, 'height', {
+          configurable: true,
+          value: 500,
+        })
+      } catch (_) {}
+      vv.dispatchEvent(new Event('resize'))
+    })
+    await expect(wizardFooter).toBeVisible()
+  })
+
+  test('mobile Projects can launch run comparison from the runs tab', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await ensurePromptReady(page)
+    const runs = seedExternalHistoryRuns(testInfo, {
+      sessionId: await browserSessionId(page),
+      commands: [
+        'nmap -sT -p 80 mobile-compare.playwright.example',
+        'nmap -sT -p 443 mobile-compare.playwright.example',
+      ],
+    })
+
+    await openMobileProjects(page)
+    const projectName = `Mobile Compare ${Date.now()}`
+    const projectRow = await createMobileProject(page, projectName)
+    const projectId = await projectRow.getAttribute('data-project-id')
+    const runIds = runs.slice(0, 2).map(run => run.id)
+    await page.evaluate(async ({ id, linkedRunIds }) => {
+      for (const runId of linkedRunIds) {
+        const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/links`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity_type: 'run', entity_id: runId, source: 'manual' }),
+        })
+        if (!resp.ok) throw new Error(`Failed to link run: ${resp.status}`)
+      }
+    }, { id: projectId, linkedRunIds: runIds })
+    await page.evaluate(() => refreshProjectWorkspace())
+
+    await projectRow.locator('[data-project-mobile-action="open-project"]').click()
+    await page.locator('[data-project-mobile-detail-tab="runs"]').click()
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toHaveCount(2)
+
+    await page.locator('#project-mobile-detail-body [data-project-action="mobile-compare-runs"]').click()
+    const compareSheet = page.locator('#project-mobile-compare-overlay')
+    await expect(compareSheet).toHaveClass(/\bopen\b/)
+    await compareSheet.locator('.project-mobile-compare-footer .btn-primary').click()
+    await expect(compareSheet).toContainText('Compare against')
+    await compareSheet.locator('.project-mobile-compare-footer .btn-primary').click()
+    await expect(compareSheet).toContainText('Choose the baseline run')
+    await compareSheet.locator('.project-mobile-compare-footer .btn-primary').click()
+
+    const compareOverlay = page.locator('#history-compare-overlay')
+    await expect(compareOverlay).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(compareOverlay.locator('#history-compare-subtitle')).toContainText('changed')
+    await expect(compareOverlay.locator('.history-compare-split')).toContainText('Run A')
+    await expect
+      .poll(() => compareOverlay.locator('.history-compare-split').evaluate((node) => node.getBoundingClientRect().height))
+      .toBeGreaterThan(60)
+    await expect
+      .poll(() => compareOverlay.locator('.history-compare-pane').first().evaluate((node) => {
+        const styles = getComputedStyle(node)
+        return `${['auto', 'scroll'].includes(styles.overflowY)}:${styles.maxHeight}`
+      }))
+      .toBe('false:none')
+    await expect
+      .poll(() => compareOverlay.locator('.history-compare-pane-title').first().evaluate((node) => {
+        return getComputedStyle(node).position
+      }))
+      .toBe('sticky')
+    await expect(page.locator('#permalink-toast')).not.toContainText('Failed to compare runs')
+  })
+
+  test('mobile Projects shows retryable project summary errors', async ({ page }) => {
+    await openMobileProjects(page)
+    const projectName = `Mobile Retry ${Date.now()}`
+    let failSummary = true
+    await page.route('**/projects/*/summary', async (route) => {
+      if (!failSummary) {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'forced mobile summary failure' }),
+      })
+    })
+    const projectRow = await createMobileProject(page, projectName)
+
+    await projectRow.locator('[data-project-mobile-action="open-project"]').click()
+    await expect(page.locator('#project-mobile-detail-body')).toContainText(
+      'Could not load this project. It may have been deleted.',
+    )
+    await expect(page.locator('#project-mobile-detail-body [data-project-mobile-action="retry"]')).toBeVisible()
+
+    failSummary = false
+    await page.locator('#project-mobile-detail-body [data-project-mobile-action="retry"]').click()
+    await expect(page.locator('#project-mobile-detail-body')).toContainText('Summary', { timeout: 15_000 })
+    await expect(page.locator('#project-mobile-detail-topbar')).toContainText(projectName)
+  })
+
   test('workflows sheet starts collapsed and wraps commands inside cards', async ({ page }) => {
     await page.setViewportSize(MOBILE)
     await page.goto('/')
@@ -712,7 +977,7 @@ test.describe('mobile menu', () => {
     expect(overflowingChipCount).toBe(0)
   })
 
-  test('mobile recent peek summarizes recent runs and opens the recents sheet on tap', async ({
+  test('mobile recent peek summarizes recent runs and opens the full history panel on tap', async ({
     page,
   }) => {
     const commands = [
@@ -730,15 +995,23 @@ test.describe('mobile menu', () => {
     const peek = page.locator('#mobile-recent-peek')
     await expect(peek).toBeVisible()
     await expect(page.locator('#mobile-recent-peek-count')).toHaveText(`${commands.length}`)
+    await expect(peek).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
 
     await peek.click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
-    const items = page.locator('#mobile-recents-list .sheet-item')
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
+    await expect(page.locator('#history-mobile-filters-toggle')).toBeVisible()
+    await expect(page.locator('#history-search-input')).toBeHidden()
+    await expect(page.locator('#history-bulk-toolbar')).toBeHidden()
+    await page.locator('#history-mobile-filters-toggle').click()
+    await expect(page.locator('#history-search-input')).toBeVisible()
+    await expect(page.locator('#history-bulk-toolbar')).toBeVisible()
+    const items = page.locator('#history-list .history-entry')
     await expect(items.first()).toBeVisible()
     await expect(items).toHaveCount(commands.length)
   })
 
-  test('mobile recents sheet injects the tapped command into the composer and closes', async ({ page }) => {
+  test('mobile full history opens run details from row tap', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
     for (const command of commands) {
@@ -746,20 +1019,20 @@ test.describe('mobile menu', () => {
     }
     await waitForHistoryRuns(page, commands.length)
     await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
-
     await page.locator('#mobile-recent-peek').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
     await page
-      .locator('#mobile-recents-list .sheet-item')
+      .locator('#history-list .history-entry')
       .filter({ hasText: 'hostname' })
       .first()
       .click()
-    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
-    await expect(page.locator('#mobile-cmd')).toHaveValue('hostname')
+    await expect(page.locator('#history-run-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#history-run-subtitle')).toContainText('hostname')
+    await expect(page.locator('#mobile-cmd')).toHaveValue('')
   })
 
-  test('mobile recents sheet restore action loads the run into the active tab', async ({
+  test('mobile full history restore action loads the run into the active tab', async ({
     page,
   }) => {
     const commands = ['hostname', 'date']
@@ -772,48 +1045,109 @@ test.describe('mobile menu', () => {
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
     await page
-      .locator('#mobile-recents-list .sheet-item')
+      .locator('#history-list .history-entry')
       .filter({ hasText: 'date' })
       .first()
-      .locator('.sheet-item-action', { hasText: 'restore' })
+      .locator('[data-action="restore"]')
       .click()
     await expect(page.locator('.tab-panel.active .output')).toContainText('date')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('mobile history rows render relative time with absolute time in the tooltip', async ({ page }) => {
+  test('mobile full history rows render absolute time in the tooltip', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
-    const timeEl = page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-time')
-    await expect(timeEl).toHaveText(/just now|\d+m ago|\d+h ago/)
-    // Absolute time is surfaced via the title attribute for precise lookups on long-press.
+    const timeEl = page.locator('#history-list .history-entry').first().locator('.history-entry-meta span').nth(1)
+    await expect(timeEl).not.toHaveText('')
+    // Absolute time is surfaced via the title attribute for precise lookups on touch devices.
     const title = await timeEl.getAttribute('title')
     expect(title).toBeTruthy()
     expect(title.length).toBeGreaterThan(0)
   })
 
-  test('mobile history permalink action keeps the drawer open', async ({ page }) => {
+  test('mobile full history permalink action keeps the drawer open', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
-    const firstEntry = page.locator('#mobile-recents-list .sheet-item').first()
-    await firstEntry.locator('.sheet-item-action', { hasText: 'permalink' }).click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    const firstEntry = page.locator('#history-list .history-entry').first()
+    await firstEntry.locator('[data-action="history-menu"]').click()
+    await firstEntry.locator('.history-action-menu .dropdown-item', { hasText: 'permalink' }).click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+  })
+
+  test('mobile full history select mode wraps toolbar and row tap selects without long-press side effects', async ({ page }) => {
+    test.setTimeout(60_000)
+    await runCommandMobile(page, 'hostname')
+    await runCommandMobile(page, 'date')
+    await waitForHistoryRuns(page, 2)
+
+    await openFullMobileHistoryPanel(page)
+    const toolbar = page.locator('#history-bulk-toolbar')
+    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
+    await expect(toolbar).toBeHidden()
+    await page.locator('#history-mobile-filters-toggle').click()
+    await expect(toolbar).toBeVisible()
+    await expect(toolbar.locator('.history-bulk-toggle')).toBeVisible()
+    await expect(toolbar.locator('.history-bulk-select-row')).toBeVisible()
+    await toolbar.locator('.history-bulk-toggle').tap()
+    await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
+    await expect(page.locator('#history-list .history-entry').first()).toHaveClass(/\bhistory-entry-selecting\b/)
+
+    await expect
+      .poll(() => toolbar.evaluate((node) => {
+        const box = node.getBoundingClientRect()
+        const children = Array.from(node.children)
+        const overflow = children.some((child) => {
+          const childBox = child.getBoundingClientRect()
+          return childBox.left < box.left - 1 || childBox.right > box.right + 1
+        })
+        return {
+          flexDirection: getComputedStyle(node).flexDirection,
+          overflow,
+          height: Math.round(box.height),
+        }
+      }))
+      .toEqual(expect.objectContaining({ flexDirection: 'column', overflow: false }))
+
+    const firstRow = page.locator('#history-list .history-entry').filter({ hasText: 'hostname' }).first()
+    await firstRow.locator('.history-entry-header').tap()
+    await expect(toolbar.locator('.history-bulk-count')).toHaveText('1 selected')
+    await expect(page.locator('#history-run-overlay.open')).toHaveCount(0)
+
+    const secondRow = page.locator('#history-list .history-entry').filter({ hasText: 'date' }).first()
+    await secondRow.evaluate(async (node) => {
+      node.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: 41,
+        pointerType: 'touch',
+        bubbles: true,
+        cancelable: true,
+      }))
+      await new Promise((resolve) => setTimeout(resolve, 650))
+      node.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 41,
+        pointerType: 'touch',
+        bubbles: true,
+        cancelable: true,
+      }))
+    })
+    await expect(toolbar.locator('.history-bulk-count')).toHaveText('1 selected')
+    await expect(page.locator('#history-run-overlay.open')).toHaveCount(0)
+    await expect(page.locator('#history-list .history-action-menu-wrap.open')).toHaveCount(0)
   })
 
   test('mobile run button disables while a command is running', async ({ page }) => {
@@ -996,5 +1330,161 @@ test.describe('mobile menu', () => {
     const composerBox = await page.locator('#mobile-composer').boundingBox()
     expect(composerBox).not.toBeNull()
     expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
+  })
+
+  test('mobile Atlas opens list/detail flow and select mode', async ({ page }) => {
+    await page.route(/https?:\/\/[^/]+\/atlas(?:\?|\/|$)/, async (route) => {
+      const url = new URL(route.request().url())
+      const entity = {
+        id: 'ent_mobile',
+        session_id: 'mobile-session',
+        type: 'ip',
+        canonical_value: '107.178.109.44',
+        first_seen_at: '2026-05-15T00:00:00Z',
+        last_seen_at: '2026-05-15T00:01:00Z',
+        occurrence_count: 2,
+        created: '2026-05-15T00:00:00Z',
+        run_count: 1,
+        labels: [{ id: 'lbl_mobile', label: 'mobile', source: 'manual', created: '2026-05-15T00:01:00Z' }],
+        note: null,
+        project_links: [],
+        project_link_count: 0,
+        run_links: [{ run_id: 'run_mobile', command: 'nmap 107.178.109.44' }],
+      }
+      if (url.pathname === '/atlas') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            total: 1,
+            counts: { ip: 1, domain: 0, hash: 0, cve: 0, url: 0 },
+            findings: 0,
+          }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/entities/ent_mobile') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            entity,
+            intel_snapshots: [],
+            intel_summary: { status: 'none', providers_with_data: [], highlights: [] },
+            runs: [{ run_id: 'run_mobile', command: 'nmap 107.178.109.44', occurrence_count: 2 }],
+            findings: [],
+          }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/entities') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ entities: [entity], total: 1, limit: 50, offset: 0 }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/findings') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            findings: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+            counts: { new: 0, reviewed: 0, important: 0, false_positive: 0, needs_followup: 0 },
+          }),
+        })
+        return
+      }
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+    })
+    await page.setViewportSize(MOBILE)
+    await page.goto('/')
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')))
+    await expect
+      .poll(async () =>
+        page.evaluate(() => document.body.classList.contains('mobile-terminal-mode')),
+      )
+      .toBe(true)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+    const atlasGrab = page.locator('#atlas-surface > .sheet-grab.gesture-handle')
+    await expect(atlasGrab).toBeVisible()
+    const tabScrollLeft = await page.locator('#atlas-mobile-tabs').evaluate((el) => {
+      const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+      el.scrollLeft = maxScroll
+      return Math.round(el.scrollLeft)
+    })
+    expect(tabScrollLeft).toBeGreaterThan(0)
+    const atlasGrabBox = await atlasGrab.boundingBox()
+    expect(atlasGrabBox).not.toBeNull()
+    await page.mouse.click(atlasGrabBox.x + atlasGrabBox.width / 2, atlasGrabBox.y + atlasGrabBox.height / 2)
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+    const dragGrabBox = await page.locator('#atlas-surface > .sheet-grab.gesture-handle').boundingBox()
+    expect(dragGrabBox).not.toBeNull()
+    const dragX = dragGrabBox.x + dragGrabBox.width / 2
+    const dragY = dragGrabBox.y + dragGrabBox.height / 2
+    await page.evaluate(({ dragX, dragY }) => {
+      const grab = document.querySelector('#atlas-surface > .sheet-grab.gesture-handle')
+      grab.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: 81,
+        pointerType: 'touch',
+        clientX: dragX,
+        clientY: dragY,
+        button: 0,
+        bubbles: true,
+      }))
+      grab.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 81,
+        pointerType: 'touch',
+        clientX: dragX,
+        clientY: dragY + 90,
+        bubbles: true,
+      }))
+      grab.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 81,
+        pointerType: 'touch',
+        clientX: dragX,
+        clientY: dragY + 90,
+        bubbles: true,
+      }))
+    }, { dragX, dragY })
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+    await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
+    const row = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+
+    await row.click()
+    await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
+    await expect(page.locator('#atlas-mobile-entity-topbar')).toContainText('107.178.109.44')
+    await page.locator('#atlas-mobile-entity-topbar .atlas-mobile-back-btn').click()
+    await expect(page.locator('#atlas-mobile-list-view')).toBeVisible()
+
+    await page.locator('#atlas-mobile-tools .atlas-mobile-overflow-btn').click()
+    await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
+    const selectModeAction = page.locator('#action-sheet .action-sheet-item').filter({ hasText: 'Select mode' })
+    await expect.poll(
+      async () => {
+        const box = await selectModeAction.boundingBox()
+        return Math.round(box?.height || 0)
+      },
+      { message: 'Atlas mobile action-sheet rows stay content-sized' },
+    ).toBeLessThan(90)
+    await selectModeAction.click()
+    await expect(page.locator('#atlas-mobile-bulk-bar')).toBeVisible()
+    await row.click()
+    await expect(page.locator('#atlas-mobile-bulk-bar')).toContainText('1 selected')
   })
 })

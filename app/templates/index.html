@@ -6,12 +6,13 @@
 <meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ app_name }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="stylesheet" href="/static/css/fonts.css">
+<link rel="stylesheet" href="/static/css/core/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
+<script src="/static/js/core/run_output_model.js"></script>
 <script src="/static/js/export_html.js"></script>
 </head>
 <body data-theme="{{ current_theme.name }}">
@@ -137,101 +138,124 @@
         <span class="menu-title-label">Menu</span>
       </div>
 
-      <div class="menu-group">
-        <button type="button" class="menu-item nav-item" data-menu-action="search">
-          <span class="menu-item-icon" aria-hidden="true">⌕</span>
-          <span class="menu-item-label">search</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="clear">
-          <span class="menu-item-icon" aria-hidden="true">⌫</span>
-          <span class="menu-item-label">clear</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
-          <span class="menu-item-icon" aria-hidden="true">#</span>
-          <span class="menu-item-label">line numbers</span>
-          <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
-          <span class="menu-item-icon" aria-hidden="true">◷</span>
-          <span class="menu-item-label">timestamps</span>
-          <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
-          <span class="disclosure-chev" aria-hidden="true">▸</span>
-        </button>
-        <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">off</span>
+      <div class="menu-scroll bottom-sheet-body nice-scroll">
+        <div class="menu-group">
+          <button type="button" class="menu-item nav-item" data-menu-action="search">
+            <span class="menu-item-icon" aria-hidden="true">⌕</span>
+            <span class="menu-item-label">search</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">elapsed</span>
-            <span class="menu-subitem-hint">+1.2s</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="clear">
+            <span class="menu-item-icon" aria-hidden="true">⌫</span>
+            <span class="menu-item-label">clear</span>
           </button>
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">clock</span>
-            <span class="menu-subitem-hint">14:03:27</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
+            <span class="menu-item-icon" aria-hidden="true">#</span>
+            <span class="menu-item-label">line numbers</span>
+            <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+            <span class="menu-item-icon" aria-hidden="true">◷</span>
+            <span class="menu-item-label">timestamps</span>
+            <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
+          </button>
+          <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">off</span>
+            </button>
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">elapsed</span>
+              <span class="menu-subitem-hint">+1.2s</span>
+            </button>
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">clock</span>
+              <span class="menu-subitem-hint">14:03:27</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-group-divider" aria-hidden="true"></div>
+
+        <div class="menu-group">
+          <button type="button" class="menu-item nav-item" data-menu-action="options">
+            <span class="menu-item-icon" aria-hidden="true">≡</span>
+            <span class="menu-item-label">options</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="projects">
+            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-label">projects</span>
+            <span class="menu-item-hint" id="mobile-menu-project-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="history">
+            <span class="menu-item-icon" aria-hidden="true">⧖</span>
+            <span class="menu-item-label">history</span>
+            <span class="menu-item-hint" id="mobile-menu-history-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="atlas">
+            <span class="menu-item-icon" aria-hidden="true">◎</span>
+            <span class="menu-item-label">atlas</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
+            <span class="menu-item-icon" aria-hidden="true">◉</span>
+            <span class="menu-item-label">status</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
+            <span class="menu-item-icon" aria-hidden="true">⌘</span>
+            <span class="menu-item-label">commands</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
+            <span class="menu-item-icon" aria-hidden="true">⚙</span>
+            <span class="menu-item-label">workflows</span>
+            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="schedules">
+            <span class="menu-item-icon" aria-hidden="true">↻</span>
+            <span class="menu-item-label">schedules</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="watchers">
+            <span class="menu-item-icon" aria-hidden="true">◌</span>
+            <span class="menu-item-label">watchers</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% if workspace_enabled %}
+          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
+            <span class="menu-item-icon" aria-hidden="true">▣</span>
+            <span class="menu-item-label">files</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% endif %}
+          <button type="button" class="menu-item nav-item" data-menu-action="theme">
+            <span class="menu-item-icon" aria-hidden="true">◐</span>
+            <span class="menu-item-label">theme</span>
+            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="faq">
+            <span class="menu-item-icon" aria-hidden="true">?</span>
+            <span class="menu-item-label">FAQ</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
+            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-label">diag</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
         </div>
+
+        <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
       </div>
-
-      <div class="menu-group-divider" aria-hidden="true"></div>
-
-      <div class="menu-group">
-        <button type="button" class="menu-item nav-item" data-menu-action="options">
-          <span class="menu-item-icon" aria-hidden="true">≡</span>
-          <span class="menu-item-label">options</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="history">
-          <span class="menu-item-icon" aria-hidden="true">⧖</span>
-          <span class="menu-item-label">history</span>
-          <span class="menu-item-hint" id="mobile-menu-history-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
-          <span class="menu-item-icon" aria-hidden="true">◉</span>
-          <span class="menu-item-label">status</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
-          <span class="menu-item-icon" aria-hidden="true">⌘</span>
-          <span class="menu-item-label">commands</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="workflows">
-          <span class="menu-item-icon" aria-hidden="true">⚙</span>
-          <span class="menu-item-label">workflows</span>
-          <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        {% if workspace_enabled %}
-        <button type="button" class="menu-item nav-item" data-menu-action="workspace">
-          <span class="menu-item-icon" aria-hidden="true">▣</span>
-          <span class="menu-item-label">files</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        {% endif %}
-        <button type="button" class="menu-item nav-item" data-menu-action="theme">
-          <span class="menu-item-icon" aria-hidden="true">◐</span>
-          <span class="menu-item-label">theme</span>
-          <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="faq">
-          <span class="menu-item-icon" aria-hidden="true">?</span>
-          <span class="menu-item-label">FAQ</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item u-hidden" data-menu-action="diag">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">diag</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-      </div>
-
-      <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>
@@ -244,7 +268,7 @@
   <aside class="rail{% if initial_rail.collapsed %} rail-collapsed{% endif %}" id="rail" aria-label="Shell sidebar" style="--rail-w: {% if initial_rail.collapsed %}44px{% else %}{{ initial_rail.width }}px{% endif %};">
     <div class="rail-header">
       <div class="rail-wordmark">
-        <div class="rail-wordmark-title">{{ app_name }}</div>
+        <div class="rail-wordmark-title" id="rail-wordmark-title" title="{{ app_name }}">{{ app_name }}</div>
         <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
       </div>
       <button id="rail-collapse-btn" class="rail-collapse-btn btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}" title="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}">{% if initial_rail.collapsed %}»{% else %}«{% endif %}</button>
@@ -282,16 +306,26 @@
     </div>
 
     <nav class="rail-nav" id="rail-nav">
-      <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item nav-item" data-action="atlas" type="button" title="Session Entity Atlas (Alt+A)"><span class="rail-nav-glyph">◎</span><span class="rail-nav-label">atlas</span></button>
+      <button class="rail-nav-item nav-item" data-action="projects" type="button" title="Project workspaces"><span class="rail-nav-glyph">◇</span><span class="rail-nav-label">projects</span></button>
       <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
-      <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
-      <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
       {% if workspace_enabled %}
       <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
-      <button class="rail-nav-item nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
-      <button class="rail-nav-item nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
-      <a class="rail-nav-item nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      <button class="rail-nav-item nav-item rail-more-trigger" data-action="rail-more" id="rail-more-btn" type="button" title="More tools" aria-haspopup="menu" aria-expanded="false" aria-controls="rail-more-menu"><span class="rail-nav-glyph">⋯</span><span class="rail-nav-label">more</span></button>
+      <div class="rail-more-menu dropdown-surface u-hidden" id="rail-more-menu" role="menu" aria-label="More rail tools">
+        <button class="rail-nav-item nav-item rail-more-item" data-action="options" type="button" role="menuitem" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+        <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="schedules" type="button" role="menuitem" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="watchers" type="button" role="menuitem" title="Change-detection watchers"><span class="rail-nav-glyph">◌</span><span class="rail-nav-label">watchers</span></button>
+        <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="status-monitor" type="button" role="menuitem" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="command-registry" type="button" role="menuitem" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="faq" type="button" role="menuitem" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
+        <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="theme" type="button" role="menuitem" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+        <a class="rail-nav-item nav-item rail-more-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      </div>
       <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 
@@ -352,7 +386,9 @@
       <div id="ac-dropdown" class="ac-dropdown dropdown-surface nice-scroll u-hidden"></div>
       <div id="hist-search-dropdown" class="hist-search-dropdown dropdown-surface u-hidden"></div>
       <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
-        <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
+        <input id="cmd" type="text" placeholder=""
+               autocomplete="new-password" autocapitalize="none" autocorrect="off"
+               spellcheck="false" inputmode="none" aria-label="Command">
         <button id="run-btn" class="btn btn-primary" hidden aria-hidden="true" tabindex="-1">Run</button>
       </div>
     </div>
@@ -393,6 +429,11 @@
           <span class="hud-label">session</span>
           <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
         </div>
+        <div class="hud-cell hud-project-context hud-cell-clickable hud-action-cell u-hidden" id="hud-project-cell"
+             role="button" tabindex="0" aria-haspopup="dialog" aria-label="Open projects from active project">
+          <span class="hud-label">project</span>
+          <span id="hud-project" class="hud-value hud-muted">—</span>
+        </div>
         <div class="hud-cell">
           <span class="hud-label">uptime</span>
           <span id="hud-uptime" class="hud-value hud-muted">—</span>
@@ -418,6 +459,104 @@
   </main>
 </div>
 
+<!-- Session Entity Atlas -->
+<div id="atlas-overlay" class="mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="atlas-surface" class="atlas-surface mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="atlas-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close Atlas"></div>
+    <div class="atlas-header surface-header">
+      <div>
+        <span class="atlas-title" id="atlas-title">ATLAS</span>
+        <div class="atlas-subtitle" id="atlas-subtitle">0 entities</div>
+      </div>
+      <button type="button" class="close-btn atlas-close" aria-label="Close Atlas">✕</button>
+    </div>
+    <div id="atlas-tabs" class="atlas-tabs tab-strip" role="tablist" aria-label="Atlas entity types"></div>
+    <section id="atlas-mobile-root" class="atlas-mobile-root u-hidden" aria-label="Mobile Atlas">
+      <div id="atlas-mobile-list-view" class="atlas-mobile-list-view">
+        <div class="atlas-mobile-tabs-wrap">
+          <div id="atlas-mobile-tabs" class="atlas-mobile-tabs tab-strip" role="tablist" aria-label="Atlas entity types"></div>
+        </div>
+        <div id="atlas-mobile-tools" class="atlas-mobile-tools"></div>
+        <div id="atlas-mobile-bulk-bar" class="atlas-mobile-bulk-bar u-hidden" aria-live="polite"></div>
+        <div id="atlas-mobile-list" class="atlas-mobile-list nice-scroll" aria-live="polite"></div>
+        <div id="atlas-mobile-pagination" class="atlas-mobile-pagination u-hidden" aria-live="polite"></div>
+      </div>
+      <div id="atlas-mobile-entity-view" class="atlas-mobile-detail-view u-hidden" role="region" aria-label="Atlas entity detail">
+        <div id="atlas-mobile-entity-topbar" class="atlas-mobile-detail-topbar"></div>
+        <div id="atlas-mobile-entity-body" class="atlas-mobile-detail-body nice-scroll" aria-live="polite"></div>
+        <div id="atlas-mobile-entity-footer" class="atlas-mobile-detail-footer"></div>
+      </div>
+      <div id="atlas-mobile-finding-view" class="atlas-mobile-detail-view u-hidden" role="region" aria-label="Atlas finding detail">
+        <div id="atlas-mobile-finding-topbar" class="atlas-mobile-detail-topbar"></div>
+        <div id="atlas-mobile-finding-body" class="atlas-mobile-detail-body nice-scroll" aria-live="polite"></div>
+        <div id="atlas-mobile-finding-footer" class="atlas-mobile-detail-footer"></div>
+      </div>
+    </section>
+    <div class="atlas-shell">
+      <div class="atlas-main">
+        <div class="atlas-toolbar">
+          <div class="atlas-search-row">
+            <input id="atlas-search" class="form-control form-control-compact" type="text" placeholder="search atlas" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search Atlas entities">
+          </div>
+          <div class="atlas-filter-row">
+            <div class="atlas-filter-controls">
+              <input id="atlas-run-filter-search" class="form-control form-control-compact atlas-run-filter-search" type="search" placeholder="search runs" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search runs for Atlas filter">
+              <select id="atlas-run-filter-select" class="form-select form-control-compact atlas-run-filter-select" aria-label="Filter Atlas by source run"></select>
+              <div id="atlas-run-filter-chip" class="atlas-run-filter-chip u-hidden"></div>
+              <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
+              <select id="atlas-orphan-filter" class="form-select form-control-compact atlas-orphan-filter" aria-label="Filter Atlas rows by source run"></select>
+              <select id="atlas-suppression-filter" class="form-select form-control-compact atlas-suppression-filter" aria-label="Filter Atlas rows by suppression state"></select>
+            </div>
+            <div class="atlas-toolbar-actions">
+              <div id="atlas-export-wrap" class="atlas-export-wrap save-menu-wrap save-menu-down">
+                <button id="atlas-export-menu-btn" class="btn btn-ghost btn-compact" type="button" aria-expanded="false">Export</button>
+                <div id="atlas-export-menu" class="atlas-export-menu save-menu dropdown-surface">
+                  <button id="atlas-export-csv-btn" class="dropdown-item dropdown-item-compact" type="button">CSV</button>
+                  <button id="atlas-export-jsonl-btn" class="dropdown-item dropdown-item-compact" type="button">JSONL</button>
+                </div>
+              </div>
+              <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+              <button id="atlas-clear-filters-btn" class="btn btn-ghost btn-compact" type="button">Clear filters</button>
+            </div>
+          </div>
+          <div class="atlas-saved-view-row">
+            <select id="atlas-saved-view-select" class="form-select form-control-compact atlas-saved-view-select" aria-label="Saved Atlas views"></select>
+            <button id="atlas-saved-view-save" class="btn btn-secondary btn-compact" type="button">Save view</button>
+            <button id="atlas-saved-view-update" class="btn btn-ghost btn-compact" type="button">Update</button>
+            <button id="atlas-saved-view-delete" class="btn btn-ghost btn-compact" type="button">Delete</button>
+          </div>
+          <div id="atlas-finding-bulk-row" class="atlas-finding-bulk-row u-hidden">
+            <div class="atlas-bulk-action-row">
+              <div class="atlas-bulk-selection-controls">
+                <label class="history-bulk-toggle control-row">
+                  <input id="atlas-select-toggle" type="checkbox">
+                  <span>select</span>
+                </label>
+                <button id="atlas-finding-select-all" class="btn btn-secondary btn-compact" type="button">Select all</button>
+                <button id="atlas-finding-clear-selection" class="btn btn-ghost btn-compact" type="button">Clear</button>
+                <span id="atlas-finding-selection-summary" class="atlas-muted atlas-bulk-selection-summary">0 selected</span>
+              </div>
+              <div class="atlas-bulk-mutation-controls">
+                <select id="atlas-finding-bulk-status" class="form-select form-control-compact" aria-label="Bulk finding review state"></select>
+                <button id="atlas-finding-bulk-apply" class="btn btn-secondary btn-compact" type="button">Apply</button>
+                <button id="atlas-bulk-suppression" class="btn btn-secondary btn-compact" type="button">Suppress</button>
+                <button id="atlas-bulk-delete" class="btn btn-secondary btn-danger btn-compact" type="button">Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="atlas-list" class="atlas-list nice-scroll" aria-live="polite"></div>
+        <div id="atlas-pagination" class="atlas-pagination u-hidden" aria-live="polite">
+          <span id="atlas-pagination-summary" class="atlas-pagination-summary"></span>
+          <button id="atlas-prev-btn" class="btn btn-secondary btn-compact" type="button">Previous</button>
+          <button id="atlas-next-btn" class="btn btn-secondary btn-compact" type="button">Next</button>
+        </div>
+      </div>
+      <aside id="atlas-detail" class="atlas-detail nice-scroll" aria-live="polite"></aside>
+    </div>
+  </section>
+</div>
+
 <!-- Run History panel -->
 <div id="history-panel" class="mobile-sheet-surface chrome-drawer">
   <div class="history-panel-header surface-header">
@@ -427,30 +566,58 @@
   </div>
   <div class="history-panel-body surface-body nice-scroll">
     <div class="history-panel-filters">
+      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle btn btn-secondary btn-compact" type="button" aria-expanded="false" aria-controls="history-search-input history-advanced-filters">history tools</button>
       <input id="history-search-input" class="form-control form-control-compact" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
-      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle btn btn-secondary btn-compact" type="button" aria-expanded="false">filters</button>
       <div id="history-advanced-filters" class="history-advanced-filters">
-        <select id="history-type-filter" aria-label="Filter by history item type">
+        <select id="history-type-filter" class="form-select form-control-compact" aria-label="Filter by history item type">
           <option value="all">type: all</option>
-          <option value="runs">type: runs</option>
+          <option value="runs">runs: all</option>
+          <option value="runs_builtin">runs: built-in</option>
+          <option value="runs_external">runs: external</option>
           <option value="snapshots">type: snapshots</option>
         </select>
         <div class="history-root-autocomplete">
           <input id="history-root-input" class="form-control form-control-compact" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
           <div id="history-root-dropdown" class="ac-dropdown dropdown-surface history-root-dropdown nice-scroll u-hidden"></div>
         </div>
-        <select id="history-exit-filter" aria-label="Filter by exit code">
+        <select id="history-signal-filter" class="form-select form-control-compact" aria-label="Filter by output signal">
+          <option value="all">signal: all</option>
+          <option value="findings">signal: findings</option>
+          <option value="warnings">signal: warnings</option>
+          <option value="errors">signal: errors</option>
+          <option value="summaries">signal: summaries</option>
+        </select>
+        <select id="history-kind-filter" class="form-select form-control-compact" aria-label="Filter by output kind">
+          <option value="all">kind: all</option>
+          <option value="error">kind: error</option>
+          <option value="warn">kind: warn</option>
+          <option value="notice">kind: notice</option>
+          <option value="info">kind: info</option>
+        </select>
+        <input id="history-entity-input" class="form-control form-control-compact" type="text" placeholder="entity value" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by output entity value">
+        <select id="history-entity-type-filter" class="form-select form-control-compact" aria-label="Filter by output entity type">
+          <option value="all">entity_type: all</option>
+          <option value="domain">entity_type: domain</option>
+          <option value="ip">entity_type: ip</option>
+          <option value="url">entity_type: url</option>
+          <option value="hash">entity_type: hash</option>
+          <option value="cve">entity_type: cve</option>
+        </select>
+        <select id="history-exit-filter" class="form-select form-control-compact" aria-label="Filter by exit code">
           <option value="all">exit: all</option>
           <option value="0">exit: 0</option>
           <option value="nonzero">exit: failed</option>
           <option value="-15">exit: terminated</option>
           <option value="incomplete">exit: incomplete</option>
         </select>
-        <select id="history-date-filter" aria-label="Filter by recent date range">
+        <select id="history-date-filter" class="form-select form-control-compact" aria-label="Filter by recent date range">
           <option value="all">date: all</option>
           <option value="24h">date: 24h</option>
           <option value="7d">date: 7d</option>
           <option value="30d">date: 30d</option>
+        </select>
+        <select id="history-project-filter" class="form-select form-control-compact" aria-label="Filter by project">
+          <option value="all">project: all</option>
         </select>
         <label class="history-filter-toggle control-row form-control-compact">
           <input id="history-starred-toggle" type="checkbox">
@@ -460,6 +627,7 @@
       </div>
     </div>
     <div id="history-active-filters" class="history-active-filters u-hidden" aria-live="polite"></div>
+    <div id="history-bulk-toolbar" class="history-bulk-toolbar u-hidden"></div>
     <div id="history-pagination" class="history-pagination u-hidden" aria-live="polite">
       <div id="history-pagination-summary" class="history-pagination-summary"></div>
       <div id="history-pagination-controls" class="history-pagination-controls"></div>
@@ -534,8 +702,12 @@
     </div>
     <label class="workspace-label" for="workspace-path-input">File Name</label>
     <input id="workspace-path-input" class="form-input form-control" type="text" placeholder="targets.txt" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
+    <label class="workspace-label" for="workspace-labels-input">Labels</label>
+    <input id="workspace-labels-input" class="form-input form-control" type="text" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
+    <label class="workspace-label" for="workspace-notes-input">Notes</label>
+    <textarea id="workspace-notes-input" class="workspace-notes-textarea form-control nice-scroll" rows="3" placeholder="Add context for this file" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
     <label class="workspace-label" for="workspace-text-input">Contents</label>
-    <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="18" placeholder="Paste file contents here" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
+    <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="14" placeholder="Paste file contents here" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
     <div class="workspace-editor-actions">
       <button type="submit" class="btn btn-primary btn-compact" id="workspace-save-btn">Save file</button>
     </div>
@@ -610,6 +782,54 @@
   </form>
 </div>
 
+<!-- Schedules Modal -->
+<div id="schedules-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="schedules-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="schedules-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close schedules"></div>
+    <div class="faq-header">
+      <span class="faq-title" id="schedules-title">SCHEDULES</span>
+      <div class="schedules-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="schedules-new-btn">New schedule</button>
+        <button type="button" class="close-btn schedules-close" aria-label="Close schedules">✕</button>
+      </div>
+    </div>
+    <div class="schedules-layout">
+      <aside class="schedules-sidebar">
+        <div class="schedules-sidebar-toolbar">
+          <button type="button" class="btn btn-secondary btn-compact" id="schedules-refresh-btn">Refresh</button>
+          <span class="schedules-count" id="schedules-count">0</span>
+        </div>
+        <div class="schedules-list nice-scroll" id="schedules-list" aria-live="polite"></div>
+      </aside>
+      <div class="schedules-detail nice-scroll" id="schedules-detail"></div>
+    </div>
+  </section>
+</div>
+
+<!-- Watchers Modal -->
+<div id="watchers-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="watchers-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="watchers-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close watchers"></div>
+    <div class="faq-header">
+      <span class="faq-title" id="watchers-title">WATCHERS</span>
+      <div class="watchers-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="watchers-new-btn">New watcher</button>
+        <button type="button" class="close-btn watchers-close" aria-label="Close watchers">✕</button>
+      </div>
+    </div>
+    <div class="watchers-layout">
+      <aside class="watchers-sidebar">
+        <div class="watchers-sidebar-toolbar">
+          <button type="button" class="btn btn-secondary btn-compact" id="watchers-refresh-btn">Refresh</button>
+          <span class="watchers-count" id="watchers-count">0</span>
+        </div>
+        <div class="watchers-list nice-scroll" id="watchers-list" aria-live="polite"></div>
+      </aside>
+      <div class="watchers-detail nice-scroll" id="watchers-detail"></div>
+    </div>
+  </section>
+</div>
+
 <!-- FAQ Modal -->
 <div id="faq-overlay" class="mobile-sheet-overlay">
   <div id="faq-modal" class="mobile-sheet-surface">
@@ -638,6 +858,159 @@
   </div>
 </div>
 
+<div id="project-workspace-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <div id="project-workspace-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="project-workspace-title">
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="project-workspace-title">PROJECTS</span>
+        <div class="project-workspace-subtitle" id="project-workspace-subtitle">Select a project to review its targets, runs, findings, artifacts, and packages.</div>
+      </div>
+      <button type="button" class="close-btn project-workspace-close" aria-label="Close projects">✕</button>
+    </div>
+    <div id="project-workspace-message" class="project-workspace-message u-hidden" role="status">
+      <span class="project-workspace-message-text"></span>
+      <button type="button" class="btn btn-ghost btn-compact project-workspace-message-dismiss" data-project-message-dismiss aria-label="Dismiss project message">✕</button>
+    </div>
+    <section id="project-mobile-root" class="project-mobile-root" aria-label="Mobile projects">
+      <div id="project-mobile-list-view" class="project-mobile-list-view">
+        <div class="project-mobile-header">
+          <div class="project-mobile-heading">
+            <span id="project-mobile-summary" class="project-mobile-summary">No projects loaded</span>
+          </div>
+          <button type="button" id="project-mobile-new-btn" class="btn btn-secondary btn-compact" data-project-mobile-action="new-project">New Project</button>
+        </div>
+        <div id="project-mobile-body" class="project-mobile-body nice-scroll" aria-live="polite"></div>
+        <div id="project-mobile-pagination" class="project-workspace-pagination u-hidden" aria-live="polite"></div>
+      </div>
+      <form id="project-mobile-create-form" class="project-mobile-create-sheet u-hidden" aria-label="Create project">
+        <div class="project-mobile-create-header">
+          <div class="project-mobile-heading">
+            <span class="project-mobile-kicker">New Project</span>
+            <span class="project-mobile-summary">Name the project to start grouping related work.</span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-compact" data-project-mobile-action="cancel-create">Back</button>
+        </div>
+        <label class="project-mobile-create-field">
+          <span>Name</span>
+          <input id="project-mobile-name" class="form-control form-control-compact" type="text" maxlength="120" placeholder="New project name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="New project name">
+        </label>
+        <div class="project-mobile-create-actions">
+          <button type="submit" class="btn btn-secondary btn-compact">Create project</button>
+        </div>
+      </form>
+      <div id="project-mobile-detail-view" class="project-mobile-detail-view u-hidden">
+        <div id="project-mobile-detail-topbar" class="project-mobile-detail-topbar"></div>
+        <div class="project-mobile-tabs-wrap">
+          <div id="project-mobile-tabs" class="project-mobile-tabs tab-strip" role="tablist" aria-label="Project sections"></div>
+        </div>
+        <div id="project-mobile-detail-body" class="project-mobile-detail-body nice-scroll" aria-live="polite"></div>
+      </div>
+    </section>
+    <div class="project-workspace-layout">
+      <aside class="project-workspace-sidebar" aria-label="Project list">
+        <form id="project-workspace-create-form" class="project-workspace-create">
+          <input id="project-workspace-name" class="form-control form-control-compact" type="text" maxlength="120" placeholder="New project name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="New project name">
+          <button type="submit" class="btn btn-secondary btn-compact">Create</button>
+        </form>
+        <div id="project-workspace-body" class="project-workspace-body nice-scroll" aria-live="polite"></div>
+        <div id="project-workspace-pagination" class="project-workspace-pagination u-hidden" aria-live="polite"></div>
+      </aside>
+      <section class="project-explorer" aria-label="Selected project">
+        <div id="project-explorer-body" class="project-explorer-body nice-scroll" aria-live="polite"></div>
+      </section>
+    </div>
+    <form id="project-notes-form" class="project-notes-form u-hidden">
+      <textarea id="project-notes-input" class="form-control form-control-compact project-notes-input" maxlength="20000" rows="3" placeholder="Notes for selected project" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Selected project notes"></textarea>
+    </form>
+    <form id="project-labels-form" class="project-labels-form u-hidden">
+      <input id="project-labels-input" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Selected project labels">
+      <button type="submit" class="btn btn-secondary btn-compact" id="project-labels-save-btn">Save labels</button>
+    </form>
+  </div>
+  <div id="project-target-editor-overlay" class="modal-overlay mobile-sheet-overlay project-target-editor-overlay u-hidden" aria-hidden="true">
+    <div id="project-target-editor-modal" class="modal-card modal-card-compact mobile-sheet-surface project-target-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-target-editor-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close target editor"></div>
+      <div class="faq-header">
+        <span class="faq-title" id="project-target-editor-title">NEW TARGET</span>
+        <button type="button" class="close-btn project-target-editor-close" aria-label="Close target editor">✕</button>
+      </div>
+      <form id="project-target-create-form" class="project-target-editor-form">
+        <label class="project-target-edit-field">
+          <span>Type</span>
+          <select id="project-target-type" class="form-select form-control-compact" aria-label="Project target type">
+            <option value="domain">domain</option>
+            <option value="url">url</option>
+            <option value="host">host</option>
+            <option value="ip">ip</option>
+          </select>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Value</span>
+          <input id="project-target-value" class="form-control form-control-compact" type="text" maxlength="512" placeholder="target.example.com" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Project target value" aria-describedby="project-target-value-help project-target-value-error">
+          <small id="project-target-value-help" class="project-target-value-help">Domain name only. Examples: darklab.sh, api.darklab.sh</small>
+          <div id="project-target-value-error" class="form-error project-target-value-error u-hidden" role="alert"></div>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Labels</span>
+          <input id="project-target-label" class="form-control form-control-compact" type="text" maxlength="2000" placeholder="Comma-separated labels" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Project target labels">
+        </label>
+        <label class="project-target-edit-field">
+          <span>Notes</span>
+          <textarea id="project-target-notes" class="form-control form-control-compact" maxlength="20000" rows="3" placeholder="Optional notes" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Project target notes"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary btn-compact project-target-editor-cancel">Cancel</button>
+          <button type="submit" id="project-target-submit" class="btn btn-primary btn-compact">Add Target</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div id="project-package-manifest-overlay" class="modal-overlay mobile-sheet-overlay project-package-manifest-overlay u-hidden" aria-hidden="true">
+    <div id="project-package-manifest-modal" class="modal-card modal-card-compact mobile-sheet-surface project-package-manifest-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-manifest-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close package manifest"></div>
+      <div class="faq-header">
+        <span class="faq-title" id="project-package-manifest-title">PACKAGE MANIFEST</span>
+        <button type="button" class="close-btn project-package-manifest-close" aria-label="Close package manifest">✕</button>
+      </div>
+      <pre id="project-package-manifest-json" class="project-package-manifest-json nice-scroll"></pre>
+    </div>
+  </div>
+  <div id="project-package-wizard-overlay" class="modal-overlay mobile-sheet-overlay project-package-wizard-overlay u-hidden" aria-hidden="true">
+    <div id="project-package-wizard-modal" class="modal-card mobile-sheet-surface project-package-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-wizard-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close package wizard"></div>
+      <div id="project-package-wizard-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="project-entity-editor-overlay" class="modal-overlay mobile-sheet-overlay project-entity-editor-overlay u-hidden" aria-hidden="true">
+  <div id="project-entity-editor-modal" class="modal-card modal-card-compact mobile-sheet-surface project-entity-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-entity-editor-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close metadata editor"></div>
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="project-entity-editor-title">EDIT METADATA</span>
+        <div class="project-entity-editor-subtitle" id="project-entity-editor-subtitle"></div>
+      </div>
+      <button type="button" class="close-btn project-entity-editor-close" aria-label="Close metadata editor">✕</button>
+    </div>
+    <form id="project-entity-editor-form" class="project-target-editor-form project-entity-editor-form">
+      <label class="project-target-edit-field">
+        <span>Labels</span>
+        <input id="project-entity-labels" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Entity labels">
+        <small class="project-target-value-help">Comma-separated labels. Existing labels not listed here will be removed.</small>
+      </label>
+      <label class="project-target-edit-field">
+        <span>Note</span>
+        <textarea id="project-entity-note" class="form-control form-control-compact" maxlength="20000" rows="4" placeholder="Optional note" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Entity note"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary btn-compact project-entity-editor-cancel">Cancel</button>
+        <button type="submit" id="project-entity-submit" class="btn btn-primary btn-compact">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="command-catalog-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
   <div id="command-catalog-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="command-catalog-title">
     <div class="faq-header">
@@ -645,6 +1018,26 @@
       <button type="button" class="close-btn command-catalog-close" aria-label="Close command details">✕</button>
     </div>
     <div id="command-catalog-body" class="faq-body command-catalog-body nice-scroll"></div>
+  </div>
+</div>
+
+<div id="pty-overlay" class="modal-overlay mobile-sheet-overlay pty-tab-overlay u-hidden" aria-hidden="true">
+  <div id="pty-modal" class="modal-card mobile-sheet-surface pty-modal" role="dialog" aria-modal="false" aria-labelledby="pty-modal-title">
+    <div class="pty-modal-header">
+      <div class="pty-modal-title-wrap">
+        <span class="faq-title" id="pty-modal-title">INTERACTIVE PTY</span>
+        <span id="pty-modal-command" class="pty-modal-command">waiting for command</span>
+      </div>
+      <div class="pty-modal-actions">
+        <span id="pty-modal-status" class="pty-modal-status" data-tone="">
+          <span id="pty-modal-status-label" class="pty-modal-status-label">waiting</span>
+          <span id="pty-modal-elapsed" class="pty-modal-elapsed">00:00</span>
+        </span>
+        <button id="pty-modal-kill" type="button" class="btn btn-destructive btn-compact pty-modal-kill" disabled>Kill</button>
+        <button type="button" class="close-btn pty-modal-close" aria-label="Close interactive PTY" disabled>✕</button>
+      </div>
+    </div>
+    <section id="pty-modal-screen" class="pty-screen pty-modal-screen" role="application" aria-label="Interactive PTY terminal"></section>
   </div>
 </div>
 
@@ -681,128 +1074,311 @@
       <span class="faq-title">OPTIONS</span>
       <button type="button" class="close-btn options-close" aria-label="Close options">✕</button>
     </div>
+    <div class="options-tabs-wrap">
+      <div id="options-tabs" class="options-tabs tab-strip" role="tablist" aria-label="Options sections">
+        <button type="button" id="options-tab-preferences" class="tab-strip-item is-active" data-options-tab="preferences" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
+        <button type="button" id="options-tab-secrets" class="tab-strip-item" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+        <button type="button" id="options-tab-notifications" class="tab-strip-item" data-options-tab="notifications" role="tab" aria-selected="false" aria-controls="options-panel-notifications">Notifications</button>
+      </div>
+    </div>
     <div class="faq-body options-body nice-scroll">
-      <div class="faq-item">
-        <div class="faq-q">Timestamps</div>
-        <div class="faq-a">
-          <select id="options-ts-select" class="form-select" aria-label="Timestamp mode">
-            <option value="off">Off</option>
-            <option value="elapsed">Elapsed</option>
-            <option value="clock">Clock</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Line Numbers</div>
-        <div class="faq-a form-fieldset">
-          <label class="form-check">
-            <input type="checkbox" id="options-ln-toggle">
-            <span>Show line numbers beside output and the live prompt</span>
-          </label>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Welcome Intro</div>
-        <div class="faq-a">
-          <select id="options-welcome-select" class="form-select" aria-label="Welcome intro mode">
-            <option value="animated">Animated</option>
-            <option value="disable_animation">Disable Animation</option>
-            <option value="remove">Remove Completely</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Share Snapshot Redaction</div>
-        <div class="faq-a">
-          <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
-            <option value="unset">Prompt Until Set</option>
-            <option value="redacted">Default To Redacted</option>
-            <option value="raw">Default To Raw</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item options-desktop-only">
-        <div class="faq-q">Run Notifications</div>
-        <div class="faq-a form-fieldset">
-          <label class="form-check">
-            <input type="checkbox" id="options-notify-toggle">
-            <span>Notify when a run completes or is killed</span>
-          </label>
-        </div>
-      </div>
-      <div class="faq-item options-desktop-only">
-        <div class="faq-q">HUD Clock</div>
-        <div class="faq-a">
-          <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">
-            <option value="utc">UTC</option>
-            <option value="local">Local Time</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Prompt Username</div>
-        <div class="faq-a form-fieldset">
-          <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt username" placeholder="Use server default">
-          <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
-          <div id="options-prompt-username-error" class="form-error options-prompt-username-error u-hidden" role="alert">Invalid characters detected</div>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Session Token</div>
-        <div class="faq-a form-fieldset">
-          <div class="options-session-token-desc">Carry your run history, starred commands and user options across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
-          <div class="options-session-token-status-row">
-            <div id="options-session-token-status" class="options-session-token-status"></div>
-            <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+      <div id="options-panel-preferences" class="options-tab-panel" data-options-panel="preferences" role="tabpanel" aria-labelledby="options-tab-preferences">
+        <div class="options-section-heading">Display</div>
+        <div class="faq-item">
+          <div class="faq-q">Timestamps</div>
+          <div class="faq-a">
+            <select id="options-ts-select" class="form-select" aria-label="Timestamp mode">
+              <option value="off">Off</option>
+              <option value="elapsed">Elapsed</option>
+              <option value="clock">Clock</option>
+            </select>
           </div>
-          <div class="options-session-token-actions">
-            <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
-            <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
-            <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
-            <button id="options-session-token-clear-btn" class="btn btn-secondary btn-compact" type="button">Clear</button>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Line Numbers</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-ln-toggle">
+              <span>Show line numbers beside output and the live prompt</span>
+            </label>
           </div>
-          <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
+        </div>
+        <div class="faq-item options-desktop-only">
+          <div class="faq-q">HUD Clock</div>
+          <div class="faq-a">
+            <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">
+              <option value="utc">UTC</option>
+              <option value="local">Local Time</option>
+            </select>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Welcome Intro</div>
+          <div class="faq-a">
+            <select id="options-welcome-select" class="form-select" aria-label="Welcome intro mode">
+              <option value="animated">Animated</option>
+              <option value="disable_animation">Disable Animation</option>
+              <option value="remove">Remove Completely</option>
+            </select>
+          </div>
+        </div>
+        <div class="options-section-heading">Identity</div>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Prompt Name</span>
+          </div>
+          <div class="faq-a form-fieldset">
+            <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" placeholder="Use server default" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+            <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
+            <div id="options-prompt-username-error" class="form-error options-prompt-username-error u-hidden" role="alert">Invalid characters detected</div>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Session Token</div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Carry your run history, starred commands and user options across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
+            <div class="options-session-token-status-row">
+              <div id="options-session-token-status" class="options-session-token-status"></div>
+              <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+            </div>
+            <div class="options-session-token-actions">
+              <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
+              <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
+              <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
+              <button id="options-session-token-clear-btn" class="btn btn-secondary btn-compact" type="button">Clear</button>
+            </div>
+            <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
+          </div>
+        </div>
+        <div class="options-section-heading">Runs</div>
+        <div class="faq-item">
+          <div class="faq-q">Project Run Capture</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-project-auto-link-external-runs-toggle">
+              <span>Add external command runs to the active project</span>
+            </label>
+            <label class="form-check">
+              <input type="checkbox" id="options-project-auto-link-run-entities-toggle">
+              <span>Also add Atlas entities from auto-linked runs</span>
+            </label>
+            <div class="options-session-token-desc">Built-in administrative commands are never added as project runs.</div>
+          </div>
+        </div>
+        <div class="faq-item options-desktop-only">
+          <div class="faq-q">Run Notifications</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-notify-toggle">
+              <span>Notify when a run completes or is killed</span>
+            </label>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Share Snapshot Redaction</div>
+          <div class="faq-a">
+            <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
+              <option value="unset">Prompt Until Set</option>
+              <option value="redacted">Default To Redacted</option>
+              <option value="raw">Default To Raw</option>
+            </select>
+          </div>
+        </div>
+        <div class="options-section-heading">Compare</div>
+        <div class="faq-item">
+          <div class="faq-q">Compare View</div>
+          <div class="faq-a">
+            <select id="options-compare-view-mode-select" class="form-select" aria-label="Run comparison view mode">
+              <option value="auto">Automatic for This Screen</option>
+              <option value="side_by_side">Side-by-side</option>
+              <option value="unified">Unified</option>
+              <option value="changes_only">Changes Only</option>
+              <option value="findings_only">Findings Only</option>
+            </select>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Compare Context</div>
+          <div class="faq-a">
+            <select id="options-compare-context-select" class="form-select" aria-label="Run comparison context">
+              <option value="3">±3 Lines</option>
+              <option value="10">±10 Lines</option>
+              <option value="all">All Lines</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="options-panel-secrets" class="options-tab-panel" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Secrets</span>
+            <button id="options-secrets-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh secrets" title="Refresh secrets">⟳</button>
+          </div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Store per-session API keys for tools that need them. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
+            <div class="options-session-token-actions">
+              <button id="options-provider-status-btn" class="btn btn-secondary btn-compact" type="button">Provider Status</button>
+              <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
+            </div>
+            <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-secrets-list" class="options-secrets-list" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+      <div id="options-panel-notifications" class="options-tab-panel" data-options-panel="notifications" role="tabpanel" aria-labelledby="options-tab-notifications" hidden>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Notifications</span>
+            <button id="options-notification-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh notification channels" title="Refresh notification channels">⟳</button>
+          </div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Send run, schedule, and watcher updates to destinations owned by this session token. Secret values are stored in the vault and never shown again.</div>
+            <div class="options-session-token-actions">
+              <button id="options-notification-new-btn" class="btn btn-secondary btn-compact" type="button">Add channel</button>
+            </div>
+            <div id="options-notification-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-notification-list" class="options-secrets-list" aria-live="polite"></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<script src="/static/js/session_core.js"></script>
+<div id="provider-status-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <div id="provider-status-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="provider-status-title">
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="provider-status-title">PROVIDER STATUS</span>
+        <div class="provider-status-subtitle">Intel providers available to this session.</div>
+      </div>
+      <button type="button" class="close-btn provider-status-close" aria-label="Close provider status">✕</button>
+    </div>
+    <div id="provider-status-body" class="provider-status-body nice-scroll" aria-live="polite"></div>
+  </div>
+</div>
+
+<script src="/static/js/core/session_core.js"></script>
 <script src="/static/js/session.js"></script>
-<script src="/static/js/state.js"></script>
-<script src="/static/js/utils.js"></script>
+<script src="/static/js/core/state.js"></script>
+<script src="/static/js/core/utils.js"></script>
 <script id="app-config-json" type="application/json">{{ frontend_config|tojson }}</script>
-<script src="/static/js/config.js"></script>
-<script src="/static/js/dom.js"></script>
-<script src="/static/js/ui_helpers.js"></script>
-<script src="/static/js/ui_pressable.js"></script>
-<script src="/static/js/ui_disclosure.js"></script>
-<script src="/static/js/ui_dismissible.js"></script>
-<script src="/static/js/ui_focus_trap.js"></script>
-<script src="/static/js/ui_confirm.js"></script>
-<script src="/static/js/ui_outside_click.js"></script>
+<script src="/static/js/core/config.js"></script>
+<script src="/static/js/core/dom.js"></script>
+<script src="/static/js/ui/ui_helpers.js"></script>
+<script src="/static/js/ui/ui_pressable.js"></script>
+<script src="/static/js/ui/ui_disclosure.js"></script>
+<script src="/static/js/ui/ui_dismissible.js"></script>
+<script src="/static/js/ui/ui_focus_trap.js"></script>
+<script src="/static/js/ui/mobile_sheet.js"></script>
+<script src="/static/js/ui/ui_action_sheet.js"></script>
+<script src="/static/js/ui/ui_confirm.js"></script>
+<script src="/static/js/ui/ui_outside_click.js"></script>
+<script src="/static/js/ui/ui_entity_metadata.js"></script>
+<script src="/static/js/ui/ui_tab_strip_edges.js"></script>
 <script src="/static/js/export_pdf.js"></script>
 <script src="/static/js/tabs.js"></script>
-<script src="/static/js/output_core.js"></script>
+<script src="/static/js/features/tabs/tab_exports.js"></script>
+<script src="/static/js/features/tabs/tab_drag_reorder.js"></script>
+<script src="/static/js/features/tabs/tab_close_lifecycle.js"></script>
+<script src="/static/js/core/output_core.js"></script>
 <script src="/static/js/output.js"></script>
-<script src="/static/js/search_core.js"></script>
+<script src="/static/js/core/search_core.js"></script>
 <script src="/static/js/search.js"></script>
-<script src="/static/js/autocomplete_core.js"></script>
+<script src="/static/js/core/autocomplete_core.js"></script>
+<script src="/static/js/features/autocomplete/suggestions.js"></script>
 <script src="/static/js/autocomplete.js"></script>
-<script src="/static/js/history_core.js"></script>
+<script src="/static/js/core/history_core.js"></script>
+<script src="/static/js/features/run-comparison/history_compare_core.js"></script>
+<script src="/static/js/features/run-comparison/history_compare_overlay.js"></script>
+<script src="/static/js/features/history/history_actions.js"></script>
+<script src="/static/js/features/history/history_project_actions.js"></script>
+<script src="/static/js/features/history/history_recall.js"></script>
 <script src="/static/js/history.js"></script>
-<script src="/static/js/workspace_core.js"></script>
+<script src="/static/js/features/history/history_links.js"></script>
+<script src="/static/js/features/history/history_mutations.js"></script>
+<script src="/static/js/features/history/history_rows.js"></script>
+<script src="/static/js/features/history/history_restore.js"></script>
+<script src="/static/js/features/history/history_run_details.js"></script>
+<script src="/static/js/features/history/history_search.js"></script>
+<script src="/static/js/features/run-comparison/history_compare_controls.js"></script>
+<script src="/static/js/features/run-comparison/history_compare_navigation.js"></script>
+<script src="/static/js/features/run-comparison/history_compare_renderer.js"></script>
+<script src="/static/js/features/run-comparison/history_compare_launcher.js"></script>
+<script src="/static/js/core/workspace_core.js"></script>
+<script src="/static/js/features/workspace/workspace_viewer_formats.js"></script>
+<script src="/static/js/features/workspace/workspace_autocomplete_cache.js"></script>
 <script src="/static/js/workspace.js"></script>
+<script src="/static/js/features/workspace/workspace_drag_drop.js"></script>
 <script src="/static/js/welcome.js"></script>
+<script src="/static/js/features/status-monitor/status_monitor_core.js"></script>
+<script src="/static/js/features/status-monitor/status_monitor_data.js"></script>
+<script src="/static/js/features/status-monitor/status_monitor_resources.js"></script>
 <script src="/static/js/status_monitor.js"></script>
-<script src="/static/js/runner_core.js"></script>
+<script src="/static/js/features/atlas/atlas_tabs.js"></script>
+<script src="/static/js/features/atlas/atlas_entity_row.js"></script>
+<script src="/static/js/features/atlas/atlas_entity_detail.js"></script>
+<script src="/static/js/features/atlas/atlas_overlay.js"></script>
+<script src="/static/js/features/atlas/atlas_mobile.js"></script>
+<script src="/static/js/core/runner_core.js"></script>
+<script src="/static/js/features/runner/runner_active_restore.js"></script>
+<script src="/static/js/features/runner/runner_persistence.js"></script>
+<script src="/static/js/features/runner/runner_workspace.js"></script>
+<script src="/static/js/pty.js"></script>
 <script src="/static/js/runner.js"></script>
-<script src="/static/js/app_preferences_core.js"></script>
+<script src="/static/js/core/app_preferences_core.js"></script>
 <script src="/static/js/app.js"></script>
-<script src="/static/js/mobile_sheet.js"></script>
+<script src="/static/js/features/mobile/mobile_shell_layout.js"></script>
+<script src="/static/js/features/tabs/tab_session_state.js"></script>
+<script src="/static/js/features/preferences/preferences.js"></script>
+<script src="/static/js/features/preferences/secrets_panel.js"></script>
+<script src="/static/js/features/preferences/notification_channels.js"></script>
+<script src="/static/js/features/preferences/session_token_controls.js"></script>
+<script src="/static/js/features/command-registry/command_registry.js"></script>
+<script src="/static/js/features/theme/theme.js"></script>
+<script src="/static/js/features/terminal/composer_editing.js"></script>
+<script src="/static/js/features/terminal/local_commands.js"></script>
+<script src="/static/js/features/terminal/mobile_composer_keyboard.js"></script>
+<script src="/static/js/features/autocomplete/runtime_context.js"></script>
+<script src="/static/js/features/tour/tour_cli.js"></script>
+<script src="/static/js/features/schedules/schedules_modal.js"></script>
+<script src="/static/js/features/watchers/watchers_modal.js"></script>
+<script src="/static/js/features/workflows/workflows.js"></script>
+<script src="/static/js/features/mobile/mobile_menu_actions.js"></script>
+<script src="/static/js/features/shortcuts/global_shortcuts.js"></script>
+<script src="/static/js/features/shortcuts/shortcuts_key_handler.js"></script>
+<script src="/static/js/features/projects/project_target_validation.js"></script>
+<script src="/static/js/features/projects/project_workspace_constants.js"></script>
+<script src="/static/js/features/projects/project_workspace_state.js"></script>
+<script src="/static/js/features/projects/project_active_context.js"></script>
+<script src="/static/js/features/projects/project_shared_ui.js"></script>
+<script src="/static/js/features/projects/project_details.js"></script>
+<script src="/static/js/features/projects/project_list.js"></script>
+<script src="/static/js/features/projects/project_navigation.js"></script>
+<script src="/static/js/features/projects/project_entity_editor.js"></script>
+<script src="/static/js/features/projects/project_workspace_actions.js"></script>
+<script src="/static/js/features/projects/project_workspace_shell.js"></script>
+<script src="/static/js/features/projects/project_workspace_lifecycle.js"></script>
+<script src="/static/js/features/projects/project_workspace_renderer.js"></script>
+<script src="/static/js/features/projects/project_workspace_bootstrap.js"></script>
+<script src="/static/js/features/projects/project_nested_sheets.js"></script>
+<script src="/static/js/features/projects/project_workspace_events.js"></script>
+<script src="/static/js/features/projects/project_targets.js"></script>
+<script src="/static/js/features/projects/project_runs.js"></script>
+<script src="/static/js/features/projects/project_mobile_compare.js"></script>
+<script src="/static/js/features/projects/project_mobile_shell.js"></script>
+<script src="/static/js/features/projects/project_mobile_detail.js"></script>
+<script src="/static/js/features/projects/project_findings_data.js"></script>
+<script src="/static/js/features/projects/project_filters.js"></script>
+<script src="/static/js/features/projects/project_entities.js"></script>
+<script src="/static/js/features/projects/project_findings.js"></script>
+<script src="/static/js/features/projects/project_artifacts.js"></script>
+<script src="/static/js/features/projects/project_packages.js"></script>
+<script src="/static/js/tour_modal.js"></script>
 <script src="/static/js/controller.js"></script>
+<script src="/static/js/features/terminal/composer_controller.js"></script>
 <script src="/static/js/shell_chrome.js"></script>
+<script src="/static/js/features/mobile/mobile_running_indicator.js"></script>
 <script src="/static/js/mobile_chrome.js"></script>
 </body>
 </html>

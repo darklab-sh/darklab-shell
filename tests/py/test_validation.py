@@ -8,8 +8,8 @@ Run with: pytest tests/ (from the repo root)
 
 import unittest.mock as mock
 
-import commands
-from commands import (
+import services.commands.registry as commands
+from services.commands.registry import (
     command_root,
     is_command_allowed,
     parse_synthetic_postfilter,
@@ -31,7 +31,7 @@ def _validation_registry_helpers():
     global _VALIDATION_REGISTRY_HELPERS
     if _VALIDATION_REGISTRY_HELPERS is None:
         registry = commands.load_commands_registry()
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             _VALIDATION_REGISTRY_HELPERS = {
                 "allow_grouping": commands.load_allow_grouping_flags(),
                 "workspace_flags": commands._workspace_flag_specs_by_root(),
@@ -45,10 +45,10 @@ def _check(cmd, allow=None, deny=None):
     a = allow if allow is not None else ALLOW
     d = deny  if deny  is not None else DENY
     helpers = _validation_registry_helpers()
-    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
-         mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
-         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
-         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+    with mock.patch("services.commands.registry.load_command_policy", return_value=(a, d)), \
+         mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
         return is_command_allowed(cmd)
 
 
@@ -93,6 +93,16 @@ class TestShellOperators:
 
     def test_synthetic_grep_pipe_allowed(self):
         ok, _ = _check("ping darklab.sh | grep ttl")
+        assert ok
+
+    def test_synthetic_grep_dash_pattern_pipe_allowed(self):
+        ok, _ = _check("nmap darklab.sh | grep '-script'")
+        assert ok
+
+        ok, _ = _check("nmap darklab.sh | grep -- -script")
+        assert ok
+
+        ok, _ = _check("nmap darklab.sh | grep -e '-script'")
         assert ok
 
     def test_synthetic_head_pipe_allowed(self):
@@ -187,7 +197,7 @@ class TestAllowlist:
         assert not ok
 
     def test_unrestricted_when_no_file(self):
-        with mock.patch("commands.load_command_policy", return_value=(None, [])):
+        with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
             ok, _ = is_command_allowed("anything goes")
         assert ok
 
@@ -229,6 +239,25 @@ class TestSyntheticGrepParsing:
         assert spec["stages"][0]["extended"] is True
         assert spec["stages"][0]["pattern"] == "ttl|time"
 
+    def test_parses_option_terminator_pattern_starting_with_dash(self):
+        quoted, quoted_err = parse_synthetic_postfilter("man nmap | grep '-script'")
+        assert quoted_err is None
+        assert quoted is not None
+        assert quoted["stages"][0]["pattern"] == "-script"
+
+        spec, err = parse_synthetic_postfilter("man nmap | grep -- -script")
+        assert err is None
+        assert spec is not None
+        assert spec["base_command"] == "man nmap"
+        assert spec["stages"][0]["pattern"] == "-script"
+
+    def test_parses_dash_e_pattern_starting_with_dash(self):
+        spec, err = parse_synthetic_postfilter("man nmap | grep -i -e '-script'")
+        assert err is None
+        assert spec is not None
+        assert spec["stages"][0]["ignore_case"] is True
+        assert spec["stages"][0]["pattern"] == "-script"
+
     def test_rejects_missing_pattern(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -i")
         assert spec is None
@@ -236,6 +265,10 @@ class TestSyntheticGrepParsing:
 
     def test_rejects_unsupported_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -n ttl")
+        assert spec is None
+        assert err == "Synthetic grep supports only -i, -v, and -E."
+
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -script")
         assert spec is None
         assert err == "Synthetic grep supports only -i, -v, and -E."
 
@@ -394,6 +427,8 @@ class TestDenyPrefix:
         # Flag should be denied even when other flags precede it
         ok, _ = _check("curl -s -o /tmp/out https://darklab.sh", allow=["curl"], deny=["curl -o"])
         assert not ok
+        ok, _ = _check("curl --config=/tmp/curlrc https://darklab.sh", allow=["curl"], deny=["curl --config"])
+        assert not ok
 
     def test_deny_flag_at_end(self):
         ok, _ = _check("nmap -sT 10.0.0.1 --script", allow=["nmap"], deny=["nmap --script"])
@@ -411,11 +446,19 @@ class TestDenyPrefix:
         ok, _ = _check("CURL -K config.txt", allow=["curl"], deny=["curl -K"])
         assert not ok
 
-    def test_deny_single_char_matches_combined_group(self):
-        # Single-char deny "-o" matches "-oN" — treat as combined flag group
-        # (useful for blocking all nmap file output with a single !nmap -o entry)
-        ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
-        assert not ok
+    def test_workspace_nmap_output_flag_exempts_combined_deny_group(self, tmp_path):
+        # Managed nmap output flags are rewritten into the session workspace
+        # before deny-prefix checks so safe file capture still works.
+        with mock.patch.dict(commands.app_config.CFG, {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+        }):
+            ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
+        assert ok
 
     def test_devnull_exception_prefix(self):
         # curl -o /dev/null ... is a common pattern for checking HTTP status — should be allowed
@@ -533,18 +576,18 @@ class TestRuntimeCommandHelpers:
         assert command_root("   ") is None
 
     def test_runtime_missing_command_name_returns_none_when_installed(self):
-        with mock.patch("commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+        with mock.patch("services.commands.registry.resolve_runtime_command", return_value="/usr/bin/curl"):
             assert runtime_missing_command_name("curl https://darklab.sh") is None
 
     def test_runtime_missing_command_name_returns_root_when_missing(self):
-        with mock.patch("commands.resolve_runtime_command", return_value=None):
+        with mock.patch("services.commands.registry.resolve_runtime_command", return_value=None):
             assert runtime_missing_command_name("nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_name_skips_env_assignments(self):
         def fake_resolve(name):
             return "/usr/bin/env" if name == "env" else None
 
-        with mock.patch("commands.resolve_runtime_command", side_effect=fake_resolve):
+        with mock.patch("services.commands.registry.resolve_runtime_command", side_effect=fake_resolve):
             assert runtime_missing_command_name("env XDG_CONFIG_HOME=/tmp nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_message_is_stable(self):

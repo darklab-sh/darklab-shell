@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady } from './helpers.js'
+import { ensurePromptReady, openRailAction } from './helpers.js'
 
 // Assertions for the shared interaction contract exercised against real
 // mounted UI rather than helper fixtures. Each helper has its own unit
@@ -64,7 +64,7 @@ test.describe('UI interaction contract — disclosures', () => {
   })
 
   test('FAQ question disclosure keeps aria-expanded in sync with the .faq-open class', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/\bopen\b/)
 
     // Scope to the FAQ modal — the share-redaction modal reuses the
@@ -131,22 +131,41 @@ test.describe('UI interaction contract — modal focus trap', () => {
       await openOverlay(page, modal.open, modal.overlay)
       await expect(page.locator(modal.overlay)).toHaveClass(/\bopen\b/)
 
-      // Content for FAQ and workflows loads async from /faq and /workflows
-      // — wait for the card to have at least two focusable descendants
-      // before running the boundary test so the test is independent of
-      // network timing. Visibility filter mirrors ui_focus_trap.js so the
-      // test and the trap agree on which element is "last": hidden
-      // attribute, [hidden] ancestor, and display:none (via client-rect).
+      // Options refreshes the secrets list as it opens and temporarily
+      // disables the controls at the bottom of the card. Wait for that async
+      // state to settle before marking the focus boundaries; otherwise the
+      // "last" element can change between the marker pass and the Tab press.
+      if (modal.name === 'options') {
+        await expect(page.locator('#options-secrets-refresh-btn')).toBeEnabled()
+        await expect(page.locator('#options-secret-new-btn')).toBeEnabled()
+      }
+
+      // Content for FAQ and workflows loads async from /faq and /workflows,
+      // and options has the async secrets refresh above. Wait for the card to
+      // have at least two focusable descendants before running the boundary
+      // test so the test is independent of network timing. Visibility filter
+      // mirrors ui_focus_trap.js so the test and the trap agree on which
+      // element is "last": hidden attribute, [hidden] ancestor, and
+      // CSS-hidden ancestors such as closed app-select menus.
       await expect
         .poll(async () => {
           return page.evaluate((selector) => {
             const card = document.querySelector(selector)
             if (!card) return 0
             const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            const isVisible = (el) => {
+              if (el.hidden) return false
+              if (typeof el.closest === 'function' && el.closest('[hidden]')) return false
+              let node = el
+              while (node && node.nodeType === 1) {
+                const style = window.getComputedStyle(node)
+                if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+                node = node.parentElement
+              }
+              return true
+            }
             return Array.from(card.querySelectorAll(SEL))
-              .filter((el) => !el.hidden
-                && !(typeof el.closest === 'function' && el.closest('[hidden]'))
-                && window.getComputedStyle(el).display !== 'none')
+              .filter(isVisible)
               .length
           }, modal.modal)
         })
@@ -155,10 +174,19 @@ test.describe('UI interaction contract — modal focus trap', () => {
       await page.evaluate((selector) => {
         const card = document.querySelector(selector)
         const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        const isVisible = (el) => {
+          if (el.hidden) return false
+          if (typeof el.closest === 'function' && el.closest('[hidden]')) return false
+          let node = el
+          while (node && node.nodeType === 1) {
+            const style = window.getComputedStyle(node)
+            if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+            node = node.parentElement
+          }
+          return true
+        }
         const list = Array.from(card.querySelectorAll(SEL))
-          .filter((el) => !el.hidden
-            && !(typeof el.closest === 'function' && el.closest('[hidden]'))
-            && window.getComputedStyle(el).display !== 'none')
+          .filter(isVisible)
         card.querySelectorAll('[data-focustest-first], [data-focustest-last]').forEach((el) => {
           delete el.dataset.focustestFirst
           delete el.dataset.focustestLast

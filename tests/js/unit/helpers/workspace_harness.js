@@ -2,10 +2,23 @@ import { vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
-const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search_core.js'), 'utf8')
+const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/search_core.js'), 'utf8')
 const SEARCH_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search.js'), 'utf8')
-const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace_core.js'), 'utf8')
+const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/workspace_core.js'), 'utf8')
+const ENTITY_METADATA_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
+const VIEWER_FORMATS_SRC = readFileSync(
+  resolve(process.cwd(), 'app/static/js/features/workspace/workspace_viewer_formats.js'),
+  'utf8',
+)
 const SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace.js'), 'utf8')
+const AUTOCOMPLETE_CACHE_SRC = readFileSync(
+  resolve(process.cwd(), 'app/static/js/features/workspace/workspace_autocomplete_cache.js'),
+  'utf8',
+)
+const DRAG_DROP_SRC = readFileSync(
+  resolve(process.cwd(), 'app/static/js/features/workspace/workspace_drag_drop.js'),
+  'utf8',
+)
 
 export function responseJson(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -47,6 +60,8 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <form id="workspace-editor" class="u-hidden">
       <div id="workspace-editor-title"></div>
       <input id="workspace-path-input">
+      <input id="workspace-labels-input">
+      <textarea id="workspace-notes-input"></textarea>
       <textarea id="workspace-text-input"></textarea>
       <button id="workspace-save-btn" type="submit"></button>
     </form>
@@ -124,6 +139,8 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     workspaceEditor: document.getElementById('workspace-editor'),
     workspaceEditorTitle: document.getElementById('workspace-editor-title'),
     workspacePathInput: document.getElementById('workspace-path-input'),
+    workspaceLabelsInput: document.getElementById('workspace-labels-input'),
+    workspaceNotesInput: document.getElementById('workspace-notes-input'),
     workspaceTextInput: document.getElementById('workspace-text-input'),
     workspaceRefreshBtn: document.getElementById('workspace-refresh-btn'),
     workspaceNewBtn: document.getElementById('workspace-new-btn'),
@@ -131,6 +148,16 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     workspaceCancelEditBtn: document.getElementById('workspace-cancel-edit-btn'),
     workspaceCloseViewerBtn: document.getElementById('workspace-close-viewer-btn'),
     workspaceSaveBtn: document.getElementById('workspace-save-btn'),
+  }
+  globals.downloadBlobAsAttachment = (blob, filename) => {
+    const url = globals.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename || 'download'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    globals.window.setTimeout(() => globals.URL.revokeObjectURL(url), 2000)
   }
   Object.assign(globals, overrides)
   const names = Object.keys(globals)
@@ -154,13 +181,19 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       showWorkspaceViewer,
       hideWorkspaceViewer,
       openWorkspaceEditorFromCommand,
+      refreshWorkspaceFileCache,
       getWorkspaceAutocompleteFileHints,
+      getWorkspaceAutocompleteDirectoryHints,
+      getWorkspaceDirectoryEntries,
       handleWorkspaceFileAction,
       showWorkspaceViewerLoading,
       promptWorkspaceFolderName,
       promptWorkspaceMove,
     };
   `
-  const fns = new Function(...names, `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${SRC}\n${returnExpr}`)(...values)
+  const fns = new Function(
+    ...names,
+    `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${ENTITY_METADATA_SRC}\n${VIEWER_FORMATS_SRC}\n${AUTOCOMPLETE_CACHE_SRC}\n${SRC}\n${DRAG_DROP_SRC}\n${returnExpr}`,
+  )(...values)
   return { ...fns, apiFetch, globals }
 }

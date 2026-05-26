@@ -1,20 +1,13 @@
 import { test, expect } from '@playwright/test'
 import {
+  ensureAutocompleteReady,
   ensurePromptReady,
-  makeTestIp,
   runCommand,
   setComposerValueForTest,
   waitForHistoryRuns,
 } from './helpers.js'
 
 const CMD = 'hostname'
-
-function testScopedIp(testInfo, baseOffset = 0) {
-  const key = `${testInfo.file}:${testInfo.title}`
-  let sum = 0
-  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
-  return makeTestIp(baseOffset + sum)
-}
 
 async function currentSessionId(page) {
   return page.evaluate(() => SESSION_ID)
@@ -91,23 +84,23 @@ async function starCommand(page, command) {
 
 async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_000 } = {}) {
   await ensurePromptReady(page, { timeout })
-  await setComposerValueForTest(page, answer)
+  await setComposerValueForTest(page, answer, { waitForAutocomplete: false })
   await page.keyboard.press('Enter')
   await expect(page.locator('.tab-panel.active .output')).toContainText(expectedText, {
     timeout,
   })
   await page.waitForFunction(
     () => (typeof hasPendingTerminalConfirm === 'function' ? !hasPendingTerminalConfirm() : true),
+    undefined,
     { timeout },
   )
 }
 
 test.describe('session-token lifecycle', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 330) })
-    await page.goto('/')
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
     await page.evaluate(() => localStorage.clear())
-    await page.reload()
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page)
   })
 
@@ -124,7 +117,7 @@ test.describe('session-token lifecycle', () => {
     expect(token).toMatch(/^tok_[a-f0-9]{32}$/)
     expect(await currentSessionId(page)).toBe(token)
 
-    await page.reload()
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page)
     expect(await storedSessionToken(page)).toBe(token)
     expect(await currentSessionId(page)).toBe(token)
@@ -140,15 +133,21 @@ test.describe('session-token lifecycle', () => {
   })
 
   test('set can skip migration without moving anonymous history', async ({ page }) => {
+    test.setTimeout(60_000)
     await runCommand(page, CMD)
     await waitForHistoryRuns(page, 1)
     const token = await issueSessionToken(page)
 
     await runCommand(page, `session-token set ${token}`)
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      'migrate history, files, workflows, and recent domains to this session token?',
+      'migrate history, files, workflows, and recent values to this session token?',
     )
-    await answerTerminalConfirm(page, 'no', 'History, file, workflow, and recent-domain migration skipped.')
+    await answerTerminalConfirm(
+      page,
+      'no',
+      'History, file, workflow, and recent-value migration skipped.',
+      { timeout: 45_000 },
+    )
 
     expect(await storedSessionToken(page)).toBe(token)
     expect(await currentSessionId(page)).toBe(token)
@@ -158,6 +157,7 @@ test.describe('session-token lifecycle', () => {
   test('set migration carries history, starred commands, and workspace files', async ({
     page,
   }) => {
+    test.setTimeout(60_000)
     await runCommand(page, CMD)
     await waitForHistoryRuns(page, 1)
     await starCommand(page, CMD)
@@ -166,7 +166,7 @@ test.describe('session-token lifecycle', () => {
 
     await runCommand(page, `session-token set ${token}`)
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      'migrate history, files, workflows, and recent domains to this session token?',
+      'migrate history, files, workflows, and recent values to this session token?',
     )
     await answerTerminalConfirm(page, 'yes', 'migrated —')
 
@@ -178,39 +178,50 @@ test.describe('session-token lifecycle', () => {
     )
   })
 
-  test('recent domain autocomplete follows the active session token across browser contexts', async ({
+  test('recent target autocomplete follows the active session token across browser contexts', async ({
     page,
     browser,
-  }, testInfo) => {
+  }) => {
+    test.setTimeout(90_000)
     const token = await issueSessionToken(page)
     await runCommand(page, `session-token set ${token}`)
     await expect.poll(async () => currentSessionId(page)).toBe(token)
 
     await runCommand(page, 'ping -c 1 darklab.sh')
     await expect.poll(async () => page.evaluate(async () => {
-      const resp = await apiFetch('/session/recent-domains')
+      const resp = await apiFetch('/session/recent-values')
       const data = await resp.json()
-      return data.domains || []
+      return (data.values && data.values.domain) || []
     })).toContain('darklab.sh')
 
-    const context = await browser.newContext({
-      extraHTTPHeaders: { 'X-Forwarded-For': testScopedIp(testInfo, 390) },
-    })
+    const context = await browser.newContext()
     const otherPage = await context.newPage()
     try {
-      await otherPage.goto('/')
-      await ensurePromptReady(otherPage)
-      await runCommand(otherPage, `session-token set ${token}`)
+      await otherPage.addInitScript((sessionToken) => {
+        localStorage.setItem('session_token', sessionToken)
+      }, token)
+      await otherPage.goto('/', { waitUntil: 'domcontentloaded' })
+      await ensurePromptReady(otherPage, { timeout: 30_000, waitForAutocomplete: true })
       await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
-      await expect.poll(async () => otherPage.evaluate(() => (
-        typeof _readRecentDomains === 'function' ? _readRecentDomains() : []
-      ))).toContain('darklab.sh')
+      await ensureAutocompleteReady(otherPage, { timeout: 30_000 })
+      await expect.poll(async () => otherPage.evaluate(async () => {
+        if (typeof loadRecentValues === 'function') await loadRecentValues()
+        return typeof _readRecentValues === 'function' ? _readRecentValues('domain') : []
+      }), {
+        timeout: 15_000,
+        intervals: [250, 500, 1000],
+      }).toContain('darklab.sh')
 
       await expect.poll(async () => otherPage.evaluate(() => (
         typeof getAutocompleteMatches === 'function'
+          && typeof acContextRegistry !== 'undefined'
+          && acContextRegistry.ping
           ? getAutocompleteMatches('ping ', 5).map(item => item.value)
           : []
-      ))).toContain('darklab.sh')
+      )), {
+        timeout: 15_000,
+        intervals: [250, 500, 1000],
+      }).toContain('darklab.sh')
     } finally {
       await context.close()
     }

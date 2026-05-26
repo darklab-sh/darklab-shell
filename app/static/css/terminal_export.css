@@ -22,6 +22,30 @@
   gap: 4px;
   min-width: 0;
 }
+.export-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.export-highlight-toggle {
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.export-highlight-toggle:hover,
+.export-highlight-toggle:focus-visible {
+  color: var(--text);
+  border-color: var(--green-dim);
+  outline: none;
+}
 .export-title {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 20px;
@@ -62,6 +86,53 @@
   min-height: 0;
   background: var(--theme-panel-bg, var(--surface));
   border: 1px solid var(--theme-panel-border, var(--border));
+}
+.export-findings-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--theme-panel-border, var(--border));
+  background: var(--theme-panel-bg, var(--surface));
+}
+.export-findings-summary span,
+.line-severity-badge,
+.export-entity-token {
+  display: inline-block;
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  padding: 0 5px;
+  line-height: 1.35;
+}
+.export-findings-summary span,
+.line-severity-badge {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.line-severity-badge {
+  margin-right: 8px;
+}
+.line-severity-error { color: var(--red); border-color: var(--red); }
+.line-severity-warn { color: var(--amber); border-color: var(--amber); }
+.line-severity-finding { color: var(--green); border-color: var(--green-dim); }
+.export-entity-token {
+  color: var(--green);
+  border-color: var(--green-dim);
+  text-decoration: none;
+}
+.structured-highlights-off .line-severity-badge {
+  display: none;
+}
+.structured-highlights-off .export-entity-token {
+  display: inline;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  line-height: inherit;
+  text-decoration: inherit;
 }
 .nice-scroll {
   scrollbar-width: thin;

@@ -31,15 +31,19 @@ Part 4 — ARCHITECTURE.md HTTP route inventory:
   grouped by feature rather than app registration order, so this check enforces
   coverage only, not ordering.
 
-Part 5 — release-draft docs:
-  Temporary release-branch merge-request and release-note drafts live under
-  docs/release-drafts/ while a version branch is active. If that directory
-  exists, the docs must carry the convention and the draft set must be paired.
+Part 5 — temporary release draft files:
+  Version branches can carry paired draft artifacts while the release is being
+  prepared, but official docs must not link to those transient files.
 
 Part 6 — operator configuration docs:
   Operator-facing defaults from app/config.py's load_config() defaults must
   be represented in the checked-in app/conf/config.yaml reference and the
-  README.md "## Configuration" table.
+  CONFIGURATION.md "## Application Settings" table.
+
+Part 7 — related-doc navigation:
+  Every "## Related Docs" section must link to every tracked project Markdown
+  file except release drafts and itself. README.md's "## Documentation Map"
+  follows the same inventory.
 """
 
 import ast
@@ -56,7 +60,8 @@ _TESTS_README = _HERE.parent / "README.md"
 _REPO_ROOT = _HERE.parent.parent
 _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
-_DOCS_STANDARDS = _REPO_ROOT / "DOCS_STANDARDS.md"
+_CONFIGURATION = _REPO_ROOT / "CONFIGURATION.md"
+_DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
 _README = _REPO_ROOT / "README.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
@@ -115,7 +120,7 @@ def _run_pytest_collect() -> tuple[int, dict[str, list[str]]]:
 def _run_vitest_list() -> tuple[int, dict[str, list[str]]]:
     """Return (total_count, {filename: ordered_unique_test_names}).
 
-    Runs `npx vitest list --config config/vitest.config.js`. Each line is
+    Runs `npx vitest list --config .tooling/vitest.config.js`. Each line is
     "tests/js/unit/<file>.test.js > describe > ... > test name". The last
     ` > ` separated segment is the test name. ``total`` is the raw listed
     count (one entry per `it(...)` call), which matches the documented
@@ -123,7 +128,7 @@ def _run_vitest_list() -> tuple[int, dict[str, list[str]]]:
     be compared against the single-row appendix convention.
     """
     result = subprocess.run(
-        ["npx", "vitest", "--config", "config/vitest.config.js", "list"],
+        ["npx", "vitest", "--config", ".tooling/vitest.config.js", "list"],
         capture_output=True,
         text=True,
         cwd=str(_REPO_ROOT),
@@ -166,7 +171,7 @@ def _run_playwright_list_for_config(config_path: str) -> tuple[int, dict[str, li
 
 def _run_playwright_parallel_list() -> tuple[int, dict[str, list[str]]]:
     """Return the normal Playwright suite listing used for documented totals."""
-    return _run_playwright_list_for_config("config/playwright.parallel.config.js")
+    return _run_playwright_list_for_config(".tooling/playwright.parallel.config.js")
 
 
 def _run_playwright_appendix_list() -> tuple[int, dict[str, list[str]]]:
@@ -176,11 +181,11 @@ def _run_playwright_appendix_list() -> tuple[int, dict[str, list[str]]]:
     screenshot-capture configs that do not run in normal test passes.
     """
     configs = (
-        "config/playwright.parallel.config.js",
-        "config/playwright.demo.config.js",
-        "config/playwright.demo.mobile.config.js",
-        "config/playwright.capture.desktop.config.js",
-        "config/playwright.capture.mobile.config.js",
+        ".tooling/playwright.parallel.config.js",
+        ".tooling/playwright.demo.config.js",
+        ".tooling/playwright.demo.mobile.config.js",
+        ".tooling/playwright.capture.desktop.config.js",
+        ".tooling/playwright.capture.mobile.config.js",
     )
     combined_total = 0
     combined_by_file: dict[str, list[str]] = {}
@@ -336,13 +341,66 @@ def _documented_default_config_keys() -> set[str]:
     return keys
 
 
-def _readme_configuration_table_keys() -> set[str]:
-    """Return setting names from the README.md '## Configuration' settings table."""
-    text = _README.read_text()
-    match = re.search(r"^## Configuration\n(?P<body>.*?)(?:^### Config file reload behavior\n)",
+def _configuration_reference_table_keys() -> set[str]:
+    """Return setting names from the CONFIGURATION.md application settings table."""
+    text = _CONFIGURATION.read_text()
+    match = re.search(r"^## Application Settings\n(?P<body>.*?)(?:^---\n\n## Files Under app/conf\n)",
                       text, re.M | re.S)
-    assert match, "Could not find README.md '## Configuration' settings table"
+    assert match, "Could not find CONFIGURATION.md '## Application Settings' table"
     return set(re.findall(r"^\|\s+`([^`]+)`\s+\|", match.group("body"), re.M))
+
+
+def _tracked_markdown_docs() -> list[str]:
+    return [
+        path for path in _git_tracked_files()
+        if path.endswith(".md")
+        and not path.startswith("docs/release-drafts/")
+    ]
+
+
+def _markdown_path_for(path: Path) -> str:
+    return path.relative_to(_REPO_ROOT).as_posix()
+
+
+def _normalise_doc_link(source_path: Path, href: str) -> str | None:
+    target = href.split("#", 1)[0]
+    if not target or re.match(r"^[a-z][a-z0-9+.-]*:", target):
+        return None
+    resolved = (source_path.parent / target).resolve()
+    try:
+        return resolved.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return None
+
+
+def _markdown_links_in_body(source_path: Path, body: str) -> list[str]:
+    links: list[str] = []
+    for href in re.findall(r"\[[^\]]+\]\(([^)]+)\)", body):
+        target = _normalise_doc_link(source_path, href)
+        if target and target.endswith(".md"):
+            _append_unique(links, target)
+    return links
+
+
+def _related_docs_links(source_path: Path) -> list[str] | None:
+    match = re.search(
+        r"^## Related Docs\n\n(?P<body>.*?)(?:\n^## |\Z)",
+        source_path.read_text(),
+        re.M | re.S,
+    )
+    if not match:
+        return None
+    return _markdown_links_in_body(source_path, match.group("body"))
+
+
+def _documentation_map_links(source_path: Path) -> list[str]:
+    match = re.search(
+        r"^## Documentation Map\n\n(?P<body>.*?)(?:\n^---\n|\n^## |\Z)",
+        source_path.read_text(),
+        re.M | re.S,
+    )
+    assert match, "Could not find README.md '## Documentation Map' section"
+    return _markdown_links_in_body(source_path, match.group("body"))
 
 
 # ── Shared fixtures ───────────────────────────────────────────────────────────
@@ -723,6 +781,8 @@ class TestDocumentedCombinedTotals:
 # parent directory below).
 _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
     "app/blueprints/__init__.py",     # empty package marker
+    "docs/release-drafts/v2.0-merge-request.md",   # temporary branch artifact
+    "docs/release-drafts/v2.0-release-notes.md",   # temporary branch artifact
 })
 
 # Directories whose individual files are intentionally collapsed into a
@@ -741,6 +801,15 @@ def _git_tracked_files() -> list[str]:
     """Return files tracked by git (committed to the index)."""
     result = subprocess.run(
         ["git", "ls-files", "--cached"],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def _git_untracked_files() -> list[str]:
+    """Return untracked files that are not ignored by git."""
+    result = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
         capture_output=True, text=True, cwd=str(_REPO_ROOT), check=True,
     )
     return [line for line in result.stdout.splitlines() if line]
@@ -917,10 +986,11 @@ class TestProjectStructureCoverage:
         listed = _parse_project_structure_tree(_README.read_text())
         listed_set = set(listed)
         tracked = set(_git_tracked_files())
+        untracked = set(_git_untracked_files())
         # Allow any directory that contains tracked files, including every
         # intermediate ancestor (so '.gitlab' resolves via
         # '.gitlab/merge_request_templates/Default.md').
-        valid = tracked | _all_ancestor_dirs(tracked) | {"."}
+        valid = tracked | untracked | _all_ancestor_dirs(tracked | untracked) | {"."}
         unknown = sorted(
             p for p in listed_set
             if p not in valid
@@ -988,19 +1058,29 @@ class TestArchitectureRouteInventory:
 # ── Part 5: release-draft docs ───────────────────────────────────────────────
 
 class TestReleaseDraftDocs:
-    """Release branches keep temporary MR/release-note drafts in-repo so
-    release messaging stays visible in normal review."""
+    """Release branches can keep temporary MR/release-note drafts in-repo
+    without making them part of the official documentation map."""
 
-    def test_release_draft_convention_is_documented_when_drafts_exist(self):
+    def test_temporary_branch_artifacts_stay_out_of_official_docs(self):
         if not _RELEASE_DRAFTS_DIR.exists():
             pytest.skip("No release draft directory in this checkout")
 
-        docs_text = _DOCS_STANDARDS.read_text()
-        contributing_text = _CONTRIBUTING.read_text()
-        assert "docs/release-drafts/" in docs_text
-        assert "docs/release-drafts/" in contributing_text
-        assert "remove" in docs_text.lower()
-        assert "remove" in contributing_text.lower()
+        official_docs = [
+            _README,
+            _CONTRIBUTING,
+            _DOC_STANDARDS,
+            _TESTS_README,
+            _ARCHITECTURE,
+            _CONFIGURATION,
+            _REPO_ROOT / "FEATURES.md",
+            _REPO_ROOT / "THEME.md",
+        ]
+        offenders = [
+            _markdown_path_for(path)
+            for path in official_docs
+            if "docs/release-drafts/" in path.read_text()
+        ]
+        assert not offenders, "Official docs must not reference temporary release draft files: " + ", ".join(offenders)
 
     def test_release_drafts_are_paired_by_version(self):
         if not _RELEASE_DRAFTS_DIR.exists():
@@ -1032,7 +1112,7 @@ class TestReleaseDraftDocs:
 
 class TestOperatorConfigurationDocs:
     """Operator-facing config defaults must stay represented in both the
-    checked-in config reference and the README settings table."""
+    checked-in config override file and the operator configuration reference."""
 
     def test_config_yaml_represents_app_defaults(self):
         expected = _config_default_keys()
@@ -1043,11 +1123,53 @@ class TestOperatorConfigurationDocs:
             + "\n".join(f"  {key}" for key in missing)
         )
 
-    def test_readme_configuration_represents_app_defaults(self):
+    def test_configuration_reference_represents_app_defaults(self):
         expected = _config_default_keys()
-        documented = _readme_configuration_table_keys()
+        documented = _configuration_reference_table_keys()
         missing = [key for key in expected if key not in documented]
         assert not missing, (
-            "README.md '## Configuration' table is missing app/config.py default keys:\n"
+            "CONFIGURATION.md '## Application Settings' table is missing app/config.py default keys:\n"
             + "\n".join(f"  {key}" for key in missing)
+        )
+
+
+# ── Part 7: related-doc navigation ───────────────────────────────────────────
+
+class TestRelatedDocsNavigation:
+    def test_related_docs_sections_list_project_markdown_files(self):
+        markdown_docs = _tracked_markdown_docs()
+        issues = []
+        for path in markdown_docs:
+            source_path = _REPO_ROOT / path
+            links = _related_docs_links(source_path)
+            if links is None:
+                continue
+            expected = [candidate for candidate in markdown_docs if candidate != path]
+            if links != expected:
+                missing = [candidate for candidate in expected if candidate not in links]
+                extra = [candidate for candidate in links if candidate not in expected]
+                if missing:
+                    issues.append(
+                        f"{path} is missing Related Docs links:\n"
+                        + "\n".join(f"  {candidate}" for candidate in missing)
+                    )
+                if extra:
+                    issues.append(
+                        f"{path} has unexpected Related Docs links:\n"
+                        + "\n".join(f"  {candidate}" for candidate in extra)
+                    )
+                if not missing and not extra:
+                    issues.append(
+                        f"{path} Related Docs order drift. Keep links in git ls-files order, "
+                        "excluding release drafts and the current file."
+                    )
+        assert not issues, "\n\n".join(issues)
+
+    def test_readme_documentation_map_lists_project_markdown_files(self):
+        markdown_docs = _tracked_markdown_docs()
+        expected = [path for path in markdown_docs if path != "README.md"]
+        links = _documentation_map_links(_README)
+        assert links == expected, (
+            "README.md '## Documentation Map' drift. Keep links in git ls-files "
+            "order, excluding release drafts and README.md itself."
         )

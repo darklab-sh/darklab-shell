@@ -1,23 +1,24 @@
 {
   "name": "darklab_shell",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "test": "npm run test:pytest && npm run test:unit && npm run test:e2e",
-    "test:pytest": "bash scripts/run_pytest.sh -c config/pytest.ini --rootdir=. tests/py",
-    "test:unit": "vitest run --config config/vitest.config.js",
-    "test:unit:watch": "vitest --config config/vitest.config.js",
+    "test:pytest": "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py",
+    "test:postgres": "bash scripts/run_postgres_tests.sh",
+    "test:unit": "vitest run --config .tooling/vitest.config.js",
+    "test:unit:watch": "vitest --config .tooling/vitest.config.js",
     "test:e2e": "bash scripts/run_playwright.sh",
     "test:e2e:ui": "bash scripts/run_playwright.sh --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
     "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
-    "lint:py": "flake8 app/ tests/py/ && bandit -r app/ -ll -q",
-    "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/ app/static/js/**/*.js",
-    "lint:css": "stylelint \"app/static/css/**/*.css\" --config config/stylelint.config.mjs",
+    "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ && bandit -r app/ -ll -q",
+    "lint:js": "npx eslint --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/**/*.js",
+    "lint:css": "stylelint \"app/static/css/**/*.css\" --config .tooling/stylelint.config.mjs",
     "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",
-    "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
-    "lint:yaml": "yamllint -c config/yamllint.yml $(find . \\( -name '*.yml' -o -name '*.yaml' \\) -not -path './.git/*' -not -path './node_modules/*')",
+    "lint:docker": "hadolint --config .tooling/hadolint.yaml Dockerfile",
+    "lint:yaml": "yamllint -c .tooling/yamllint.yml $(find . \\( -name '*.yml' -o -name '*.yaml' \\) -not -path './.git/*' -not -path './node_modules/*')",
     "lint:json": "node scripts/lint_json.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "audit": "npm run audit:py && npm run audit:js",
@@ -27,16 +28,18 @@
     "vendor:check": "tmp=$(mktemp -d) && node scripts/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/"
   },
   "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "ansi_up": "6.0.6",
     "jspdf": "4.2.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.52.0",
-    "@vitest/coverage-v8": "^4.1.5",
-    "eslint": "^10.3.0",
+    "@playwright/test": "^1.60.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "eslint": "^10.4.0",
     "jsdom": "^29.1.1",
     "markdownlint-cli2": "^0.22.0",
-    "stylelint": "^17.10.0",
-    "vitest": "^4.1.5"
+    "stylelint": "^17.12.0",
+    "vitest": "^4.1.7"
   }
 }

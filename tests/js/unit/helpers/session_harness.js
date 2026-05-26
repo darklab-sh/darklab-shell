@@ -19,7 +19,7 @@ export function loadSession({
     })
 
   const fns = fromDomScripts(
-    ['app/static/js/session_core.js', 'app/static/js/session.js'],
+    ['app/static/js/core/session_core.js', 'app/static/js/session.js'],
     {
       localStorage: storage,
       crypto: { randomUUID },

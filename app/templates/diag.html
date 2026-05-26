@@ -17,7 +17,7 @@
   })();
 </script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="stylesheet" href="/static/css/fonts.css">
+<link rel="stylesheet" href="/static/css/core/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
 <link rel="stylesheet" href="/static/css/terminal_export.css">
 <link rel="stylesheet" href="/static/css/diag.css">
@@ -46,6 +46,9 @@
   {% set rstats = data.redis.stats or {} %}
   {% set broker = data.broker or {} %}
   {% set fb = broker.fallback or {} %}
+  {% set ai = data.ai or {} %}
+  {% set inspector = data.classifier_inspector or {} %}
+  {% set inspector_result = inspector.result or {} %}
   {% set assets_loaded = (1 if data.assets.ansi_up.ok else 0) + (1 if data.assets.jspdf.ok else 0) + (1 if data.assets.fonts.ok else 0) %}
 
   {% macro diag_config_value(value) -%}
@@ -54,6 +57,130 @@
     {%- elif value is sameas true %}true
     {%- elif value is sameas false %}<span class="diag-muted">false</span>
     {%- else %}{{ value }}{% endif %}
+  {%- endmacro %}
+
+  {% macro classifier_inspector_section(inspector, inspector_result) -%}
+  <section class="diag-section s-classifier diag-classifier-inspector">
+    <div class="diag-section-title">Classifier Inspector</div>
+    <form class="diag-classifier-form" method="get" action="/diag" data-diag-classifier-form>
+      {% if request.args.get('tz_offset') is not none %}
+      <input type="hidden" name="tz_offset" value="{{ request.args.get('tz_offset') }}">
+      {% endif %}
+      <div class="diag-classifier-grid">
+        <label class="diag-field">
+          <span>Command</span>
+          <input type="text" name="classifier_command" value="{{ inspector.command }}" placeholder="nmap -sV darklab.sh">
+        </label>
+        <label class="diag-field">
+          <span>Command type</span>
+          <select class="form-select" name="classifier_cmd_type">
+            <option value="real"{% if inspector.cmd_type != 'builtin' %} selected{% endif %}>real</option>
+            <option value="builtin"{% if inspector.cmd_type == 'builtin' %} selected{% endif %}>builtin</option>
+          </select>
+        </label>
+      </div>
+      <label class="diag-field diag-classifier-line">
+        <span>Output line</span>
+        <textarea name="classifier_line" rows="3" placeholder="Paste one output line to inspect">{{ inspector.line }}</textarea>
+      </label>
+      <details class="diag-classifier-advanced"{% if inspector.cls %} open{% endif %}>
+        <summary>Advanced</summary>
+        <label class="diag-field">
+          <span>Line class</span>
+          <input type="text" name="classifier_cls" value="{{ inspector.cls }}" placeholder="notice, progress, builtin-help-row">
+        </label>
+      </details>
+      <div class="diag-classifier-actions">
+        <button class="btn btn-primary btn-compact" type="submit">Inspect</button>
+        <a class="btn btn-secondary btn-compact" href="/diag{% if request.args.get('tz_offset') is not none %}?tz_offset={{ request.args.get('tz_offset') }}{% endif %}" data-diag-classifier-clear>Clear</a>
+      </div>
+    </form>
+    <div class="diag-classifier-result-region" aria-live="polite">
+    {% if inspector.submitted %}
+      {% if inspector_result %}
+      <div class="diag-classifier-result">
+        <div class="diag-classifier-summary">
+          <span class="diag-count-item"><span class="diag-count-name">kind</span><span class="diag-count-value">{{ inspector_result.kind }}</span></span>
+          <span class="diag-count-item"><span class="diag-count-name">role</span><span class="diag-count-value">{{ inspector_result.role }}</span></span>
+          <span class="diag-count-item"><span class="diag-count-name">root</span><span class="diag-count-value">{{ inspector_result.command_root or '—' }}</span></span>
+          <span class="diag-count-item"><span class="diag-count-name">target</span><span class="diag-count-value">{{ inspector_result.target or '—' }}</span></span>
+        </div>
+        <table class="diag-table">
+          <tr>
+            <td>signals</td>
+            <td>
+              {% if inspector_result.signals %}
+              <span class="diag-chips">
+                {% for signal in inspector_result.signals %}<span class="diag-chip present">{{ signal }}</span>{% endfor %}
+              </span>
+              {% else %}
+              <span class="diag-muted">none</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td>entities</td>
+            <td>
+              {% if inspector_result.entities %}
+              <div class="diag-count-list">
+                {% for entity in inspector_result.entities %}
+                <span class="diag-count-item">
+                  <span class="diag-count-name">{{ entity.type }}</span>
+                  <span class="diag-count-value">{{ entity.canonical_value }}</span>
+                </span>
+                {% endfor %}
+              </div>
+              {% else %}
+              <span class="diag-muted">none</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr><td>normalized</td><td><code>{{ inspector_result.normalized_text or '—' }}</code></td></tr>
+        </table>
+      </div>
+      {% else %}
+      <div class="diag-empty">Paste one output line to inspect.</div>
+      {% endif %}
+    {% endif %}
+    </div>
+  </section>
+  {%- endmacro %}
+
+  {% macro classifier_drift_section() -%}
+  <section class="diag-section s-classifier-drift diag-drift-report" data-diag-drift-report>
+    <div class="diag-section-title">Classifier Drift Report</div>
+    <form class="diag-drift-form" data-diag-drift-form>
+      <div class="diag-classifier-grid">
+        <label class="diag-field">
+          <span>Recent runs</span>
+          <input type="number" name="runs" min="1" max="200" value="50">
+        </label>
+        <label class="diag-field">
+          <span>Lines per run</span>
+          <input type="number" name="lines" min="1" max="1000" value="200">
+        </label>
+      </div>
+      <div class="diag-classifier-grid">
+        <label class="diag-field">
+          <span>Command root</span>
+          <input type="text" name="root" placeholder="optional, e.g. nmap">
+        </label>
+        <label class="diag-field diag-checkbox-field">
+          <span>Full artifacts</span>
+          <label class="diag-checkbox-control">
+            <input type="checkbox" name="include_full" value="1">
+            <span>include full output when available</span>
+          </label>
+        </label>
+      </div>
+      <div class="diag-classifier-actions">
+        <button class="btn btn-primary btn-compact" type="submit">Run report</button>
+      </div>
+    </form>
+    <div class="diag-drift-result-region" aria-live="polite">
+      <div class="diag-empty">Run the report to sample recent saved output.</div>
+    </div>
+  </section>
   {%- endmacro %}
 
   {# ── Health Summary ────────────────────────────────────────────────────── #}
@@ -73,14 +200,16 @@
         <span class="{{ 'diag-ok' if data.db.ok else 'diag-fail' }}">{{ 'online' if data.db.ok else 'error' }}</span>
       </div>
       <div class="diag-summary-meta">
-        {% if data.db.ok and data.db.query_ms is not none %}{{ '%g'|format(data.db.query_ms) }} ms{% else %}query unavailable{% endif %}
+        {% if data.db.ok and data.db.backend %}{{ data.db.backend }} · {% endif %}
+        {% if data.db.ok and data.db.ping_ms is not none %}ping {{ data.db.ping_human or ('%g ms'|format(data.db.ping_ms)) }}{% else %}ping unavailable{% endif %}
+        {% if data.db.ok and data.db.probe_ms is not none %}<span>· diag probe {{ data.db.probe_human or ('%g ms'|format(data.db.probe_ms)) }}</span>{% endif %}
         {% if data.db.ok and data.db.size_human %}<span>· {{ data.db.size_human }}</span>{% endif %}
       </div>
       {% if data.db.ok %}
       <div class="diag-summary-pills">
         <span>{{ '{:,}'.format(data.db.runs) }} runs</span>
         <span>{{ data.db.snapshots }} snapshots</span>
-        {% if data.db.fts_orphans is not none %}
+        {% if data.db.fts_orphans is defined and data.db.fts_orphans is not none %}
         <span class="{{ 'diag-fail' if data.db.fts_orphans else 'diag-ok' }}">{{ data.db.fts_orphans }} fts orphans</span>
         {% endif %}
       </div>
@@ -128,11 +257,49 @@
     </div>
   </section>
 
+  <section class="diag-section s-ai diag-ai-panel" data-diag-ai-panel>
+    <div class="diag-section-title">AI Assists</div>
+    <table class="diag-table">
+      <tr>
+        <td>status</td>
+        <td>
+          {% if ai.enabled and ai.ok %}
+            <span class="diag-dot ok"></span><span class="diag-ok">ready</span>
+          {% elif ai.enabled %}
+            <span class="diag-dot fail"></span><span class="diag-fail">{{ ai.status or 'error' }}</span>
+          {% else %}
+            <span class="diag-dot warn"></span><span class="diag-warn">disabled</span>
+          {% endif %}
+          {% if ai.latency_ms is defined %}<span class="diag-muted">· {{ ai.latency_ms }} ms</span>{% endif %}
+        </td>
+      </tr>
+      <tr><td>provider</td><td>{{ ai.provider or '—' }}</td></tr>
+      <tr><td>model</td><td>{{ ai.model or '—' }}</td></tr>
+      <tr>
+        <td>model installed</td>
+        <td class="{{ 'diag-ok' if ai.model_installed else 'diag-muted' }}">{{ 'yes' if ai.model_installed else 'unknown' }}</td>
+      </tr>
+      {% if ai.error %}
+      <tr><td>error</td><td class="diag-fail">{{ ai.error }}</td></tr>
+      {% endif %}
+    </table>
+    <form class="diag-inline-form" data-diag-ai-test-form method="post" action="/diag/ai-test">
+      <button class="btn btn-secondary btn-compact" type="submit">Test prompt</button>
+    </form>
+    <div class="diag-ai-test-result" aria-live="polite"></div>
+  </section>
+
+  {{ classifier_inspector_section(inspector, inspector_result) }}
+  {{ classifier_drift_section() }}
+
   {# ── Database Details ──────────────────────────────────────────────────── #}
   <section class="diag-section s-db-details">
     <div class="diag-section-title">Database Details</div>
     <table class="diag-table">
       {% if data.db.ok %}
+      {% if data.db.backend %}
+      <tr><td>backend</td><td>{{ data.db.backend }}</td></tr>
+      {% endif %}
       {% if data.db.size_human %}
       <tr>
         <td>size</td>
@@ -148,7 +315,7 @@
       {% if data.db.journal_mode %}
       <tr><td>journal</td><td>{{ data.db.journal_mode }}</td></tr>
       {% endif %}
-      {% if data.db.reclaimable_size_human is not none %}
+      {% if data.db.reclaimable_size_human is defined and data.db.reclaimable_size_human is not none %}
       <tr>
         <td>reclaimable</td>
         <td>
@@ -174,7 +341,20 @@
         </td>
       </tr>
       {% endif %}
-      {% if data.db.fts_orphans is not none %}
+      {% if data.db.project_workspace %}
+      <tr>
+        <td>project workspace</td>
+        <td class="diag-count-list">
+          {% for name, count in data.db.project_workspace.items() %}
+          <span class="diag-count-item">
+            <span class="diag-count-name">{{ name }}</span>
+            <span class="diag-count-value">{{ '{:,}'.format(count) }}</span>
+          </span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      {% if data.db.fts_orphans is defined and data.db.fts_orphans is not none %}
       <tr>
         <td>fts orphans</td>
         <td>
@@ -187,6 +367,120 @@
       <tr><td>error</td><td class="diag-fail">{{ data.db.error }}</td></tr>
       {% endif %}
     </table>
+  </section>
+
+  {# ── Storage Breakdown ─────────────────────────────────────────────────── #}
+  {% set storage = data.db.storage or {} %}
+  {% set storage_buckets = storage.buckets or [] %}
+  {% set storage_stats_available = storage.storage_stats_available or data.db.dbstat_available %}
+  {% set max_bucket_allocated = storage_buckets | map(attribute='allocated') | max if storage_buckets else 0 %}
+  <section class="diag-section s-storage">
+    <div class="diag-section-title">
+      Storage breakdown
+      {% if data.db.backend == 'sqlite' and data.db.dbstat_available is sameas false %}
+      <span class="diag-section-title-count diag-warn">page sizes unavailable</span>
+      {% endif %}
+    </div>
+    {% if data.db.ok and storage %}
+      {% if data.db.backend == 'sqlite' and data.db.dbstat_available is sameas false %}
+      <div class="diag-storage-banner diag-warn">
+        table page-size breakdown unavailable — rebuild SQLite with <code>SQLITE_ENABLE_DBSTAT_VTAB</code>.
+      </div>
+      {% elif data.db.backend == 'postgres' %}
+      <div class="diag-storage-banner diag-muted">
+        Postgres relation sizes come from <code>pg_total_relation_size</code>; page-level free-space details stay database-managed.
+      </div>
+      {% endif %}
+      <div class="diag-storage-summary">
+        <span>{{ 'Database file' if data.db.backend != 'postgres' else 'Database relations' }} {{ data.db.size_human or '—' }}</span>
+        {% if data.db.backend != 'postgres' %}<span>{{ data.db.reclaimable_size_human or '0 B' }} reclaimable</span>{% endif %}
+        <span>{{ storage.total_logical_payload_bytes_human or '0 B' }} logical payload</span>
+        {% if storage.largest_object %}
+        <span>largest object <code>{{ storage.largest_object.name }}</code></span>
+        {% endif %}
+      </div>
+      {% if storage_buckets %}
+      <div class="diag-storage-groups">
+        {% for bucket in storage_buckets %}
+        {% set width = ((bucket.allocated / max_bucket_allocated) * 100) if max_bucket_allocated else 0 %}
+        <details class="diag-storage-group" open>
+          <summary>
+            <span class="diag-storage-group-name">{{ bucket.name }}</span>
+            <span class="diag-muted">
+              {% if storage_stats_available %}{{ bucket.allocated_human }} allocated · {{ bucket.payload_human }} payload · {% endif %}
+              {{ bucket.logical_payload_human }} logical · {{ bucket.rows|length }} objects
+            </span>
+            <span class="diag-storage-bar" style="--diag-storage-bar-width: {{ '%0.2f'|format(width) }}%"></span>
+          </summary>
+          <table class="diag-table diag-storage-table">
+            <thead>
+              <tr>
+                <th>object</th>
+                <th>rows</th>
+                <th>allocated</th>
+                <th>payload</th>
+                <th>overhead</th>
+                <th>unused</th>
+                <th>logical</th>
+                <th>avg row</th>
+                <th>pages</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in bucket.rows %}
+              <tr>
+                <td>
+                  <span>{{ row.name }}</span>
+                  <span class="diag-muted">· {{ row.kind }}</span>
+                  {% if row.payload_error %}<span class="diag-warn"> · payload unavailable</span>{% endif %}
+                </td>
+                <td>{{ '{:,}'.format(row.rows) if row.rows is not none else '—' }}</td>
+                <td>{{ row.allocated_human if storage_stats_available else '—' }}</td>
+                <td>{{ row.payload_human if storage_stats_available else '—' }}</td>
+                <td>{{ row.overhead_human if storage_stats_available else '—' }}</td>
+                <td>{{ row.unused_human if data.db.backend != 'postgres' and data.db.dbstat_available else '—' }}</td>
+                <td>{{ row.logical_payload_human }}</td>
+                <td>{{ row.avg_row_payload_human }}</td>
+                <td>{{ '{:,}'.format(row.pages) if data.db.backend != 'postgres' and data.db.dbstat_available and row.pages is not none else '—' }}</td>
+              </tr>
+              {% for shadow in row.shadows %}
+              <tr class="diag-storage-shadow">
+                <td><span class="diag-muted">↳ {{ shadow.name }}</span></td>
+                <td>—</td>
+                <td>{{ shadow.allocated_human if storage_stats_available else '—' }}</td>
+                <td>{{ shadow.payload_human if storage_stats_available else '—' }}</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>{{ '{:,}'.format(shadow.pages) if data.db.backend != 'postgres' and data.db.dbstat_available and shadow.pages is not none else '—' }}</td>
+              </tr>
+              {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if storage.largest_runs %}
+      <div class="diag-storage-largest">
+        <div class="diag-tools-sublabel">Largest saved runs</div>
+        <table class="diag-table">
+          {% for run in storage.largest_runs %}
+          <tr>
+            <td class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false" title="{{ run.command }}">{{ run.command }}</td>
+            <td>{{ run.payload_human }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+      {% elif storage.largest_runs_skipped %}
+      <div class="diag-storage-banner diag-muted">Largest saved runs skipped: {{ storage.largest_runs_skipped }}.</div>
+      {% endif %}
+    {% else %}
+      <div class="diag-empty">Storage details unavailable.</div>
+    {% endif %}
   </section>
 
   {# ── Redis Details ─────────────────────────────────────────────────────── #}
@@ -324,6 +618,18 @@
     </table>
   </section>
 
+  {# ── Interactive PTY ──────────────────────────────────────────────────── #}
+  <section class="diag-section s-pty">
+    <div class="diag-section-title">Interactive PTY</div>
+    <table class="diag-table">
+      <tr><td>active</td><td>{{ data.pty.active }}</td></tr>
+      <tr><td>completed</td><td>{{ data.pty.completed_count }}</td></tr>
+      <tr><td>duration</td><td>avg {{ data.pty.average_seconds }}s <span class="diag-muted">· p95 {{ data.pty.p95_seconds }}s</span></td></tr>
+      <tr><td>input</td><td>{{ '{:,}'.format(data.pty.input_bytes) }} bytes <span class="diag-muted">· {{ '{:,}'.format(data.pty.dropped_input_bytes) }} dropped</span></td></tr>
+      <tr><td>control queue</td><td>{{ data.pty.control_queue_depth }}</td></tr>
+    </table>
+  </section>
+
   {# ── Config ────────────────────────────────────────────────────────────── #}
   <section class="diag-section s-config">
     <div class="diag-section-title">Config</div>
@@ -458,8 +764,22 @@
     var inFlight = false;
     var indicator = document.querySelector('.diag-live-indicator');
 
+    function shouldDeferDiagRefresh() {
+      if (document.visibilityState !== 'visible') return true;
+      if (document.querySelector(
+        '.diag-classifier-form.is-dirty, .diag-classifier-form.is-loading, '
+        + '.diag-drift-report.is-loading, .diag-drift-form.is-dirty, '
+        + '.diag-ai-panel.is-loading'
+      )) return true;
+      return !!(
+        document.activeElement
+        && document.activeElement.closest
+        && document.activeElement.closest('.diag-classifier-form, .diag-drift-form, .diag-ai-panel')
+      );
+    }
+
     async function refreshDiag() {
-      if (inFlight || document.visibilityState !== 'visible') return;
+      if (inFlight || shouldDeferDiagRefresh()) return;
       inFlight = true;
       if (indicator) indicator.classList.add('refreshing');
       try {
@@ -469,10 +789,16 @@
         });
         if (!resp.ok) return;
         var html = await resp.text();
+        if (shouldDeferDiagRefresh()) return;
         var doc = new DOMParser().parseFromString(html, 'text/html');
         var newMain = doc.querySelector('.diag-main');
         var oldMain = document.querySelector('.diag-main');
-        if (newMain && oldMain) oldMain.replaceWith(newMain);
+        if (newMain && oldMain) {
+          var oldDrift = oldMain.querySelector('[data-diag-drift-report].has-results');
+          var newDrift = newMain.querySelector('[data-diag-drift-report]');
+          if (oldDrift && newDrift) newDrift.replaceWith(oldDrift);
+          oldMain.replaceWith(newMain);
+        }
         var newGen = doc.querySelector('.diag-refreshed-at time');
         var oldGen = document.querySelector('.diag-refreshed-at time');
         if (newGen && oldGen) {
@@ -493,6 +819,410 @@
       // Refresh immediately when the tab becomes visible again so the
       // operator does not stare at a stale snapshot for up to 10s.
       if (document.visibilityState === 'visible') refreshDiag();
+    });
+    document.addEventListener('input', function (event) {
+      var form = event.target && event.target.closest
+        ? event.target.closest('.diag-classifier-form, .diag-drift-form')
+        : null;
+      if (form) form.classList.add('is-dirty');
+    });
+  })();
+
+  // AI diagnostics: keep the explicit provider test prompt off the main page
+  // refresh path so slow local models do not reload the diagnostics document.
+  (function () {
+    function timingText(timings) {
+      if (!timings) return '';
+      var parts = [];
+      if (timings.prompt_ms != null) {
+        parts.push('prompt ' + Math.round(Number(timings.prompt_ms) || 0) + ' ms'
+          + (timings.prompt_n != null ? ' / ' + timings.prompt_n + ' tok' : ''));
+      }
+      if (timings.predicted_ms != null) {
+        parts.push('generation ' + Math.round(Number(timings.predicted_ms) || 0) + ' ms'
+          + (timings.predicted_n != null ? ' / ' + timings.predicted_n + ' tok' : ''));
+      }
+      return parts.join(' · ');
+    }
+
+    function renderResult(region, payload) {
+      if (!region) return;
+      region.replaceChildren();
+      var el = document.createElement('div');
+      el.className = payload && payload.ok ? 'diag-storage-banner diag-ok' : 'diag-storage-banner diag-fail';
+      if (payload && payload.ok) {
+        el.textContent = 'Prompt OK'
+          + (payload.latency_ms != null ? ' · ' + payload.latency_ms + ' ms' : '')
+          + (timingText(payload.provider_timings) ? ' · ' + timingText(payload.provider_timings) : '')
+          + (payload.payload && payload.payload.message ? ' · ' + payload.payload.message : '');
+      } else {
+        el.textContent = payload && payload.error ? payload.error : 'AI test prompt failed.';
+      }
+      region.appendChild(el);
+      if (payload && payload.raw_response) {
+        var pre = document.createElement('pre');
+        pre.className = 'diag-ai-raw';
+        pre.textContent = payload.raw_response;
+        region.appendChild(pre);
+      }
+    }
+
+    document.addEventListener('submit', async function (event) {
+      var form = event.target && event.target.matches && event.target.matches('[data-diag-ai-test-form]')
+        ? event.target
+        : null;
+      if (!form) return;
+      event.preventDefault();
+      var panel = form.closest('[data-diag-ai-panel]');
+      var region = panel ? panel.querySelector('.diag-ai-test-result') : null;
+      var submit = form.querySelector('[type="submit"]');
+      if (panel) panel.classList.add('is-loading');
+      if (submit) submit.disabled = true;
+      try {
+        var resp = await fetch(form.action, {
+          method: 'POST',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        var payload = await resp.json().catch(function () { return { ok: false }; });
+        renderResult(region, payload);
+      } catch (_) {
+        renderResult(region, { ok: false, error: 'AI test prompt failed.' });
+      } finally {
+        if (panel) panel.classList.remove('is-loading');
+        if (submit) submit.disabled = false;
+      }
+    });
+  })();
+
+  // Classifier inspector: submit the small classifier request on its own so the
+  // expensive diagnostics probes do not rerun every time an operator checks one
+  // line. The form still has a normal GET action as a no-JS fallback.
+  (function () {
+    var CLASSIFIER_KEYS = [
+      'classifier_command',
+      'classifier_cls',
+      'classifier_cmd_type',
+      'classifier_line',
+    ];
+
+    function appendText(parent, tag, className, text) {
+      var el = document.createElement(tag);
+      if (className) el.className = className;
+      el.textContent = text == null || text === '' ? '—' : String(text);
+      parent.appendChild(el);
+      return el;
+    }
+
+    function appendCountItem(parent, name, value) {
+      var item = document.createElement('span');
+      item.className = 'diag-count-item';
+      appendText(item, 'span', 'diag-count-name', name);
+      appendText(item, 'span', 'diag-count-value', value);
+      parent.appendChild(item);
+    }
+
+    function appendTableRow(table, label, valueNode) {
+      var row = document.createElement('tr');
+      appendText(row, 'td', '', label);
+      var valueCell = document.createElement('td');
+      valueCell.appendChild(valueNode);
+      row.appendChild(valueCell);
+      table.appendChild(row);
+    }
+
+    function renderClassifierResult(region, payload) {
+      if (!region) return;
+      region.replaceChildren();
+      if (!payload || !payload.submitted) return;
+      if (!payload.result) {
+        appendText(region, 'div', 'diag-empty', 'Paste one output line to inspect.');
+        return;
+      }
+
+      var result = payload.result;
+      var wrap = document.createElement('div');
+      wrap.className = 'diag-classifier-result';
+
+      var summary = document.createElement('div');
+      summary.className = 'diag-classifier-summary';
+      appendCountItem(summary, 'kind', result.kind);
+      appendCountItem(summary, 'role', result.role);
+      appendCountItem(summary, 'root', result.command_root);
+      appendCountItem(summary, 'target', result.target);
+      wrap.appendChild(summary);
+
+      var table = document.createElement('table');
+      table.className = 'diag-table';
+
+      var signalCell = document.createElement('span');
+      if (Array.isArray(result.signals) && result.signals.length) {
+        signalCell.className = 'diag-chips';
+        result.signals.forEach(function (signal) {
+          appendText(signalCell, 'span', 'diag-chip present', signal);
+        });
+      } else {
+        appendText(signalCell, 'span', 'diag-muted', 'none');
+      }
+      appendTableRow(table, 'signals', signalCell);
+
+      var entityCell;
+      if (Array.isArray(result.entities) && result.entities.length) {
+        entityCell = document.createElement('div');
+        entityCell.className = 'diag-count-list';
+        result.entities.forEach(function (entity) {
+          var item = document.createElement('span');
+          item.className = 'diag-count-item';
+          appendText(item, 'span', 'diag-count-name', entity && entity.type);
+          appendText(item, 'span', 'diag-count-value', entity && entity.canonical_value);
+          entityCell.appendChild(item);
+        });
+      } else {
+        entityCell = document.createElement('span');
+        entityCell.className = 'diag-muted';
+        entityCell.textContent = 'none';
+      }
+      appendTableRow(table, 'entities', entityCell);
+
+      var code = document.createElement('code');
+      code.textContent = result.normalized_text || '—';
+      appendTableRow(table, 'normalized', code);
+
+      wrap.appendChild(table);
+      region.appendChild(wrap);
+    }
+
+    function syncClassifierUrl(form, clear) {
+      if (!window.history || typeof window.history.replaceState !== 'function') return;
+      var params = new URLSearchParams(window.location.search);
+      params.delete('format');
+      CLASSIFIER_KEYS.forEach(function (key) { params.delete(key); });
+      if (!clear) {
+        var data = new FormData(form);
+        CLASSIFIER_KEYS.forEach(function (key) {
+          var value = data.get(key);
+          if (value != null && String(value).trim()) params.set(key, value);
+        });
+        if (!params.has('classifier_cmd_type')) {
+          params.set('classifier_cmd_type', data.get('classifier_cmd_type') || 'real');
+        }
+      }
+      var query = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
+    }
+
+    document.addEventListener('submit', async function (event) {
+      var form = event.target && event.target.matches && event.target.matches('[data-diag-classifier-form]')
+        ? event.target
+        : null;
+      if (!form) return;
+      event.preventDefault();
+      var card = form.closest('.diag-classifier-inspector');
+      var region = card ? card.querySelector('.diag-classifier-result-region') : null;
+      var submit = form.querySelector('[type="submit"]');
+      form.classList.add('is-loading');
+      form.setAttribute('aria-busy', 'true');
+      if (submit) submit.disabled = true;
+      try {
+        var params = new URLSearchParams(new FormData(form));
+        var resp = await fetch('/diag/classifier-inspector?' + params.toString(), {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        renderClassifierResult(region, await resp.json());
+        form.classList.remove('is-dirty');
+        syncClassifierUrl(form, false);
+      } catch (_) {
+        if (region) appendText(region, 'div', 'diag-empty diag-fail', 'Classifier inspection failed.');
+      } finally {
+        form.classList.remove('is-loading');
+        form.removeAttribute('aria-busy');
+        if (submit) submit.disabled = false;
+      }
+    });
+
+    document.addEventListener('click', function (event) {
+      var clear = event.target && event.target.closest
+        ? event.target.closest('[data-diag-classifier-clear]')
+        : null;
+      if (!clear) return;
+      var card = clear.closest('.diag-classifier-inspector');
+      var form = card ? card.querySelector('[data-diag-classifier-form]') : null;
+      if (!form) return;
+      event.preventDefault();
+      CLASSIFIER_KEYS.forEach(function (key) {
+        var field = form.elements[key];
+        if (!field) return;
+        field.value = key === 'classifier_cmd_type' ? 'real' : '';
+      });
+      var region = card.querySelector('.diag-classifier-result-region');
+      if (region) region.replaceChildren();
+      form.classList.remove('is-dirty');
+      var advanced = form.querySelector('.diag-classifier-advanced');
+      if (advanced) advanced.open = false;
+      syncClassifierUrl(form, true);
+    });
+  })();
+
+  // Classifier drift report: run the heavier recent-output sampling only when
+  // an operator asks for it, then let samples jump back into the inspector.
+  (function () {
+    function appendText(parent, tag, className, text) {
+      var el = document.createElement(tag);
+      if (className) el.className = className;
+      el.textContent = text == null || text === '' ? '—' : String(text);
+      parent.appendChild(el);
+      return el;
+    }
+
+    function appendCountItem(parent, name, value) {
+      var item = document.createElement('span');
+      item.className = 'diag-count-item';
+      appendText(item, 'span', 'diag-count-name', name);
+      appendText(item, 'span', 'diag-count-value', value);
+      parent.appendChild(item);
+    }
+
+    function eventSummaryText(summary) {
+      if (!summary) return '—';
+      var entities = Array.isArray(summary.entities) ? summary.entities : [];
+      var signals = Array.isArray(summary.signals) ? summary.signals : [];
+      var parts = [
+        'kind=' + (summary.kind || '—'),
+        'role=' + (summary.role || '—'),
+        'signals=' + (signals.length ? signals.join(',') : 'none'),
+      ];
+      if (entities.length) {
+        parts.push('entities=' + entities.map(function (entity) {
+          return [entity.type, entity.canonical_value].filter(Boolean).join(':');
+        }).join(','));
+      }
+      if (summary.target) parts.push('target=' + summary.target);
+      return parts.join(' · ');
+    }
+
+    function renderDriftReport(region, payload) {
+      if (!region) return;
+      region.replaceChildren();
+      if (!payload || !payload.ok) {
+        appendText(region, 'div', 'diag-empty diag-fail', payload && payload.error ? payload.error : 'Classifier drift report failed.');
+        return;
+      }
+      var wrap = document.createElement('div');
+      wrap.className = 'diag-drift-result';
+
+      var summary = document.createElement('div');
+      summary.className = 'diag-classifier-summary';
+      appendCountItem(summary, 'runs', payload.runs_scanned || 0);
+      appendCountItem(summary, 'lines', payload.lines_sampled || 0);
+      appendCountItem(summary, 'issues', payload.issue_count || 0);
+      appendCountItem(summary, 'truncated', payload.truncated_runs || 0);
+      wrap.appendChild(summary);
+
+      if (!payload.issue_count) {
+        appendText(wrap, 'div', 'diag-empty diag-ok', 'No classifier drift found in the sampled output.');
+        region.appendChild(wrap);
+        return;
+      }
+
+      var bucketsWrap = document.createElement('div');
+      bucketsWrap.className = 'diag-drift-buckets';
+      (Array.isArray(payload.buckets) ? payload.buckets : []).forEach(function (bucket) {
+        var details = document.createElement('details');
+        details.className = 'diag-drift-bucket';
+        details.open = true;
+        var summaryRow = document.createElement('summary');
+        appendText(summaryRow, 'span', '', bucket.label || bucket.key);
+        appendText(summaryRow, 'span', 'diag-count-value', bucket.count || 0);
+        details.appendChild(summaryRow);
+
+        var table = document.createElement('table');
+        table.className = 'diag-table';
+        (Array.isArray(bucket.samples) ? bucket.samples : []).forEach(function (sample) {
+          var row = document.createElement('tr');
+          var textCell = document.createElement('td');
+          textCell.className = 'diag-drift-sample-text';
+          appendText(textCell, 'div', '', sample.text || '—');
+          appendText(textCell, 'div', 'diag-muted', sample.command || '—');
+          row.appendChild(textCell);
+
+          var storedCell = document.createElement('td');
+          appendText(storedCell, 'div', 'diag-muted', 'stored');
+          appendText(storedCell, 'div', '', eventSummaryText(sample.stored));
+          row.appendChild(storedCell);
+
+          var currentCell = document.createElement('td');
+          appendText(currentCell, 'div', 'diag-muted', 'current');
+          appendText(currentCell, 'div', '', eventSummaryText(sample.current));
+          row.appendChild(currentCell);
+
+          var actionCell = document.createElement('td');
+          var inspect = document.createElement('button');
+          inspect.className = 'btn btn-secondary btn-compact';
+          inspect.type = 'button';
+          inspect.textContent = 'Inspect';
+          inspect.dataset.diagDriftInspect = 'true';
+          inspect.dataset.command = sample.command || '';
+          inspect.dataset.line = sample.text || '';
+          actionCell.appendChild(inspect);
+          row.appendChild(actionCell);
+          table.appendChild(row);
+        });
+        details.appendChild(table);
+        bucketsWrap.appendChild(details);
+      });
+      wrap.appendChild(bucketsWrap);
+      region.appendChild(wrap);
+    }
+
+    document.addEventListener('submit', async function (event) {
+      var form = event.target && event.target.matches && event.target.matches('[data-diag-drift-form]')
+        ? event.target
+        : null;
+      if (!form) return;
+      event.preventDefault();
+      var card = form.closest('[data-diag-drift-report]');
+      var region = card ? card.querySelector('.diag-drift-result-region') : null;
+      var submit = form.querySelector('[type="submit"]');
+      if (card) card.classList.add('is-loading');
+      if (submit) submit.disabled = true;
+      try {
+        var params = new URLSearchParams(new FormData(form));
+        var resp = await fetch('/diag/classifier-drift?' + params.toString(), {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        renderDriftReport(region, await resp.json());
+        if (card) card.classList.add('has-results');
+        form.classList.remove('is-dirty');
+      } catch (_) {
+        if (region) appendText(region, 'div', 'diag-empty diag-fail', 'Classifier drift report failed.');
+      } finally {
+        if (card) card.classList.remove('is-loading');
+        if (submit) submit.disabled = false;
+      }
+    });
+
+    document.addEventListener('click', function (event) {
+      var button = event.target && event.target.closest
+        ? event.target.closest('[data-diag-drift-inspect]')
+        : null;
+      if (!button) return;
+      var form = document.querySelector('[data-diag-classifier-form]');
+      if (!form) return;
+      event.preventDefault();
+      if (form.elements.classifier_command) form.elements.classifier_command.value = button.dataset.command || '';
+      if (form.elements.classifier_line) form.elements.classifier_line.value = button.dataset.line || '';
+      if (form.elements.classifier_cls) form.elements.classifier_cls.value = '';
+      if (form.elements.classifier_cmd_type) form.elements.classifier_cmd_type.value = 'real';
+      form.classList.add('is-dirty');
+      form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
   })();
 

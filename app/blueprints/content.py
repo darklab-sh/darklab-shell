@@ -8,9 +8,11 @@ import re
 from flask import Blueprint, Response, jsonify, render_template, request
 
 import config as _config
-from commands import (
+from services.commands.registry import (
+    command_secret_consumers,
     command_catalog_from_registry,
     command_catalog_entry,
+    interactive_pty_specs_from_registry,
     load_all_faq,
     load_all_workflows,
     load_ascii_art,
@@ -18,13 +20,15 @@ from commands import (
     load_autocomplete_context_from_commands_registry,
     load_commands_registry,
     load_mobile_welcome_hints,
+    load_tour,
     load_welcome,
     load_welcome_hints,
 )
-from builtin_commands import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
-from helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
-from user_workflows import list_user_workflows
-from wordlists import wordlist_autocomplete_items
+from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
+from core.helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
+from services.intel.registry import app_native_secret_consumers, provider_status_catalog
+from services.workflows.user_workflows import list_user_workflows
+from services.commands.wordlists import wordlist_autocomplete_items
 
 log = logging.getLogger("shell")
 
@@ -106,6 +110,15 @@ def _prompt_label(workspace_enabled: bool) -> str:
 def _frontend_config_payload():
     """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
+    scheduler_config = cfg.get("scheduler")
+    scheduler_default_timezone = "UTC"
+    if isinstance(scheduler_config, dict):
+        scheduler_default_timezone = str(scheduler_config.get("default_timezone") or "UTC")
+    tour = load_tour(cfg)
+    tour_version = tour.get("version", 0)
+    tour_chapters = tour.get("chapters", [])
+    if not isinstance(tour_chapters, list):
+        tour_chapters = []
     return {
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
@@ -119,11 +132,23 @@ def _frontend_config_payload():
         "motd":                  cfg["motd"],
         "recent_commands_limit": cfg["recent_commands_limit"],
         "max_output_lines":      cfg["max_output_lines"],
+        "high_volume_output_line_threshold": cfg["high_volume_output_line_threshold"],
+        "high_volume_output_status_interval_lines": cfg["high_volume_output_status_interval_lines"],
+        "evidence_package_max_mb": cfg["evidence_package_max_mb"],
+        "evidence_package_max_uncompressed_mb": cfg["evidence_package_max_uncompressed_mb"],
+        "evidence_package_max_artifacts": cfg["evidence_package_max_artifacts"],
         "max_tabs":              cfg["max_tabs"],
         "history_panel_limit":      cfg["history_panel_limit"],
         "command_timeout_seconds":  cfg["command_timeout_seconds"],
         "permalink_retention_days": cfg["permalink_retention_days"],
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),
+        "interactive_pty_enabled": bool(cfg.get("interactive_pty_enabled", False)),
+        "ai_enabled":              bool(cfg.get("ai_enabled", False)),
+        "ai_feature_summary":      bool(cfg.get("ai_feature_summary", False)),
+        "ai_feature_next_commands": bool(cfg.get("ai_feature_next_commands", False)),
+        "ai_feature_run_suggestions": bool(cfg.get("ai_feature_run_suggestions", False)),
+        "interactive_pty_commands": interactive_pty_specs_from_registry(),
+        "scheduler_default_timezone": scheduler_default_timezone,
         "welcome_char_ms":          cfg["welcome_char_ms"],
         "welcome_jitter_ms":      cfg["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    cfg["welcome_post_cmd_ms"],
@@ -134,6 +159,10 @@ def _frontend_config_payload():
         "welcome_status_labels":  cfg["welcome_status_labels"],
         "welcome_hint_interval_ms": cfg["welcome_hint_interval_ms"],
         "welcome_hint_rotations": cfg["welcome_hint_rotations"],
+        "tour_enabled":           bool(cfg.get("tour_enabled", True)),
+        "tour_version":           int(tour_version),
+        "tour_chapters":          tour_chapters,
+        "tour_chapter_count":      len(tour_chapters),
         "diag_enabled": ip_is_in_cidrs(
             get_client_ip(),
             cfg.get("diagnostics_allowed_cidrs") or [],
@@ -237,6 +266,7 @@ def command_catalog_index():
             "root": entry.get("root"),
             "category": entry.get("category"),
             "description": entry.get("description"),
+            "requires_secrets": entry.get("requires_secrets") if isinstance(entry.get("requires_secrets"), list) else [],
             "example_count": len(examples) if isinstance(examples, list) else 0,
             "subcommand_count": len(subcommands) if isinstance(subcommands, list) else 0,
             "flag_count": len(flags) if isinstance(flags, list) else 0,
@@ -255,6 +285,11 @@ def command_catalog_index():
         "restricted": bool(commands),
         "commands": commands,
         "groups": groups,
+        "secret_consumers": [
+            *command_secret_consumers(),
+            *app_native_secret_consumers(),
+        ],
+        "intel_providers": provider_status_catalog(),
     })
 
 

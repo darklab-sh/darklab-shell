@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url'
 // IIFE into window per test so there is no cross-test global leakage.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/state.js'), 'utf8')
-const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_helpers.js'), 'utf8')
+const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/core/state.js'), 'utf8')
+const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_helpers.js'), 'utf8')
 
 function loadHelpers() {
   delete window.focusElement
@@ -130,15 +130,141 @@ describe('app-native select enhancement', () => {
   })
 
   it('dispatches normal change events when choosing an app-native option', () => {
+    document.getElementById('demo-select').dataset.portalMenu = 'true'
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, 'scrollHeight')
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return this.classList?.contains('app-select-menu') ? 120 : 0
+      },
+    })
     loadHelpers()
     const select = document.getElementById('demo-select')
     const onChange = vi.fn()
     select.addEventListener('change', onChange)
+    const trigger = document.querySelector('.app-select-trigger')
+    trigger.getBoundingClientRect = () => ({
+      top: 530,
+      bottom: 564,
+      left: 24,
+      right: 224,
+      width: 200,
+      height: 34,
+      x: 24,
+      y: 530,
+    })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { offsetTop: 0, offsetLeft: 0, width: 390, height: 500 },
+    })
 
-    document.querySelector('.app-select-trigger').click()
-    document.querySelector('.app-select-menu [data-value="two"]').click()
+    try {
+      trigger.click()
+      const menu = document.querySelector('.app-select-menu')
+      expect(menu.parentElement).toBe(document.body)
+      expect(menu.classList.contains('dropdown-up')).toBe(true)
+      expect(menu.style.maxHeight).toBe('320px')
+      expect(menu.style.top).toBe('410px')
+      document.querySelector('.app-select-menu [data-value="two"]').click()
+    } finally {
+      if (originalScrollHeight) {
+        Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
+      } else {
+        delete window.HTMLElement.prototype.scrollHeight
+      }
+    }
 
     expect(select.value).toBe('two')
     expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
+  it('portals modal selects so menus escape clipped dialog bodies', () => {
+    document.body.innerHTML = `
+      <div role="dialog" aria-modal="true">
+        <select id="demo-select" class="form-select" aria-label="Dialog select">
+          <option value="one">One</option>
+          <option value="two">Two</option>
+        </select>
+      </div>
+    `
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, 'scrollHeight')
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return this.classList?.contains('app-select-menu') ? 120 : 0
+      },
+    })
+    loadHelpers()
+    const trigger = document.querySelector('.app-select-trigger')
+    trigger.getBoundingClientRect = () => ({
+      top: 530,
+      bottom: 564,
+      left: 24,
+      right: 224,
+      width: 200,
+      height: 34,
+      x: 24,
+      y: 530,
+    })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { offsetTop: 0, offsetLeft: 0, width: 390, height: 500 },
+    })
+
+    try {
+      trigger.click()
+      const menu = document.querySelector('.app-select-menu')
+      expect(menu.parentElement).toBe(document.body)
+      expect(menu.classList.contains('dropdown-up')).toBe(true)
+      expect(menu.style.position).toBe('fixed')
+      expect(menu.style.top).toBe('410px')
+    } finally {
+      if (originalScrollHeight) {
+        Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
+      } else {
+        delete window.HTMLElement.prototype.scrollHeight
+      }
+    }
+  })
+
+  it('refreshes custom menu options when native select options change', () => {
+    const g = loadHelpers()
+    const select = document.getElementById('demo-select')
+    const option = document.createElement('option')
+    option.value = 'three'
+    option.textContent = 'Three'
+    select.appendChild(option)
+
+    g.syncAppSelect(select)
+
+    expect([...document.querySelectorAll('.app-select-menu [role="option"]')].map(btn => btn.textContent)).toEqual([
+      'One',
+      'Two',
+      'Three',
+    ])
+  })
+
+  it('enhances form-select controls inserted after startup', async () => {
+    loadHelpers()
+    document.body.replaceChildren()
+
+    const select = document.createElement('select')
+    select.className = 'form-select'
+    select.setAttribute('aria-label', 'Dynamic select')
+    const option = document.createElement('option')
+    option.value = 'dynamic'
+    option.textContent = 'Dynamic'
+    select.appendChild(option)
+
+    document.body.appendChild(select)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(select.classList.contains('app-select-native')).toBe(true)
+    expect(select.nextElementSibling?.classList.contains('app-select')).toBe(true)
+    expect(select.nextElementSibling?.querySelector('.app-select-trigger')?.textContent).toContain('Dynamic')
   })
 })

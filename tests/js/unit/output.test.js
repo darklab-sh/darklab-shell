@@ -1,6 +1,6 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
+function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } = {}) {
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -12,12 +12,12 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
   }
 
   return fromDomScripts(
-    ['app/static/js/output_core.js', 'app/static/js/output.js'],
+    ['app/static/js/core/run_output_model.js', 'app/static/js/core/output_core.js', 'app/static/js/output.js'],
     {
       document,
-      AnsiUp: FakeAnsiUp,
+      AnsiUp: AnsiUpCtor || FakeAnsiUp,
       activeTabId: 'tab-1',
-      tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
+      tabs: [{ id: 'tab-1', st: 'running', rawLines: [], runStart: 1000 }],
       APP_CONFIG: { max_output_lines: 2, ...appConfig },
       getOutput: () => document.getElementById('out'),
       shellPromptWrap: document.getElementById('shell-prompt-wrap'),
@@ -26,11 +26,17 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
     `{
     appendLine,
     appendLines,
+    appendHighVolumeOutputFinalSummary,
+    recordLiveOutputCoalescedLines,
+    disableHighVolumeOutputResumeControls,
+    renderRestoredTabOutput,
+    resetHighVolumeOutputState,
     _restoreOutputTailAfterLayout,
     _setTsMode,
     _setLnMode,
     buildPromptLabel,
     currentPromptWorkspacePath,
+    _showOutputEntityMenu,
     _getTabs: () => tabs,
   }`,
     'setTabs(tabs); setActiveTabId(activeTabId);',
@@ -39,6 +45,8 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
 
 describe('appendLine', () => {
   beforeEach(() => {
+    delete document._darklabHighVolumeOutputBound
+    delete document._darklabOutputEntityTokensBound
     document.body.className = ''
     document.body.innerHTML = `
       <div id="out" class="output">
@@ -63,13 +71,141 @@ describe('appendLine', () => {
     expect(line.textContent).toContain('<img src=x onerror=alert(1)>')
   })
 
-  it('renders non-plain classes through ansi_to_html', () => {
+  it('renders typed notice events with textContent and legacy CSS class', () => {
     const { appendLine } = loadOutputFns()
 
-    appendLine('hello', '', 'tab-1')
+    appendLine({
+      text: '<strong>typed notice</strong>',
+      kind: 'notice',
+      role: 'body',
+    }, 'tab-1')
 
-    const line = document.querySelector('.line')
+    const line = document.querySelector('.line.notice')
+    expect(line).not.toBeNull()
+    expect(line.innerHTML).not.toContain('<strong>')
+    expect(line.textContent).toContain('<strong>typed notice</strong>')
+  })
+
+  it('renders typed prompt roles like legacy prompt-echo lines', () => {
+    const { appendLine, _getTabs } = loadOutputFns()
+
+    appendLine({ text: 'nmap darklab.sh', kind: 'info', role: 'prompt-echo' }, 'tab-1')
+    appendLine('', 'prompt-echo', 'tab-1')
+
+    const line = document.querySelector('.line.prompt-echo')
+    expect(line).not.toBeNull()
+    expect(line.querySelector('.prompt-prefix')?.textContent).toContain('anon@darklab')
+    expect(line.textContent).toContain('nmap darklab.sh')
+    const blankPrompt = document.querySelectorAll('.line.prompt-echo')[1]
+    expect(blankPrompt.classList.contains('is-blank')).toBe(false)
+    expect(blankPrompt.querySelector('.line-content')?.firstElementChild?.classList.contains('prompt-prefix')).toBe(true)
+    expect(_getTabs()[0].rawLines[0].cls).toBe('prompt-echo')
+    expect(_getTabs()[0].rawLines[0].text).toContain('nmap darklab.sh')
+  })
+
+  it('round trips wire event input through fromWireLineEvent before rendering', () => {
+    const { appendLine } = loadOutputFns()
+
+    appendLine({
+      text: 'still plain',
+      cls: '',
+      kind: 'notice',
+      role: 'body',
+    }, 'tab-1')
+
+    const line = document.querySelector('.line.notice')
+    expect(line).not.toBeNull()
+    expect(line.textContent).toContain('still plain')
+  })
+
+  it('renders non-plain classes through ansi_to_html', () => {
+    class LinkAnsiUp {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(text) {
+        const raw = String(text || '')
+        return raw
+          .replace(/\x1b]8;;([^\x07]+)\x07([^\x1b]+)\x1b]8;;\x07/g, '<a href="$1">$2</a>')
+          .replace(/^hello$/, '<em>hello</em>')
+      }
+    }
+    const { appendLine } = loadOutputFns({ AnsiUpCtor: LinkAnsiUp, appConfig: { max_output_lines: 10 } })
+
+    appendLine('hello', '', 'tab-1')
+    appendLine('README: \x1b]8;;https://example.test\x07README\x1b]8;;\x07', 'builtin-note', 'tab-1')
+
+    const line = document.querySelector('.line:not(.builtin-note)')
     expect(line.innerHTML).toContain('<em>hello</em>')
+    const link = document.querySelector('.line.builtin-note a')
+    expect(link?.getAttribute('href')).toBe('https://example.test')
+    expect(link?.getAttribute('target')).toBe('_blank')
+    expect(link?.getAttribute('rel')).toBe('noopener')
+    expect(link?.textContent).toBe('README')
+  })
+
+  it('isolates ANSI parser state between tabs', () => {
+    class StatefulAnsiUp {
+      constructor() {
+        this.use_classes = false
+        this.color = ''
+      }
+
+      ansi_to_html(text) {
+        const raw = String(text || '')
+        if (raw.includes('\x1b[31m')) this.color = 'red'
+        if (raw.includes('\x1b[0m')) this.color = ''
+        const clean = raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+        return `<span class="${this.color || 'plain'}">${clean}</span>`
+      }
+    }
+    const { appendLine } = loadOutputFns({
+      AnsiUpCtor: StatefulAnsiUp,
+      appConfig: { max_output_lines: 10 },
+      extraGlobals: {
+        tabs: [
+          { id: 'tab-1', rawLines: [], runStart: 1000 },
+          { id: 'tab-2', rawLines: [], runStart: 1000 },
+        ],
+      },
+    })
+
+    appendLine('\x1b[31mred opener without reset', '', 'tab-1')
+    appendLine('plain output in another tab', '', 'tab-2')
+
+    const lines = Array.from(document.querySelectorAll('.line .line-content'))
+    expect(lines[0].innerHTML).toContain('class="red"')
+    expect(lines[1].innerHTML).toContain('class="plain"')
+  })
+
+  it('resets ANSI parser state before replaying restored output', () => {
+    class StatefulAnsiUp {
+      constructor() {
+        this.use_classes = false
+        this.color = ''
+      }
+
+      ansi_to_html(text) {
+        const raw = String(text || '')
+        if (raw.includes('\x1b[31m')) this.color = 'red'
+        if (raw.includes('\x1b[0m')) this.color = ''
+        const clean = raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+        return `<span class="${this.color || 'plain'}">${clean}</span>`
+      }
+    }
+    const { appendLine, renderRestoredTabOutput } = loadOutputFns({
+      AnsiUpCtor: StatefulAnsiUp,
+      appConfig: { max_output_lines: 10 },
+    })
+
+    appendLine('\x1b[31mred opener without reset', '', 'tab-1')
+    renderRestoredTabOutput('tab-1', [{ text: 'restored plain output', cls: '' }])
+
+    const line = document.querySelector('.line .line-content')
+    expect(document.querySelectorAll('.line')).toHaveLength(1)
+    expect(line.innerHTML).toContain('class="plain"')
+    expect(line.innerHTML).not.toContain('class="red"')
   })
 
   it('renders shell as a normal workspace folder in the prompt', () => {
@@ -90,7 +226,7 @@ describe('appendLine', () => {
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {
     const { appendLine } = fromDomScripts(
-      ['app/static/js/utils.js', 'app/static/js/output_core.js', 'app/static/js/output.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/output_core.js', 'app/static/js/output.js'],
       {
         document,
         activeTabId: 'tab-1',
@@ -115,11 +251,63 @@ describe('appendLine', () => {
     const { appendLine } = loadOutputFns()
 
     appendLine('hello', '', 'tab-1')
+    appendLine('', '', 'tab-1')
 
     const line = document.querySelector('.line')
+    const blankLine = document.querySelectorAll('.line')[1]
     expect(line.querySelector('.line-content')).not.toBeNull()
     expect(line.firstElementChild?.classList.contains('line-content')).toBe(true)
     expect(line.querySelector('.line-content').innerHTML).toContain('<em>hello</em>')
+    expect(blankLine.classList.contains('is-blank')).toBe(true)
+    expect(blankLine.querySelector('.line-content')?.textContent).toBe('')
+  })
+
+  it('renders builtin help and FAQ rows as structured terminal content', () => {
+    const activateFaqCommandChip = vi.fn()
+    const { appendLine } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+      extraGlobals: { activateFaqCommandChip },
+    })
+
+    appendLine('  history  Show saved runs', 'builtin-help-row', 'tab-1')
+    appendLine('Q  How do I export?', 'builtin-faq-q', 'tab-1')
+    appendLine('A  Run `help` first.', 'builtin-faq-a', 'tab-1')
+
+    const helpLine = document.querySelector('.line.builtin-help-row')
+    expect(helpLine.querySelector('.faq-chip[data-faq-command="history"]')).toBeNull()
+    expect(helpLine.querySelector('.builtin-help-label')?.textContent).toBe('history')
+    expect(helpLine.querySelector('.builtin-help-description')?.textContent).toBe('Show saved runs')
+    expect(activateFaqCommandChip).not.toHaveBeenCalled()
+
+    expect(document.querySelector('.line.builtin-faq-q .builtin-row-marker')?.textContent).toBe('Q')
+    expect(document.querySelector('.line.builtin-faq-q .builtin-faq-question-text')?.textContent).toBe('How do I export?')
+    expect(document.querySelector('.line.builtin-faq-a .builtin-row-marker')?.textContent).toBe('A')
+    expect(document.querySelector('.line.builtin-faq-a .builtin-inline-code')?.textContent).toBe('help')
+  })
+
+  it('keeps automatic command chips out of command list rows', () => {
+    const activateFaqCommandChip = vi.fn()
+    const { appendLine } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+      extraGlobals: { activateFaqCommandChip },
+    })
+
+    appendLine('  banner  Print the configured banner art', 'builtin-help-row', 'tab-1')
+    appendLine('  cat <file>                    Show a session file.', 'builtin-help-row', 'tab-1')
+    appendLine('id                                   kind       muted  label', 'builtin-table-header', 'tab-1')
+    appendLine('  nmap  Fast network scanner', 'builtin-catalog-item', 'tab-1')
+
+    expect(document.querySelectorAll('.line.builtin-help-row .faq-chip, .line.builtin-catalog-item .faq-chip')).toHaveLength(0)
+    expect(document.querySelectorAll('.line.builtin-help-row .builtin-help-label')).toHaveLength(2)
+    expect(document.querySelectorAll('.line.builtin-help-row .builtin-help-label')[1].textContent).toBe('cat <file>')
+    expect(document.querySelectorAll('.line.builtin-help-row .builtin-help-description')[1].textContent).toBe('Show a session file.')
+
+    const tableHeader = document.querySelector('.line.builtin-table-header')
+    expect(tableHeader.querySelector('.builtin-help-label')).toBeNull()
+    expect(tableHeader.querySelector('.builtin-help-description')).toBeNull()
+    expect(tableHeader.textContent).toContain('id')
+    expect(tableHeader.textContent).toContain('kind')
+    expect(activateFaqCommandChip).not.toHaveBeenCalled()
   })
 
   it('trims old lines and keeps rawLines in sync', () => {
@@ -138,6 +326,62 @@ describe('appendLine', () => {
     expect(tab.rawLines).toHaveLength(2)
     expect(tab.rawLines[0].text).toBe('two')
     expect(tab.rawLines[1].text).toBe('three')
+  })
+
+  it('coalesces consecutive progress rows in the live renderer while retaining raw lines', () => {
+    const { appendLine, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    appendLine({ text: '10%', kind: 'info', role: 'progress' }, 'tab-1')
+    const firstProgressLine = document.querySelector('.line.progress')
+    appendLine({ text: '20%', kind: 'info', role: 'progress' }, 'tab-1')
+    appendLine('done', '', 'tab-1')
+    appendLine({ text: 'index 1', kind: 'info', role: 'progress' }, 'tab-1')
+
+    const lines = Array.from(document.querySelectorAll('.line'))
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toBe(firstProgressLine)
+    expect(lines[0].textContent).toContain('20%')
+    expect(lines[0].dataset.lineNumber).toBe('1')
+    expect(lines[1].textContent).toContain('done')
+    expect(lines[2].textContent).toContain('index 1')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['10%', '20%', 'done', 'index 1'])
+  })
+
+  it('coalesces batched status rows without dropping raw output history', async () => {
+    const { appendLines, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    await appendLines([
+      { text: 'phase 1', kind: 'info', role: 'status-line' },
+      { text: 'phase 2', kind: 'info', role: 'status-line' },
+      { text: 'body', cls: '' },
+      { text: 'phase 3', kind: 'info', role: 'status-line' },
+      { text: 'phase 4', kind: 'info', role: 'status-line' },
+    ], 'tab-1')
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const lines = Array.from(document.querySelectorAll('.line'))
+    expect(lines).toHaveLength(3)
+    expect(lines.map(line => line.textContent.trim())).toEqual(['phase 2', 'body', 'phase 4'])
+    expect(lines[0].dataset.lineNumber).toBe('1')
+    expect(lines[2].dataset.lineNumber).toBe('3')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['phase 1', 'phase 2', 'body', 'phase 3', 'phase 4'])
+  })
+
+  it('coalesces restored progress rows while keeping restored raw lines intact', () => {
+    const { renderRestoredTabOutput, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    renderRestoredTabOutput('tab-1', [
+      { text: 'loading 1', cls: 'progress', tsC: '12:00:00', tsE: '+0.1s', line_number: 1 },
+      { text: 'loading 2', cls: 'progress', tsC: '12:00:01', tsE: '+0.2s', line_number: 2 },
+      { text: 'finished', cls: '', tsC: '12:00:02', tsE: '+0.3s', line_number: 3 },
+    ])
+
+    const lines = Array.from(document.querySelectorAll('.line'))
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toContain('loading 2')
+    expect(lines[0].dataset.lineNumber).toBe('1')
+    expect(lines[1].textContent).toContain('finished')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['loading 1', 'loading 2', 'finished'])
   })
 
   it('avoids full output scans while trimming in default prefix mode', () => {
@@ -206,27 +450,48 @@ describe('appendLine', () => {
   it('stores server-provided signal metadata on DOM lines and rawLines', () => {
     const { appendLine, _getTabs } = loadOutputFns()
 
-    appendLine('443/tcp open https', '', 'tab-1', {
+    appendLine('scan ip.darklab.sh 443/tcp open https', '', 'tab-1', {
       signals: ['findings'],
       line_index: 7,
       line_number: 1,
       command_root: 'nmap',
       target: 'ip.darklab.sh',
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
     })
 
     const line = document.querySelector('.line')
+    const token = line?.querySelector('.atlas-entity-token')
     expect(line?.dataset.signals).toBe('findings')
     expect(line?.dataset.lineIndex).toBe('7')
     expect(line?.dataset.commandRoot).toBe('nmap')
     expect(line?.dataset.signalTarget).toBe('ip.darklab.sh')
+    expect(token?.dataset.atlasEntityType).toBe('domain')
+    expect(token?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+    expect(token?.tagName).toBe('SPAN')
+    expect(token?.getAttribute('role')).toBe('button')
+    expect(token?.getAttribute('tabindex')).toBe('0')
+    expect(token?.classList.contains('chip')).toBe(true)
+    expect(token?.classList.contains('chip-action')).toBe(true)
 
     expect(_getTabs()[0].rawLines[0]).toMatchObject({
-      text: '443/tcp open https',
+      text: 'scan ip.darklab.sh 443/tcp open https',
       signals: ['findings'],
       line_index: 7,
       line_number: 1,
       command_root: 'nmap',
       target: 'ip.darklab.sh',
+      entities: [{
+        type: 'domain',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
     })
     expect(_getTabs()[0]._outputSignalCounts).toEqual({
       findings: 1,
@@ -235,6 +500,99 @@ describe('appendLine', () => {
       summaries: 0,
     })
     expect(_getTabs()[0]._outputSignalCountsValid).toBe(true)
+  })
+
+  it('keeps highlighted entity text selectable with the rest of the output line', () => {
+    const { appendLine } = loadOutputFns()
+
+    appendLine('https://tor-stats.darklab.sh/static/', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'tor-stats.darklab.sh',
+        canonical_value: 'tor-stats.darklab.sh',
+        start: 8,
+        end: 28,
+      }],
+    })
+
+    const content = document.querySelector('.line-content')
+    const selection = window.getSelection()
+    const range = document.createRange()
+    expect(content?.textContent).toBe('https://tor-stats.darklab.sh/static/')
+
+    range.selectNodeContents(content)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    expect(selection?.toString()).toBe('https://tor-stats.darklab.sh/static/')
+  })
+
+  it('falls back to value matching when ANSI makes entity offsets stale', () => {
+    class StripAnsiUp {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(text) {
+        return String(text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+      }
+    }
+    const { appendLine } = loadOutputFns({ AnsiUpCtor: StripAnsiUp })
+
+    appendLine('\x1b[31mip.darklab.sh\x1b[0m 443/tcp open https', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 0,
+        end: 'ip.darklab.sh'.length,
+      }],
+    })
+
+    const token = document.querySelector('.atlas-entity-token')
+    expect(token?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+    expect(token?.textContent).toBe('ip.darklab.sh')
+    expect(token?.textContent).not.toContain('\x1b')
+  })
+
+  it('supports keyboard navigation and outside-click close in the entity context menu', () => {
+    const { appendLine, _showOutputEntityMenu } = loadOutputFns()
+
+    appendLine('scan ip.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
+    })
+
+    const token = document.querySelector('.atlas-entity-token')
+    token?.focus()
+    _showOutputEntityMenu(token, 32, 32)
+
+    const menu = document.querySelector('.atlas-output-entity-menu')
+    const items = Array.from(menu?.querySelectorAll('[data-output-entity-action]') || [])
+    expect(menu).not.toBeNull()
+    expect(items).toHaveLength(6)
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('open-atlas')
+
+    items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('edit-metadata')
+
+    items[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('see-run')
+
+    items[5].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+    expect(document.activeElement?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+
+    _showOutputEntityMenu(token, 32, 32)
+    expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
   })
 
   it('keeps cached signal counts in sync when old lines are trimmed', () => {
@@ -412,6 +770,158 @@ describe('appendLine', () => {
     expect(lines).toHaveLength(65)
     expect(lines[0].textContent).toContain('line 1')
     expect(lines[64].textContent).toContain('line 65')
+  })
+
+  it('pauses live rendering for high-volume brokered output while keeping raw lines', () => {
+    const { appendLine, _getTabs } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 3,
+        high_volume_output_status_interval_lines: 2,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+    appendLine('line 4', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent)
+    expect(renderedText.join('\n')).toContain('line 1')
+    expect(renderedText.join('\n')).not.toContain('line 4')
+    expect(renderedText.join('\n')).toContain('high-volume output mode: 4 lines received')
+    expect(document.querySelector('[data-high-volume-resume-tab="tab-1"]')).not.toBeNull()
+
+    const rawLines = _getTabs()[0].rawLines.map(line => line.text)
+    expect(rawLines).toContain('line 4')
+  })
+
+  it('binds high-volume resume controls through the shared pressable helper', () => {
+    const bindPressable = vi.fn((button, options = {}) => {
+      button.dataset.pressableBound = '1'
+      button.addEventListener('click', (event) => {
+        event.preventDefault()
+        options.onActivate?.()
+      })
+    })
+    const { appendLine } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+      extraGlobals: { bindPressable },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+
+    const button = document.querySelector('[data-high-volume-resume-tab="tab-1"]')
+    expect(button.dataset.pressableBound).toBe('1')
+    expect(bindPressable).toHaveBeenCalledWith(button, expect.objectContaining({ refocusComposer: false }))
+  })
+
+  it('resumes live rendering for new high-volume output when requested', () => {
+    const { appendLine } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+
+    document.querySelector('[data-high-volume-resume-tab="tab-1"]').click()
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).not.toContain('line 2')
+    expect(renderedText).toContain('live output rendering resumed after 1 skipped lines')
+    expect(renderedText).toContain('line 3')
+  })
+
+  it('disables high-volume resume controls once the run is no longer active', () => {
+    const { appendLine, disableHighVolumeOutputResumeControls, _getTabs } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    const button = document.querySelector('[data-high-volume-resume-tab="tab-1"]')
+
+    _getTabs()[0].st = 'ok'
+    disableHighVolumeOutputResumeControls('tab-1')
+    button.click()
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(button.disabled).toBe(true)
+    expect(renderedText).not.toContain('live output rendering resumed')
+    expect(renderedText).toContain('line 3')
+  })
+
+  it('adds a final high-volume summary for skipped live-rendered lines', () => {
+    const { appendLine, appendHighVolumeOutputFinalSummary } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    appendLine('[process exited with code 0]', 'exit-ok', 'tab-1')
+
+    expect(appendHighVolumeOutputFinalSummary('tab-1')).toBe(true)
+    expect(appendHighVolumeOutputFinalSummary('tab-1')).toBe(false)
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).toContain('[process exited with code 0]')
+    expect(renderedText).toContain('live output summary: 1 line was not rendered live in this tab')
+    expect(renderedText).toContain('full transcript output is preserved in saved output, permalinks, and exports')
+    expect(renderedText).not.toContain('line 2')
+  })
+
+  it('adds a final live summary when progress rows were collapsed', () => {
+    const { appendLine, appendHighVolumeOutputFinalSummary, recordLiveOutputCoalescedLines } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+    })
+
+    appendLine('line 1', '', 'tab-1')
+    recordLiveOutputCoalescedLines('tab-1', 12)
+
+    expect(appendHighVolumeOutputFinalSummary('tab-1')).toBe(true)
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).toContain('progress/status updates were collapsed in this tab')
+    expect(renderedText).toContain('live line numbers may differ from the saved transcript')
+  })
+
+  it('resets high-volume counters for a new run', () => {
+    const { appendLine, resetHighVolumeOutputState, _getTabs } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    resetHighVolumeOutputState('tab-1')
+    _getTabs()[0].st = 'running'
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).not.toContain('high-volume output mode: 3 lines received')
+    expect(renderedText).toContain('line 3')
   })
 
   it('queues multi-line appends in chunks and updates raw lines once flushed', async () => {

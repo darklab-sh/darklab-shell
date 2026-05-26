@@ -18,6 +18,8 @@ function loadWelcomeFns({
   setTimeoutImpl = null,
   mobile = false,
   welcomeIntroPreference = 'animated',
+  tourSeenVersion = '',
+  openTourModal = vi.fn(() => true),
   randomValue = 0,
 } = {}) {
   document.body.innerHTML = '<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>'
@@ -88,6 +90,10 @@ function loadWelcomeFns({
         logClientError: () => {},
         useMobileTerminalViewportMode: () => mobile,
         getWelcomeIntroPreference: () => welcomeIntroPreference,
+        getTourSeenVersionPreference: () => tourSeenVersion,
+        openTourModal,
+        refocusComposerAfterAction: vi.fn(),
+        setComposerValue: vi.fn(),
         requestAnimationFrame: (fn) => fn(),
         Math: Object.create(Math, {
           random: { value: () => randomValue },
@@ -115,6 +121,7 @@ function loadWelcomeFns({
     apiFetch,
     out,
     mountShellPrompt,
+    openTourModal,
   }
 }
 
@@ -155,6 +162,119 @@ describe('welcome helpers', () => {
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Enter runs the command')
     expect(_isWelcomeActive()).toBe(false)
     expect(_isWelcomeDone()).toBe(true)
+  })
+
+  it('runWelcome renders an emphasized tour CTA when the tour has not been opened', async () => {
+    const { runWelcome, out } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: true,
+        tour_version: 2,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      tourSeenVersion: '',
+    })
+
+    await runWelcome()
+
+    const cta = out.querySelector('.welcome-tour-cta')
+    expect(cta?.textContent).toContain('Tour the app - type tour or open the visual tour')
+    expect(cta?.classList.contains('welcome-tour-cta-emphasis')).toBe(true)
+    expect(cta?.classList.contains('welcome-tour-cta-demoted')).toBe(false)
+  })
+
+  it('runWelcome demotes the tour CTA after the current version has been opened', async () => {
+    const { runWelcome, out } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: true,
+        tour_version: 2,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      tourSeenVersion: 2,
+    })
+
+    await runWelcome()
+
+    const cta = out.querySelector('.welcome-tour-cta')
+    expect(cta?.classList.contains('welcome-tour-cta-demoted')).toBe(true)
+    expect(cta?.classList.contains('welcome-tour-cta-emphasis')).toBe(false)
+  })
+
+  it('runWelcome re-emphasizes the tour CTA when the tour version changes', async () => {
+    const { runWelcome, out } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: true,
+        tour_version: 3,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      tourSeenVersion: 2,
+    })
+
+    await runWelcome()
+
+    const cta = out.querySelector('.welcome-tour-cta')
+    expect(cta?.classList.contains('welcome-tour-cta-emphasis')).toBe(true)
+  })
+
+  it('runWelcome suppresses the tour CTA when disabled or no chapters are visible', async () => {
+    const disabled = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: false,
+        tour_version: 2,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+    })
+    await disabled.runWelcome()
+
+    const empty = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: true,
+        tour_version: 2,
+        tour_chapters: [],
+      },
+    })
+    await empty.runWelcome()
+
+    expect(disabled.out.querySelector('.welcome-tour-cta')).toBeNull()
+    expect(empty.out.querySelector('.welcome-tour-cta')).toBeNull()
+  })
+
+  it('mobile welcome renders the CLI-only tour CTA copy', async () => {
+    const { runWelcome, out } = loadWelcomeFns({
+      mobile: true,
+      mobileHintItems: ['Tap the prompt to open the mobile keyboard quickly.'],
+      config: {
+        tour_enabled: true,
+        tour_version: 2,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+    })
+
+    await runWelcome()
+
+    const cta = out.querySelector('.welcome-tour-cta')
+    expect(cta?.textContent).toContain('Tour the app - type tour')
+    expect(cta?.textContent).not.toContain('visual tour')
+  })
+
+  it('desktop visual tour CTA opens the modal without loading the CLI command', async () => {
+    const { runWelcome, out, openTourModal } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: true,
+        tour_version: 2,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+    })
+
+    await runWelcome()
+
+    out.querySelector('.welcome-tour-cta-visual')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openTourModal).toHaveBeenCalledWith({ source: 'welcome' })
   })
 
   it('renders the operator message inside the welcome banner when motd is configured', async () => {

@@ -2,7 +2,7 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { fromDomScript } from './helpers/extract.js'
 
-const CONFIG_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/config.js'), 'utf8')
+const CONFIG_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/config.js'), 'utf8')
 
 describe('frontend config bootstrap', () => {
   it('reads APP_CONFIG from the server-rendered bootstrap JSON', () => {
@@ -21,6 +21,10 @@ describe('frontend config bootstrap', () => {
       welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
       welcome_hint_interval_ms: 4200,
       welcome_hint_rotations: 0,
+      tour_enabled: true,
+      tour_version: 1,
+      tour_chapters: [{ id: 'running_commands', title: 'Running commands', summary: 'Run a command.' }],
+      tour_chapter_count: 8,
       share_redaction_enabled: true,
       share_redaction_rules: [{ label: 'bearer token' }],
     }
@@ -30,7 +34,7 @@ describe('frontend config bootstrap', () => {
         : null,
     }
     const window = {}
-    const { APP_CONFIG } = fromDomScript('app/static/js/config.js', { document, window }, 'APP_CONFIG')
+    const { APP_CONFIG } = fromDomScript('app/static/js/core/config.js', { document, window }, 'APP_CONFIG')
 
     expect(APP_CONFIG).toMatchObject({
       app_name: expect.any(String),
@@ -46,6 +50,10 @@ describe('frontend config bootstrap', () => {
       welcome_status_labels: expect.any(Array),
       welcome_hint_interval_ms: expect.any(Number),
       welcome_hint_rotations: expect.any(Number),
+      tour_enabled: expect.any(Boolean),
+      tour_version: expect.any(Number),
+      tour_chapters: expect.any(Array),
+      tour_chapter_count: expect.any(Number),
       share_redaction_enabled: expect.any(Boolean),
       share_redaction_rules: expect.any(Array),
     })
@@ -57,7 +65,7 @@ describe('frontend config bootstrap', () => {
     const bootstrap = { app_name: 'harness', recent_commands_limit: 3 }
     const document = { getElementById: () => null }
     const window = { APP_CONFIG: bootstrap }
-    const { APP_CONFIG } = fromDomScript('app/static/js/config.js', { document, window }, 'APP_CONFIG')
+    const { APP_CONFIG } = fromDomScript('app/static/js/core/config.js', { document, window }, 'APP_CONFIG')
 
     expect(APP_CONFIG).toBe(bootstrap)
   })

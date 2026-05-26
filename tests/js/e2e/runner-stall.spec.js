@@ -1,15 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, makeTestIp } from './helpers.js'
+import { ensurePromptReady } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const QUIET_THEN_OUTPUT_CMD = 'curl http://localhost:5001/health'
-const TEST_IP = makeTestIp(69)
 
 test.describe('runner stall handling', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
-  })
-
   async function openShellWithShortStallTimer(page) {
     await page.addInitScript(() => {
       const originalSetTimeout = window.setTimeout.bind(window)

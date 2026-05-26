@@ -1,0 +1,27 @@
+line-length = 130
+target-version = "py314"
+
+[lint]
+select = ["E", "F", "W"]
+
+# E302/E305: single blank lines between functions are intentional in this codebase;
+#             visual separation is provided by section header comments.
+# E221/E272: extra whitespace is used deliberately for column alignment.
+ignore = ["E302", "E305", "E221", "E272"]
+
+[lint.per-file-ignores]
+# E402: sys.path manipulation must precede app import in these test files.
+"tests/py/test_validation.py" = ["E402"]
+"tests/py/test_utils.py" = ["E402"]
+"tests/py/test_routes.py" = ["E402"]
+"tests/py/test_logging.py" = ["E402"]
+
+# E402: configure_logging(CFG) must run before local imports that connect to Redis
+# at module-import time, so those imports follow it.
+"app/app.py" = ["E402"]
+
+# E402: these modules intentionally keep `from __future__ import annotations`
+# before the descriptive module string. Flake8 accepted the layout; keep Ruff
+# compatible with the existing source style.
+"app/core/process.py" = ["E402"]
+"app/services/pty/service.py" = ["E402"]

@@ -71,7 +71,7 @@ body.mobile-terminal-mode {
   }
 
   /* Single source of truth for every mobile bottom-sheet gesture handle.
-     Behavior is wired in app/static/js/mobile_sheet.js::bindMobileSheet —
+     Behavior is wired in app/static/js/ui/mobile_sheet.js::bindMobileSheet —
      visual + cursor + touch-action + brighten on press all live here so the
      menu, recents, history panel, workflows, FAQ, options, kill, hist-del,
      and share-redaction sheets cannot drift. Outside mobile-terminal-mode the
@@ -451,6 +451,34 @@ body.mobile-terminal-mode {
     gap: 6px;
     padding-left: 23px;
   }
+  .recents-sheet .sheet-item-action-menu-wrap {
+    position: relative;
+    display: inline-flex;
+    flex: 1;
+    min-width: 0;
+  }
+  .recents-sheet .sheet-item-action-menu-wrap .sheet-item-action {
+    width: 100%;
+  }
+  .recents-sheet .sheet-item-action-menu-wrap .sheet-item-action-menu {
+    min-width: 190px;
+    z-index: 520;
+    overscroll-behavior: contain;
+  }
+  .recents-sheet .sheet-item-action-menu-wrap.open .sheet-item-action-menu {
+    display: block;
+  }
+  .recents-sheet .sheet-item-action-menu .dropdown-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+    line-height: 1.25;
+    text-align: left;
+    white-space: nowrap;
+  }
   .recents-sheet .sheet-item-action {
     flex: 1;
     padding: 6px 4px;
@@ -475,7 +503,19 @@ body.mobile-terminal-mode {
   .menu-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 101;
+    max-height: 86dvh;
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
     animation: shell-m-sheet-in 240ms ease;
+  }
+  .menu-sheet .menu-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
   .menu-sheet .menu-title-label {
     color: var(--green);
@@ -553,7 +593,11 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-item-hint {
     color: var(--muted);
     font-size: 11px;
+    max-width: 46%;
     opacity: 0.8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* Surface-specific chev color: drill-chev (drill-in rows) and
      disclosure-chev (timestamps expander) both render in --border-bright

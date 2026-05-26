@@ -18,14 +18,16 @@ The suites are layered on purpose:
 
 Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
 
+Project workspace behavior follows the same split: pytest owns project routes, schema, migration, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
+
 Current totals:
 
-- behavior tests: 2,409
-- docs/inventory meta-tests: 30
-- `pytest`: 1205 (1175 behavior + 30 meta)
-- `vitest`: 998
-- `playwright`: 236
-- total: 2,439
+- behavior tests: 3,246
+- docs/inventory meta-tests: 33
+- `pytest`: 1796 (1763 behavior + 33 meta)
+- `vitest`: 1247
+- `playwright`: 253
+- total: 3,296
 
 This document is organized in two parts:
 
@@ -62,7 +64,7 @@ You need different local dependencies depending on the suite:
 | --- | --- | --- |
 | `pytest` | Python, repo virtualenv, Python dev dependencies | Normal backend coverage does not require Docker |
 | `Vitest` | Node.js, npm dependencies | Runs in jsdom; no Flask server required |
-| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `config/playwright.config.js` is the single-project editor/debug config and `config/playwright.parallel.config.js` is the isolated parallel CLI config |
+| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `.tooling/playwright.config.js` is the single-project editor/debug config and `.tooling/playwright.parallel.config.js` is the isolated parallel CLI config |
 | Container Smoke Test | Docker + Docker Compose | Opt-in verification path for image/tooling changes |
 
 Recommended local baseline:
@@ -92,6 +94,7 @@ Notes:
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
+- CI runs the Postgres backend lane automatically. Locally, use `npm run test:postgres` to run the Postgres smoke, route, and migration integration tests against isolated schemas. The helper uses `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable Docker Postgres container and removes it after the run. You can also pass `--postgres-dsn` to pytest directly, or use `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the bundled Compose Postgres service without publishing the database port.
 - the container smoke test is slower and is meant for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
 
 ---
@@ -109,7 +112,7 @@ npm run test:e2e
 Run focused slices while iterating:
 
 ```bash
-bash scripts/run_pytest.sh -c config/pytest.ini --rootdir=. tests/py/test_routes.py -v
+bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py/test_routes.py -v
 npm run test:unit -- tests/js/unit/history.test.js tests/js/unit/runner.test.js
 npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "history"
@@ -117,8 +120,9 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
-- plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
+- The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
+- plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 - modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
 
@@ -166,8 +170,8 @@ Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/`
 
 The browser layer now uses a split config model:
 
-- [config/playwright.config.js](../config/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
-- [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
+- [.tooling/playwright.config.js](../.tooling/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
+- [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects by default using measured per-file runtime weights. CI currently sets `PLAYWRIGHT_PROJECT_COUNT=3` to reduce browser/server contention on the shared runner.
 
 ### Demo Recording
 
@@ -180,7 +184,7 @@ scripts/record_demo.sh --base-url http://localhost:9000
 scripts/record_demo.sh --no-arm                     # start immediately when OBS is already lined up
 ```
 
-Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use `scripts/obs_recording.mjs` to start/stop OBS over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token through the configured app database, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use `scripts/obs_recording.mjs` to start/stop OBS over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 OBS must be installed and running before you start either wrapper. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
 
@@ -228,7 +232,7 @@ Mobile OBS preset:
   - Bounds: `Stretch`, `Width 502 px`, `Height 932 px`
   - Crop: `Left 0 px`, `Right 4 px`, `Top 174 px`, `Bottom 0 px`
 
-Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
+Desktop and mobile demo configs share a central visual contract in [.tooling/playwright.visual.contracts.js](../.tooling/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
 Both demo specs also read from one named visual-history fixture in `tests/js/e2e/visual_history_fixture.js`, which returns realistic paginated `/history` payloads with enough rows to keep the history drawer and mobile recents sheet in their pagination state during recordings.
 
@@ -254,10 +258,11 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, or workflow command changes.
+`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists and still matches the Docker runtime inputs, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild; otherwise the cache refreshes itself when `Dockerfile`, `app/requirements.txt`, or `entrypoint.sh` changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. Required-secret tools can still contribute registry-declared help examples when those examples are marked with `smoke.profile: unauthenticated`, which catches broken CLI imports without needing provider keys. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
+./scripts/container_smoke_test.sh --build                   # force cache-image rebuild, then run
 ./scripts/container_smoke_test.sh -k nmap                   # filter by pattern
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
@@ -345,10 +350,11 @@ Practical note:
 - Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
 - When a branch depends on a browser API or network error, make the failure deterministic in the harness instead of relying on the environment.
 - For browser tests that interact with history, remember that the server is eventually consistent around run persistence. Retry or re-open the drawer when needed.
-- For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`. Prefer per-test hashing rather than one fixed IP per file so repeated suite runs do not collide in the same limiter bucket.
-- For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
+- Python and Playwright harnesses raise app rate limits by default so unrelated tests should not carry per-test limiter workarounds.
+- For tests that explicitly exercise per-IP rate-limit behavior, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`.
+- For browser tests that need a long-running command, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
-- Keep this appendix, README project tree, and README configuration table in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and README `## Configuration`.
+- Keep this appendix, README project tree, and configuration reference in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and `CONFIGURATION.md`.
 
 ---
 
@@ -358,12 +364,96 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 
 ### Pytest
 
+#### `test_api_v1.py`
+
+| Test | Description |
+| --- | --- |
+| `test_api_v1_rejects_missing_and_anonymous_auth` | Verifies `/api/v1` rejects missing tokens and anonymous UUID sessions. |
+| `test_api_v1_rejects_revoked_token` | Verifies `/api/v1` rejects session tokens that have been revoked after creation. |
+| `test_api_v1_whoami_accepts_bearer_token` | Verifies bearer-token auth returns session metadata without echoing the token. |
+| `test_api_v1_read_routes_use_api_rate_limit` | Verifies read-only `/api/v1` routes use the shared API rate limit. |
+| `test_api_v1_history_is_token_scoped_and_uses_page_envelope` | Verifies history list responses are token-scoped and use the shared pagination envelope. |
+| `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output/ranged-output reads work for the owner and hide cross-session runs behind 404. |
+| `test_api_v1_ai_summary_routes_are_token_scoped` | Verifies API summary assist enqueue and list routes are scoped to the owning token. |
+| `test_api_v1_artifact_list_and_download_are_token_scoped` | Verifies artifact list and download routes work for the owner and hide cross-session artifacts behind 404. |
+| `test_api_v1_artifact_download_rejects_cross_run_artifact_id` | Verifies artifact downloads reject artifact ids that belong to a different run. |
+| `test_api_v1_project_readers_are_token_scoped` | Verifies project detail, findings, runs, entities, and package readers work for the owner and return 404 across sessions. |
+| `test_api_v1_run_start_uses_broker_and_streams_ndjson` | Verifies API run start returns stream links and NDJSON stream adaptation follows broker events. |
+| `test_api_v1_sse_stream_emits_idle_heartbeat` | Verifies brokered SSE streams emit heartbeat comments during idle periods. |
+| `test_api_v1_ndjson_stream_adapts_sse_heartbeat_comments` | Verifies NDJSON stream adaptation preserves idle SSE heartbeats as heartbeat rows. |
+| `test_api_v1_ndjson_stream_preserves_sse_event_name` | Verifies NDJSON stream adaptation carries SSE event names into rows when the payload does not already include one. |
+| `test_api_v1_run_start_reports_broker_unavailable` | Verifies run start returns `503 broker_unavailable` and `Retry-After` when the broker is unavailable. |
+| `test_api_v1_run_start_rejects_archived_project_link` | Verifies API-started runs reject explicit links to archived projects before starting execution. |
+| `test_api_v1_run_start_rejects_invalid_body_and_unknown_project` | Verifies API run start rejects non-object JSON bodies and unknown project ids with stable error codes. |
+| `test_api_v1_run_start_rejects_project_links_for_builtin_missing_and_interactive` | Verifies explicit project links are rejected for built-ins, missing runtimes, and interactive PTY commands. |
+| `test_api_v1_run_start_rewrites_workspace_root_output_paths` | Verifies API-started runs rewrite leading-slash workspace output paths before spawning commands. |
+| `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies active-run lists, run streams, wait requests, and cancel requests are scoped to the owning token. |
+| `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
+| `test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped` | Verifies schedule API CRUD, manual run-now, fire audit rows, and cross-session 404 behavior. |
+| `test_api_v1_schedules_reject_invalid_body_and_disallowed_command` | Verifies schedule API creates reject non-object bodies and commands that fail command policy. |
+| `test_api_v1_schedule_create_normalizes_string_false_enabled` | Verifies schedule API create treats string `"false"` as disabled instead of truthy. |
+| `test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped` | Verifies watcher API CRUD, manual run-now, accept-baseline, fire audit rows, and cross-session 404 behavior. |
+| `test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline` | Verifies watcher API creates reject non-object bodies, hidden baselines, first-run commands that fail policy, and commands that fail command policy. |
+| `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
+| `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
+| `test_api_v1_notification_channels_are_token_scoped` | Verifies notification channel API reads and writes are scoped to the owning token. |
+| `test_api_v1_notification_channel_rejections_are_logged` | Verifies notification channel API rejections emit structured warning logs with session-safe context. |
+| `test_darklab_cli_notify_commands_use_secret_file_and_event_reader` | Verifies CLI notification commands read secrets from a JSON file, avoid command-line secret flags, and render channel/event table output. |
+| `test_darklab_cli_schedule_commands_manage_api_schedules` | Verifies CLI schedule commands create, list, inspect, pause, resume, run, list fires, and delete schedules through the API client. |
+| `test_darklab_cli_watch_commands_manage_api_watchers` | Verifies CLI watcher commands create existing-run and first-run watchers, list, inspect, pause, resume, run, list fires, accept, and delete watchers through the API client. |
+| `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
+| `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |
+| `test_api_v1_whoami_last_seen_is_current_auth_timestamp` | Verifies `whoami` reports and stores the current successful API authentication timestamp. |
+| `test_darklab_cli_sse_parser_reads_events` | Verifies the bundled CLI's SSE parser reads event ids and JSON payloads. |
+| `test_darklab_cli_config_flags_win_over_environment` | Verifies CLI flags take precedence over environment configuration. |
+| `test_darklab_cli_client_builds_authenticated_api_urls` | Verifies the CLI client builds `/api/v1` URLs with encoded query parameters. |
+| `test_darklab_cli_client_sends_bearer_header_and_formats_http_errors` | Verifies the CLI HTTP client sends bearer auth headers and formats JSON API errors. |
+| `test_darklab_cli_config_preserves_http_scheme_and_port` | Verifies CLI API URLs preserve explicit HTTP schemes and custom ports. |
+| `test_darklab_cli_config_file_uses_toml` | Verifies the CLI config file is parsed as TOML, including inline comments and numeric timeout values. |
+| `test_darklab_cli_config_requires_explicit_http_scheme` | Verifies CLI API URLs fail clearly when no HTTP or HTTPS scheme is provided. |
+| `test_darklab_cli_run_requires_no_follow_for_json_start_payload` | Verifies `darklab run` requires `--no-follow --format json` for start-only JSON output and rejects incompatible follow/format pairs before starting a run. |
+| `test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors` | Verifies the CLI entry point can read active/current data, render table output, stream, start runs, show command help, and report API errors through a fake API client. |
+| `test_darklab_cli_tail_text_does_not_double_space_output` | Verifies CLI text streaming normalizes SSE line endings without adding blank lines between output rows. |
+| `test_darklab_cli_tail_handles_keyboard_interrupt` | Verifies Ctrl+C while tailing a run exits cleanly without a traceback. |
+| `test_darklab_cli_run_follow_interrupt_reports_run_id` | Verifies Ctrl+C while `darklab run` follows output reports the run id and reattach command. |
+| `test_darklab_cli_tail_text_fails_when_stream_has_no_terminal_event` | Verifies CLI text tailing fails when a stream closes before an exit, killed, or error event. |
+| `test_darklab_cli_tail_ndjson_fails_when_stream_has_no_terminal_event` | Verifies CLI NDJSON tailing fails when a stream closes before an exit, killed, or error event. |
+| `test_darklab_cli_download_rejects_unsafe_header_filename` | Verifies artifact downloads reject unsafe `Content-Disposition` filenames. |
+| `test_darklab_cli_download_uses_rfc5987_filename` | Verifies artifact downloads honor UTF-8 `filename*` attachment names before writing the file. |
+| `test_darklab_cli_download_refuses_to_overwrite_existing_file` | Verifies artifact downloads do not silently overwrite existing local files. |
+
 #### `test_backend_modules.py`
 
 The `TestThemeRegistry` group covers the theme loading and fallback system. One test in this group is a drift guard: `test_theme_example_files_match_generated_defaults` regenerates the dark and light example files in memory from `_THEME_DEFAULTS` and compares them against the checked-in `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example`. If this test fails it means `_THEME_DEFAULTS` in `app/config.py` was edited without updating the example files — fix it by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing both updated files.
 
 | Test | Description |
 | --- | --- |
+| `TestAIAssistProviderClient.test_json_parser_and_summary_validator_accept_provider_variants` | Checks that the AI provider parser and summary validator accept local-provider response variants. |
+| `TestAIAssistProviderClient.test_streaming_chat_completion_reports_progress_tokens` | Checks that streamed AI provider responses report elapsed progress and token usage when the provider sends it. |
+| `TestAIAssistProviderClient.test_chat_completion_records_failure_metrics` | Checks that terminal AI provider failures record request failure metrics. |
+| `TestAIAssistProviderClient.test_private_base_url_guard_rejects_public_dns_results` | Checks that the AI provider private-base-URL guard rejects public DNS results. |
+| `TestAIAssistContextAndStorage.test_build_run_context_redacts_boundaries_and_hashes_deterministically` | Checks that AI run context assembly strips prompt boundaries and produces stable hashes. |
+| `TestAIAssistContextAndStorage.test_summary_run_context_uses_compact_sections` | Checks that summary AI context uses compact sections and omits richer context fields. |
+| `TestAIAssistContextAndStorage.test_next_commands_context_uses_compact_sections_with_entities` | Checks that next-command AI context uses compact sections while keeping trusted entities. |
+| `TestAIAssistContextAndStorage.test_summary_transcript_tail_keeps_findings_and_summaries_first` | Checks that summary transcript tails preserve findings and summaries before ordinary tail lines. |
+| `TestAIAssistContextAndStorage.test_ai_context_suppression_filters_use_boolean_literals` | Checks that AI context suppression filters use SQLite/Postgres-safe boolean literals. |
+| `TestAIAssistContextAndStorage.test_ai_context_redaction_counts_only_changed_source_bytes` | Checks that AI context redaction accounting counts only the original spans changed by redaction. |
+| `TestAIAssistContextAndStorage.test_ai_context_logs_secret_metadata_failures` | Checks that AI context assembly logs secret metadata lookup failures without exposing secret names or values. |
+| `TestAIAssistContextAndStorage.test_ai_suggestion_secret_lookup_failures_are_logged` | Checks that AI suggestion validation logs required-secret lookup failures with safe metadata. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_logs_provider_failures` | Checks that AI provider diagnostics log failed provider probes with bounded status details. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_disabled_and_not_configured_without_client` | Checks that AI provider diagnostics report disabled or incomplete config without creating a provider client. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_reachable_model_inventory` | Checks that AI provider diagnostics report reachable provider inventory and installed-model status. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_reachable_missing_model` | Checks that AI provider diagnostics keep reachable providers distinct from missing configured models. |
+| `TestAIAssistContextAndStorage.test_ai_worker_logs_stale_reclaims_and_busy_at_debug` | Checks that the AI worker logs stale-assist recovery and keeps busy-slot chatter at debug level. |
+| `TestAIAssistContextAndStorage.test_ai_assist_storage_reuses_completed_cache_and_active_rows` | Checks that AI assist storage reuses active rows and completed cache hits. |
+| `TestAIAssistContextAndStorage.test_ai_coordination_uses_redis_for_rate_limits_locks_and_slots` | Checks that AI assist coordination uses Redis for write limits, enqueue locks, and worker slots. |
+| `TestAIAssistContextAndStorage.test_ai_assist_storage_owned_connections_use_context_manager` | Checks that AI assist storage owned connections work through the database context-manager contract. |
+| `TestAIAssistContextAndStorage.test_ai_worker_claims_summary_assist_and_persists_provider_payload` | Checks that the AI worker claims a summary assist and persists the provider payload. |
+| `TestAIAssistContextAndStorage.test_ai_worker_repairs_summary_text_that_contradicts_open_ports` | Checks that the AI worker repairs summary prose that contradicts deterministic open-port signals. |
+| `TestAIAssistContextAndStorage.test_ai_worker_uses_fallback_when_summary_provider_truncates_json` | Checks that the AI worker uses deterministic summary data when the provider truncates summary JSON. |
+| `TestAIAssistContextAndStorage.test_ai_worker_fails_assist_when_context_hash_changes` | Checks that the AI worker fails a queued assist when rebuilt context no longer matches the cached hash. |
+| `TestAIAssistContextAndStorage.test_ai_worker_validates_next_command_suggestions` | Checks that the AI worker validates next-command suggestions and persists accepted and rejected audit rows. |
+| `TestAIAssistContextAndStorage.test_ai_suggestion_validation_tolerates_redacted_context_targets` | Checks that AI suggestion validation tolerates redacted source-run targets while still validating against the saved source target. |
 | `TestSplitChainedCommands.test_plain_command_returns_one_element` | Checks that plain command returns one element. |
 | `TestSplitChainedCommands.test_pipe` | Checks pipe handling. |
 | `TestSplitChainedCommands.test_double_ampersand` | Checks double ampersand handling. |
@@ -376,6 +466,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSplitChainedCommands.test_redirect_in` | Checks redirect in handling. |
 | `TestSplitChainedCommands.test_empty_parts_stripped` | Checks empty parts stripped handling. |
 | `TestSplitChainedCommands.test_empty_string_returns_empty_list` | Checks that empty string returns empty list. |
+| `TestLoadConfig.test_database_env_overrides_yaml_backend_settings` | Verifies database environment variables override YAML backend settings and pool sizes. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
@@ -384,17 +475,119 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_uses_configured_data_dir_when_environment_is_unset` | Verifies that operator-configured `data_dir` is used when the internal environment override is absent. |
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
-| `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that startup warns when `WORKSPACE_ROOT` and configured `workspace_root` diverge, without warning for matching paths. |
+| `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
+| `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
+| `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
+| `TestDatabaseBackend.test_postgres_pool_preserves_pgoptions_when_disabling_jit` | Verifies the Postgres pool preserves caller-provided connection options while adding the app's default JIT setting. |
+| `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
+| `TestDatabaseBackend.test_postgres_compat_connection_converts_app_placeholders` | Verifies the Postgres app-query compatibility wrapper converts SQLite-style placeholders for connection, cursor, and batch execution. |
+| `TestDatabaseBackend.test_postgres_compat_connection_preserves_transient_error_when_rollback_is_lost` | Verifies a lost connection during transient-error rollback does not hide the original retryable Postgres shutdown error. |
+| `TestDatabaseBackend.test_postgres_transient_error_recognizes_lost_connection_messages` | Verifies transient Postgres detection recognizes connection-loss messages that arrive without SQLSTATE metadata. |
+| `TestDatabaseBackend.test_db_connect_routes_to_postgres_compat_when_configured` | Verifies `db_connect()` routes to the Postgres compatibility context when the Postgres backend is configured. |
+| `TestDatabaseBackend.test_postgres_requires_database_url` | Verifies the Postgres adapter rejects missing `database_url` before opening a pool. |
+| `TestDatabaseBackend.test_run_kind_import_does_not_cycle_through_metrics` | Verifies run-kind helpers can import without cycling through workspace metrics during one-off database setup. |
+| `TestDatabaseBackend.test_postgres_identifier_quoting_and_advisory_lock_are_stable` | Verifies Postgres identifier quoting and advisory-lock IDs are deterministic. |
+| `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
+| `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
+| `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
+| `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
+| `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
+| `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
+| `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
+| `TestSchedulerFoundation.test_scheduler_cron_presets_and_strict_cron_validation` | Verifies scheduler cadence presets normalize to canonical cron strings, strict POSIX cron validation rejects unsupported forms and sub-five-minute cadences, and timezone names must be valid IANA zones. |
+| `TestSchedulerFoundation.test_scheduler_cron_handles_local_timezones_and_dst_boundaries` | Verifies next-fire calculations across local timezones, US DST transitions, and a non-US weekly schedule. |
+| `TestSchedulerFoundation.test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows` | Verifies schedule creation requires a durable session token and normal schedule listings hide watcher-owned schedule rows. |
+| `TestSchedulerFoundation.test_scheduler_recovery_coalesces_recent_missed_fire` | Verifies scheduler recovery coalesces a recent missed fire into one audit row and advances the next fire from the recovered fire time. |
+| `TestSchedulerFoundation.test_scheduler_fire_disables_revoked_token_schedule` | Verifies due schedules whose durable session token was revoked are audited, disabled, and marked with the revoked-token pause reason. |
+| `TestSchedulerFoundation.test_scheduler_fire_skips_when_previous_run_active` | Verifies overlap policy skips a due schedule while its previous run is still active. |
+| `TestSchedulerFoundation.test_scheduler_fire_claim_prevents_duplicate_manual_launch` | Verifies an atomic schedule-fire claim prevents duplicate manual launches for the same stale schedule row. |
+| `TestSchedulerFoundation.test_scheduler_fire_failure_records_audit_state_and_notification` | Verifies failed schedule launches record fire audit state, advance failure metadata, and enqueue the scheduled-run-failed notification trigger. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_rejects_unavailable_broker_and_interactive_pty` | Verifies scheduled launch rejects broker outages and interactive PTY commands before starting work. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_runs_exact_builtin_with_schedule_owner_tab` | Verifies exact special built-ins launch as brokered synthetic runs owned by the schedule tab id. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_runs_rewritten_builtin_after_input_preparation` | Verifies commands rewritten into built-ins keep variable/filter handling and schedule ownership. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_returns_missing_runtime_synthetic_run` | Verifies missing scanner runtimes become brokered synthetic failure runs owned by the schedule tab id. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_starts_external_run_worker_with_schedule_owner_tab` | Verifies external scheduled commands publish a start event and launch the broker worker with schedule ownership metadata. |
+| `TestSchedulerFoundation.test_scheduler_due_schedules_orders_limits_and_ignores_disabled` | Verifies due schedule selection orders by next fire, honors limits, and ignores disabled schedules. |
+| `TestSchedulerFoundation.test_scheduler_recovery_skips_invalid_and_stale_missed_fires` | Verifies recovery audits invalid due timestamps and stale missed fires outside the catch-up window. |
+| `TestSchedulerFoundation.test_scheduler_worker_run_once_fires_due_schedules_and_commits` | Verifies one worker tick fires due schedules and commits the resulting fire rows. |
+| `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
+| `TestWatchersFoundation.test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists` | Verifies watcher creation inserts the watcher row and owned schedule row together while normal schedule lists hide watcher-owned cadence. |
+| `TestWatchersFoundation.test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically` | Verifies deleting a watcher removes its state, owned schedule, and fire audit rows together. |
+| `TestWatchersFoundation.test_watcher_create_requires_durable_token_valid_options_and_quota` | Verifies watcher creation requires durable tokens, strict option booleans, known option keys, and the per-session watcher cap. |
+| `TestWatchersFoundation.test_watchers_with_same_command_keep_separate_schedules_and_state` | Verifies duplicate command watchers keep separate schedules, baselines, and state counters. |
+| `TestWatchersFoundation.test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run` | Verifies duplicate watcher-fire records for the same watcher and run reuse the existing audit row. |
+| `TestWatchersFoundation.test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule` | Verifies watcher edit, pause, resume, and accept-baseline actions keep the watcher row and owned schedule aligned. |
+| `TestWatchersFoundation.test_watcher_schedule_fire_launches_run_and_records_pending_fire` | Verifies watcher-owned schedules launch through scheduler dispatch, mark the watcher as firing, and record a pending watcher fire. |
+| `TestWatchersFoundation.test_watcher_full_cycle_captures_first_run_detects_change_notifies_and_accepts_baseline` | Verifies a watcher can capture the first successful run as its baseline, fire again with a detected change, queue a notification, and promote the changed run as the new baseline. |
+| `TestWatchersFoundation.test_watcher_textual_diff_reports_entity_delta` | Verifies textual watcher diffs report added, removed, and unchanged structured entities when line metadata is available. |
+| `TestWatchersFoundation.test_watcher_finalize_changed_diff_updates_state_and_queues_notification` | Verifies completed watcher runs with a textual diff move to changed state and queue a watcher-changed notification. |
+| `TestWatchersFoundation.test_watcher_finalize_no_change_recovers_only_after_changed_state` | Verifies no-change watcher fires stay quiet from ok state and emit recovered only after a prior changed state. |
+| `TestWatchersFoundation.test_watcher_finalize_failed_run_disables_after_threshold` | Verifies failed watcher runs record error state, queue watcher-error notifications, and disable after the failure threshold. |
+| `TestWatchersFoundation.test_deleted_baseline_run_pauses_watcher_and_owned_schedule` | Verifies deleting a baseline run moves the watcher to baseline-deleted error state and pauses its owned schedule. |
+| `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
+| `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
+| `TestNotificationsPhase0.test_dispatcher_dnd_defers_without_consuming_attempts` | Verifies notification do-not-disturb defers delivery without burning provider retry attempts. |
+| `TestNotificationsPhase0.test_dispatcher_rate_limit_defers_without_consuming_attempts` | Verifies notification rate limiting defers delivery without burning provider retry attempts. |
+| `TestNotificationsPhase0.test_dispatcher_rate_limit_counts_retry_attempts` | Verifies notification rate limiting counts recent failed delivery attempts, not only successful sends. |
+| `TestNotificationsPhase0.test_dispatcher_retry_delay_increases_after_first_failure` | Verifies notification retry backoff grows after the first failed delivery attempt. |
+| `TestNotificationsPhase0.test_dispatcher_dead_letters_retryable_events_after_max_age` | Verifies retryable notification events older than the retry max-age window are dead-lettered instead of rescheduled. |
+| `TestNotificationsPhase0.test_dispatcher_records_retry_terminal_and_exception_outcomes` | Verifies retryable failures, terminal failures, and sender exceptions persist the correct notification event statuses. |
+| `TestNotificationsPhase0.test_dispatcher_prunes_sent_events_after_retention` | Verifies old sent notification delivery rows are pruned while fresh sent rows and dead-letter rows remain. |
+| `TestNotificationsPhase0.test_notification_channel_ids_use_full_uuid_hex` | Verifies notification channel ids use the same full UUID hex length as notification event ids. |
+| `TestNotificationsPhase0.test_notification_helpers_do_not_import_blueprints` | Verifies notification service helpers stay independent from Flask blueprint modules. |
+| `TestNotificationsPhase0.test_notification_channels_require_durable_session_tokens` | Verifies outbound notification channels reject anonymous session ids and require durable session tokens. |
+| `TestNotificationsPhase0.test_notify_builtin_lists_mutes_tests_events_and_deletes_channel` | Verifies the terminal `notify` built-in can list, inspect, mute, test, audit, unmute, and delete a vault-backed channel. |
+| `TestNotificationsPhase0.test_notify_builtin_keeps_secret_channel_creation_in_options` | Verifies terminal `notify create` keeps secret-valued channel setup in Options instead of accepting secrets in shell history. |
+| `TestRunHistorySearchClauses.test_sqlite_history_search_prefers_fts_for_output_scope` | Verifies SQLite history search still prefers FTS for output-capable searches with indexable terms. |
+| `TestRunHistorySearchClauses.test_sqlite_history_search_falls_back_to_like_for_short_terms` | Verifies SQLite history search falls back to substring `LIKE` for short terms that FTS trigram tokenization cannot match. |
+| `TestRunHistorySearchClauses.test_sqlite_command_scope_searches_command_only` | Verifies command-scoped history search only matches the command text. |
+| `TestRunHistorySearchClauses.test_postgres_history_search_uses_trigram_friendly_ilike` | Verifies Postgres history search uses substring `ILIKE` clauses that can use trigram indexes without referencing SQLite FTS tables. |
+| `TestPostgresMigrationHelper.test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables` | Verifies the offline Postgres migration helper copies app tables while skipping SQLite FTS internals. |
+| `TestPostgresMigrationHelper.test_required_migration_versions_match_app_registry` | Verifies the migration helper's required Postgres app migration versions stay aligned with the app migration registry. |
+| `TestPostgresMigrationHelper.test_copy_plan_requires_app_migration_destination_columns` | Verifies the migration helper plans copies from SQLite columns into the app-created Postgres schema instead of creating copy-compatible tables. |
+| `TestPostgresMigrationHelper.test_file_validation_checks_artifacts_and_body_store_pointers` | Verifies migration preflight checks run-output artifacts and body-store pointer files. |
+| `TestPostgresMigrationHelper.test_file_validation_accepts_legacy_run_output_prefixed_paths` | Verifies migration file validation accepts older run-output artifact rows that already include the `run-output/` prefix. |
+| `TestPostgresMigrationHelper.test_secret_preflight_requires_key_confirmation` | Verifies encrypted secret rows require explicit key-continuity confirmation before migration. |
+| `TestPostgresMigrationHelper.test_dry_run_does_not_require_postgres_dependency_or_database_url` | Verifies migration dry runs do not require Postgres dependencies or a destination DSN. |
+| `TestPostgresMigrationHelper.test_findings_occurrence_copy_deduplicates_legacy_duplicate_keys` | Verifies migration collapses legacy duplicate finding occurrence keys before copying into the stricter Postgres primary key. |
+| `TestPostgresMigrationHelper.test_migration_temporarily_disables_findings_legacy_trigger` | Verifies migration disables the legacy findings trigger while bulk-copying rows so copied findings do not pre-create duplicate occurrences. |
+| `TestIntelServices.test_provider_registry_exposes_existing_provider_metadata` | Verifies the app-native intel provider registry exposes shipped provider labels, entity support, cache scopes, and secret consumers. |
+| `TestIntelServices.test_canonical_entity_normalizes_supported_values` | Verifies canonical IP, domain, URL, hash, and CVE values for external intel lookups. |
+| `TestIntelServices.test_canonical_entity_rejects_invalid_values` | Verifies unsupported or malformed intel entities fail before provider lookup. |
+| `TestIntelServices.test_schema_response_tracks_provider_data_and_cache_state` | Verifies normalized provider responses include empty peers, data flags, and cache-hit state. |
+| `TestIntelServices.test_cache_round_trips_normalized_payload_with_provider_ttl` | Verifies normalized intel cache storage, provider TTL overrides, and quota-exhausted backoff state. |
+| `TestIntelServices.test_rate_limiter_consumes_bucket_and_reports_retry` | Verifies per-session provider token buckets consume quota and report retry timing. |
+| `TestIntelServices.test_audit_event_omits_sensitive_provider_fields` | Verifies intel audit events include lookup metadata without API keys or raw provider bodies. |
+| `TestIntelServices.test_json_api_client_uses_system_ca_bundle_for_https` | Verifies app-native intel HTTPS clients prefer the system CA bundle when no explicit CA env is set. |
+| `TestIntelServices.test_json_api_client_rejects_cross_origin_redirects_before_forwarding_secrets` | Verifies app-native intel HTTPS clients stop cross-origin redirects before provider API-key headers can be forwarded. |
+| `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
+| `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
+| `TestIntelServices.test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized` | Verifies Team Cymru DNS origin and ASN-description records normalize into rendered ownership fields. |
+| `TestIntelServices.test_new_intel_provider_modules_normalize_payloads` | Verifies URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews provider modules normalize representative payloads and request contracts. |
+| `TestIntelServices.test_teamcymru_dns_client_fetches_origin_and_asn_description_records` | Verifies the Team Cymru DNS client fetches origin records and matching ASN-description records. |
+| `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
+| `TestIntelServices.test_lookup_entity_requires_secret_before_cache_hit` | Verifies cached provider data is not returned when the current session lacks the required provider secret. |
+| `TestIntelServices.test_lookup_entity_skips_cached_provider_response_when_ttl_is_zero` | Verifies a zero provider TTL disables cached response reuse and fetches fresh provider data. |
+| `TestIntelServices.test_lookup_entity_includes_no_secret_provider_and_caches_result` | Verifies no-key providers run through the same lookup and cache path as keyed providers. |
+| `TestIntelServices.test_default_hash_providers_only_include_hibp_for_sha1` | Verifies HIBP Pwned Passwords is included only for SHA1 hash lookups. |
+| `TestIntelServices.test_builtin_intel_ip_formats_partial_provider_results` | Verifies the `intel ip` built-in renders configured provider results beside missing-provider placeholders. |
+| `TestIntelServices.test_builtin_intel_ip_formats_censys_provider_results` | Verifies the `intel ip` built-in renders normalized Censys host ports, services, ownership, and names. |
+| `TestIntelServices.test_builtin_intel_reports_all_missing_provider_keys` | Verifies all-missing provider lookups exit with setup guidance instead of reporting success. |
+| `TestIntelServices.test_builtin_intel_formats_cve_provider_results` | Verifies the `intel cve` built-in renders normalized NVD provider results. |
+| `TestIntelServices.test_builtin_intel_rejects_private_ip_without_override` | Verifies `intel ip` blocks private or loopback addresses by default before provider lookup. |
+| `TestIntelServices.test_builtin_intel_hash_rejects_invalid_value` | Verifies `intel hash` rejects non-hex or unsupported hash lengths with the expected user-facing message. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
 | `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
 | `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
+| `TestSessionWorkspace.test_scanner_owned_workspace_entry_with_scanner_group_needs_repair` | Verifies that scanner-owned workspace entries are repaired when their mode bits look correct but their group drifted away from the shared app group. |
 | `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
 | `TestSessionWorkspace.test_read_workspace_permission_denied_is_not_raw_os_error` | Verifies that unreadable workspace files raise an app-level permission error instead of a raw OS error. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
-| `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders and recursive folder delete removes nested files and directories. |
+| `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders, recursive folder delete removes nested files and directories, and manual delete metrics are recorded. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
 | `TestSessionWorkspace.test_workspace_glob_pattern_matches_one_path_segment` | Verifies that workspace glob expansion matches `*` within one path segment without crossing into nested folders. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
@@ -407,14 +600,21 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
-| `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
+| `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
+| `TestAIRuntimeWiring.test_ai_worker_entrypoint_is_gated_and_supervised` | Verifies that the AI worker entrypoint is disabled by default, gated by `AI_WORKER_ENABLED`, runs as `appuser`, and restarts after exits. |
+| `TestAIRuntimeWiring.test_compose_ai_profile_wires_shell_to_llama_sidecar` | Verifies that the Compose llama profile, shell AI environment, optional dependency, healthcheck, and model cache volume stay wired together. |
+| `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy, help metadata, smoke metadata, and autocomplete data, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
+| `TestDerivedCommandRegistry.test_commands_registry_rejects_interactive_pty_with_required_secrets` | Verifies that registry loading rejects interactive PTY commands that also declare required secret env injection. |
+| `TestDerivedCommandRegistry.test_secret_show_consumers_marks_required_and_optional` | Verifies that `secret show-consumers` labels command consumers as required or optional. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_wordlist_metadata_covers_known_wordlist_flags` | Verifies that known wordlist-consuming command slots declare `value_type: wordlist` and the expected wordlist categories. |
 | `TestDerivedCommandRegistry.test_real_registry_restricted_input_metadata_covers_known_target_slots` | Verifies that known target-consuming command slots declare value metadata used by restricted command-input checks. |
+| `TestDerivedCommandRegistry.test_real_registry_positional_argument_order_covers_known_host_port_slots` | Verifies that ordered positional autocomplete metadata is preserved for command roots with host and port slots. |
+| `TestDerivedCommandRegistry.test_nuclei_url_target_discovery_ignores_template_path_flags` | Verifies that Nuclei URL target discovery ignores template path flags instead of treating template names as project targets. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
@@ -454,6 +654,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_theme_color_scheme_falls_back_when_color_is_not_parseable` | Checks that theme color scheme falls back when color is not parseable. |
 | `TestThemeRegistry.test_empty_yaml_returns_empty` | Checks that empty YAML returns empty. |
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
+| `TestThemeRegistry.test_load_all_faq_normalizes_entry_categories` | Verifies that built-in and custom FAQ entries carry known section categories and fall back to Other for unknown categories. |
 | `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
 | `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
 | `TestThemeRegistry.test_load_all_faq_promotes_workspace_builtin_entry_when_enabled` | Verifies that the built-in Files FAQ appears near the top of the FAQ when session Files are enabled. |
@@ -471,6 +672,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIsDeniedMultiWordTool.test_subcommand_specific_deny_fires_for_correct_subcommand` | Checks that subcommand specific deny fires for correct subcommand. |
 | `TestIsDeniedMultiWordTool.test_deny_tool_only_no_flag` | Checks that deny tool only no flag. |
 | `TestIsDeniedMultiWordTool.test_deny_tool_only_does_not_block_other_tool` | Checks that deny tool only does not block other tool. |
+| `TestIsDeniedMultiWordTool.test_mtr_interactive_is_reserved_for_pty_route` | Verifies that `mtr --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
+| `TestIsDeniedMultiWordTool.test_ffuf_interactive_is_reserved_for_pty_route` | Verifies that `ffuf --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
+| `TestIsDeniedMultiWordTool.test_masscan_interactive_is_reserved_for_pty_route` | Verifies that `masscan --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
 | `TestRewriteCaseInsensitive.test_mtr_uppercase` | Checks mtr uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nmap_uppercase` | Checks nmap uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nuclei_uppercase` | Checks nuclei uppercase handling. |
@@ -482,6 +686,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunBrokerMemoryStore.test_bounded_replay_keeps_latest_output_and_terminal_event` | Verifies that bounded replay preserves the latest output plus the terminal event. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_replays_snapshot_before_waiting_for_live_events` | Verifies that broker stream subscriptions replay an initial snapshot before waiting for live events. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_skips_trim_notice_when_resuming_live_tail` | Verifies that broker streams skip trim notices when choosing the live-tail resume cursor. |
+| `TestRunBrokerMemoryStore.test_stream_run_events_exits_cleanly_when_redis_stream_disconnects` | Verifies that broker streams end cleanly when Redis closes a blocked stream read during shutdown. |
 | `TestRunBrokerMemoryStore.test_decode_payload_accepts_redis_bytes_fields` | Verifies that broker Redis payload decoding accepts byte-string stream fields. |
 | `TestRunBrokerMemoryStore.test_redis_store_decodes_bytes_event_ids_and_payloads` | Verifies that the Redis broker store decodes byte-string event IDs and payloads before replay filtering. |
 | `TestRunBrokerMemoryStore.test_redis_store_normalizes_invalid_resume_ids` | Verifies that Redis replay normalizes stale synthetic resume IDs before calling Redis stream APIs. |
@@ -497,13 +702,39 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_reports_owner_liveness_for_client` | Verifies that active-run metadata reports owner client, tab, liveness, and same-client state. |
 | `TestActiveRunMetadata.test_active_runs_for_session_refreshes_matching_owner_liveness` | Verifies that active-run listings refresh same-client owner liveness so Status Monitor polling keeps run control alive. |
 | `TestActiveRunMetadata.test_active_run_touch_owner_refreshes_liveness` | Verifies that owner heartbeats refresh liveness only for the owning client and tab. |
+| `TestActiveRunMetadata.test_active_run_claim_owner_reports_changed_client` | Verifies that owner claims report whether a PTY stream moved to a different browser client. |
 | `TestActiveRunMetadata.test_active_run_owner_metadata_remains_provenance_only` | Verifies that active-run owner metadata remains origin/liveness information rather than a reassignment permission model. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_is_the_active_run_permission_boundary` | Verifies that active-run PID lookup is scoped to the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
+| `TestActiveRunMetadata.test_cleanup_stale_active_run_metadata_removes_orphans_and_previous_container_rows` | Verifies startup active-run cleanup removes Redis metadata left by dead containers while preserving live rows for the current container. |
 | `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Status Monitor display. |
+| `TestInteractivePtyRegistry.test_live_registry_publishes_each_supported_interactive_tool` | Verifies that `commands.yaml` exposes the expected interactive PTY tools (`nc`, `telnet`, `mtr`, `ffuf`, `masscan`) with their trigger flag and runtime settings. |
+| `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
+| `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
+| `TestPtyBrokerService.test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run` | Verifies that PTY reattach snapshots can be served from Redis by a worker that does not own the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_snapshot_reports_age_for_distributed_reattach` | Verifies that Redis-backed PTY snapshots report their age so the browser can show stale reattach notices. |
+| `TestPtyBrokerService.test_pty_owner_claim_publishes_displaced_event_for_previous_client` | Verifies that a new browser-client PTY attach publishes one displacement event for the previous owner tab. |
+| `TestPtyBrokerService.test_pty_snapshot_prunes_stale_redis_state_without_active_process` | Verifies that stale Redis PTY metadata, snapshots, control streams, and output streams are pruned when no active process remains. |
+| `TestPtyBrokerService.test_pty_snapshot_publish_rate_is_capped_even_after_byte_threshold` | Verifies that high-throughput PTY output cannot force Redis snapshot publishes more often than the minimum publish interval. |
+| `TestPtyBrokerService.test_pty_stream_reports_stale_run_before_heartbeating_forever` | Verifies that stale PTY streams emit a terminal error instead of heartbeating forever after the process metadata disappears. |
+| `TestPtyBrokerService.test_pty_start_cleans_up_if_reader_thread_fails_to_start` | Verifies that PTY startup cleans up the process, file descriptor, and active-run metadata if the reader thread cannot start. |
+| `TestPtyBrokerService.test_pty_start_requires_pyte_for_saved_terminal_capture` | Verifies that interactive PTY startup fails before spawning when the required server-side terminal capture dependency is missing. |
+| `TestPtyBrokerService.test_pty_command_env_inherits_only_vetted_keys` | Verifies that PTY command environments preserve useful terminal variables without passing unvetted process state. |
+| `TestPtyTerminalCapture.test_terminal_capture_synthesizes_scrollback_and_final_frame` | Verifies that PTY capture persists scrollback and final visible frame with a marker between them. |
+| `TestPtyTerminalCapture.test_terminal_capture_builds_ansi_snapshot_with_attrs_and_cursor` | Verifies that PTY capture serializes visible terminal state with ANSI attributes and cursor position for reattach. |
+| `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_final_frame_exists` | Verifies that final-frame-only PTY output is saved without an empty separator marker. |
+| `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_scrollback_exists` | Verifies that scrollback-only PTY output is saved without an empty separator marker. |
+| `TestPtyTerminalCapture.test_terminal_capture_persists_notice_when_output_is_empty` | Verifies that empty PTY output saves a coherent notice line. |
+| `TestPtyTerminalCapture.test_terminal_capture_falls_back_after_first_feed_error` | Verifies that PTY capture logs one pyte feed failure and falls back to plain-text capture for later chunks. |
+| `TestPtyTerminalCapture.test_terminal_capture_fallback_treats_carriage_return_as_overwrite` | Verifies that fallback PTY capture treats carriage-return progress updates as overwrites instead of appending duplicate status lines. |
+| `TestPtyTerminalCapture.test_terminal_history_line_limit_is_bounded` | Verifies that PTY capture history uses a sensible default, floor, and ceiling around `max_output_lines`. |
+| `TestRawOnlyRedaction.test_omits_intel_line_groups_with_placeholder` | Verifies that raw-only intel output groups are replaced by one share/export placeholder. |
+| `TestRawOnlyRedaction.test_preserves_non_intel_entries` | Verifies that non-intel lines are not changed by raw-only omission. |
+| `TestRawOnlyRedaction.test_redacts_matching_entity_canonical_value_to_sentinel` | Verifies share/export redaction replaces matching entity canonical values with the redaction sentinel. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -524,6 +755,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeLoading.test_out_trailing_whitespace_stripped_but_leading_preserved` | Checks that out trailing whitespace stripped but leading preserved. |
 | `TestWelcomeLoading.test_non_list_yaml_returns_empty` | Checks that non list YAML returns empty. |
 | `TestWelcomeLoading.test_local_overlay_appends_entries` | Checks that local overlay appends entries. |
+| `TestTourLoading.test_missing_file_returns_empty_tour` | Verifies that a missing tour file returns an empty disabled tour. |
+| `TestTourLoading.test_valid_chapters_load_with_version` | Verifies that valid tour chapters load with the configured schema version. |
+| `TestTourLoading.test_tour_disabled_returns_no_visible_chapters` | Verifies that `tour_enabled: false` hides all tour chapters. |
+| `TestTourLoading.test_missing_or_invalid_version_raises` | Verifies that missing or invalid tour versions fail schema validation. |
+| `TestTourLoading.test_unknown_requires_key_raises` | Verifies that unknown tour feature gates fail schema validation. |
+| `TestTourLoading.test_feature_gated_chapters_follow_config_flags` | Verifies that tour chapters respect representative feature flags. |
+| `TestTourLoading.test_mobile_tour_omits_interactive_pty_chapter` | Verifies that the mobile tour omits the desktop-only Interactive PTY chapter. |
+| `TestTourLoading.test_loader_rereads_changed_tour_file` | Verifies that the tour loader re-reads changed chapter content. |
 | `TestWelcomeAssetLoading.test_missing_ascii_file_returns_empty_string` | Checks that missing ascii file returns empty string. |
 | `TestWelcomeAssetLoading.test_ascii_art_trims_only_trailing_whitespace` | Checks that ascii art trims only trailing whitespace. |
 | `TestWelcomeAssetLoading.test_missing_mobile_ascii_file_returns_empty_string` | Checks that missing mobile ascii file returns empty string. |
@@ -534,33 +773,54 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeAssetLoading.test_mobile_hints_overlay_appends_entries` | Checks that mobile hints overlay appends entries. |
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
+| `TestOutputSignals.test_help_output_does_not_feed_signals_or_entities` | Verifies that registry-declared external help output stays visible without feeding finding signals or Atlas entity extraction, while non-help uses of `-h` / `-H` still classify normally. |
 | `TestOutputSignals.test_classifies_dns_enumeration_findings_by_command` | Verifies that DNS and subdomain enumeration tools classify command-scoped host, record, and network-range findings without making hostnames global findings. |
-| `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
+| `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, gobuster, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
 | `TestOutputSignals.test_classifies_web_scanner_findings_by_command` | Verifies that Nikto and WPScan classify useful scanner findings while skipping progress and footer lines. |
 | `TestOutputSignals.test_classifies_tls_scanner_findings_by_command` | Verifies that TLS scanner posture, certificate, cipher, and compliance lines classify into findings or errors. |
 | `TestOutputSignals.test_classifies_projectdiscovery_and_port_scanner_findings` | Verifies that ProjectDiscovery and port scanner outputs classify command-scoped findings and summaries. |
+| `TestOutputSignals.test_classifies_scanner_progress_lines_as_progress_role` | Verifies that regular scanner progress updates carry the progress role without becoming findings, warnings, errors, or summaries. |
+| `TestOutputSignals.test_live_output_batcher_coalesces_progress_without_dropping_saved_lines` | Verifies that live progress rows coalesce for display while saved output still captures each original line. |
+| `TestOutputSignals.test_live_output_batcher_flushes_sparse_output_by_age` | Verifies that sparse live output flushes promptly instead of waiting for a large batch. |
 | `TestOutputSignals.test_signal_matching_uses_ansi_normalized_text` | Verifies that backend signal matching strips ANSI formatting before classifying output while preserving the original line elsewhere. |
 | `TestOutputSignals.test_classifies_nuclei_findings_by_command` | Verifies that common Nuclei template result lines classify as command-scoped findings. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
+| `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
+| `TestOutputSignals.test_extract_entities_ignores_file_names_inside_url_paths` | Verifies that entity extraction keeps URL hostnames while ignoring file-like names inside URL paths. |
+| `TestOutputSignals.test_extract_entities_can_include_private_ips_when_requested` | Verifies that entity extraction can opt into private and loopback IP metadata for explicit caller-controlled contexts. |
+| `TestOutputSignals.test_classifier_adds_entity_metadata_to_real_output` | Verifies that real command output lines carry structured entity metadata with source-line indexes. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
 | `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
 | `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |
 | `TestRunOutputCapture.test_preview_keeps_only_last_n_lines` | Checks that preview keeps only last n lines. |
+| `TestRunOutputCapture.test_preview_byte_cap_drops_oldest_lines` | Checks that the SQLite preview byte cap drops oldest preview lines before storing oversized previews. |
+| `TestRunOutputCapture.test_preview_byte_cap_truncates_single_huge_line` | Checks that one huge output line is truncated inside the SQLite preview while preserving the run line count. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
+| `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
+| `TestRunOutputCapture.test_replace_run_output_summary_tolerates_concurrent_backfill_insert` | Verifies structured output summary backfills tolerate another worker inserting the same summary key first. |
+| `TestRunOutputCapture.test_legacy_event_factory_matches_typed_add_event_bytes` | Verifies legacy line-event factory output and typed `add_event` output write matching event rows after the artifact header. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
+| `TestRunOutputCapture.test_full_output_artifact_cap_does_not_reopen_and_overwrite_prefix` | Verifies capped full-output artifacts keep the preserved prefix when later lines arrive after the byte cap is hit. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_legacy_plain_text_rows` | Checks that full output artifact loads legacy plain text rows. |
+| `TestRunOutputCapture.test_full_output_artifact_loads_headerless_legacy_json_rows` | Verifies headerless legacy JSON artifacts still decode through the line-event compatibility path. |
+| `TestRunOutputCapture.test_full_output_artifact_loads_enveloped_wire_rows` | Verifies headered v1 artifact files skip the header and decode versioned line-event rows. |
+| `TestRunOutputCapture.test_full_output_artifact_unknown_values_log_once_per_load` | Verifies full-output artifact loading logs each unknown line-event kind, role, or signal once per load. |
+| `TestRunOutputCapture.test_empty_full_output_capture_does_not_create_artifact_file` | Verifies empty persisted-output captures do not create gzip artifact files. |
+| `TestRunOutputCapture.test_search_text_from_events_includes_deduped_capped_entities` | Verifies run-output search text includes deduped entity canonical values while skipping oversized and redacted values. |
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
 | `TestRunOutputCapture.test_hints_loader_ignores_blank_lines_and_comments` | Checks that hints loader ignores blank lines and comments. |
 | `TestRunOutputCapture.test_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped welcome hints are hidden when Files are disabled and restored when Files are enabled. |
+| `TestRunOutputCapture.test_hints_loader_skips_interactive_pty_section_when_disabled` | Verifies that interactive-PTY welcome hints are hidden unless interactive PTY support is enabled. |
 | `TestMobileWelcomeHintLoading.test_missing_mobile_hints_file_returns_empty_list` | Checks that missing mobile hints file returns empty list. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped mobile welcome hints are hidden when Files are disabled and restored when Files are enabled. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_registry_examples_and_workflows` | Verifies that the shared container smoke corpus includes both registry examples and workflow commands while deduplicating overlaps in stable order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
-| `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only command examples stay out of the generic smoke corpus because they need per-session file setup. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only examples stay out of the generic smoke corpus, while required-secret roots can still include registry-declared unauthenticated help smoke examples. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_interactive_commands_include_only_pty_examples` | Verifies that the dedicated interactive smoke corpus includes only PTY-gated examples and leaves workspace-required examples out. |
 | `TestWordlistCatalog.test_load_wordlist_catalog_filters_and_sorts_curated_matches` | Verifies that the wordlist catalog applies configured globs, ignores non-wordlist docs, and returns deterministic curated ordering. |
 | `TestWordlistCatalog.test_wordlist_catalog_search_path_and_all_scan` | Verifies curated wordlist search, path lookup, and the opt-in full SecLists scan while excluding archive files. |
 | `TestWordlistCatalog.test_wordlist_catalog_missing_root_returns_empty_items` | Verifies that a missing SecLists root returns an empty catalog without losing configured category metadata. |
@@ -592,19 +852,41 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPermalinkErrorPage.test_mentions_retention_when_configured` | Checks that mentions retention when configured. |
 | `TestPermalinkErrorPage.test_no_retention_mention_when_unlimited` | Checks that no retention mention when unlimited. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
+| `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
+| `TestDatabaseInit.test_json_bearing_schema_columns_use_sqlite_json_type` | Verifies JSON-bearing schema columns keep SQLite's `TEXT` storage type through the backend dialect helper. |
+| `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
+| `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
+| `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
+| `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
+| `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |
+| `TestDatabaseInit.test_creates_project_workspace_indexes` | Verifies that project workspace query-shape indexes are created during database bootstrap. |
 | `TestDatabaseInit.test_init_is_idempotent` | Checks init is idempotent handling. |
 | `TestDatabaseInit.test_retention_prunes_old_runs` | Checks that retention prunes old runs. |
 | `TestDatabaseInit.test_retention_prunes_old_snapshots` | Checks that retention prunes old snapshots. |
+| `TestDatabaseInit.test_retention_prunes_old_snapshot_metadata` | Verifies that retention prunes labels and notes for deleted snapshots. |
+| `TestDatabaseInit.test_retention_prunes_project_run_and_artifact_metadata` | Verifies that retention pruning removes stale project run links and run-file artifact metadata. |
 | `TestDatabaseInit.test_zero_retention_does_not_prune` | Checks that zero retention does not prune. |
 | `TestDatabaseInit.test_recent_runs_not_pruned` | Checks that recent runs not pruned. |
 | `TestDatabaseInit.test_legacy_runs_table_gets_session_id_column_migrated` | Checks that legacy runs table gets session id column migrated. |
 | `TestDatabaseInit.test_migrate_schema_ignores_existing_column_error` | Checks that migrate schema ignores existing column error. |
+| `TestBodyStore.test_large_text_round_trips_through_pointer_and_deletes_file` | Verifies the filesystem body store writes oversized text as a compressed pointer, reads it back, and deletes the file. |
+| `TestBodyStore.test_inline_threshold_accepts_human_readable_byte_values` | Verifies large-body offload thresholds accept byte counts plus `kb` and `mb` strings. |
 | `TestSessionVariables.test_set_list_unset_and_expand_variables` | Verifies that session command variables can be stored, listed, expanded in `$NAME` and `${NAME}` forms, and removed. |
 | `TestSessionVariables.test_rejects_invalid_names_and_undefined_references` | Verifies that invalid variable names, undefined variables, and unsupported shell-style `$...` syntax are rejected. |
 | `TestBuiltinStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
 | `TestBuiltinStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
 | `TestBuiltinStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
+| `TestSecretsVault.test_encrypt_decrypt_round_trip_uses_unique_nonces` | Verifies encrypted secrets decrypt back to their original values and use a fresh nonce for each write. |
+| `TestSecretsVault.test_master_key_rejects_short_decoded_env_value` | Verifies the secrets vault rejects a base64 master key that does not decode to exactly 32 bytes. |
+| `TestSecretsVault.test_key_file_bootstrap_generates_and_reuses_secure_file` | Verifies the secrets vault lazily creates a reusable `0600` master-key file when no env key is configured. |
+| `TestSecretsVault.test_existing_key_file_permissions_are_repaired` | Verifies an existing secrets master-key file with broader permissions is repaired to `0600` before use. |
+| `TestSecretsVault.test_env_master_key_wins_over_key_file_and_logs_warning` | Verifies `SECRETS_MASTER_KEY` wins over an existing key file and logs the ignored-file warning. |
+| `TestSecretsVault.test_database_init_creates_secrets_table_and_index_idempotently` | Verifies repeated database initialization creates the secrets table and session/update-time index safely. |
+| `TestSecretsVault.test_storage_normalizes_names_and_migrates_without_decrypting` | Verifies secret storage normalizes names, dedupes consumer envs, and moves session rows without decrypting values. |
+| `TestSecretsVault.test_storage_migration_keeps_source_secret_when_destination_name_collides` | Verifies session secret migration keeps the source row when a destination secret with the same name already exists. |
+| `TestSecretsVault.test_storage_legacy_duplicate_consumer_env_uses_most_recent_update` | Verifies legacy duplicate consumer-env rows resolve to the most recently updated secret. |
+| `TestSecretsVault.test_storage_rejects_duplicate_consumer_env_bindings` | Verifies a session cannot bind the same consumer env name to two different encrypted secrets. |
 
 #### `test_container_smoke_test.py`
 
@@ -614,15 +896,22 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_parse_compose_port_output` | Checks that parse compose port output. |
 | `test_compose_projects_from_container_names_filters_smoke_projects` | Verifies that stale-container cleanup extracts only smoke-test Compose project names from Docker container names. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
+| `test_post_run_reads_batched_output_for_stop_text` | Verifies the smoke stream parser treats output batches as visible command output when checking stop text. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
+| `test_force_smoke_image_build_reads_wrapper_env` | Verifies that the smoke fixture only forces a cache-image rebuild when the wrapper sets `RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD=1`. |
+| `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, Python requirements, and entrypoint changes refresh the stable smoke cache image. |
+| `test_smoke_image_cache_status_requires_matching_label` | Verifies that the smoke fixture reuses only cache images with the expected build-input label. |
+| `test_smoke_image_cache_status_rebuilds_when_image_is_missing` | Verifies that a missing stable smoke cache image triggers a rebuild. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
+| `test_container_smoke_test_interactive_expectations_cover_all_pty_examples` | Checks that the interactive smoke-test expectation fixture covers every PTY-gated command example. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that each smoke command matches expected output, retrying transient failures with `RUN_CONTAINER_SMOKE_TEST_RETRIES` before failing. |
 | `test_container_smoke_test_workspace_file_flags` | Verifies that the built image can create workspace files through the API, run workspace-enabled input/output flags through `/runs`, read generated files back, and clean up through the workspace API. |
+| `test_container_smoke_test_interactive_pty_commands` | Verifies that the built image can start interactive PTY examples through `/pty/runs`, match expected startup output, and stop them cleanly. |
 
 #### `test_docs.py`
 
-Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, release-draft conventions, and app configuration default coverage in `app/conf/config.yaml` plus README `## Configuration`.
+Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, release-draft conventions, app configuration default coverage in `app/conf/config.yaml` plus `CONFIGURATION.md`, and Related Docs navigation coverage.
 
 | Test | Description |
 | --- | --- |
@@ -652,10 +941,12 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
 | `TestProjectStructureCoverage.test_structure_order_matches_git_file_listing` | Checks that the README.md `## Project Structure` tree follows `git ls-files --cached` order with parent directories inserted before children. |
 | `TestArchitectureRouteInventory.test_route_inventory_matches_flask_url_map` | Checks that ARCHITECTURE.md `## HTTP Route Inventory` lists the same method/route pairs registered in Flask's URL map, without enforcing documentation order. |
-| `TestReleaseDraftDocs.test_release_draft_convention_is_documented_when_drafts_exist` | Checks that release-draft branch docs are documented when `docs/release-drafts/` exists. |
+| `TestReleaseDraftDocs.test_temporary_branch_artifacts_stay_out_of_official_docs` | Verifies temporary branch draft artifacts stay out of the official documentation map. |
 | `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
 | `TestOperatorConfigurationDocs.test_config_yaml_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in the checked-in `app/conf/config.yaml` reference. |
-| `TestOperatorConfigurationDocs.test_readme_configuration_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in README.md `## Configuration`. |
+| `TestOperatorConfigurationDocs.test_configuration_reference_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in `CONFIGURATION.md` `## Application Settings`. |
+| `TestRelatedDocsNavigation.test_related_docs_sections_list_project_markdown_files` | Checks that every `## Related Docs` section lists all tracked project Markdown files except release drafts and itself. |
+| `TestRelatedDocsNavigation.test_readme_documentation_map_lists_project_markdown_files` | Checks that README.md `## Documentation Map` lists all tracked project Markdown files except release drafts and README.md itself. |
 
 #### `test_logging.py`
 
@@ -745,12 +1036,19 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRunFailureEvents.test_run_stream_error_emits_error` | Checks that run stream error emits error. |
 | `TestRequestResponseDebugEvents.test_request_not_logged_at_info_level` | Checks that request not logged at info level. |
 | `TestRequestResponseDebugEvents.test_response_not_logged_at_info_level` | Checks that response not logged at info level. |
+| `TestRequestResponseDebugEvents.test_request_completed_logged_at_info_level` | Verifies normal request completions emit an INFO-level `REQUEST_COMPLETED` event. |
+| `TestRequestResponseDebugEvents.test_request_completed_demotes_successful_probe_paths_to_debug` | Verifies successful `/health` and `/status` probes do not emit INFO-level completion events. |
+| `TestRequestResponseDebugEvents.test_request_completed_probe_debug_event_keeps_bounded_fields` | Verifies successful probe completion events keep bounded fields when DEBUG logging is enabled. |
+| `TestRequestResponseDebugEvents.test_request_completed_extra_has_bounded_request_fields` | Verifies `REQUEST_COMPLETED` includes bounded request fields without query-string data. |
+| `TestRequestResponseDebugEvents.test_request_completed_skips_static_asset_noise` | Verifies static asset-style requests do not emit the INFO-level completion event. |
 | `TestRequestResponseDebugEvents.test_request_logged_at_debug_level` | Checks that request logged at debug level. |
 | `TestRequestResponseDebugEvents.test_request_debug_extra_has_path` | Checks that request debug extra has path. |
 | `TestRequestResponseDebugEvents.test_request_debug_extra_has_method` | Checks that request debug extra has method. |
 | `TestRequestResponseDebugEvents.test_response_logged_at_debug_level` | Checks that response logged at debug level. |
 | `TestRequestResponseDebugEvents.test_response_debug_extra_has_status` | Checks that response debug extra has status. |
 | `TestRequestResponseDebugEvents.test_query_string_included_in_request_debug_when_present` | Checks that query string included in request debug when present. |
+| `TestWorkerEntrypointLoggingSetup.test_notification_worker_main_configures_logging` | Verifies the notification worker entrypoint configures structured logging before running. |
+| `TestWorkerEntrypointLoggingSetup.test_scheduler_worker_main_configures_logging` | Verifies the scheduler worker entrypoint configures structured logging before running. |
 | `TestDbPrunedEvent.test_db_pruned_emits_info_when_records_deleted` | Checks that database pruned emits info when records deleted. |
 | `TestDbPrunedEvent.test_db_pruned_extra_has_run_count` | Checks that database pruned extra has run count. |
 | `TestDbPrunedEvent.test_db_pruned_not_emitted_when_retention_disabled` | Checks that database pruned not emitted when retention disabled. |
@@ -812,6 +1110,89 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_ip` | Checks that spawn error extra has IP. |
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_cmd` | Checks that spawn error extra has command. |
 
+#### `test_metrics_endpoint.py`
+
+Prometheus `/metrics` route, runtime collector, label, and histogram-bucket coverage.
+
+| Test | Description |
+| --- | --- |
+| `TestMetricsEndpoint.test_ip_gate_denies_non_allowlisted_callers` | Verifies that non-allowlisted callers get a 404 from `/metrics`. |
+| `TestMetricsEndpoint.test_disabled_route_returns_404_even_when_allowlisted` | Verifies that `metrics_enabled: false` hides `/metrics` even for allowlisted callers. |
+| `TestMetricsEndpoint.test_allowlisted_callers_get_prometheus_text` | Verifies that allowlisted callers receive Prometheus text with the expected content type. |
+| `TestMetricsEndpoint.test_scrape_includes_runtime_gauge_families` | Verifies that scrape-time runtime gauge families render in `/metrics`. |
+| `TestMetricsEndpoint.test_scrape_includes_durable_ai_assist_queue_health` | Verifies that `/metrics` exposes durable AI assist status counts plus queued, in-progress, and heartbeat age gauges. |
+| `TestMetricsEndpoint.test_scrape_includes_postgres_pool_config_and_state` | Verifies that Postgres pool configuration and connection-state gauges render with bounded labels. |
+| `TestMetricsEndpoint.test_run_finalize_metric_uses_bounded_labels` | Verifies that completed-run metrics use command-root, run-kind, and exit-code-class labels. |
+| `TestMetricsEndpoint.test_rate_limit_and_intel_helpers_render_expected_labels` | Verifies that rate-limit, intel, AI request, DB query, history fallback, evidence package, PTY completion, and workspace eviction helper metrics render with bounded labels. |
+| `TestMetricsDefinitionDrift.test_metric_names_use_darklab_prefix` | Verifies that every registered metric name uses the `darklab_` prefix. |
+| `TestMetricsDefinitionDrift.test_histograms_have_explicit_buckets` | Verifies that every histogram declares explicit buckets. |
+| `TestMetricsDefinitionDrift.test_labeled_metrics_have_cardinality_policies` | Verifies that every labeled metric has an explicit cardinality policy and fails on unreviewed labels. |
+| `TestMetricsDefinitionDrift.test_route_label_normalizer_does_not_use_raw_paths` | Verifies that route labels do not preserve raw path or query-string characters. |
+
+#### `test_notifications_channels.py`
+
+Slack, Discord, Telegram, and Pushover notification channel coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_phase2_channels_are_registered` | Verifies Slack, Discord, Telegram, and Pushover channel classes register with the shared notification channel registry. |
+| `test_registered_channels_implement_delivery_contract` | Verifies every registered notification channel implements the shared validation and send contract. |
+| `test_slack_channel_formats_blocks` | Verifies Slack notifications use incoming-webhook blocks with a header and summary fields. |
+| `test_summary_fields_truncate_long_run_ids` | Verifies chat/email notification summary fields shorten long run ids to a readable suffix. |
+| `test_summary_fields_format_structured_count_maps_as_text` | Verifies structured notification count maps render as compact text instead of Python dictionary syntax. |
+| `test_discord_channel_formats_embed` | Verifies Discord notifications use embeds with a title, fields, and timestamp footer. |
+| `test_chat_webhook_channels_share_retry_and_terminal_outcomes` | Verifies chat-webhook channels share retryable 5xx and terminal 4xx handling. |
+| `test_telegram_channel_requires_chat_id` | Verifies Telegram channels require a non-secret chat id in channel config. |
+| `test_telegram_channel_posts_plain_text_without_token_in_body` | Verifies Telegram sends plain-text messages through Bot API without placing the bot token in message text. |
+| `test_telegram_channel_timeout_is_retryable_without_token_leak` | Verifies Telegram timeout errors are retryable and do not echo the bot token. |
+| `test_pushover_channel_posts_form_payload` | Verifies Pushover sends form payloads with optional non-secret priority and sound options. |
+| `test_pushover_channel_requires_secret_refs` | Verifies Pushover channels require vault-backed app-token and user-key references. |
+
+#### `test_notifications_email.py`
+
+SMTP email notification channel coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_email_channel_is_registered` | Verifies the email channel registers with the shared notification channel registry. |
+| `test_email_channel_rejects_missing_smtp_transport` | Verifies email channels reject missing operator SMTP transport config. |
+| `test_email_channel_requires_recipients` | Verifies email channels require at least one channel-owned recipient. |
+| `test_email_channel_sends_starttls_message` | Verifies email delivery uses STARTTLS, operator SMTP credentials, text body, and escaped HTML alternative. |
+| `test_email_channel_uses_smtp_ssl_without_starttls` | Verifies `tls: ssl` uses SMTP-over-SSL without issuing STARTTLS. |
+| `test_email_channel_reports_missing_password_secret_without_leak` | Verifies missing SMTP password environment variables fail terminally without echoing the variable name. |
+| `test_email_channel_retries_smtp_exceptions` | Verifies SMTP send exceptions are retryable and do not leak the password. |
+
+#### `test_notifications_hooks.py`
+
+Notification hook fan-out, skip-rule, and redaction coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_run_complete_hook_enqueues_external_run_summary` | Verifies external run finalization queues one run-complete payload with run counts and command root. |
+| `test_run_complete_hook_skips_builtin_runs` | Verifies built-in runs do not participate in default run-complete notification fan-out. |
+| `test_run_complete_hook_redacts_string_summary_fields` | Verifies string summary fields are redacted before notification events are queued. |
+| `test_run_complete_hook_swallow_enqueue_errors` | Verifies notification enqueue failures are logged without breaking run finalization. |
+| `test_run_complete_summary_defaults_missing_counts_to_zero` | Verifies missing finalization counts default to zero in run-complete notification summaries. |
+
+#### `test_notifications_webhook.py`
+
+Generic JSON webhook notification channel delivery and payload-shape coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_webhook_channel_posts_json_payload` | Verifies the webhook channel resolves its vault-backed URL and sends a JSON POST with the configured timeout. |
+| `test_webhook_channel_uses_short_timeout_for_test_send` | Verifies manual webhook test sends use the shorter notification test timeout instead of the normal delivery timeout. |
+| `test_webhook_channel_retries_5xx_then_succeeds` | Verifies 5xx webhook responses are retryable and a later 2xx response succeeds. |
+| `test_notification_http_redirect_handler_refuses_redirects` | Verifies notification HTTP sends refuse absolute and relative redirects. |
+| `test_webhook_channel_does_not_follow_redirects` | Verifies webhook redirect responses do not trigger a second request to the redirected URL. |
+| `test_webhook_channel_treats_4xx_as_terminal` | Verifies 4xx webhook responses fail terminally instead of retrying. |
+| `test_webhook_channel_rejects_malformed_urls` | Verifies malformed or non-http(s) webhook URLs are rejected before an HTTP request is attempted. |
+| `test_webhook_channel_rejects_private_and_local_urls` | Verifies webhook delivery rejects loopback, link-local, private-network, and localhost destinations before sending. |
+| `test_webhook_channel_rejects_dns_resolved_private_hosts` | Verifies webhook delivery rejects hostnames that resolve to private addresses. |
+| `test_webhook_channel_allows_explicit_private_host_allowlist` | Verifies the private-host allowlist can intentionally permit trusted internal webhook receivers. |
+| `test_webhook_channel_retries_timeout` | Verifies network timeouts are retryable webhook delivery failures. |
+| `test_run_complete_payload_exposes_command_root_without_full_command` | Verifies run-complete payloads include only command root, not full command arguments. |
+
 #### `test_output_search.py`
 
 SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code path (when `runs_fts` is available) and the graceful fallback to `LOWER(command)` / `LOWER(output_search_text)` `LIKE` matching when the FTS table is absent.
@@ -834,6 +1215,43 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
 | `TestOutputSearch.test_fts_failure_falls_back_to_command_and_output_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text and output-only queries succeed via `LIKE` fallback and return HTTP 200. |
 
+#### `test_output_signals_against_line_signal.py`
+
+| Test | Description |
+| --- | --- |
+| `test_output_signal_scopes_are_covered_by_line_signal_enum` | Verifies that backend output signal scopes are covered by the typed line-event signal enum. |
+
+#### `test_postgres_backend.py`
+
+Backend smoke, route, and migration coverage. SQLite smoke coverage always runs. CI runs the Postgres lane automatically. For local runs, Postgres integration tests run when `DARKLAB_TEST_POSTGRES_DSN` or `--postgres-dsn` points at a test Postgres database; `npm run test:postgres` can also create a disposable Docker Postgres container automatically. Postgres tests create and drop isolated schemas so they do not share tables with the app schema.
+
+| Test | Description |
+| --- | --- |
+| `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the Phase 6 backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
+| `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
+| `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_configured_postgres_app_startup_smoke_uses_real_pool` | Starts the configured app in a subprocess against a real Postgres pool and verifies startup, token generation, token lookup, and History access. |
+| `test_history_commands_route_reads_from_postgres` | Verifies the history commands route can read distinct recent commands through the Postgres compatibility query path. |
+| `test_history_route_reads_search_results_from_postgres` | Verifies the History list route can search run output through the Postgres compatibility query path. |
+| `test_history_stats_route_reads_from_postgres` | Verifies the History stats route counts runs, snapshots, starred commands, and elapsed time through Postgres. |
+| `test_builtin_stats_command_reads_elapsed_time_from_postgres` | Verifies the terminal `stats` built-in uses Postgres-safe elapsed-time math while preserving command-root breakdowns. |
+| `test_client_side_run_route_writes_to_postgres` | Verifies the browser-owned client-side run persistence route writes run rows through Postgres. |
+| `test_run_output_artifact_upsert_writes_to_postgres` | Verifies full-output artifact metadata uses a Postgres-safe conflict update. |
+| `test_completed_external_run_persistence_writes_full_postgres_graph` | Verifies completed external runs persist run rows, full-output artifacts, workspace artifacts, active project links, Atlas entities, findings, and History readback through Postgres. |
+| `test_completed_run_finalize_rolls_back_optional_postgres_failure` | Verifies optional Postgres run-finalization failures roll back their partial writes without losing the completed run row. |
+| `test_share_routes_roundtrip_snapshot_on_postgres` | Verifies snapshot share create/read/delete routes round-trip through Postgres. |
+| `test_session_metadata_routes_write_to_postgres` | Verifies session preferences, recent values, starred commands, and user workflows write through Postgres using JSONB-safe parameters and native conflict handling. |
+| `test_session_token_lifecycle_and_migration_routes_use_postgres` | Verifies session token generation, lookup, verification, revocation, guarded session migration, and migrated session data through Postgres. |
+| `test_secret_session_migration_uses_postgres_conflict_handling` | Verifies encrypted secret session migration keeps an existing destination secret when Postgres conflict handling skips a duplicate source secret. |
+| `test_project_routes_use_postgres_query_path` | Verifies project create/list/active, target linking, run linking, metadata ordering, and JSON source details through the Postgres query path. |
+| `test_workspace_files_route_uses_postgres_metadata_query_path` | Verifies the Files list route can attach workspace artifact, project, label, and note metadata through the Postgres query path. |
+| `test_atlas_routes_use_postgres_query_path` | Verifies Atlas summary, entity list/detail/export, finding search, finding review, cleanup preview, JSONB intel snapshots, and label ordering through the Postgres query path. |
+| `test_atlas_intel_refresh_writes_jsonb_snapshots` | Verifies Atlas intel refresh stores provider payloads as Postgres JSONB snapshots and entity detail loads offloaded body-store payloads instead of pointer metadata. |
+| `test_diag_route_reports_postgres_storage` | Verifies `/diag` reports Postgres table counts, storage buckets, largest saved runs, backend-specific database metadata, and usage stats without SQLite-only FTS probes or tuple-only row access. |
+| `test_metrics_route_scrapes_postgres_runtime_gauges` | Verifies `/metrics` scrapes Postgres runtime gauges, backend markers, table rows, allocated bytes, and a harmless zero FTS-orphan value through the app query path. |
+| `test_postgres_db_init_applies_retention_pruning` | Verifies Postgres `db_init()` applies retention pruning after migrations and removes expired run, snapshot, artifact, and body-store metadata/files. |
+| `test_migration_helper_copies_fixture_into_isolated_postgres_schema` | Builds a SQLite fixture with runs, artifacts, body-store pointers, secrets metadata, JSON columns, and search text, migrates it into an isolated Postgres schema, then verifies row counts, JSON values, file pointers, and search parity. |
+
 #### `test_request_kill_and_commands.py`
 
 | Test | Description |
@@ -848,6 +1266,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestKillRoute.test_kill_sends_sigterm_to_process_group` | Checks that kill sends sigterm to process group. |
 | `TestKillRoute.test_kill_still_returns_true_when_process_lookup_fails` | Checks that kill still returns true when process lookup fails. |
 | `TestKillRoute.test_kill_uses_scanner_sudo_path_when_configured` | Checks that kill uses scanner sudo path when configured. |
+| `TestKillRoute.test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race` | Verifies that kill treats an already-exited scanner process group as a successful race after sudo reports failure. |
 | `TestKillRoute.test_kill_rejects_non_object_json` | Checks that kill rejects non object JSON. |
 | `TestKillRoute.test_kill_rejects_non_string_run_id` | Checks that kill rejects non string run id. |
 | `TestWelcomeLoadingEdges.test_valid_yaml_is_normalized` | Checks that valid YAML is normalized. |
@@ -862,16 +1281,19 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestIsCommandAllowedEdges.test_workspace_enabled_exempts_declared_file_flags_and_rewrites_paths` | Verifies that declared workspace file flags can bypass deny entries only when workspace storage is enabled and the file names rewrite into the session workspace. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_resolve_relative_to_workspace_cwd` | Verifies that declared workspace file flags resolve relative file names against the active tab workspace folder before rewriting them for execution. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_allow_parent_paths_without_escaping_workspace` | Verifies that `..` path segments can move upward within the workspace but cannot escape the session workspace. |
+| `TestIsCommandAllowedEdges.test_workspace_file_flags_treat_root_paths_as_workspace_root` | Verifies that leading-slash workspace file flag values resolve from the session workspace root instead of the server filesystem root. |
 | `TestIsCommandAllowedEdges.test_workspace_disabled_keeps_declared_file_flags_denied` | Verifies that declared workspace file flags remain denied while workspace storage is disabled. |
 | `TestIsCommandAllowedEdges.test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists` | Verifies that workspace-aware read flags rewrite relative session file names while preserving allowed packaged absolute wordlists. |
 | `TestIsCommandAllowedEdges.test_workspace_write_flags_keep_dev_null_exception` | Verifies that workspace-aware write flags do not break the existing `/dev/null` output exception. |
-| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, and `katana` using the real command registry metadata. |
+| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `httpx`, `gobuster`, `naabu`, `katana`, `nmap`, and Amass using the real command registry metadata. |
+| `TestIsCommandAllowedEdges.test_workspace_artifact_capture_skips_app_managed_amass_database` | Verifies that app-managed Amass database paths under `tools/amass` are not captured as workspace artifacts. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_inline_literal_targets` | Verifies configured restricted networks block literal IP and URL-host command inputs in metadata-known target slots while allowing ordinary domains. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_overlapping_cidr_targets` | Verifies configured restricted networks block overlapping CIDR command inputs in metadata-known target slots. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_inspect_workspace_target_files` | Verifies configured restricted networks are enforced for app-readable workspace target files passed through declared read flags. |
 | `TestBuiltinCommandResolution.test_documented_builtin_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_BUILTIN_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestBuiltinCommandResolution.test_resolves_supported_builtin_commands` | Checks that resolves supported built-in commands. |
 | `TestBuiltinCommandResolution.test_workspace_builtin_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
+| `TestBuiltinCommandResolution.test_tour_builtin_command_is_hidden_when_disabled` | Verifies that the `tour` built-in stops resolving when the onboarding feature is disabled. |
 | `TestBuiltinCommandResolution.test_commands_external_catalog_uses_commands_registry` | Verifies that `commands --external` renders allowed external roots from `commands.yaml` rather than a duplicated list. |
 | `TestBuiltinCommandResolution.test_commands_info_renders_registry_catalog_entry` | Verifies that `commands info <root>` renders command descriptions, examples, and value-taking flags from the registry catalog without exposing internal app-handling notes. |
 | `TestBuiltinCommandResolution.test_commands_info_unknown_root_returns_usage_hint` | Verifies that `commands info` returns a clear no-entry message for unknown roots. |
@@ -892,6 +1314,48 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHealthRoute.test_status_degraded_when_db_fails` | Checks that status degraded when database fails. |
 | `TestHealthRoute.test_status_ok_when_redis_pings_successfully` | Checks that status ok when Redis pings successfully. |
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
+| `TestSecretsRoutes.test_session_secrets_crud_never_returns_value` | Verifies session secret create, list, rotate, and delete routes return metadata only and never echo stored values. |
+| `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
+| `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
+| `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
+| `TestNotificationChannelRoutes.test_notification_channels_require_durable_session_tokens` | Verifies browser notification-channel routes require durable session tokens. |
+| `TestNotificationChannelRoutes.test_notification_channel_crud_masks_secret_values` | Verifies notification-channel create, list, update, and kind-lock routes return masked metadata while preserving vault-backed secret references. |
+| `TestNotificationChannelRoutes.test_notification_channel_create_rolls_back_secret_when_row_insert_fails` | Verifies notification-channel secret writes roll back with the channel row when creation fails. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_targets_requested_channel` | Verifies a channel test send targets only the requested notification channel. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_reports_delivery_failure_status` | Verifies a channel test send reports the persisted retry/failure status instead of showing queued success only. |
+| `TestNotificationChannelRoutes.test_notification_event_audit_route_lists_session_channel_deliveries` | Verifies the browser notification delivery audit route returns only the active session's channel events. |
+| `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
+| `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses and removes all channel-owned vault secrets. |
+| `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
+| `TestProjectRoutes.test_project_targets_list_supports_pagination_type_search_and_auto_filter` | Verifies the project target list supports paging, type filters, search, and the auto-discovered target review filter. |
+| `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
+| `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
+| `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
+| `TestProjectRoutes.test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere` | Verifies project deletion keeps entity-owned findings intact when the entity remains linked through another project. |
+| `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
+| `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
+| `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
+| `TestProjectRoutes.test_entity_note_routes_enforce_session_and_payload_boundaries` | Verifies entity note routes reject cross-session access and invalid note payloads while preserving the owner note. |
+| `TestProjectRoutes.test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs` | Verifies project run comparison rejects one-run, same-run, unlinked, cross-session, missing-baseline, and missing-project requests. |
+| `TestProjectRoutes.test_project_compare_returns_empty_diffs_for_matching_empty_runs` | Verifies project run comparison returns empty added/removed diffs for linked runs with no findings or artifacts. |
+| `TestProjectRoutes.test_project_and_history_compare_match_artifacts_by_content_hash` | Verifies project and history run comparisons both treat same-content artifacts as unchanged even when workspace paths differ. |
+| `TestProjectRoutes.test_project_scoped_compare_lines_requires_linked_project_runs` | Verifies project-scoped compare-line expansion requires project-owned linked runs. |
+| `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
+| `TestProjectRoutes.test_project_findings_can_exclude_collapsed_command_groups` | Verifies collapsed Project Findings command groups are excluded from the paged row query while their collapsed counts remain available. |
+| `TestProjectRoutes.test_bulk_project_links_report_mixed_results_and_keep_legacy_response` | Verifies bulk project links report per-run add/remove/reject results while legacy single-link callers keep their response shape. |
+| `TestProjectRoutes.test_project_run_link_can_include_source_atlas_entities` | Verifies run project links can preview and optionally link Atlas entities found in the same source run. |
+| `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run, non-curated Atlas entity links from the project while keeping curated entities. |
+| `TestProjectRoutes.test_bulk_project_links_reject_too_many_entity_ids` | Verifies bulk project link requests reject payloads over the server-side run limit. |
+| `TestProjectRoutes.test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached` | Verifies bulk project links report `policy_blocked` when the project link limit is reached mid-batch. |
+| `TestProjectRoutes.test_project_target_quota_ignores_bulk_linked_atlas_entities` | Verifies project target quota checks do not count bulk-linked Atlas entities as discovered or manually added project targets. |
+| `TestProjectRoutes.test_bulk_project_atlas_links_obey_entity_quota` | Verifies bulk Atlas entity linking obeys the project entity quota independently from the broader project link quota. |
+| `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
+| `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
+| `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
+| `TestProjectRoutes.test_evidence_package_download_job_builds_and_downloads_archive` | Verifies polled evidence package archive jobs report completion and download the completed ZIP. |
+| `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
+| `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
@@ -904,6 +1368,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestStatusRoute.test_server_time_is_ms_epoch` | `server_time` is a millisecond-epoch integer in a plausible range. |
 | `TestConfigRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestConfigRoute.test_contains_expected_keys` | Checks contains expected keys handling. |
+| `TestConfigRoute.test_interactive_pty_commands_reflect_registry` | Verifies that the browser config exposes interactive PTY command metadata from the command registry. |
 | `TestConfigRoute.test_workspace_menu_affordances_follow_config` | Checks that test workspace menu affordances follow config. |
 | `TestConfigRoute.test_max_tabs_is_int` | Checks that max tabs is int. |
 | `TestConfigRoute.test_contains_timeout_and_welcome_keys` | Contains timeout and welcome keys. |
@@ -912,6 +1377,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestConfigRoute.test_prompt_identity_reflects_cfg` | Checks that prompt username and domain reflect CFG. |
 | `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
+| `TestConfigRoute.test_tour_metadata_reflects_cfg_and_visible_chapters` | Verifies that `/config` exposes tour availability, version, and chapter count from the tour configuration. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |
 | `TestConfigRoute.test_diag_enabled_false_when_cidrs_empty` | Checks that diagnostics enabled false when cidrs empty. |
 | `TestConfigRoute.test_diag_enabled_false_when_client_ip_not_in_cidrs` | Checks that diagnostics enabled false when client IP not in cidrs. |
@@ -929,6 +1395,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestThemesRoute.test_empty_registry_falls_back_to_built_in_dark_theme` | Checks that empty registry falls back to built in dark theme. |
 | `TestVendorAssets.test_ansi_up_js_is_served` | Checks that ansi_up.js is served with correct content type. |
 | `TestVendorAssets.test_jspdf_js_is_served` | Checks that jspdf.umd.min.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
@@ -938,8 +1407,12 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestDiagRoute.test_response_has_expected_top_level_keys` | Checks that response has expected top level keys. |
 | `TestDiagRoute.test_app_section_has_version_and_name` | Checks that app section has version and name. |
 | `TestDiagRoute.test_config_section_contains_operational_keys` | Checks that config section contains operational keys. |
+| `TestDiagRoute.test_pty_section_contains_operator_metrics` | Checks that diagnostics include active PTY count, completed durations, input bytes, dropped bytes, and control queue depth. |
+| `TestDiagRoute.test_classifier_inspector_reports_line_metadata` | Verifies that `/diag` and the lightweight classifier endpoint can inspect one output line and report the backend classifier's kind, role, command root, signals, and rendered HTML section near the top of the page. |
 | `TestDiagRoute.test_every_config_key_belongs_to_a_group` | Drift guard: every key emitted into `result['config']` must be listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it would render nowhere on the page. |
 | `TestDiagRoute.test_html_response_renders_config_group_labels` | Checks that the HTML diag page renders each config group label and the `.diag-config-group-label` styling hook. |
+| `TestDiagRoute.test_ai_test_route_runs_prompt_and_rate_limits_repeats` | Checks that the AI diagnostics test route runs one prompt and rate-limits repeats. |
+| `TestDiagRoute.test_ai_test_route_logs_provider_failures` | Checks that the AI diagnostics test route logs provider failures with safe status details. |
 | `TestDiagRoute.test_db_section_ok_and_has_counts` | Checks that database section ok and has counts. |
 | `TestDiagRoute.test_db_section_error_on_db_failure` | Checks that database section error on database failure. |
 | `TestDiagRoute.test_redis_section_reflects_client_presence` | Checks that Redis section reflects client presence. |
@@ -955,12 +1428,17 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestDiagRoute.test_db_section_reports_journal_mode` | Checks that the database section reports `journal_mode` as one of SQLite's documented values (`delete`, `truncate`, `persist`, `memory`, `wal`, `off`). |
 | `TestDiagRoute.test_db_section_reports_freelist_and_reclaimable_bytes` | Checks that `page_count`, `page_size`, `freelist_count`, and `reclaimable_size = freelist × page_size` are surfaced for VACUUM-headroom visibility. |
 | `TestDiagRoute.test_db_section_reports_per_table_row_counts` | Checks that the per-table row count list is populated, includes the `runs` table, and excludes `sqlite_*` internal tables and FTS5 shadow tables (`runs_fts_*`). |
+| `TestDiagRoute.test_db_storage_breakdown_reports_buckets` | Checks that `/diag` JSON includes storage buckets, run-table row counts, and logical payload estimates. |
+| `TestDiagRoute.test_db_storage_breakdown_sums_payload_and_artifact_bytes` | Checks that storage payload estimates include wide run text fields and numeric artifact byte sizes. |
+| `TestDiagRoute.test_db_storage_breakdown_rolls_up_fts_shadow_tables` | Checks that FTS5 shadow tables are grouped under the `runs_fts` virtual table when `dbstat` is available. |
+| `TestDiagRoute.test_db_storage_breakdown_falls_back_without_dbstat` | Checks that storage diagnostics keep row counts and logical payloads when SQLite lacks `dbstat`. |
+| `TestDiagRoute.test_html_response_renders_storage_breakdown_section` | Checks that the HTML diagnostics page renders the Storage breakdown panel and run sizing hints. |
 | `TestDiagRoute.test_db_section_quotes_metadata_table_names_for_row_counts` | Verifies that diagnostics quote and escape SQLite metadata-derived table names before row-count probes. |
 | `TestDiagRoute.test_diag_sqlite_identifier_rejects_empty_or_nul_names` | Checks that the diagnostics SQLite identifier helper escapes double quotes and rejects empty or NUL-containing names. |
 | `TestDiagRoute.test_db_section_runs_and_snapshots_remain_at_top_level` | Backward-compat check: the original /diag schema's `runs` and `snapshots` top-level keys are still present and match the new `tables` row counts. |
 | `TestDiagRoute.test_db_section_reports_fts_orphan_count` | Checks that the FTS5 orphan probe (`runs_fts` rows whose parent `runs.rowid` is gone) returns a non-negative integer. |
 | `TestDiagRoute.test_db_fts_orphan_probe_uses_sqlite_rowid_not_uuid_id` | Verifies that the diagnostics FTS orphan probe compares `runs_fts.rowid` to SQLite `runs.rowid` rather than the UUID/text `runs.id`, so valid indexed rows are not reported as orphans. |
-| `TestDiagRoute.test_db_section_reports_query_latency` | Checks that the database section reports a non-negative `query_ms` for the count probes. |
+| `TestDiagRoute.test_db_section_reports_ping_and_probe_timings` | Checks that the database section reports a lightweight `ping_ms`, a full diagnostics `probe_ms`, and keeps `query_ms` as a compatibility alias. |
 | `TestDiagRoute.test_assets_section_reports_loaded_when_files_present` | Checks that assets section reports loaded when committed files are present. |
 | `TestDiagRoute.test_assets_section_reports_missing_when_files_absent` | Checks that assets section reports missing when static asset files are absent. |
 | `TestDiagRoute.test_assets_probe_size_matches_served_content_length` | Checks that the in-process HEAD probe surfaces the actual served `Content-Length` for ansi_up and jspdf, matching a direct GET against the same URL. |
@@ -1000,6 +1478,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkflowsRoute.test_payload_includes_input_driven_workflows` | Verifies that `/workflows` includes workflows with declared inputs so the client can render prefilled, user-editable workflow forms. |
 | `TestWorkflowsRoute.test_workspace_required_workflows_follow_files_feature_flag` | Verifies that workspace-required workflows are omitted from `/workflows` when Files are disabled and returned when Files are enabled. |
 | `TestWorkflowsRoute.test_user_workflows_are_returned_before_builtins` | Verifies that current-session user-created workflows are returned before built-in workflows. |
+| `TestSessionPreferencesRoute.test_tour_seen_version_round_trips_unset_current_and_stale_values` | Verifies that session preferences preserve unset, current, and stale tour-seen versions as normalized integers. |
+| `TestSessionPreferencesRoute.test_tour_seen_route_records_current_tour_version_without_losing_preferences` | Verifies that recording an opened tour stores the current tour version without discarding existing session preferences. |
+| `TestSessionPreferencesRoute.test_tour_seen_version_migrates_with_session_token` | Verifies that tour-seen preferences migrate with the rest of a session token's saved Options state. |
 | `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
 | `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
@@ -1015,10 +1496,38 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestMobileWelcomeHintsRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
+| `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
+| `TestAtlasRoutes.test_findings_list_can_filter_by_source_run` | Verifies Atlas summary counts, entity lists, and Findings can be scoped to one current-session source run without leaking rows from other runs or sessions. |
+| `TestAtlasRoutes.test_summary_can_filter_by_project` | Verifies Atlas summary counts honor project scope instead of reporting global session totals. |
+| `TestAtlasRoutes.test_entity_list_batches_metadata_for_current_page` | Verifies Atlas entity lists batch visible-page labels and project-link counts without loading full notes or project links per row. |
+| `TestAtlasRoutes.test_atlas_search_matches_entity_and_finding_metadata` | Verifies Atlas search matches entity and finding labels/notes without crossing session boundaries. |
+| `TestAtlasRoutes.test_entity_detail_caps_large_linked_collections` | Verifies Atlas entity detail responses page large linked source-run and finding collections while reporting totals and more-row state. |
+| `TestAtlasRoutes.test_orphan_filter_surfaces_atlas_rows_after_source_run_delete` | Verifies Atlas hides rows without source runs by default while the orphan filter can surface them. |
+| `TestAtlasRoutes.test_stale_run_links_do_not_hide_atlas_orphans_or_block_cleanup` | Verifies stale Atlas source links from deleted runs do not hide orphaned rows or block source-run cleanup. |
+| `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune non-curated Atlas rows from the deleted run while preserving curated entities. |
+| `TestAtlasRoutes.test_run_cleanup_protects_findings_reachable_through_project_run_links` | Verifies run cleanup keeps findings that are project-reachable through linked source runs. |
+| `TestAtlasRoutes.test_run_delete_can_prune_curated_project_reachable_atlas_rows_when_requested` | Verifies the explicit curated cleanup option can delete single-source Atlas rows that are project-reachable. |
+| `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove non-curated sibling entities from the same source run. |
+| `TestAtlasRoutes.test_run_retaining_atlas_cleanup_detaches_sources_and_recalculates_rows` | Verifies source-run Atlas cleanup keeps the run transcript while detaching links, pruning disposable rows, and recalculating shared counts. |
+| `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings while reporting missing ids. |
+| `TestAtlasRoutes.test_atlas_read_and_write_routes_are_session_scoped` | Verifies Atlas read, write, refresh, delete, and project-link routes do not reveal or mutate another session's Atlas data. |
+| `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
+| `TestAtlasRoutes.test_refresh_intel_can_offload_provider_payload_and_restore_detail` | Verifies oversized Atlas intel payloads can be offloaded, restored in entity detail, and cleaned up with the entity. |
+| `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
+| `TestAtlasRoutes.test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links` | Verifies Atlas suppression hides entities and findings by default while preserving review, project-link, and export access through the suppressed view. |
+| `TestAtlasRoutes.test_atlas_saved_views_roundtrip_and_stay_session_scoped` | Verifies saved Atlas views can be created, listed, updated, deleted, and kept isolated to the owning session. |
+| `TestAtlasRoutes.test_unscoped_findings_flow_through_atlas_projects_and_run_routes` | Verifies unscoped findings share one review state across Atlas, Projects, and source-run finding routes. |
+| `TestAtlasRoutes.test_run_findings_route_returns_deduped_findings_with_occurrence_count` | Verifies source-run finding routes return deduped findings plus occurrence totals for large repeated findings. |
+| `TestAtlasRoutes.test_project_links_curate_atlas_entities_into_project_targets` | Verifies Atlas project links surface as Project Targets and can be unlinked without copying entity records. |
+| `TestAtlasRoutes.test_project_summary_surfaces_all_linked_atlas_entities` | Verifies Projects summaries surface linked Atlas entities beyond targets, including intel availability counts. |
+| `TestAtlasRoutes.test_project_findings_include_linked_entity_findings_without_linked_run` | Verifies Projects findings include findings reached through linked Atlas entities even when the source run is not linked. |
+| `TestAtlasRoutes.test_bulk_project_unlink_supports_atlas_entities` | Verifies bulk project unlink removes Atlas entity project links without deleting the entities. |
+| `TestAtlasRoutes.test_exports_entities_as_csv_and_jsonl_with_metadata` | Verifies Atlas entity exports include labels, notes, project names, and provider names in CSV and JSONL formats. |
 | `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
+| `TestWorkspaceRoutes.test_workspace_file_routes_include_and_maintain_generic_metadata` | Verifies that workspace file list/read responses expose generic labels and notes, and that move/delete operations keep path metadata in sync. |
 | `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
 | `TestWorkspaceRoutes.test_info_and_delete_folder_recursively` | Verifies that the Files API reports folder file counts and deletes nested folder contents through the same validated delete endpoint. |
 | `TestWorkspaceRoutes.test_move_file_and_folder_paths` | Verifies that the Files API can move files into folders, rename folders while moving, and move files back to the workspace root. |
@@ -1028,8 +1537,10 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkspaceRoutes.test_allows_hidden_workspace_paths_when_listed` | Verifies that listed hidden session files can be written, listed, and read through the Files API. |
 | `TestWorkspaceRoutes.test_enforces_quota_and_type_checks` | Verifies request-body validation and workspace quota errors at the HTTP boundary. |
 | `TestWorkspaceRoutes.test_download_streams_session_owned_file` | Verifies that validated session-owned files can be downloaded without exposing absolute paths. |
+| `TestWorkspaceRoutes.test_file_list_includes_project_artifact_metadata` | Verifies that workspace file listings include project artifact metadata for files captured from run input/output flags. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_runs_before_requests_when_workspace_enabled` | Verifies that request-driven workspace cleanup removes expired session directories when workspace storage is enabled. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_skips_request_session_workspace` | Verifies that request-driven workspace cleanup preserves the active request session while removing other expired workspaces. |
+| `TestRunRoute.test_workspace_path_output_filter_masks_absolute_session_paths` | Verifies real-run output masking rewrites absolute session workspace paths to user-facing workspace paths. |
 | `TestRunRoute.test_brokered_run_requires_available_broker` | Verifies that `POST /runs` reports an unavailable broker before starting a command. |
 | `TestRunRoute.test_brokered_run_missing_runtime_returns_synthetic_stream_reference` | Verifies that brokered command starts return a synthetic stream reference when an allowed runtime is missing. |
 | `TestRunRoute.test_brokered_run_rejects_invalid_command_payloads` | Verifies that brokered command starts reject malformed, missing, non-string, and blank command payloads. |
@@ -1038,6 +1549,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_brokered_run_events_returns_session_scoped_backfill` | Verifies that brokered event backfill returns session-authorized events with event IDs. |
 | `TestRunRoute.test_brokered_run_events_rejects_runs_outside_session` | Verifies that brokered event backfill rejects run IDs outside the current session before reading broker events. |
 | `TestRunRoute.test_brokered_run_stream_replays_events_for_session_run` | Verifies that brokered stream replay emits stored events and refreshes owner liveness. |
+| `TestRunRoute.test_brokered_run_stream_allows_registered_run_that_exited_before_persistence` | Verifies that brokered stream replay can attach to a registered same-session run that exited before completed-run persistence finished. |
 | `TestRunRoute.test_brokered_run_stream_rejects_runs_outside_session` | Verifies that brokered stream replay rejects run IDs outside the current session before opening a broker stream. |
 | `TestRunRoute.test_brokered_run_owner_takeover_route_is_retired` | Verifies that the previous active-run takeover route is no longer exposed. |
 | `TestRunRoute.test_kill_allows_same_session_attached_client_and_publishes_killer` | Verifies that `/kill` accepts a same-session attached client and publishes killed-event metadata. |
@@ -1046,6 +1558,10 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
 | `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
+| `TestRunRoute.test_client_side_run_can_offload_search_text_and_delete_it_with_run` | Verifies oversized run search text can be offloaded and cleaned up when the run is deleted. |
+| `TestRunRoute.test_client_side_run_applies_preview_byte_cap` | Verifies that browser-owned run persistence applies the same preview byte cap as server-owned run output. |
+| `TestRunRoute.test_client_side_run_persists_tour_builtin` | Verifies that the terminal tour can persist its client-side transcript as a normal history run. |
+| `TestRunRoute.test_client_side_run_does_not_link_to_active_project` | Verifies browser-owned built-in persistence saves history without linking administrative runs to the active project. |
 | `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
 | `TestHistoryRoute.test_get_returns_200` | Checks get returns 200 handling. |
 | `TestHistoryRoute.test_get_returns_runs_list` | Checks that get returns runs list. |
@@ -1058,21 +1574,42 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_insights_filters_app_builtin_commands` | Verifies that app built-ins (`pwd`, `whoami`, `help`, …) are filtered from the constellation, treemap, heatmap, events, and `max_day_count` returned by `/history/insights`. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
+| `TestHistoryRoute.test_bulk_delete_history_reports_partial_results_and_rejects_running_runs` | Verifies bulk history delete reports per-run results and rejects running runs without deleting them. |
+| `TestHistoryRoute.test_bulk_delete_history_rejects_malformed_ids` | Verifies that bulk history delete rejects non-string and overlong run IDs before querying or logging them. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
+| `TestHistoryRoute.test_ai_summary_routes_enqueue_and_list_session_scoped_assists` | Checks that browser AI summary assist routes enqueue, list, and enforce session scope. |
 | `TestHistoryRoute.test_history_respects_panel_limit_and_sorts_newest_first` | Checks that history respects panel limit and sorts newest first. |
 | `TestHistoryRoute.test_history_commands_returns_distinct_recent_commands_without_exit_filter` | Verifies that `/history/commands` returns the newest distinct commands without excluding non-zero exit codes. |
 | `TestHistoryRoute.test_history_reports_totals_and_keeps_roots_complete_across_pages` | Checks that paginated history responses report totals and keep command-root suggestions across pages. |
 | `TestHistoryRoute.test_history_applies_starred_only_server_side` | Checks that starred-only history filtering is applied server-side and reflected in totals. |
 | `TestHistoryRoute.test_history_can_return_snapshot_items` | Checks that `/history?type=snapshots` returns snapshot items through the mixed history payload while leaving the run subset empty. |
+| `TestHistoryRoute.test_history_filters_run_subtypes` | Verifies that `/history` can split run rows into app built-ins and external command runs. |
+| `TestHistoryRoute.test_history_filters_runs_by_project_and_ignores_legacy_snapshot_links` | Verifies project history filters return linked runs and ignore legacy snapshot project links. |
 | `TestHistoryRoute.test_history_search_filters_by_command_text` | Checks that `/history` command-text search narrows the returned runs. |
 | `TestHistoryRoute.test_history_command_scope_excludes_output_matches` | Verifies command-scoped history search excludes runs that only match through saved output text. |
 | `TestHistoryRoute.test_history_filters_by_command_root` | Checks that `/history` command-root filtering returns matching runs and exposes the session root list. |
 | `TestHistoryRoute.test_history_filters_by_exit_code_and_recent_date_range` | Checks that `/history` exit-code and recent-date filters can be combined. |
 | `TestHistoryRoute.test_active_history_returns_running_runs_for_this_session` | Checks that `/history/active` returns the current session's in-flight run metadata. |
 | `TestHistoryRoute.test_compare_candidates_rank_exact_command_before_same_target` | Verifies that run comparison candidates prefer exact command matches before same-target and same-command-only matches. |
+| `TestHistoryRoute.test_hunk_line_diff_handles_insert_delete_and_equal_context` | Verifies that run comparison hunks cover insertions, modified lines, and folded equal context. |
+| `TestHistoryRoute.test_compare_line_events_reports_structural_changes_by_line_index` | Verifies structured run-output comparison reports same-line kind/role changes without treating them as text-only equality. |
+| `TestHistoryRoute.test_compare_full_output_falls_back_to_preview_when_artifact_is_missing` | Verifies run comparison falls back to saved preview output when a referenced full-output artifact is unavailable. |
+| `TestHistoryRoute.test_compare_route_falls_back_to_preview_when_full_artifact_is_corrupt` | Verifies the compare route returns a preview-backed diff instead of failing when a full-output artifact is corrupt. |
+| `TestHistoryRoute.test_hunk_line_diff_handles_uneven_replace_pairing` | Verifies that uneven replace hunks pair similar lines while preserving left-only rows. |
+| `TestHistoryRoute.test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired` | Verifies that unrelated replace blocks and very long lines stay in unpaired buckets. |
+| `TestHistoryRoute.test_replace_pairing_uses_quick_ratio_before_full_ratio` | Verifies replace pairing skips expensive full similarity checks when cheap quick-ratio filtering already rejects a candidate. |
+| `TestHistoryRoute.test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold` | Verifies that one-line replace blocks still render as paired changes even below the normal similarity threshold. |
+| `TestHistoryRoute.test_hunk_line_diff_reports_budget_exhaustion` | Verifies changed-line and hunk-count budget exhaustion are reported in the hunk diff payload. |
+| `TestHistoryRoute.test_compare_history_lines_returns_filtered_output_slices` | Verifies compare-line lazy expansion slices filtered output entries after terminal chrome is removed. |
+| `TestHistoryRoute.test_compare_history_lines_rejects_invalid_ranges_and_clamps_stale_ranges` | Verifies compare-line lazy expansion rejects invalid controls, clamps stale end ranges, and still rejects cross-session run access. |
+| `TestHistoryRoute.test_compare_history_lines_paginates_by_line_and_byte_limits` | Verifies compare-line lazy expansion enforces line and byte page caps. |
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
+| `TestHistoryRoute.test_compare_history_runs_handles_invalid_requests_and_identical_runs` | Verifies run comparison rejects invalid request combinations and returns a no-change payload for identical completed runs. |
+| `TestHistoryRoute.test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint` | Verifies that run comparison treats matching finding text as unchanged even when findings are recorded in different order with different run-scoped fingerprints. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
+| `TestShareRoute.test_post_can_offload_large_snapshot_content_and_restore_it` | Verifies oversized snapshot bodies can be offloaded, restored through the share API, and deleted with the snapshot. |
+| `TestShareRoute.test_post_does_not_link_snapshot_to_source_run_project` | Verifies snapshots created from project-associated runs are not linked back to that project. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
 | `TestShareRoute.test_post_rejects_invalid_content_item` | Checks that post rejects invalid content item. |
@@ -1087,6 +1624,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestShareRoute.test_post_rejects_non_object_json` | Checks that post rejects non object JSON. |
 | `TestShareRoute.test_get_nonexistent_share_returns_404` | Checks that get nonexistent share returns 404. |
 | `TestShareRoute.test_delete_share_removes_snapshot_for_current_session` | Checks that deleting a snapshot share removes it for the owning session and leaves the permalink unavailable afterward. |
+| `TestShareRoute.test_bulk_delete_shares_reports_partial_results_and_removes_metadata` | Checks that bulk snapshot deletion reports partial results and removes metadata for deleted snapshots. |
+| `TestShareRoute.test_bulk_delete_shares_rejects_malformed_ids` | Verifies that bulk snapshot delete rejects non-string and overlong snapshot IDs before querying or logging them. |
 | `TestShareRoute.test_get_share_json_returns_content` | Checks that get share JSON returns content. |
 | `TestShareRoute.test_get_share_html_returns_page` | Checks that get share HTML returns page. |
 | `TestShareRoute.test_get_share_html_honors_theme_name_cookie` | Checks that get share HTML honors theme name cookie. |
@@ -1113,6 +1652,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunPermalinkRoute.test_json_view_returns_command` | Checks that JSON view returns command. |
 | `TestRunPermalinkRoute.test_json_view_is_a_bearer_permalink_across_sessions` | Verifies that a copied run permalink URL is an implicit bearer link and can render JSON without the original session identity. |
 | `TestRunPermalinkRoute.test_json_view_returns_full_output_when_artifact_exists` | Checks that JSON view returns full output when artifact exists. |
+| `TestRunPermalinkRoute.test_json_view_falls_back_to_preview_when_full_output_artifact_is_missing` | Verifies JSON run views fall back to preview output when a referenced full-output artifact is unavailable. |
 | `TestRunPermalinkRoute.test_json_preview_view_returns_preview_when_requested` | Checks that JSON preview view returns preview when requested. |
 | `TestRunPermalinkRoute.test_html_content_type` | Checks HTML content type handling. |
 | `TestRunPermalinkRoute.test_permalink_uses_full_output_when_available` | Checks that permalink uses full output when available. |
@@ -1141,17 +1681,42 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 | Test | Description |
 | --- | --- |
+| `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_disabled` | Verifies that interactive PTY runs stay disabled unless the instance opts in. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_requires_broker_or_single_worker` | Verifies that interactive PTY mode requires Redis in multi-worker deployments or a single-worker local fallback. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_strips_trigger_before_validation` | Verifies that `mtr --interactive` validates and starts as an `mtr` PTY command without passing the trigger flag to the tool. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_uses_workspace_cwd_and_validated_exec_command` | Verifies that PTY start requests pass the tab workspace CWD into validation and spawn the validated workspace-aware command argv. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_uses_registry_spec` | Verifies that interactive PTY start requests use trigger, size, input, and runtime settings from the command registry. |
+| `TestInteractivePtyRuns.test_completed_pty_transcript_modes_shape_saved_output` | Verifies that completed PTY transcript modes can preserve final-frame output or scrollback findings while dropping transient status redraws. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_allows_multiple_active_pty_runs_for_session` | Verifies that a session can start another interactive PTY while one is already active. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit` | Verifies that interactive PTY startup returns a clear limit error instead of spawning when the session already has the configured maximum active PTYs. |
+| `TestInteractivePtyRuns.test_stream_interactive_pty_touches_active_run_owner` | Verifies that active PTY streams refresh owner liveness like normal brokered run streams. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_returns_terminal_resume_state` | Verifies that the PTY snapshot endpoint returns terminal frame state and resume event id for active PTY reattach. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_reports_worker_local_limit` | Verifies that PTY snapshot requests explain when the run belongs to the session but is not available on the current worker. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_uses_specific_failure_statuses` | Verifies that PTY snapshot failures use specific HTTP statuses for missing, closed, stale, and not-yet-available runs. |
+| `TestInteractivePtyRuns.test_kill_routes_pty_killed_event_to_pty_stream` | Verifies that `/kill` publishes PTY kill notices through the PTY event stream instead of the normal run stream. |
+| `TestInteractivePtyRuns.test_interactive_pty_control_routes_are_rate_limited` | Verifies that PTY input and resize control routes use the shared rate limiter. |
+| `TestInteractivePtyRuns.test_interactive_pty_input_route_uses_dedicated_rate_limit` | Verifies that PTY input uses the dedicated interactive typing rate limit instead of the normal `/runs` limit. |
 | `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
 | `TestRunStreaming.test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up` | Verifies that the broker worker publishes notices, filtered output, exit metadata, and cleanup calls. |
 | `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |
 | `TestRunStreaming.test_broker_worker_publishes_error_and_cleans_up_when_stdout_is_missing` | Verifies that broker worker startup errors publish an error event and still clean up process tracking. |
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |
+| `TestRunStreaming.test_completed_external_run_queues_run_complete_notification` | Verifies a completed external run queues a run-complete notification event for subscribed session channels. |
 | `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/runs` output events include backend signal metadata for classified lines. |
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
+| `TestRunStreaming.test_project_findings_strip_ansi_codes_before_storage` | Verifies that persisted project findings store ANSI-normalized plain text even when scanner output includes terminal formatting. |
+| `TestRunStreaming.test_project_findings_prefer_classifier_target_metadata` | Verifies that persisted project findings use classifier target metadata when the finding line does not repeat the input-file target. |
+| `TestRunStreaming.test_project_targets_reject_cidr_targets` | Verifies that project targets reject CIDR values now that project target rows are backed by concrete Atlas entities. |
+| `TestRunStreaming.test_project_targets_reject_port_set_targets` | Verifies that project targets reject port-set values now that project target rows are backed by concrete Atlas entities. |
+| `TestRunStreaming.test_active_project_auto_discovers_typed_command_targets` | Verifies that active projects stage typed command inputs as pending targets and suppress dismissed discoveries until user re-add. |
+| `TestRunStreaming.test_active_project_target_quota_skip_does_not_log_server_error` | Verifies that expected active-project target quota skips log as warnings without server-error tracebacks. |
 | `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
 | `TestRunStreaming.test_nonblocking_stream_reader_logs_when_nonblocking_setup_fails` | Verifies that non-blocking stream setup failures warn before falling back to blocking line reads. |
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
+| `TestRunStreaming.test_completed_run_links_to_active_project` | Verifies completed server-owned runs link to the current active project. |
+| `TestRunStreaming.test_active_project_entity_link_failure_keeps_run_finalization` | Verifies active-project Atlas entity link failures roll back partial project links without losing the completed run transcript, findings, Atlas entities, or source-run Atlas counts. |
+| `TestRunStreaming.test_completed_run_skips_active_project_when_auto_link_disabled` | Verifies completed external runs stay out of the active project when automatic project capture is disabled. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_grep` | Checks that a synthetic grep run streams and persists only matching lines. |
 | `TestRunStreaming.test_run_supports_invert_match_synthetic_grep` | Checks that synthetic grep supports `-v` invert matching. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_head` | Checks that synthetic head limits the persisted transcript to the first matching lines. |
@@ -1204,8 +1769,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_builtin_man_rejects_topics_outside_allowlist` | Checks that built-in man rejects topics outside allowlist. |
 | `TestRunStreaming.test_builtin_man_for_built_in_topic_returns_shell_help` | Checks that `man history` and similar built-in topics return shell built-in help output. |
 | `TestRunStreaming.test_builtin_man_for_shortcuts_topic_returns_web_shell_help` | Checks that built-in man for shortcuts topic returns web shell help. |
-| `TestRunStreaming.test_builtin_history_lists_recent_session_commands` | Checks that built-in history lists recent session commands. |
-| `TestRunStreaming.test_builtin_history_honors_recent_commands_limit` | Verifies that the built-in `history` command uses the configured recent-command limit instead of a separate hard cap. |
+| `TestRunStreaming.test_builtin_history_lists_session_commands` | Checks that built-in history lists session commands. |
+| `TestRunStreaming.test_builtin_history_ignores_recent_commands_limit` | Verifies that the built-in `history` command prints full session history instead of using the recent-command cache limit. |
+| `TestRunStreaming.test_secret_set_with_accidental_value_persists_sanitized_command` | Verifies backend history stores only `secret set NAME` if a value is accidentally typed on the command line. |
 | `TestRunStreaming.test_builtin_pwd_returns_synthetic_path` | Checks that built-in pwd returns synthetic path. |
 | `TestRunStreaming.test_builtin_pwd_returns_workspace_root_when_workspace_enabled` | Verifies that built-in `pwd` reports `/` when workspace storage owns the terminal path model. |
 | `TestRunStreaming.test_builtin_uname_a_returns_web_shell_environment` | Checks that built-in uname a returns web shell environment. |
@@ -1218,14 +1784,77 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
 | `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/runs` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
 | `TestRunStreaming.test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths` | Verifies that ProjectDiscovery tools receive session-scoped runtime state and display generated workspace paths as user-facing paths. |
+| `TestRunStreaming.test_run_injects_required_secrets_through_process_environment` | Verifies registry-required secrets are decrypted into the subprocess environment without appearing in command text or streamed output. |
+| `TestRunStreaming.test_run_preserves_secret_environment_through_scanner_sudo_prefix` | Verifies scanner-user sudo launches preserve only declared secret env names while keeping secret values out of argv and output. |
+| `TestRunStreaming.test_run_injects_secret_under_vendor_env_name` | Verifies registry-required secrets can be looked up by one vault name and injected under the vendor-required process env name. |
+| `TestRunStreaming.test_run_accepts_vendor_native_fallback_secret_name` | Verifies commands can use a declared fallback vault name such as `VTCLI_APIKEY` when the app-facing secret name is absent. |
+| `TestRunStreaming.test_run_missing_alias_secret_message_lists_supported_names` | Verifies missing required-secret messages list all supported vault names for alias-backed declarations. |
+| `TestRunStreaming.test_run_resolves_required_secrets_before_runtime_command_rewrites` | Verifies secret declarations are resolved from the original registry command root even when validation rewrites the runtime command. |
+| `TestRunStreaming.test_run_requires_valid_session_before_secret_injection` | Verifies commands that require encrypted secrets fail before spawn when no valid session is available. |
+| `TestRunStreaming.test_run_blocks_when_required_secret_is_missing` | Verifies a command with a missing required registry secret is rejected before subprocess spawn. |
+| `TestRunStreaming.test_run_allows_missing_optional_secret_and_logs_warning` | Verifies optional registry secrets warn when missing but do not block command launch. |
 | `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/runs` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
 | `TestRunStreaming.test_session_variables_reject_undefined_reference_before_spawn` | Verifies that undefined session-variable references fail before spawning a process. |
 | `TestRunStreaming.test_session_variables_validate_policy_after_expansion` | Verifies that command policy receives the expanded command rather than the typed variable reference. |
+| `TestRunOutputArtifacts.test_history_search_finds_entity_canonical_values_indexed_from_run_output` | Verifies History search finds canonical entity values indexed from structured run output. |
 | `TestRunOutputArtifacts.test_delete_run_removes_output_artifact` | Checks that delete run removes output artifact. |
 | `TestRunOutputArtifacts.test_clear_history_removes_output_artifacts_for_session` | Checks that clear history removes output artifacts for session. |
 | `TestHistoryIsolation.test_history_only_returns_runs_for_current_session` | Checks that history only returns runs for current session. |
 | `TestHistoryIsolation.test_delete_run_only_deletes_for_matching_session` | Checks that delete run only deletes for matching session. |
+| `TestHistoryIsolation.test_public_run_permalink_omits_intel_output_for_non_owner` | Verifies that public non-owner run permalink JSON omits app-native intel response bodies. |
+| `TestHistoryIsolation.test_public_run_permalink_omits_full_artifact_intel_output_for_non_owner` | Verifies public non-owner run permalink JSON and HTML omit app-native intel response bodies loaded from full-output artifacts. |
 | `TestShareRoundTrip.test_share_json_roundtrip_preserves_structured_content` | Checks that share JSON roundtrip preserves structured content. |
+| `TestShareRoundTrip.test_share_omits_intel_output_even_when_raw_requested` | Verifies that raw snapshot sharing omits app-native intel response bodies from JSON and HTML. |
+
+#### `test_run_output_model.py`
+
+| Test | Description |
+| --- | --- |
+| `test_v1_payload_round_trips_losslessly` | Verifies that fully versioned line-event payloads survive a decode/encode round trip. |
+| `test_legacy_payload_decodes_and_upgrades_predictably` | Verifies legacy `cls` payloads decode into separate kind and role values and upgrade with v1 fields. |
+| `test_unknown_legacy_cls_survives_compatibility_round_trip` | Verifies unknown legacy class strings survive compatibility decode and encode. |
+| `test_legacy_writer_preserves_current_key_order` | Verifies the legacy line-event serializer keeps the current output-entry key order. |
+| `test_legacy_cls_fixture_maps_to_one_kind_role_pair` | Verifies every documented legacy `cls` value maps to one intended kind/role pair. |
+| `test_kind_and_role_legacy_shims_are_independent` | Verifies semantic legacy classes and structural legacy classes decode on separate axes. |
+| `test_unknown_values_fall_back_and_report_to_collector` | Verifies unknown kind, role, and signal values fall back safely and report through the caller collector. |
+| `test_entity_normalisation_matches_capture_shape` | Verifies line entities normalize to the same shape used by run-output capture. |
+| `test_compatibility_cls_prefers_role_when_both_axes_are_non_default` | Verifies compatibility `cls` uses the role string when kind and role are both non-default. |
+| `test_event_search_text_is_event_text_for_phase_zero` | Verifies the initial search-text accessor returns the event text unchanged. |
+
+#### `test_run_output_model_parity.py`
+
+| Test | Description |
+| --- | --- |
+| `test_python_and_js_line_event_enum_values_match` | Verifies Python and browser line-event enum value lists stay in sync. |
+| `test_python_legacy_class_fixture_matches_line_event_decoder` | Verifies Python legacy `cls` decoding matches the shared fixture used by browser parity tests. |
+
+#### `test_schedules.py`
+
+| Test | Description |
+| --- | --- |
+| `TestSchedulesRoutes.test_schedule_crud_for_current_session` | Verifies current-session schedule create, list, detail, update, delete, cadence normalization, and enabled-state shaping through the browser routes. |
+| `TestSchedulesRoutes.test_schedule_routes_hide_cross_session_rows` | Verifies schedules are session-isolated and cross-session detail, fire-list, patch, and delete attempts return 404. |
+| `TestSchedulesRoutes.test_schedule_preview_returns_next_three_fires` | Verifies the browser preview route returns three next-fire timestamps for a cadence preset and timezone, and rejects custom cron cadences faster than every five minutes. |
+| `TestSchedulesRoutes.test_schedule_preview_requires_durable_session_token` | Verifies the preview route requires a durable session token just like schedule writes. |
+| `TestSchedulesRoutes.test_schedule_create_rejects_disallowed_command` | Verifies schedule creation rejects commands that fail the shared command policy. |
+| `TestSchedulesRoutes.test_schedule_patch_revalidates_changed_command` | Verifies schedule updates re-run command validation when the command changes. |
+| `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire, exposes the fire audit route, and advances schedule metadata without depending on the scheduler worker. |
+| `TestSchedulesRoutes.test_schedule_fire_links_completed_run_in_history` | Verifies a fired schedule's completed run appears in History with a scheduled badge and originating schedule id. |
+| `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
+| `TestSchedulesRoutes.test_schedule_create_and_patch_normalize_edge_inputs` | Verifies browser schedule routes normalize disabled string booleans, trim labels, reject invalid timezones and blank commands, and preserve paused schedules during cadence updates. |
+| `TestSchedulesRoutes.test_schedule_fires_pagination_bounds` | Verifies schedule fire audit pagination returns stable limits, offsets, totals, has-more flags, and newest-first rows. |
+| `TestWatchersRoutes.test_watcher_routes_crud_and_cascade_owned_schedule` | Verifies browser watcher create/list/pause/resume/delete behavior, cross-session isolation, and owned-schedule cascade cleanup. |
+| `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs, rejects unfinished current-session baselines, and allows first-run baseline creation. |
+| `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire and clears changed-state counters. |
+| `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates audit rows only for the selected watcher even when another watcher has the same command. |
+| `TestWatchBuiltin.test_watch_builtin_create_list_info_and_state_changes` | Verifies the terminal watch command creates, lists, inspects, pauses, resumes, and deletes current-session watchers and owned schedules. |
+| `TestWatchBuiltin.test_watch_builtin_validates_baseline_and_command_policy` | Verifies the terminal watch command rejects missing, unfinished, and disallowed-command baselines before persistence, and creates pending first-run watchers. |
+| `TestWatchBuiltin.test_watch_builtin_run_records_fire_and_accepts_latest_baseline` | Verifies the terminal watch run subcommand records watcher fire audit rows and accept promotes the latest watcher run as baseline. |
+| `TestWatchBuiltin.test_watch_builtin_requires_durable_session_token` | Verifies the terminal watch command requires a persistent session token. |
+| `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
+| `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
+| `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire and advances schedule metadata. |
+| `TestScheduleBuiltin.test_schedule_builtin_requires_durable_session_token` | Verifies the terminal schedule command requires a persistent session token. |
 
 #### `test_session_routes.py`
 
@@ -1260,26 +1889,30 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionMigrate.test_migrates_session_preferences_when_destination_has_none` | Checks that a source session's saved preference snapshot moves to the destination session when the destination has no saved preferences yet. |
 | `TestSessionMigrate.test_migrates_session_variables` | Checks that session command variables move to the destination identity and are returned by `/session/variables`. |
 | `TestSessionMigrate.test_migrates_user_workflows` | Checks that session-owned user workflows move to the destination identity during migration. |
-| `TestSessionMigrate.test_migrates_recent_domains_and_merges_destination` | Checks that recent-domain autocomplete entries move to the destination identity, merge counts for overlapping domains, and keep the newest timestamp. |
+| `TestSessionMigrate.test_migrates_project_workspace_records` | Verifies project workspace records move to the destination identity during session migration while preserving unique project slugs. |
+| `TestSessionMigrate.test_migrates_recent_values_and_merges_destination` | Checks that recent autocomplete values move to the destination identity, merge counts for overlapping values, and keep the newest timestamp. |
 | `TestSessionMigrate.test_migrate_keeps_existing_destination_session_preferences` | Checks that migration does not overwrite a destination session's existing saved preference snapshot. |
+| `TestSessionMigrate.test_migrate_merges_active_project_preference_into_existing_destination_preferences` | Checks that active project context is merged into existing destination preferences without overwriting unrelated destination options. |
 | `TestSessionMigrate.test_migrate_workspace_returns_zero_without_source_workspace` | Checks that workspace migration reports zero file movement when the source session has no workspace directory. |
 | `TestSessionMigrate.test_migrates_source_workspace_files_to_destination` | Checks that source workspace files and empty folders move to the destination session during migration. |
 | `TestSessionMigrate.test_migrate_workspace_keeps_destination_only_files` | Checks that destination-only workspace files remain available when the source has no workspace files. |
 | `TestSessionMigrate.test_migrate_workspace_skips_conflicting_files_without_overwrite` | Checks that conflicting workspace files are skipped without overwriting destination contents while non-conflicting files still move. |
+| `TestSessionMigrate.test_migrate_workspace_file_metadata_only_for_moved_files` | Verifies that workspace-file labels and notes migrate only when the source file actually moved to the destination session. |
 | `TestSessionWorkflows.test_create_lists_and_returns_normalized_workflow` | Checks that creating a session workflow stores normalized workflow data and returns it through the list endpoint. |
 | `TestSessionWorkflows.test_rejects_undeclared_workflow_variables` | Checks that workflow steps cannot reference undeclared template variables. |
 | `TestSessionWorkflows.test_update_and_delete_are_session_scoped` | Checks that workflow update and delete operations are scoped to the owning session. |
-| `TestSessionRecentDomains.test_get_returns_empty_list_for_new_session` | Checks that a new session starts with no recent-domain autocomplete entries. |
-| `TestSessionRecentDomains.test_post_normalizes_filters_and_caps_domains` | Checks that recent-domain persistence normalizes domain values, rejects non-domain values, de-duplicates entries, and caps each session at 10 domains. |
-| `TestSessionRecentDomains.test_post_is_session_scoped` | Checks that recent-domain entries do not leak between session IDs. |
-| `TestSessionRecentDomains.test_post_updates_existing_domain_count_and_recency` | Checks that saving an existing recent domain updates its recency and increments its usage count. |
-| `TestSessionRecentDomains.test_post_rejects_non_list_payload` | Checks that recent-domain saves require a `domains` array. |
+| `TestSessionRecentValues.test_get_returns_empty_list_for_new_session` | Checks that a new session starts with empty recent autocomplete values. |
+| `TestSessionRecentValues.test_post_normalizes_filters_and_caps_values_per_kind` | Checks that recent-value persistence normalizes domains, IPs, URLs, and port sets while capping each kind at 10 values. |
+| `TestSessionRecentValues.test_post_is_session_scoped` | Checks that recent values do not leak between session IDs. |
+| `TestSessionRecentValues.test_post_updates_existing_value_count_and_recency` | Checks that saving an existing recent value updates its recency and increments its usage count. |
+| `TestSessionRecentValues.test_post_rejects_non_list_payload` | Checks that recent-value saves require a `values` array. |
+| `TestSessionRecentValues.test_get_rejects_unknown_kind` | Checks that recent-value listing rejects unsupported kind filters. |
 | `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` reports zero runs for a session with no run history. |
 | `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
 | `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
 | `TestSessionRunCount.test_is_scoped_to_session` | Checks that the count only includes runs belonging to the requesting `X-Session-ID`. |
 | `TestSessionRunCount.test_returns_user_workflow_count` | Checks that `/session/run-count` reports the session's saved workflow count for migration prompts. |
-| `TestSessionRunCount.test_returns_recent_domain_count` | Checks that `/session/run-count` reports the session's recent-domain count for migration prompts. |
+| `TestSessionRunCount.test_returns_recent_value_count` | Checks that `/session/run-count` reports the session's recent-value count for migration prompts. |
 | `TestSessionStarred.test_get_returns_empty_list_for_new_session` | Checks that `GET /session/starred` returns an empty list for a new session. |
 | `TestSessionStarred.test_get_returns_starred_commands` | Checks that starred commands are included in the GET response. |
 | `TestSessionStarred.test_get_is_scoped_to_session` | Checks that GET only returns stars belonging to the requesting session. |
@@ -1322,6 +1955,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestShellOperators.test_redirect_append` | Checks redirect append handling. |
 | `TestShellOperators.test_redirect_in` | Checks redirect in handling. |
 | `TestShellOperators.test_synthetic_grep_pipe_allowed` | Checks that the narrow synthetic grep pipe is allowed while general pipes remain blocked. |
+| `TestShellOperators.test_synthetic_grep_dash_pattern_pipe_allowed` | Checks that synthetic grep pipes can filter for patterns that start with a dash without enabling arbitrary shell pipes. |
 | `TestShellOperators.test_synthetic_head_pipe_allowed` | Checks that the narrow synthetic head pipe is allowed while general pipes remain blocked. |
 | `TestShellOperators.test_synthetic_tail_pipe_allowed` | Checks that the narrow synthetic tail pipe is allowed while general pipes remain blocked. |
 | `TestShellOperators.test_synthetic_wc_pipe_allowed` | Checks that the narrow synthetic `wc -l` pipe is allowed while general pipes remain blocked. |
@@ -1347,6 +1981,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSyntheticGrepParsing.test_parses_basic_synthetic_grep` | Checks that the basic synthetic grep form is parsed into a base command plus grep options. |
 | `TestSyntheticGrepParsing.test_parses_combined_flags` | Checks that combined `-iv` synthetic grep flags are accepted. |
 | `TestSyntheticGrepParsing.test_parses_extended_regex_pattern` | Checks that `-E` synthetic grep patterns are parsed correctly. |
+| `TestSyntheticGrepParsing.test_parses_option_terminator_pattern_starting_with_dash` | Checks that synthetic grep accepts quoted and `--` patterns that start with a dash. |
+| `TestSyntheticGrepParsing.test_parses_dash_e_pattern_starting_with_dash` | Checks that synthetic grep accepts `-e` before a pattern that starts with a dash. |
 | `TestSyntheticGrepParsing.test_rejects_missing_pattern` | Checks that synthetic grep rejects a missing pattern. |
 | `TestSyntheticGrepParsing.test_rejects_unsupported_flags` | Checks that unsupported synthetic grep flags are rejected. |
 | `TestSyntheticGrepParsing.test_rejects_extra_operands` | Checks that synthetic grep rejects extra operands beyond one pattern. |
@@ -1377,7 +2013,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestDenyPrefix.test_deny_flag_matches_exact_case` | Checks that deny flag matches exact case. |
 | `TestDenyPrefix.test_deny_flag_does_not_cross_case_boundary` | Checks that deny flag does not cross case boundary. |
 | `TestDenyPrefix.test_deny_tool_prefix_still_case_insensitive` | Checks that deny tool prefix still case insensitive. |
-| `TestDenyPrefix.test_deny_single_char_matches_combined_group` | Checks that deny single char matches combined group. |
+| `TestDenyPrefix.test_workspace_nmap_output_flag_exempts_combined_deny_group` | Verifies managed nmap workspace output flags can bypass the broader nmap output deny group. |
 | `TestDenyPrefix.test_devnull_exception_prefix` | Checks /dev/null exception prefix handling. |
 | `TestDenyPrefix.test_devnull_exception_anywhere` | Checks /dev/null exception anywhere handling. |
 | `TestDenyPrefix.test_devnull_exception_does_not_allow_real_paths` | Checks that /dev/null exception does not allow real paths. |
@@ -1405,15 +2041,37 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_name_skips_env_assignments` | Checks that missing-command detection looks through simple `env NAME=value` wrappers. |
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_message_is_stable` | Checks that runtime missing command message is stable. |
 
+#### `test_watchers_classifiers.py`
+
+| Test | Description |
+| --- | --- |
+| `test_findings_classifier_uses_structured_finding_fingerprints` | Verifies watcher diffs prefer structured finding fingerprints when both runs have persisted findings. |
+| `test_textual_classifier_is_fallback_and_honors_suppress_removals` | Verifies the textual fallback handles plain output diffs and can suppress removal-only changes. |
+| `test_ports_classifier_reports_added_changed_and_removed_ports` | Verifies nmap-shaped output reports added, removed, and changed port/service signals. |
+| `test_hosts_classifier_reports_added_hosts_for_subdomain_lists` | Verifies host-list commands report newly discovered hosts. |
+| `test_tls_classifier_reports_certificate_field_changes` | Verifies openssl s_client output reports changed certificate fields. |
+| `test_classifier_registry_keeps_structured_classifiers_before_textual_fallback` | Verifies structured watcher classifiers run before the textual fallback. |
+
 ### Vitest
 
 #### `app.test.js`
 
 | Test | Description |
 | --- | --- |
+| `binds focus traps for persistent app modal surfaces at startup` | Verifies that persistent app modal surfaces bind focus traps during startup. |
+| `uses the shared confirmation action contract before deleting schedules` | Verifies that the Schedules modal delete action uses the shared confirmation action contract before deleting. |
+| `opens schedule fire runs without using the run id as the command title` | Verifies that Schedule fire rows open Run Details with only the run id so the run id is not shown as a temporary command title. |
+| `creates schedules from the modal with cadence preview details` | Verifies the Schedules modal creates a schedule from the form, shows preview data, sends the expected payload, and refreshes the list. |
+| `pauses resumes and fires schedules from the modal action buttons` | Verifies Schedules modal pause, resume, and run-now actions call the right endpoints and refresh action state. |
+| `prompts before switching schedules or creating a new schedule with unsaved edits` | Verifies that dirty Schedule modal edits prompt before selecting another schedule or starting a new one. |
+| `creates watchers from a baseline run and renders diff audit rows` | Verifies the Watchers modal creates a watcher from a Run Details baseline, sends cadence/options payloads, renders comparison-style diff details, and shows fire audit run handoffs. |
+| `creates watchers that capture the first run as the baseline` | Verifies the Watchers modal can create a first-run watcher without a Run ID and shows the pending baseline state. |
+| `pauses resumes fires and accepts watcher baselines from action buttons` | Verifies Watchers modal pause, resume, run-now, and accept-baseline actions call the right endpoints and confirmation flow. |
+| `does not let history outside-click dismissal close behind modal overlays` | Verifies that History drawer outside-click dismissal exempts modal overlays so stacked editors keep focus. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
-| `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
+| `applies saved timestamp, line number, HUD clock, and compare preferences from cookies at startup` | Verifies that saved timestamp, line number, HUD clock, and compare preferences are applied from cookies at startup. |
 | `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |
+| `persists the selected options tab and keeps desktop-only controls in the preferences panel` | Verifies that the selected Options tab is saved with session preferences and desktop-only fields stay inside the Preferences panel. |
 | `switches the visible prompt into confirmation mode when requested` | Verifies that the composer prompt swaps from the normal shell prompt to the transcript-owned `[yes/no]:` confirmation prompt while a terminal confirm is pending. |
 | `applies the saved prompt username preference to the live prompt` | Verifies that the saved prompt username option updates the live shell prompt and persists through the session preference path. |
 | `shows live validation for invalid prompt username input without saving it` | Verifies that invalid prompt username characters show an inline Options error and do not overwrite the saved prompt username. |
@@ -1433,9 +2091,11 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies a theme from the terminal theme command` | Verifies that the terminal-native `theme` command applies a selected theme through the same runtime path as the theme selector. |
 | `groups terminal theme list output by color scheme` | Verifies that `theme list` separates dark, light, and fallback theme entries using the registry `color_scheme` value. |
 | `requires explicit set before applying a theme from the terminal theme command` | Verifies that `theme <theme>` is rejected and only `theme set <theme>` applies a terminal-native theme change. |
-| `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username, through the same preference path as the options modal. |
+| `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username and run comparison defaults, through the same preference path as the options modal. |
 | `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
+| `renders the guided terminal tour, records it once, and opens sample chips in a new tab` | Verifies that the `tour` built-in types visible chapters, pauses between them, records the opened version once per session, and opens sample commands in a new tab without running them. |
+| `omits the interactive tools chapter from the terminal tour on mobile` | Verifies that the terminal tour hides the Interactive Tools chapter on mobile layouts even when Interactive PTY is enabled. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves workflow names and variable flags in runtime autocomplete context` | Verifies that saved workflow names and workflow input flags are exposed through runtime autocomplete. |
 | `deduplicates workflow subcommands that share runtime insert text` | Verifies that runtime workflow subcommands replace placeholder-decorated static hints when both insert the same command text. |
@@ -1446,6 +2106,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
 | `serves directory-aware workspace autocomplete hints while preserving typed prefixes` | Verifies that typed workspace path prefixes such as `darklab/`, `../`, and `../darklab/` resolve against the active tab cwd while preserving the user's typed prefix. |
 | `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
+| `hides the tour built-in from runtime autocomplete when the feature is disabled` | Verifies that the runtime autocomplete context omits `tour` when the onboarding feature is disabled. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
 | `falls back to the current/default theme when localStorage references a missing theme` | Verifies that falls back to the current/default theme when localStorage references a missing theme. |
@@ -1456,8 +2117,10 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `_setTsMode marks the timestamps button inactive in off mode` | _setTsMode marks the timestamps button inactive in off mode. |
 | `bootstraps cleanly when config and allowed-commands fetches fail` | Verifies that bootstraps cleanly when config and allowed-commands fetches fail. |
 | `settles the welcome intro immediately when the user types into the active welcome tab` | Verifies that settles the welcome intro immediately when the user types into the active welcome tab. |
+| `keeps macOS double-space substitution out of the command composer` | Verifies that macOS double-space period substitution is normalized back to literal spaces before the composer state updates. |
 | `settles welcome immediately when Enter is pressed during welcome playback` | Verifies that settles welcome immediately when Enter is pressed during welcome playback. |
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
+| `does not let welcome playback steal Space from schedules form fields` | Verifies that the global welcome keyboard handler leaves Schedules modal form input alone while the modal is open. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
 | `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
 | `persists output signal metadata for session restore` | Verifies that findings, warning, error, and summary metadata survives browser refresh state snapshots. |
@@ -1526,14 +2189,20 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports macOS Option+W to close the active tab via physical key code` | Verifies that supports macOS Option+W to close the active tab via physical key code. |
 | `supports Alt+ArrowLeft and Alt+ArrowRight to move by word` | Verifies that terminal-style Option/Alt+ArrowLeft and Option/Alt+ArrowRight move the prompt caret by word without cycling tabs. |
 | `supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs` | Verifies that Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight cycle between tabs. |
+| `routes Option+Tab through open modal tab sets before terminal tabs` | Verifies that Option+Tab and Shift+Option+Tab cycle an open tabbed modal before switching terminal tabs. |
+| `cycles modal tabs from non-terminal inputs` | Verifies that Option+Tab still cycles modal tabs when focus is inside a modal input. |
+| `uses the top open modal tab set when multiple tabbed surfaces are present` | Verifies that stacked tabbed modals route Option+Tab to the topmost tab set first. |
 | `supports Alt+digit to jump directly to a tab` | Verifies that supports Alt+digit to jump directly to a tab. |
 | `supports macOS Option+digit tab jumps via physical key code` | Verifies that supports macOS Option+digit tab jumps via physical key code. |
-| `supports Alt+P to create a permalink for the active tab` | Verifies that supports Alt+P to create a permalink for the active tab. |
-| `supports macOS Option+P to create a permalink via physical key code` | Verifies that supports macOS Option+P to create a permalink via physical key code. |
+| `supports Alt+Shift+P to create a permalink for the active tab` | Verifies that supports Alt+Shift+P to create a permalink for the active tab. |
+| `supports macOS Option+Shift+P to create a permalink via physical key code` | Verifies that supports macOS Option+Shift+P to create a permalink via physical key code. |
+| `supports Alt+P to toggle the projects modal from the terminal prompt` | Verifies that Alt+P opens the Projects modal when closed and closes it when already open. |
+| `supports Alt+C to toggle the command registry from the terminal prompt` | Verifies that Alt+C opens the command registry when closed and closes it when already open. |
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
 | `supports Alt+M to toggle the status monitor from the terminal prompt` | Verifies that Alt+M opens the Status Monitor when closed and closes it when already open. |
 | `supports Alt+Shift+F to toggle the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens and closes Files while preserving Alt+F for word-forward. |
+| `supports Alt+Shift+S and Alt+Shift+W to toggle Schedules and Watchers from the terminal prompt` | Verifies that Alt+Shift+S opens/closes Schedules and Alt+Shift+W opens/closes Watchers, including macOS physical-key fallback. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
 | `does not apply action shortcuts while typing in non-terminal inputs` | Verifies that does not apply action shortcuts while typing in non-terminal inputs. |
@@ -1561,8 +2230,16 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `opens a destructive confirm before clearing the active session token` | Verifies that clearing an active session token first opens the shared destructive confirm with copy and clear actions. |
 | `lets the user copy the session token from the clear confirm without clearing it` | Verifies that the clear confirm can copy the active token while leaving the session unchanged. |
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
+| `loads encrypted secrets metadata in options without revealing values` | Verifies that the Options Secrets section loads names, consumer envs, and timestamps without rendering stored secret values. |
+| `adds encrypted secrets through the replace-only options prompt` | Verifies that the Options Secrets prompt stores a registry-known key from the picker while keeping the value out of the rendered panel. |
+| `keeps a custom secret escape hatch with an unused-secret warning` | Verifies that the Options Secrets prompt still supports custom secret names while warning that undeclared consumer envs are not used by shipped commands. |
+| `suggests app-native intel secret consumers in the options prompt` | Verifies that app-native intel provider secrets from the command catalog metadata appear in the Options Secrets picker. |
+| `opens the encrypted secret prompt for terminal secret set without echoing the value` | Verifies that `secret set NAME` opens the browser-owned value prompt and does not echo the typed value into visible UI. |
+| `deletes encrypted secrets from the options panel only after confirming` | Verifies that deleting a secret uses the shared destructive confirm before calling the delete route and refreshing the list. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
+| `renders the FAQ visual tour re-entry link and opens the tour modal` | Verifies that the FAQ renders the desktop visual tour re-entry link, opens the tour modal, and closes FAQ so tour actions return to the terminal. |
+| `suppresses the FAQ visual tour re-entry link when the tour is disabled` | Verifies that the FAQ hides the visual tour re-entry link when `tour_enabled` is false. |
 | `opens command catalog details from the command registry browser` | Verifies that the Command Registry opens command details without loading the prompt directly. |
 | `opens autocomplete after loading a command catalog example chip` | Verifies that command catalog example chips load the prompt and trigger the normal composer autocomplete flow. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
@@ -1576,6 +2253,43 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `saves off and unchecks toggle when mode is off` | Verifies that saves off and unchecks toggle when mode is off. |
 | `reflects off preference as unchecked toggle` | Verifies that reflects off preference as unchecked toggle. |
 | `reflects on preference as checked toggle` | Verifies that reflects on preference as checked toggle. |
+
+#### `atlas.test.js`
+
+| Test | Description |
+| --- | --- |
+| `opens to the Findings tab by default` | Verifies that opening Atlas without a target starts on the Findings tab. |
+| `saves and applies named Atlas views` | Verifies that Atlas saves the current tab/filter state as a named view and applies it back to the surface. |
+| `syncs populated filter selects and enhances dynamic detail selects` | Verifies that Atlas syncs populated Findings filters and enhances the finding review-state picker after it renders. |
+| `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
+| `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
+| `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
+| `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
+| `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations only show optional same-run cleanup when non-curated sibling rows can be removed. |
+| `applies the project filter when opened from a project` | Verifies that project-launched Atlas requests entities filtered to that project. |
+| `opens Findings scoped to a run and clears the run filter chip` | Verifies that run-launched Atlas requests summary, Findings, and entity rows for one source run and exposes a clearable run filter chip. |
+| `applies a source-run filter from the Atlas run selector` | Verifies that the Atlas run selector applies the selected source run to summary and Findings requests. |
+| `enables entity pagination once the list loads even when detail is still loading` | Verifies that Atlas entity pagination unlocks after the list response even if the selected entity detail request is still pending. |
+| `clears entity pagination when switching from a large tab to a single-page tab` | Verifies that Atlas clears hidden pagination text and disables controls after moving to a tab that fits on one page. |
+| `ignores stale entity list responses after switching tabs` | Verifies that a late response from a previous Atlas tab cannot overwrite the active tab's list or pagination state. |
+| `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |
+| `suppresses selected Atlas findings without deleting them` | Verifies that select mode can suppress visible-page Atlas findings through the suppression route without deleting source data. |
+| `bulk-updates selected Atlas findings` | Verifies that selected Atlas findings can be bulk-updated from the Findings tab. |
+| `bulk-deletes selected Atlas entities from entity tabs` | Verifies that select mode can bulk-delete visible-page Atlas entities and reports attached finding removal. |
+| `bulk-deletes selected Atlas findings from the Findings tab` | Verifies that select mode can bulk-delete selected Atlas findings from the Findings tab. |
+| `exports filtered entity rows without leaving the Atlas surface` | Verifies that Atlas entity exports use the active type, search, and project filters and start a browser download. |
+
+#### `atlas_mobile.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders mobile tabs and drills into entity detail with Back preserving the list` | Verifies that Mobile Atlas renders its tab row and entity list, drills into entity detail, and returns to the list with Back. |
+| `syncs filter disclosure controls and clears selected rows before refreshing` | Verifies that Mobile Atlas filter controls update shared state, clear selected rows, refresh the list, and render the orphan-only clear chip. |
+| `disables saved-view update and delete until a saved view is selected` | Verifies that Mobile Atlas keeps saved-view update/delete actions disabled until a saved view is selected. |
+| `enters select mode from the action sheet and uses row taps for bulk selection` | Verifies that the Mobile Atlas overflow action sheet enters select mode, shows the sticky bulk bar, and turns row taps into selection toggles. |
+| `opens finding detail and keeps review updates in the sticky footer` | Verifies that Mobile Atlas opens finding detail and routes the footer review-state picker through the shared finding update handler. |
+| `uses danger tone for high and critical finding badges` | Verifies that Mobile Atlas renders high and critical finding severity badges with the danger tone instead of success green. |
+| `honors forceView detail requests once the selected entity is resolved` | Verifies that Mobile Atlas opens directly to entity detail when a caller requests detail view and the selected entity is already resolved. |
 
 #### `autocomplete.test.js`
 
@@ -1611,11 +2325,18 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `shows subcommand-scoped examples when a partial subcommand uniquely matches` | Verifies that partial subcommand input such as `amass s` surfaces examples once it uniquely matches one subcommand. |
 | `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
-| `tracks recent domains from structured flag and positional slots, capped in memory` | Verifies that recent domain capture reads known domain argument slots, preserves recency order in the browser cache, and enforces the autocomplete cap without using browser storage. |
-| `loads recent domains from the session endpoint` | Verifies that recent-domain autocomplete loads persisted session domains from the backend and normalizes the returned values. |
-| `persists captured recent domains without requiring browser storage` | Verifies that captured domain values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
-| `suggests recent domains only inside known domain value slots` | Verifies that recent domain autocomplete appears only where command metadata identifies a domain value. |
-| `does not infer recent-domain slots from placeholder text without value_type metadata` | Verifies that recent-domain capture and suggestions require explicit `value_type: domain` metadata. |
+| `walks nested subcommands before suggesting the next project argument` | Verifies that nested project subcommands continue into their next argument hints instead of restarting autocomplete at command-root suggestions. |
+| `suggests schedule ids for terminal schedule actions` | Verifies that terminal schedule action autocomplete uses the current session's loaded schedule ids. |
+| `suggests watcher ids for terminal watch actions` | Verifies that terminal watch action autocomplete uses the current session's loaded watcher ids. |
+| `tracks recent values from structured flag and positional slots, capped per kind in memory` | Verifies that recent target capture reads known typed argument slots, skips file-list inputs, preserves recency order, and enforces the autocomplete cap per kind without using browser storage. |
+| `stores complete IPv4 values from host slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from host slots without saving partial numeric host values. |
+| `loads recent values from the session endpoint` | Verifies that recent target autocomplete loads persisted session domains, IPs, URLs, and port sets from the backend and normalizes the returned values. |
+| `replays recent-value captures submitted before autocomplete context loads` | Verifies that a command submitted before autocomplete metadata loads still records recent target values once the metadata is available. |
+| `reloads active project targets after a same-session project workspace storage signal` | Verifies that passive browser tabs refresh project-target autocomplete after another tab changes project workspace state from the terminal. |
+| `persists captured recent values without requiring browser storage` | Verifies that captured typed values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
+| `suggests recent targets only inside compatible known value slots` | Verifies that recent target autocomplete appears only where command metadata identifies a compatible value type. |
+| `does not infer recent-value slots from placeholder text without value_type metadata` | Verifies that recent target capture and suggestions require explicit value-type metadata. |
+| `keeps case-sensitive dnsrecon -d domain and -D wordlist slots separate` | Verifies that dnsrecon shows both case-sensitive flags, filters partial flag input exactly, and keeps domain and wordlist value slots separate. |
 | `suggests installed wordlists only inside marked wordlist slots` | Verifies that installed SecLists suggestions appear only in explicit `value_type: wordlist` slots and filter by category. |
 | `keeps workspace file hints while adding installed wordlists for wordlist slots` | Verifies that wordlist autocomplete adds installed SecLists paths without dropping session workspace file hints. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
@@ -1633,6 +2354,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `keeps positional placeholder hints visible while typing the argument value` | Verifies that a positional placeholder such as `ping ... <host>` stays visible as guidance while the user types the real host value. |
 | `drops positional placeholder guidance once the token context changes to a new flag slot` | Verifies that positional placeholder guidance does not linger once the user starts a new flag token such as `ping -c 4 -`. |
 | `shows starter values together with placeholders and then leaves only the placeholder while typing` | Verifies that starter values like `https://` can appear alongside a `<url>` placeholder at the argument slot, and that the placeholder remains once the typed token no longer matches the starter value. |
+| `honors ordered positional hints one argument slot at a time` | Verifies that ordered positional placeholders expose only the current argument slot, such as host before port. |
 | `stops suggesting more positional arguments after reaching argument_limit, but still allows flags` | Verifies that `argument_limit` suppresses further positional guidance once the configured number of positional arguments is filled, while still allowing flag suggestions in a later flag slot. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
@@ -1669,10 +2391,12 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `no source file references retired class 'modal-secondary-warning'` | Regression guard: fails if the retired `modal-secondary-warning` class reappears in app source. |
 | `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
 | `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
+| `native select elements compose the form-select primitive` | Regression guard: fails if app source adds native select markup or JS-created selects without the shared `.form-select` primitive. |
+| `notification rows use badge primitives for passive metadata` | Regression guard: fails if the Notifications options panel stops using shared badge primitives or re-adds a duplicate tab-click refresh handler. |
 
 #### `button_primitives_allowlist.test.js`
 
-Positive counterpart to the negative blocklist in `button_primitives.test.js`. Each row below is one dynamically-generated test — the suite walks `app/templates/**.html` and emits one test per file, plus a fixture-validity test. Every `<button>`, `[role="button"]`, and `<a role="button">` in the scanned file must either carry an allowed primitive class (`btn`, `nav-item`, `close-btn`, `toggle-btn`, `kb-key`) or match a selector in `tests/js/fixtures/button_primitive_allowlist.json`. The allowlist fixture documents surfaces that deliberately opt out of the primitives (legacy or surface-specific class families).
+Positive counterpart to the negative blocklist in `button_primitives.test.js`. Each row below is one dynamically-generated test — the suite walks `app/templates/**.html` and emits one test per file, plus a fixture-validity test. Every `<button>`, `[role="button"]`, and `<a role="button">` in the scanned file must either carry an allowed primitive class (`btn`, `nav-item`, `tab-strip-item`, `close-btn`, `toggle-btn`, `kb-key`, and the other shared primitive families) or match a selector in `tests/js/fixtures/button_primitive_allowlist.json`. The allowlist fixture documents surfaces that deliberately opt out of the primitives (legacy or surface-specific class families).
 
 | Test | Description |
 | --- | --- |
@@ -1693,6 +2417,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `history pagination buttons render with allowed primitives` | Verifies that the desktop history pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
 | `mobile recents pagination buttons render with allowed primitives` | Verifies that the mobile recents sheet pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
+| `mobile history surface opens without forcing a run-only type filter` | Verifies that the mobile History entry point opens the shared History panel without overriding the current `type` filter. |
 
 #### `config.test.js`
 
@@ -1750,23 +2475,49 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
 | `limits visible recent chips on mobile and appends an overflow chip` | Verifies that limits visible recent chips on mobile and appends an overflow chip. |
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
+| `centers restored finding highlights in the terminal output container` | Verifies that restored finding highlights are centered in the terminal output container. |
 | `refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject` | Verifies the history drawer permalink action falls back to execCommand when clipboard writeText rejects. |
-| `clicking a history entry row injects the command into the composer and closes the panel` | Verifies row click is the re-run path — the command lands in the composer, the drawer closes, and no tab restore runs. |
+| `clicking a history entry row opens run details without closing the panel` | Verifies row click opens the Run Details modal while keeping the History drawer in context, leaving the composer untouched, and passing the run context to Atlas. |
+| `opens the watchers modal from the Run Details baseline action` | Verifies Run Details can open the Watchers modal with the current run as the prefilled baseline. |
+| `renders Run Details AI summary actions when AI summaries are enabled` | Verifies Run Details can load cached AI assists, request a summary, render returned summary fields, and show validated Copy/Run suggestion actions when the AI feature flags are enabled. |
+| `uses shared row primitives for fallback Run Details entity rows` | Verifies Run Details fallback entity rows use the shared clickable row primitives when the Atlas row renderer is unavailable. |
+| `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run, non-curated Atlas entity unlinking. |
+| `uses Current Project attachment state for Run Details project actions when link metadata is missing` | Verifies Run Details still shows remove-from-project actions when an opened run lacks embedded project-link metadata but the Current Project card confirms the active project link. |
+| `loads structured run findings into the run details findings tab` | Verifies the Run Details modal consumes `/entities/run/<id>/findings` and renders structured findings in the Findings tab. |
 | `closes the history panel for permalink but keeps it open for star and delete` | Verifies permalink closes the desktop drawer while star and delete keep it open so the row stays in context under the confirm modal. |
 | `keeps the history panel open on mobile for every row action (confirm modal overlays it)` | Verifies the mobile drawer no longer auto-closes on the delete row — the confirm modal overlays the drawer and ui_confirm owns refocus on resolve. |
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
+| `keeps restore and delete visible and moves secondary run actions into an ordered menu` | Verifies that the history drawer keeps Restore and Delete visible while grouping secondary actions into the expected row menu order. |
+| `uses copy and restore as mobile history row primaries and moves the rest into the menu` | Verifies that mobile history rows keep Copy command and Restore as primary actions while moving the remaining run actions into the overflow menu. |
+| `renders select mode checkboxes and toggles row selection without opening run details` | Verifies that History select mode renders row checkboxes, disables unfinished runs, and turns row clicks into selection instead of opening Run Details. |
+| `selects all visible completed runs, reports mixed state, and clears selection` | Verifies that History select-all only includes visible completed runs, announces mixed selection state, and clears selected rows. |
+| `disables project bulk actions without an active project or with mixed selected item types` | Verifies project bulk actions are disabled when no active project is selected or the selection includes snapshots. |
+| `resets select mode and selection before the next history drawer open` | Verifies that closing the History drawer clears stale select mode and selection before the next refresh. |
+| `keeps row actions from toggling selection while select mode is enabled` | Verifies row-level action controls do not toggle selection or open Run Details while select mode is active. |
+| `locks the bulk toolbar and selected rows while a bulk action is in flight` | Verifies bulk requests disable select-mode controls and keep row selection stable until the request finishes. |
+| `bulk add uses the project picker with the active project first` | Verifies the bulk add-to-project picker lists the active project first and posts selected run ids in one batch. |
+| `shows a fallback toast when history refresh fails after a successful bulk action` | Verifies a completed bulk action still tells the user to refresh when the post-action History reload fails. |
+| `bulk remove unlinks selected runs from every linked project without a picker` | Verifies bulk remove confirms once, skips the project picker, and posts batch unlink requests for every linked project represented by the selected runs. |
+| `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown future reasons. |
+| `only offers Atlas cleanup on run delete when there are removable candidates` | Verifies that run delete confirmations only show the optional Atlas cleanup checkbox when removable cleanup candidates exist. |
+| `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
 | `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
 | `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces the manual candidate list instead of merging stale suggested runs into the search results. |
 | `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
 | `preflights Restore Both tab capacity before creating either tab` | Verifies that Restore Both checks available tab capacity before creating comparison restore tabs. |
 | `includes the history type filter in the request URL when snapshots are selected` | Verifies that switching the desktop history surface to snapshots adds the `type=snapshots` filter to the `/history` request. |
+| `includes run subtype filters in the request URL` | Verifies that the history drawer sends built-in and external run subtype filters to `/history`. |
+| `renders run metadata badges and opens the metadata editor from the run menu` | Verifies that run history rows render label and note badges and delegate Edit to the metadata editor. |
 | `renders snapshot rows with open and copy-link actions` | Verifies that snapshot-only history responses render the `SNAPSHOT` row treatment and expose the snapshot action set. |
+| `selects snapshot rows and bulk deletes them through the snapshot endpoint` | Verifies that History select mode can select saved snapshots and delete them through the snapshot bulk endpoint. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
 | `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
 | `_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date` | Verifies the relative-time helper used by the mobile recents sheet returns stable bucket strings and a short date for older runs. |
 | `desktop history rows keep absolute clock time and no tooltip on the time span` | Regression: the desktop history drawer keeps exact clock time and does not set a title tooltip on the time span, so only the mobile sheet switches to relative copy. |
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
+| `sends structured output filters from the history drawer controls` | Verifies that the History drawer's signal, kind, entity, and entity-type controls send structured output filters to `/history` and render removable chips. |
+| `includes the selected project in history requests and active filter chips` | Verifies that the history drawer can filter by project and renders the selected project as a removable active-filter chip. |
 | `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
 | `keeps root suggestions stable when a refresh returns no roots while typing` | Verifies that auto-refresh responses cannot erase the command-root suggestion list while the user is typing in the focused command-name filter. |
@@ -1776,9 +2527,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
 | `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
 | `keeps the history drawer open when removing an active filter chip` | Verifies that clearing a filter chip does not trip the global outside-click handler and close the drawer. |
-| `toggles the mobile advanced history filters section` | Verifies that the mobile-only advanced history filter block expands and collapses correctly. |
-| `resetHistoryMobileFilters collapses the advanced mobile history filters` | Verifies that reopening or closing the mobile history drawer resets the advanced filter block to the collapsed state. |
-| `shows the active filter count in the mobile filters button label` | Verifies that the mobile filters button shows the current active-filter count. |
+| `toggles the mobile history tools section` | Verifies that the mobile-only history tools section expands and collapses correctly. |
+| `resetHistoryMobileFilters collapses the mobile history tools` | Verifies that reopening or closing the mobile history drawer resets the tools section to the collapsed state. |
+| `shows the active filter count in the mobile history tools button label` | Verifies that the mobile history tools button shows the current active-filter count. |
 | `refreshHistoryPanel sends starred-only as a server-side filter` | Verifies that starred-only history filtering is passed to `/history` and rendered from the server response. |
 | `clearHistoryFilters resets the drawer controls and the request URL` | Verifies that clearing all history filters resets both control values and the generated `/history` query string. |
 | `shows a filtered empty state when no runs match the active filters` | Verifies that the drawer distinguishes “no matching runs” from “no runs yet”. |
@@ -1786,6 +2537,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `executeHistAction shows a failure toast when clearing non-favorite history fails` | Verifies that executeHistAction shows a failure toast when clearing non-favorite history fails. |
 | `shows and clears the history loading overlay while a run is being restored` | Verifies that shows and clears the history loading overlay while a run is being restored. |
 | `restores the full history payload when full output is available` | Verifies that restores the full history payload when full output is available. |
+| `restores a same-command history run into a new tab when run ids differ` | Verifies that restoring history uses run identity instead of command text so separate runs with the same command can both be restored. |
 | `clears the history loading overlay and shows a failure toast when a restore fetch fails` | Verifies that clears the history loading overlay and shows a failure toast when a restore fetch fails. |
 | `enterHistSearch activates search mode and shows the dropdown` | Verifies that enterHistSearch activates search mode and shows the dropdown. |
 | `enterHistSearch saves the current input as the pre-draft` | Verifies that enterHistSearch saves the current input as the pre-draft. |
@@ -1809,6 +2561,30 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
 
+#### `history_compare_split.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders hunk counts and split-pane rows for equal, replace, insert, and delete hunks` | Verifies that the run comparison renderer maps the hunk model into paired split-pane rows and count badges. |
+| `marks structural kind and role changes on compare rows` | Verifies that structural compare changes expose row metadata and a visible structural-change class. |
+| `resolves hidden auto mode from viewport and keeps modal view overrides local` | Verifies that the compare-modal view selector resolves hidden auto mode from the viewport, keeps modal-only overrides local, and can restore the saved default without changing it. |
+| `renders a fetched comparison in mobile mode with the real select enhancer` | Verifies that the fetched compare renderer can open the mobile unified view with the app-native select enhancer without falling into the generic failure toast. |
+| `surfaces backend compare errors instead of only the generic failure toast` | Verifies that failed compare responses include the backend validation message in the toast instead of collapsing every failure into the same generic copy. |
+| `hides equal-line context controls and rows in changes-only and findings-only modes` | Verifies that changes-only and findings-only comparison modes hide context controls and suppress transcript equal rows or the transcript pane. |
+| `renders added and removed entity-set diffs from comparison objects` | Verifies that run comparison renders added and removed entity diffs from the structured comparison object payload. |
+| `rerenders full equal hunks when context dropdown changes without refetching or saving defaults` | Verifies that the compare context dropdown reshapes already-loaded equal hunks without re-running the compare request or changing the saved default. |
+| `renders replace blocks while preserving each side output order` | Verifies that replace hunks keep each pane's original transcript order while aligning changed pairs. |
+| `keeps right-only replace lines before later paired right lines` | Verifies that a right-side inserted service line renders before a later paired summary line when that was the original B-side order. |
+| `renders per-hunk and surplus truncation placeholders` | Verifies that per-hunk line omissions and surplus hunk omissions are visible in the split-pane output. |
+| `expands folded equal hunks through paginated lazy fetches and reuses cached lines` | Verifies folded unchanged ranges load both sides through `/history/compare/lines`, follow pagination, and reuse cached lines after collapse/re-expand. |
+| `continues lazy fold pagination across byte-limited pages` | Verifies folded unchanged ranges continue lazy loading when the backend page boundary is caused by byte limits. |
+| `expands a single oversized lazy line without requiring another page` | Verifies a single oversized lazy line renders from one backend page without forcing another request. |
+| `stops lazy fold pagination when the backend clamps a stale range` | Verifies folded unchanged ranges stop requesting additional pages when the backend reports that the requested range was clamped. |
+| `expands empty folded equal ranges without a lazy fetch` | Verifies folded unchanged ranges with no hidden backend slice expand without calling `/history/compare/lines`. |
+| `expands long line text in place` | Verifies long compare rows render a compact expander and reveal the full line without rerendering the comparison. |
+| `uses totals for copy summary output` | Verifies that Copy summary reads changed, added, removed, and unchanged counts from the hunk totals contract. |
+| `does not sync split pane scroll positions in mobile terminal mode` | Verifies that mobile terminal viewport mode uses the stacked comparison fallback without desktop pane scroll syncing. |
+
 #### `mobile_running_indicator.test.js`
 
 | Test | Description |
@@ -1825,27 +2601,50 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows elapsed time for the active mobile Status Monitor peek when runStart is known` | Verifies that the mobile Status Monitor peek shows elapsed time when the active run has a start timestamp. |
 | `suppresses the mobile Status Monitor peek wiggle for reduced motion` | Verifies that the mobile Status Monitor peek does not animate when reduced motion is requested. |
 | `returns the peek to recents after the active run finalization hold expires` | Verifies that the mobile peek briefly holds Status Monitor state after completion, then returns to recents. |
+| `does not show the Status Monitor peek hold for restored history tabs` | Verifies that restored history tabs keep the mobile peek on recents instead of briefly showing Status Monitor. |
 | `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Checks that activates the edge glow when a running non-active tab is only partially clipped off-screen. |
 | `chip tap activates the next running non-active tab in tab-row order` | Checks that chip tap activates the next running non-active tab in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
 | `re-syncs the chip count from tab lifecycle events instead of DOM mutation observers` | Checks that re-syncs the chip count from tab lifecycle events instead of DOM mutation observers. |
 | `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Checks that hides the chip and edge glows when the body is not in mobile-terminal-mode. |
 
+#### `notification_channels.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders token-required and empty states from refresh responses` | Verifies the Notifications tab surfaces durable-token errors and the empty-channel nudge from refresh responses. |
+| `uses cached channel metadata for tab revisits and preserves it after forced load failures` | Verifies the Notifications tab reuses cached channel rows for normal tab revisits and keeps the cached list visible after a forced refresh hits a rate-limit response. |
+| `validates required secrets and submits editor payloads without exposing them in the list` | Verifies the channel editor blocks missing secrets, then submits secret/config/trigger payloads through the channel route. |
+| `renders channel actions and routes test, deliveries, mute, and delete requests` | Verifies notification channel rows route test-send success/failure to toasts, show delivery audit rows, and keep mute/delete updating panel state. |
+
 #### `output.test.js`
 
 | Test | Description |
 | --- | --- |
 | `renders notice lines with textContent (not HTML)` | Verifies that renders notice lines with textContent (not HTML). |
+| `renders typed notice events with textContent and legacy CSS class` | Verifies that typed notice events render safely while keeping the legacy notice class. |
+| `renders typed prompt roles like legacy prompt-echo lines` | Verifies that typed prompt-role events render with the same prompt prefix and raw-line compatibility as legacy prompt echoes. |
+| `round trips wire event input through fromWireLineEvent before rendering` | Verifies that wire-shaped line events are decoded through the shared browser model before rendering. |
 | `renders non-plain classes through ansi_to_html` | Verifies that renders non-plain classes through ansi_to_html. |
+| `isolates ANSI parser state between tabs` | Verifies that unterminated ANSI color or style state in one tab does not affect output rendered in another tab. |
+| `resets ANSI parser state before replaying restored output` | Verifies that restored transcript replay starts with fresh ANSI parser state for the target tab. |
 | `renders shell as a normal workspace folder in the prompt` | Verifies that a workspace folder named `shell` is displayed normally in the prompt instead of being treated as a mount prefix. |
 | `falls back to plain-text rendering when AnsiUp is unavailable` | Verifies that falls back to plain-text rendering when AnsiUp is unavailable. |
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
+| `renders builtin help and FAQ rows as structured terminal content` | Verifies that help rows render plain command/description columns and FAQ rows render stable question/answer markers with inline code. |
+| `keeps automatic command chips out of command list rows` | Verifies built-in help rows, command catalog rows, and table headers stay non-clickable while commands with arguments still split into aligned columns. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
+| `coalesces consecutive progress rows in the live renderer while retaining raw lines` | Verifies that live progress updates replace the previous visible progress row while every emitted line stays in raw history. |
+| `coalesces batched status rows without dropping raw output history` | Verifies that batched status-line updates collapse to the newest visible row in each consecutive group while preserving raw output history. |
+| `coalesces restored progress rows while keeping restored raw lines intact` | Verifies that restored progress lines render as last-value-wins rows without mutating saved raw line data. |
 | `avoids full output scans while trimming in default prefix mode` | Verifies that appending lines in the default no-prefix mode trims max-line output without rescanning every rendered row. |
 | `keeps absolute line numbers after max-line trimming` | Verifies that max-line trimming keeps displayed line numbers tied to emitted output order instead of renumbering the visible tail. |
 | `preserves absolute line numbers when line-number mode is enabled later` | Verifies that enabling line numbers after output trimming uses stored absolute line numbers for retained rows. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
+| `keeps highlighted entity text selectable with the rest of the output line` | Verifies that highlighted Atlas entity tokens remain part of normal transcript text selection and copying. |
+| `falls back to value matching when ANSI makes entity offsets stale` | Verifies entity-token rendering does not trust stale start/end offsets after ANSI stripping changes visible text positions. |
+| `supports keyboard navigation and outside-click close in the entity context menu` | Verifies the output entity context menu focuses its first action, supports arrow-key movement, returns focus to the token on Escape, and closes on outside click. |
 | `keeps cached signal counts in sync when old lines are trimmed` | Verifies that per-tab signal counts decrement when max-line trimming removes old signal rows. |
 | `uses +0.0s for lines without a true elapsed runtime` | Verifies that synthetic or untimed lines surface `+0.0s` instead of a blank elapsed prefix. |
 | `toggles the line-number body class and button labels` | Verifies that toggles the line-number body class and button labels. |
@@ -1857,6 +2656,13 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
+| `pauses live rendering for high-volume brokered output while keeping raw lines` | Verifies that high-volume brokered output pauses live row rendering while keeping bounded raw transcript data. |
+| `binds high-volume resume controls through the shared pressable helper` | Verifies that high-volume resume controls use the shared pressable interaction helper. |
+| `resumes live rendering for new high-volume output when requested` | Verifies that the high-volume output resume action renders later live output again. |
+| `disables high-volume resume controls once the run is no longer active` | Verifies that stale high-volume resume controls are disabled after a run leaves the running state. |
+| `adds a final high-volume summary for skipped live-rendered lines` | Verifies that completed high-volume runs print a one-time summary of lines that were retained but not rendered live. |
+| `adds a final live summary when progress rows were collapsed` | Verifies that completed runs explain when progress/status rows were collapsed in the live terminal while the full transcript remains preserved. |
+| `resets high-volume counters for a new run` | Verifies that high-volume output counters reset before a fresh brokered run starts in the same tab. |
 | `queues multi-line appends in chunks and updates raw lines once flushed` | Verifies that bulk output replay queues multi-line output through the batch flusher and syncs raw lines after flush. |
 | `uses delayed tail restore for large mobile output bursts` | Verifies that large mobile output bursts keep the transcript pinned to the prompt after delayed layout growth. |
 
@@ -1869,8 +2675,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `creates a .line span for each entry` | Verifies that creates a .line span for each entry. |
 | `adds the cls class alongside "line"` | Verifies that adds the cls class alongside "line". |
 | `calls ansi_to_html for normal output lines` | Verifies that calls ansi_to_html for normal output lines. |
+| `renders structured finding and entity highlights on the permalink page` | Verifies that permalink output shows structured finding badges and entity highlights. |
+| `toggles structured finding and entity highlights without changing output text` | Verifies that the permalink highlight toggle hides visual emphasis without changing the rendered transcript text. |
 | `uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines` | Verifies that uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines. |
+| `uses ExportHtmlUtils role helpers for typed prompt lines` | Verifies that typed prompt-role lines use the shared export role helpers before rendering. |
 | `uses textContent (not ansi_to_html) for plain classes` | Verifies that uses textContent (not ansi_to_html) for plain classes. |
+| `uses textContent for typed notice events` | Verifies that typed notice events render as text content on permalink pages instead of HTML. |
 | `sets #toggle-ln text to "line numbers: off" initially` | Verifies that sets #toggle-ln text to "line numbers: off" initially. |
 | `sets #toggle-ts text to "timestamps: unavailable" when no metadata` | Verifies that sets #toggle-ts text to "timestamps: unavailable" when no metadata. |
 | `sets #toggle-ts text to "timestamps: off" when metadata present` | Verifies that sets #toggle-ts text to "timestamps: off" when metadata present. |
@@ -1905,6 +2715,48 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
 
+#### `pty.test.js`
+
+| Test | Description |
+| --- | --- |
+| `detects the reserved mtr interactive command form` | Verifies that only the `mtr --interactive` command form is routed to the guarded PTY path. |
+| `preloads xterm assets at boot when interactive PTY is enabled` | Verifies that enabled interactive PTY mode schedules xterm asset preloading during browser startup. |
+| `does not schedule xterm preloading when interactive PTY is disabled` | Verifies that disabled interactive PTY mode leaves xterm assets unloaded until the feature is enabled. |
+| `replaces failed xterm script tags before retrying vendor asset loads` | Verifies that failed xterm vendor script tags are removed before a retry attaches to a fresh script load. |
+| `detects mobile terminal mode as unsupported for interactive PTY shells` | Verifies that mobile terminal mode blocks interactive PTY shell startup before opening xterm or starting a backend run. |
+| `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
+| `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |
+| `refreshes the live xterm theme when the app theme changes` | Verifies that an open interactive PTY terminal applies the latest app theme palette without recreating the terminal. |
+| `keeps focus on the active PTY terminal while the PTY tab is running` | Verifies that live interactive PTY tabs retain keyboard focus on xterm instead of the hidden prompt. |
+| `scopes the PTY modal overlay to the owning tab panel` | Verifies that the live PTY modal is mounted inside the tab that owns the interactive run. |
+| `reuses the tab-scoped PTY overlay across repeated runs in one tab` | Verifies that repeated interactive PTY runs in one tab reuse a single overlay and clear stale run ownership between runs. |
+| `skips PTY fit and resize while the owning tab is hidden` | Verifies that hidden-tab PTY terminals skip xterm fitting and resize POSTs until their tab becomes active again. |
+| `uses the running-tab close confirmation from the PTY modal close button` | Verifies that the PTY modal close button opens the same Cancel, Keep running, and Kill confirmation used by running tab close. |
+| `allows multiple tab-scoped PTY modals to run concurrently` | Verifies that a failed PTY in one tab does not close or dispose another tab's live PTY modal. |
+| `lets Ctrl+C flow through xterm as native PTY input` | Verifies that Ctrl+C inside the interactive PTY modal reaches the PTY as a native interrupt instead of opening the kill confirmation. |
+| `truncates PTY input by UTF-8 byte length and reports truncation before posting` | Verifies that large PTY input is capped by the server's byte limit before posting and surfaces a transcript notice when truncation happens. |
+| `batches rapid PTY input chunks into one request` | Verifies that bursty terminal input chunks are coalesced into one PTY input request. |
+| `reattaches an active PTY from a snapshot and follows the live stream` | Verifies that PTY reattach writes the plain-text snapshot to a fresh xterm and resumes streaming from the supplied event id. |
+| `does not create a PTY reattach tab when the snapshot is unavailable` | Verifies that failed PTY snapshot fetches report the error without consuming a new tab. |
+| `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
+| `closes only the displaced PTY owner when a different browser takes over` | Verifies that PTY displacement events close the targeted owner tab without affecting other clients or tabs. |
+| `appends the saved PTY final frame before the exit status line` | Verifies that modal PTY completion loads the saved final screen into the parent transcript before appending the exit status line. |
+| `marks a PTY tab detached when the stream ends without an exit event but the run is still active` | Verifies that a dropped PTY stream keeps the run marked active, preserves Kill, and starts the saved-result polling path. |
+| `marks a PTY tab failed when the stream ends and the run is not active` | Verifies that a stale PTY stream finalizes the tab as failed instead of treating an unknown exit as success. |
+
+#### `run_output_model.test.js`
+
+| Test | Description |
+| --- | --- |
+| `round trips v1 payloads losslessly` | Verifies browser line-event payloads survive a decode/encode round trip. |
+| `decodes legacy class strings into separate kind and role values` | Verifies browser legacy `cls` decoding upgrades into explicit kind and role fields. |
+| `preserves unknown legacy class strings through compatibility writes` | Verifies browser compatibility writes keep unknown legacy classes intact. |
+| `preserves legacy wire key order` | Verifies the browser legacy serializer keeps the current output-entry key order. |
+| `reports unknown values and falls back safely` | Verifies browser decoding reports unknown kind, role, and signal values while rendering through safe fallbacks. |
+| `keeps role cls compatibility when both axes are non-default` | Verifies browser compatibility `cls` uses the role string when kind and role are both non-default. |
+| `exports enum value lists for Python parity tests` | Verifies the browser model exposes enum value lists for cross-language parity checks. |
+| `matches the shared legacy class fixture` | Verifies browser legacy-class decoding stays aligned with the shared Python fixture. |
+
 #### `runner.test.js`
 
 | Test | Description |
@@ -1933,11 +2785,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `accepts uniq -c` | Verifies that accepts uniq -c. |
 | `rejects unsupported uniq flags` | Verifies that rejects unsupported uniq flags. |
 | `parses the base command and grep stage for client-side built-ins` | Verifies that client-side built-ins can split a piped command into a runnable base command and synthetic helper stage. |
+| `parses grep patterns that start with a dash` | Verifies that client-side pipe parsing accepts quoted dash patterns, `grep -- -pattern`, and `grep -e '-pattern'`. |
 | `applies chained synthetic helpers to captured client-side output` | Verifies that captured client-side command output can pass through chained synthetic helpers before rendering. |
 | `filters terminal-native theme output through the same pipe helpers as older built-ins` | Verifies that terminal-native `theme` output supports the same pipe helpers as server-side built-ins. |
 | `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
 | `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
+| `routes tour commands to the client-side tour handler` | Verifies that `tour` terminal commands are handled by the client tour renderer instead of going to the backend run path. |
+| `scrubs accidental secret set values before history, echo, and client persistence` | Verifies that accidental `secret set NAME VALUE` input is reduced to `secret set NAME` before recall history, transcript echo, and client-run persistence. |
 | `routes exit and quit commands to tab close without persisting a run` | Verifies that `exit` and `quit` close the active tab directly without adding history entries or posting client-side run artifacts. |
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
@@ -1948,11 +2803,16 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `restoreActiveRunsAfterReload skips runs explicitly detached by this browser` | Verifies that Keep running suppresses automatic reload reattachment for that active run in the same browser. |
 | `attachActiveRunFromMonitor clears explicit detach suppression for the run` | Verifies that manually attaching from Status Monitor opts a detached run back into normal reload continuity. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
+| `restoreActiveRunsAfterReload reuses the restored original tab for the same active run` | Verifies that active-run reload recovery reuses the restored original tab, resumes after the last seen broker event, and avoids duplicating the command echo. |
+| `reattaches a detached normal stream in the original running tab` | Verifies that a normal command stream that ends without an exit while the backend run remains active reattaches in the same tab with a stream-recovery notice. |
 | `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `attachActiveRunFromMonitor opens an attached subscribed tab with kill controls` | Verifies that Status Monitor Attach opens a live subscribed tab with normal kill controls. |
 | `attachActiveRunFromMonitor subscribes without claiming ownership` | Verifies that Status Monitor Attach subscribes directly to the broker stream without calling an ownership route. |
 | `keeps subscribed tabs killable on owner metadata and reports remote kills` | Verifies that owner metadata does not hide kill controls and that remote killed events render a clear notice. |
+| `parses typed stream output and logs unknown schema values once per stream` | Verifies that v1 stream output falls back safely and reports unknown schema, kind, role, and signal values once per stream. |
+| `resets high-volume output state when a new brokered run starts` | Verifies that a new brokered run clears high-volume output state from any previous run in the tab. |
+| `disables high-volume resume controls when a brokered run exits` | Verifies that completed brokered runs disable stale high-volume resume controls. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
@@ -1968,12 +2828,15 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand shows a fetch error when the /runs request rejects` | Verifies that runCommand shows a fetch error when the `/runs` request rejects. |
 | `runCommand handles a 500 response as a friendly server error` | Verifies that runCommand handles a 500 response as a friendly server error. |
 | `runCommand handles a 403 response as a denied command` | Verifies that runCommand handles a 403 response as a denied command. |
+| `runCommand shows the missing-secret setup hint from the server` | Verifies that missing required secret denials render the server-provided setup hint in the terminal. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
 | `runCommand dismisses the mobile keyboard after a successful submit` | Verifies that runCommand dismisses the mobile keyboard after a successful submit. |
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
-| `runCommand preserves output classes from streamed events` | Verifies that runCommand preserves output classes from streamed events. |
+| `runCommand refreshes and broadcasts project context after successful project built-ins` | Verifies that successful terminal project commands refresh local project context and notify passive same-session tabs. |
+| `runCommand preserves output classes and blank streamed lines` | Verifies that runCommand preserves output classes and blank streamed lines. |
+| `marks brokered output as live when high-volume output handling is configured` | Verifies that brokered stream output carries the live-output marker used by high-volume browser rendering. |
 | `runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result` | Verifies that `nc` reverse-DNS warning noise is filtered while the meaningful open-port line remains visible. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |
 | `returns true on empty input (blank Enter)` | Verifies that returns true on empty input (blank Enter). |
@@ -2133,6 +2996,29 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
+| `keeps inactive project list pagination visually hidden` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability. |
+| `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
+| `pages and filters the project Details targets browser` | Verifies that the Project Details target browser paginates, filters, keeps target counts stable, and updates target rows without a full modal reload. |
+| `renders the mobile project list with active-first rows and collapsed archived projects` | Verifies that the mobile Projects list pins the active project first, truncates label chips, keeps archived projects collapsed, and lets count chips select the matching project tab. |
+| `creates projects from the mobile create sheet` | Verifies that the mobile Projects create entry point opens its sheet, creates a project, selects it as active, and returns to the list. |
+| `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
+| `renders mobile project tab content with mobile row actions` | Verifies that mobile Projects detail tabs render summary metadata, targets, runs, findings, artifacts, packages, and mobile row action affordances. |
+| `opens the mobile project compare stepper and runs a baseline label comparison` | Verifies that the mobile Projects run-compare stepper can compare a selected run against a baseline label using the project compare endpoint. |
+| `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
+| `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists. |
+| `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |
+| `unarchives archived projects without changing the active project` | Verifies that archived projects can be restored from the Projects modal without claiming the active project slot. |
+| `deletes a project from the project explorer after confirmation` | Verifies that the Projects modal confirms destructive project deletion and refreshes the list afterward. |
+| `toggles the active project external run capture preference` | Verifies that the Projects modal can disable automatic active-project capture for external command runs. |
+| `keeps the target editor dropdown value in sync with the last saved target type` | Verifies that the project target editor initializes and submits the same target type that the custom dropdown displays. |
+| `validates project target values before saving` | Verifies that project target values are validated client-side before the modal saves a new or edited target. |
+| `reloads project findings after linked runs change` | Verifies that project findings refresh after runs are linked or unlinked from the project. |
+| `autosaves project notes while editing` | Verifies that project notes save automatically from the Details tab without an explicit Save button. |
+| `edits project labels from the details tab` | Verifies that project labels can be edited from the project Details tab and reflected in project header/sidebar chips. |
+| `hides project artifacts and raw package artifact inclusion when Files are disabled` | Verifies the Projects modal hides the Artifacts tab/run artifact jump chips and prevents raw artifact inclusion when Files are unavailable. |
+| `opens a finding source run at the recorded line` | Verifies that project finding rows show target/review metadata, update review state without opening the run, and restore the source run at the persisted finding line number when clicked. |
+| `reorders project findings when the sort control changes` | Verifies that Projects modal finding sort modes visibly reorder finding rows by severity, target, and newest run. |
+| `refreshes an open Projects modal after a cross-tab project broadcast` | Verifies that a project-workspace storage broadcast refreshes an already-open Projects modal. |
 
 #### `state.test.js`
 
@@ -2150,6 +3036,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
 | `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
 | `offers attach and kill actions for runs owned by another live browser` | Verifies that another browser's live runs expose Attach and Kill actions from the Status Monitor. |
+| `attaches active PTY runs from Status Monitor when PTY reattach is available` | Verifies that active PTY rows use the shared Attach action when the PTY reattach helper is available. |
 | `keeps attach and kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Attach and Kill when the current browser already has an attached tab for a run started elsewhere. |
 | `keeps attach visible before and after an attached tab is closed` | Verifies that Status Monitor keeps Attach visible while a run has a local tab and after that tab is closed. |
 | `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
@@ -2179,6 +3066,20 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
 | `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
 | `keeps HUD status monitor triggers clickable without running-state affordances` | Verifies that STATUS, LAST EXIT, and TABS still open Status Monitor without adding the old running-state glyph or pulse. |
+| `_constellationHourDensity returns a 24-length normalized array` | Verifies that the Status Monitor constellation density helper produces one normalized value per hour. |
+| `_constellationHourDensity returns all zeros for empty input` | Verifies that the Status Monitor constellation density helper returns an all-zero day when no stars exist. |
+| `_constellationActiveWindow returns the full day for sparse fixtures` | Verifies that sparse constellation data keeps the full-day view instead of overfitting to too little history. |
+| `_constellationActiveWindow returns a padded window for clustered fixtures` | Verifies that clustered constellation data produces a padded active window around the observed command times. |
+| `_constellationActiveWindow clamps padded edges to [0, 1440]` | Verifies that active-window padding never extends before the start or after the end of the day. |
+| `_constellationMinuteToX maps a star at minute 800 inside {600, 1080} to the expected position` | Verifies that active-window minute mapping places stars correctly inside the focused time range. |
+| `full-day toggle round-trips through preferences and re-renders the panel` | Verifies that the Status Monitor full-day constellation toggle persists through preferences and redraws the panel. |
+| `ambient stars carry no data-star-id and do not gain pointer focus` | Verifies that decorative constellation stars remain non-data, non-focusable background points. |
+| `_constellationDeadBands returns empty for sessions under the minimum-star floor` | Verifies that interior dead-band detection only fires for sessions with enough plotted stars to be statistically meaningful. |
+| `_constellationDeadBands finds an interior low-density band when stars cluster at both edges of the day` | Verifies that contiguous low-density runs in the middle of the clock are detected as cropped dead bands. |
+| `_constellationVisibleSegments crops a single dead band into two visible segments` | Verifies that a known dead band produces the expected visible-span split around it. |
+| `_constellationVisibleSegments returns a single segment when there are no dead bands` | Verifies that the constellation axis remains contiguous when no interior dead band is detected. |
+| `_constellationMinuteToX is piecewise when given multiple segments and clamps dead-band minutes to the seam` | Verifies that minutes inside a collapsed dead band map to the same seam x while minutes inside the visible segments map proportionally to the combined visible mass. |
+| `piecewise X axis renders seam markers and skips guides inside the dead band` | Verifies that the dashed seam line plus `//` glyph render between visible segments, that hour-label guides for dead-band hours are suppressed, and that the meta line shows the multi-segment label. |
 
 #### `tabs.test.js`
 
@@ -2231,19 +3132,34 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `builds exported HTML with color-scheme metadata and themed shell surfaces` | Verifies that builds exported HTML with color-scheme metadata and themed shell surfaces. |
 | `builds a shared export header model with canonical run-meta ordering` | Verifies that the shared export header model preserves the canonical run-meta ordering used across permalink, HTML, and PDF surfaces. |
 | `renders export header html with the same title/meta/run-meta structure as permalink pages` | Verifies that the shared export header HTML matches the permalink page title/meta/run-meta structure. |
+| `can build exported HTML with structured highlights initially off` | Verifies that saved HTML exports include the highlight toggle and can load with structured highlights already muted. |
 | `saveTab shows a toast when there is only welcome output` | Verifies that saveTab shows a toast when there is only welcome output. |
 | `saveTab does not apply redaction rules to exported text` | Verifies that saveTab does not apply redaction rules to exported text. |
 | `exportTabHtml does not apply redaction rules to rendered HTML output` | Verifies that exportTabHtml does not apply redaction rules to rendered HTML output. |
+| `exportTabHtml omits raw-only intel output` | Verifies that styled HTML export replaces app-native intel body lines with the raw-only placeholder. |
 | `exportTabHtml shows a toast when the tab has no lines` | Verifies that exportTabHtml shows a toast when the tab has no lines. |
 | `exportTabHtml shows a toast when ExportHtmlUtils is not loaded` | Verifies that exportTabHtml shows a toast when ExportHtmlUtils is not loaded. |
 | `exportTabPdf shows a toast when the tab has no lines` | Verifies that exportTabPdf shows a toast when the tab has no lines. |
 | `exportTabPdf shows a toast when jsPDF is not loaded` | Verifies that exportTabPdf shows a toast when jsPDF is not loaded. |
+| `exportTabPdf omits raw-only intel output` | Verifies that PDF export receives the raw-only placeholder instead of app-native intel body lines. |
 | `permalinkTab applies configured redaction rules before creating a snapshot` | Verifies that permalinkTab applies configured redaction rules before creating a snapshot. |
 | `startTabRename updates scroll buttons when the strip begins overflowing during edit` | Verifies that startTabRename updates scroll buttons when the strip begins overflowing during edit. |
 | `refocuses the terminal input after clicking the left tab scroll button` | Verifies that refocuses the terminal input after clicking the left tab scroll button. |
 | `refocuses the terminal input after clicking the right tab scroll button` | Verifies that refocuses the terminal input after clicking the right tab scroll button. |
 | `reorders tabs through touch pointer dragging on mobile` | Verifies that reorders tabs through touch pointer dragging on mobile. |
 | `reorders desktop tabs through pointer dragging` | Verifies that reorders desktop tabs through pointer dragging. |
+
+#### `tour_modal.test.js`
+
+| Test | Description |
+| --- | --- |
+| `opens the desktop visual tour, records the version, and binds the focus trap` | Verifies that the desktop tour modal opens, records the current tour version, and binds the shared focus trap. |
+| `navigates chapters with the shared pressable controls` | Verifies that the tour modal Prev and Next controls move between chapters through the pressable contract. |
+| `runs the visual tour Try this actions and closes the carousel` | Verifies that visual tour Try this actions close the carousel, load command-focused prompt text, and open real app surfaces for UI-focused chapters. |
+| `closes through the shared dismissible dispatcher and backdrop` | Verifies that the tour modal closes through closeTopmostDismissible and backdrop dismissal. |
+| `stays unavailable when the tour is disabled, empty, or on mobile` | Verifies that the desktop visual tour is suppressed when the feature is disabled, no chapters are visible, or mobile mode is active. |
+| `renders each configured illustration key with a themed mini card fallback` | Verifies that every configured tour illustration key renders a non-empty themed mini card and unknown keys fall back safely. |
+| `renders the running command exit row like terminal success output` | Verifies that the Running Commands tour illustration uses the same bracketed green success exit row as terminal output. |
 
 #### `ui_confirm.test.js`
 
@@ -2260,6 +3176,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resolves null via cancelConfirm()` | Verifies the imperative cancel entrypoint resolves with null. |
 | `hides the host and clears action markup after resolve` | Verifies cleanup hides the host, re-applies u-hidden, and clears rendered buttons. |
 | `refocuses the composer on resolve` | Verifies resolution triggers refocusComposerAfterAction with defer:true. |
+| `can resolve without refocusing the composer` | Verifies drawer-owned confirmations can resolve without returning focus to the terminal composer. |
 | `renders a plain string body` | Verifies string bodies are set as textContent on the body slot. |
 | `renders {text, note} as text + <br> + .modal-copy-note span` | Verifies the {text, note} shape renders primary copy plus a styled secondary note. |
 | `renders a Node body directly` | Verifies a DOM Node body is appended without re-wrapping. |
@@ -2278,6 +3195,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `stacks when the viewport is <=480px even with 2 actions` | Verifies modal-actions-stacked is applied on narrow viewports for a 2-action dialog. |
 | `does not stack for 2 actions on wide viewports` | Verifies the default side-by-side layout for 2 actions above the breakpoint. |
 | `renders a single Node into the content slot` | Verifies a DOM Node passed as `content` is appended to the `[data-confirm-content]` slot. |
+| `enhances form-select controls in the content slot` | Verifies confirmation-modal form selects are passed through the app-native select enhancer after mounting. |
+| `focuses the app-native select trigger when defaultFocus is an enhanced select` | Verifies confirmation modals focus the generated app-native select trigger instead of the hidden native select when defaultFocus points at an enhanced select. |
 | `renders an array of Nodes into the content slot in order` | Verifies an array of Nodes is appended into the content slot preserving order. |
 | `skips non-Node items in an array silently` | Verifies non-Node items in the content array are ignored rather than throwing. |
 | `clears the content slot on resolve` | Verifies caller-supplied content is removed when the confirm promise settles. |
@@ -2373,6 +3292,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
 | `keeps the native select as state while rendering a themed trigger` | Verifies app-native select enhancement keeps the original select as the state owner. |
 | `dispatches normal change events when choosing an app-native option` | Verifies app-native select option clicks emit regular select change events. |
+| `portals modal selects so menus escape clipped dialog bodies` | Verifies app-native select menus inside dialogs portal to the page layer and flip above controls near the viewport edge. |
+| `refreshes custom menu options when native select options change` | Verifies app-native select menus rebuild when async code updates the native select option list. |
+| `enhances form-select controls inserted after startup` | Verifies dynamically inserted form-select controls become app-native dropdowns automatically. |
 
 #### `ui_focus_trap.test.js`
 
@@ -2386,6 +3308,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `dispose removes the keydown handler and clears the bound flag` | Verifies the disposable contract unwinds the listener and the idempotency marker. |
 | `skips hidden focusables inside the container` | Verifies `[hidden]` descendants are excluded from the focus list. |
 | `skips focusables with inline display:none (options-modal session-token buttons pattern)` | Verifies elements hidden via `style.display = 'none'` are excluded so Tab from the actual visible last focusable wraps instead of leaking past a non-focusable boundary element. |
+| `skips focusables inside a CSS-hidden ancestor` | Verifies descendants of a CSS-hidden container are excluded from the focus list. |
 | `does not intercept arrow keys unless explicitly enabled` | Verifies the shared trap leaves arrow-key behavior alone on normal modal surfaces unless callers opt in. |
 | `cycles forward with ArrowRight and ArrowDown when arrow keys are enabled` | Verifies opt-in arrow-key mode advances focus through the current trap order. |
 | `cycles backward with ArrowLeft and ArrowUp when arrow keys are enabled` | Verifies opt-in arrow-key mode reverses focus through the current trap order. |
@@ -2475,6 +3398,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `redacts only the text field while preserving line metadata` | Verifies that redacts only the text field while preserving line metadata. |
 | `marks failure toasts with an error tone` | Verifies that marks failure toasts with an error tone. |
 | `marks success toasts with the success tone` | Verifies that marks success toasts with the success tone. |
+| `clicks a temporary download anchor and revokes the object URL once` | Verifies that blob downloads use a temporary anchor and one delayed object URL revoke. |
 | `copies to clipboard and shows a share button in the toast when navigator.share is available` | Verifies that copies to clipboard and shows a share button in the toast when navigator.share is available. |
 | `tapping the share button in the toast calls navigator.share with the url` | Verifies that tapping the share button in the toast calls navigator.share with the url. |
 | `copies to clipboard and shows a plain toast when navigator.share is unavailable` | Verifies that copies to clipboard and shows a plain toast when navigator.share is unavailable. |
@@ -2488,6 +3412,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `cancelWelcome clears active and done flags` | Verifies that cancelWelcome clears active and done flags. |
 | `runWelcome stops cleanly when the server returns no blocks` | Verifies that runWelcome stops cleanly when the server returns no blocks. |
 | `runWelcome appends command and notice lines and marks completion` | Verifies that runWelcome appends command and notice lines and marks completion. |
+| `runWelcome renders an emphasized tour CTA when the tour has not been opened` | Verifies that the welcome tour CTA is emphasized before the current tour version has been opened. |
+| `runWelcome demotes the tour CTA after the current version has been opened` | Verifies that the welcome tour CTA remains visible but demoted after the current tour version has been opened. |
+| `runWelcome re-emphasizes the tour CTA when the tour version changes` | Verifies that a newer tour version restores emphasis to the welcome tour CTA. |
+| `runWelcome suppresses the tour CTA when disabled or no chapters are visible` | Verifies that the welcome tour CTA is hidden when the tour is disabled or chapter filtering leaves nothing to show. |
+| `mobile welcome renders the CLI-only tour CTA copy` | Verifies that mobile welcome output keeps the tour CTA scoped to the terminal command entry point. |
+| `desktop visual tour CTA opens the modal without loading the CLI command` | Verifies that the desktop welcome CTA can open the visual tour without replacing the composer with the `tour` command. |
 | `renders the operator message inside the welcome banner when motd is configured` | Verifies that renders the operator message inside the welcome banner when motd is configured. |
 | `runWelcome falls back to darklab_shell banner text when /welcome/ascii fails` | Verifies that runWelcome falls back to darklab_shell banner text when /welcome/ascii fails. |
 | `runWelcome falls back to the static hint when /welcome/hints fails` | Verifies that runWelcome falls back to the static hint when /welcome/hints fails. |
@@ -2520,6 +3450,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
+| `prefills and saves workspace file labels and notes from the editor` | Verifies that the Files editor preloads generic workspace-file metadata and reconciles labels and notes when saving. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
 | `opens the viewer with a loading preview while a file read is pending` | Verifies that clicking View opens the viewer immediately with loading feedback before the file read and preview rendering finish. |
 | `shows loading feedback before opening the editor for large files` | Verifies that Edit opens with loading feedback before large file contents are loaded into the editor modal. |
@@ -2573,6 +3504,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `output appears in the terminal after running a command` | Verifies that output appears in the terminal after running a command. |
 | `HUD LAST EXIT shows 0 after a successful run and output has exit-ok line` | Verifies that HUD LAST EXIT shows 0 after a successful run and output has exit-ok line. |
 | `denied command shows [denied] in output and non-zero LAST EXIT` | Verifies that denied command shows [denied] in output and non-zero LAST EXIT. |
+| `starts, streams, resizes, and kills an interactive PTY command` | Verifies that the browser PTY path can start an interactive command, render streamed output in xterm, post resize events, and kill the run through the confirmation flow. |
+| `reattaches an active interactive PTY after reload` | Verifies that reload recovery can rebuild an active PTY modal from the snapshot endpoint and resume the live stream. |
 
 #### `demo.mobile.spec.js`
 
@@ -2605,7 +3538,8 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 
 | Test | Description |
 | --- | --- |
-| `clicking a history entry injects the command into the composer and closes the drawer` | Verifies that the row-tap primary action populates `#cmd` with the selected history command and closes the history panel without spawning a tab. |
+| `clicking a history entry opens run details and keeps the drawer open` | Verifies that the row-tap primary action opens the Run Details modal, leaves the History drawer open behind it, and does not spawn a tab. |
+| `Run Details AI workflow renders summary and validated next commands` | Verifies the feature-flagged Run Details AI flow can request a summary, request next-command suggestions, render accepted and blocked suggestions, and wire Copy/Run actions without a live AI provider. |
 | `the history restore button loads output into a tab without touching the composer` | Verifies that the per-row `restore` action button loads the run's output into a tab and leaves `#cmd` empty — the pre-swap "click row to restore" behavior now lives on an explicit button. |
 | `the history restore button switches to an existing tab instead of duplicating it` | Verifies that clicking `restore` for a run whose output is already open activates the existing tab rather than opening a duplicate. |
 | `deleting a starred entry removes it from the chip bar` | Verifies that deleting a starred entry removes it from the chip bar. |
@@ -2617,6 +3551,8 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 | `history drawer can filter to snapshots and shows snapshot actions` | Verifies that the history drawer can switch to snapshot-only mode, render the `SNAPSHOT` row treatment, and expose the snapshot action set. |
+| `history bulk select can add remove and delete visible runs` | Verifies that desktop History select mode can select visible runs, add them to the active project, remove them from a project, and bulk-delete them. |
+| `run comparison split view works from history and project entry points` | Verifies that seeded same-command runs render the split comparison from both the History drawer and Projects modal, including synced scrolling, lazy equal-line expansion, long-line expansion, counts, and project-scoped lazy fetches. |
 
 #### `interaction-contract.spec.js`
 
@@ -2660,6 +3596,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | --- | --- |
 | `back button is visible at mobile viewport width` | Verifies that back button is visible at mobile viewport width. |
 | `back button navigates back to the shell` | Verifies that back button navigates back to the shell. |
+| `storage breakdown renders table sizing diagnostics` | Verifies that the diagnostics Storage breakdown panel renders with at least one table-sizing row. |
 | `back button is visible at 850px touch viewport (shell threshold)` | Verifies that the diagnostics back button appears at 850px on a touch device — the shell's mobile-mode threshold — so chrome parity holds beyond the old 760px breakpoint. |
 | `back button is hidden at 850px non-touch viewport` | Verifies that the diagnostics back button is hidden at 850px on a non-touch (pointer: fine) device, where the shell stays in desktop mode. |
 | `mobile startup uses the mobile welcome and keeps the composer visible` | Verifies that mobile startup uses the mobile welcome and keeps the composer visible. |
@@ -2688,17 +3625,22 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
 | `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the backdrop — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
+| `mobile Projects creates, links, drills by count chip, and opens row actions` | Verifies the real mobile Projects browser flow for creating a project, linking the last run, using a count chip to drill into Runs, and opening row actions in a mobile action sheet. |
+| `mobile Projects can launch run comparison from the runs tab` | Verifies that the mobile Projects compare stepper hands off to the shared run comparison overlay, closes the Projects sheet, and avoids the generic compare failure toast. |
+| `mobile Projects shows retryable project summary errors` | Verifies that mobile Projects renders a retryable inline error when a project summary fetch fails and recovers after tapping Retry. |
 | `workflows sheet starts collapsed and wraps commands inside cards` | Verifies that mobile workflow cards start collapsed, expand on tap, and keep wrapped command chips inside the sheet width. |
-| `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
-| `mobile recents sheet injects the tapped command into the composer and closes` | Verifies that tapping a row in the mobile recents sheet populates `#mobile-cmd` with the selected command and dismisses the sheet — the primary tap path is now composer-injection, not tab-restore. |
-| `mobile recents sheet restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile recents sheet loads the corresponding run into the active tab — the pre-swap row-tap behavior now lives on an explicit button. |
-| `mobile history rows render relative time with absolute time in the tooltip` | Verifies that the mobile recents sheet shows relative timestamps ("just now", "3m ago", ...) and surfaces the absolute time through the span's title attribute. |
-| `mobile history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile recents sheet does not dismiss the drawer after tap, reducing repeated reopen churn. |
+| `mobile recent peek summarizes recent runs and opens the full history panel on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile History panel with tools collapsed. |
+| `mobile full history opens run details from row tap` | Verifies that tapping a row in the mobile History panel opens Run Details and leaves the mobile composer untouched. |
+| `mobile full history restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile History panel loads the corresponding run into the active tab. |
+| `mobile full history rows render absolute time in the tooltip` | Verifies that mobile History rows surface precise run time through the span's title attribute. |
+| `mobile full history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile History panel does not dismiss the drawer after tap, reducing repeated reopen churn. |
+| `mobile full history select mode wraps toolbar and row tap selects without long-press side effects` | Verifies that the full mobile History sheet keeps the bulk toolbar wrapped inside the viewport, lets row-body taps select runs in select mode, and ignores long-press-style pointer holds. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
 | `mobile keyboard helper moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
 | `mobile output wraps inside the transcript when timestamps and line numbers are on` | Regression for mobile output overflow: injects a long prefixed line with `body.ln-on` and `body.ts-clock` active and asserts `.line-content`'s right edge stays within `.output`'s right edge at mobile viewport width. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
+| `mobile Atlas opens list/detail flow and select mode` | Verifies that mobile Atlas opens from the mobile menu, switches entity tabs, drills into entity detail, returns with Back, and uses overflow select mode for row selection. |
 
 #### `output.spec.js`
 
@@ -2722,7 +3664,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 
 | Test | Description |
 | --- | --- |
-| `firing more than 5 requests per second returns a 429` | Verifies that firing more than 5 requests per second returns a 429. |
+| `firing more than the e2e per-second limit returns a 429` | Verifies that firing more than the e2e per-second limit returns a 429. |
 
 #### `runner-stall.spec.js`
 
@@ -2750,7 +3692,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `generate persists the token across reload and clear returns to anonymous` | Verifies that terminal-driven token generation stores the active token, survives a reload, and `session-token clear` returns the browser to its anonymous session after confirmation. |
 | `set can skip migration without moving anonymous history` | Verifies that setting an issued token can explicitly skip migration and does not carry the prior anonymous run history into the token session. |
 | `set migration carries history, starred commands, and workspace files` | Verifies that the browser migration path moves run history, starred commands, and app-mediated workspace files to the selected session token. |
-| `recent domain autocomplete follows the active session token across browser contexts` | Verifies that recent-domain autocomplete persists with the active session token and becomes available in another browser context after setting that token. |
+| `recent target autocomplete follows the active session token across browser contexts` | Verifies that recent target autocomplete persists with the active session token and becomes available in another browser context after setting that token. |
 | `set rejects unknown tok tokens before switching identity` | Verifies that unknown `tok_` values fail verification and leave the browser on the original anonymous session. |
 | `revoke active token clears browser storage and reverts to anonymous` | Verifies that revoking the active token removes browser token storage and switches back to the anonymous session after confirmation. |
 
@@ -2778,7 +3720,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `macOS Option+T opens a new tab without inserting a symbol into the prompt` | Verifies that macOS Option+T opens a new tab without inserting a symbol into the prompt. |
 | `macOS Option+W closes the active tab without inserting a symbol into the prompt` | Verifies that macOS Option+W closes the active tab without inserting a symbol into the prompt. |
 | `macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt` | Verifies that macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt. |
-| `macOS Option+P creates a permalink without inserting a symbol into the prompt` | Verifies that macOS Option+P creates a permalink without inserting a symbol into the prompt. |
+| `macOS Option+Shift+P creates a permalink without inserting a symbol into the prompt` | Verifies that macOS Option+Shift+P creates a permalink without inserting a symbol into the prompt. |
 | `macOS Option+ArrowRight and Option+ArrowLeft move by word` | Verifies that macOS Option+ArrowRight and Option+ArrowLeft move by word without cycling tabs. |
 | `macOS Shift+Option+ArrowRight and Shift+Option+ArrowLeft cycle tabs` | Verifies that macOS Shift+Option+ArrowRight and Shift+Option+ArrowLeft cycle tabs. |
 | `macOS Option+digit jumps directly to a tab without inserting a symbol` | Verifies that macOS Option+digit jumps directly to a tab without inserting a symbol. |
@@ -2805,6 +3747,8 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
+| `Alt+C toggles the Commands modal from the composer` | Alt+C opens and closes the Commands modal without leaking `ç` into the prompt. |
+| `Alt+P toggles the Projects modal from the composer` | Alt+P opens and closes the Projects modal without leaking `π` into the prompt. |
 | `Alt+M toggles the Status Monitor from the composer` | Alt+M opens and closes the status monitor without leaking `µ` into the prompt. |
 | `Alt+Shift+F toggles the Files modal from the composer` | Alt+Shift+F opens and closes Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
@@ -2882,6 +3826,9 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `desktop Status Monitor loads dashboard endpoints together without route stubs` | Verifies that the Status Monitor opens against real dashboard endpoints for status, workspace files, history stats, and history insights. |
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
+| `creates an active project, manages targets, and edits linked run metadata` | Verifies that the Projects modal can create and activate a project, persist project labels/notes, add/edit/delete targets, link the last run, and save linked-run metadata in a live browser. |
+| `creates, edits, downloads, and deletes a project evidence package` | Verifies that the Projects modal package wizard creates a linked-run evidence package with labels/notes, and that package edit, manifest, download, and delete actions work in a live browser. |
+| `edits finding and artifact metadata and previews project artifacts` | Verifies that seeded project findings and run artifacts can be edited, previewed, downloaded, filtered by source run, and unlinked through the Projects modal in a live browser. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
 | `navigates nested file output folders and exposes viewer actions` | Verifies that the workspace modal displays nested output paths as folders and exposes actions in the file viewer header. |
 | `input-driven workflows render prefilled form fields and runnable rendered steps` | Verifies that input-driven workflow cards render prefilled fields, runnable rendered steps, and a `Run all` control. |
@@ -2895,6 +3842,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `run all executes rendered workflow steps sequentially in the same tab` | Verifies that `Run all` executes the rendered workflow commands sequentially in the active tab instead of opening separate tabs. |
 | `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
+| `persists the selected Options tab and keeps secrets out of preferences` | Verifies that the Options modal remembers the selected Secrets tab and keeps stored secret rows out of the Preferences tab. |
 
 #### `welcome-context.spec.js`
 
@@ -2928,8 +3876,25 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 ## Related Docs
 
-- [README.md](../README.md) — quick start, feature summary, and operator configuration reference
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup, branch workflow, and merge request process
-- [ARCHITECTURE.md](../ARCHITECTURE.md) — runtime layers, request flow, and persistence schema
-- [DECISIONS.md](../DECISIONS.md) — architectural rationale, tradeoffs, and implementation history
-- [THEME.md](../THEME.md) — theme registry, key reference, and custom theme authoring
+- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
+- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](../FEATURES.md) - full per-feature reference
+- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](../docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
+- [docs/api.md](../docs/api.md) - headless API and bundled CLI usage guide
+- [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](../docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
+- [docs/postgres-migration.md](../docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](../docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
+- [docs/storage-scaling.md](../docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](../docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory

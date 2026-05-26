@@ -77,6 +77,7 @@ function loadStatusMonitor({
   mobile = false,
   bindMobileSheet = undefined,
   attachActiveRunFromMonitor = undefined,
+  attachInteractivePtyCommand = undefined,
   killActiveRunFromMonitor = undefined,
   openHistoryWithFilters = undefined,
   restoreHistoryRun = undefined,
@@ -146,12 +147,17 @@ function loadStatusMonitor({
   if (openHistoryWithFilters) window.openHistoryWithFilters = openHistoryWithFilters
   if (restoreHistoryRun) window.restoreHistoryRun = restoreHistoryRun
   return fromDomScripts(
-    ['app/static/js/status_monitor.js'],
+    [
+      'app/static/js/features/status-monitor/status_monitor_core.js',
+      'app/static/js/features/status-monitor/status_monitor_data.js',
+      'app/static/js/features/status-monitor/status_monitor_resources.js',
+      'app/static/js/status_monitor.js',
+    ],
     {
       document,
       window,
       apiFetch,
-      showToast: vi.fn(),
+      showToast,
       getTabs: vi.fn(() => tabs),
       activateTab,
       ...(pauseBackgroundRunStreamsForStatusMonitor
@@ -161,6 +167,7 @@ function loadStatusMonitor({
         ? { resumeBackgroundRunStreamsAfterStatusMonitor }
         : {}),
       ...(attachActiveRunFromMonitor ? { attachActiveRunFromMonitor } : {}),
+      ...(attachInteractivePtyCommand ? { attachInteractivePtyCommand } : {}),
       ...(killActiveRunFromMonitor ? { killActiveRunFromMonitor } : {}),
       ...(bindMobileSheet ? { bindMobileSheet } : {}),
     },
@@ -333,6 +340,38 @@ describe('Status Monitor', () => {
       expect.objectContaining({ run_id: 'run-other-client' }),
     )
     expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('attaches active PTY runs from Status Monitor when PTY reattach is available', async () => {
+    const attachInteractivePtyCommand = vi.fn(() => Promise.resolve(true))
+    const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
+    const { openStatusMonitor } = loadStatusMonitor({
+      attachInteractivePtyCommand,
+      killActiveRunFromMonitor,
+      runs: [
+        {
+          run_id: 'run-pty',
+          run_type: 'pty',
+          pid: 1234,
+          command: 'mtr --interactive darklab.sh',
+          started: new Date().toISOString(),
+          has_live_owner: true,
+          owned_by_this_client: false,
+        },
+      ],
+    })
+
+    await openStatusMonitor({ source: 'test' })
+
+    expect(document.querySelector('.status-monitor-pty-note')).toBeNull()
+    const buttons = [...document.querySelectorAll('.status-monitor-action-btn')]
+    expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
+    expect(buttons[0].getAttribute('aria-disabled')).toBeNull()
+    buttons[0].click()
+    await Promise.resolve()
+    expect(attachInteractivePtyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-pty' }),
+    )
   })
 
   it('keeps attach and kill available when another browser owns a run already attached locally', async () => {
@@ -792,16 +831,19 @@ describe('Status Monitor', () => {
     vi.useFakeTimers()
     const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[], []] })
 
-    await openStatusMonitor({ source: 'test' })
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
+    try {
+      await openStatusMonitor({ source: 'test' })
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await vi.advanceTimersByTimeAsync(3000)
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await vi.advanceTimersByTimeAsync(60000)
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
-
-    closeStatusMonitor()
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
+    } finally {
+      closeStatusMonitor()
+      vi.useRealTimers()
+    }
   })
 
   it('uses CPU hysteresis and recent samples for the pulse strip', async () => {
@@ -1468,5 +1510,310 @@ describe('Status Monitor', () => {
 
     document.getElementById('hud-tabs-cell').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await vi.waitFor(() => expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false))
+  })
+})
+
+describe('Status Monitor — Constellation full-sky polish', () => {
+  beforeEach(() => {
+    document.body.className = ''
+    document.body.innerHTML = `
+      <div id="rail"></div>
+      <div id="hud-status-cell">
+        <span id="status">IDLE</span>
+      </div>
+    `
+    sessionStorage.clear()
+    document.cookie = 'pref_constellation_full_day=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    delete window.applyConstellationFullDayPreference
+    delete window.getConstellationFullDayPreference
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  })
+
+  it('_constellationHourDensity returns a 24-length normalized array', () => {
+    loadStatusMonitor()
+    const { hourDensity } = window.__constellationTestHelpers
+    const stars = [
+      { started: '2026-01-03T09:15:00' },
+      { started: '2026-01-03T09:45:00' },
+      { started: '2026-01-03T14:00:00' },
+    ]
+    const density = hourDensity(stars)
+    expect(density).toHaveLength(24)
+    expect(density[9]).toBe(1)
+    expect(density[14]).toBe(0.5)
+    expect(density[0]).toBe(0)
+    density.forEach((value) => {
+      expect(value).toBeGreaterThanOrEqual(0)
+      expect(value).toBeLessThanOrEqual(1)
+    })
+  })
+
+  it('_constellationHourDensity returns all zeros for empty input', () => {
+    loadStatusMonitor()
+    const { hourDensity } = window.__constellationTestHelpers
+    const density = hourDensity([])
+    expect(density).toHaveLength(24)
+    expect(density.every((value) => value === 0)).toBe(true)
+  })
+
+  it('_constellationActiveWindow returns the full day for sparse fixtures', () => {
+    loadStatusMonitor()
+    const { activeWindow } = window.__constellationTestHelpers
+    expect(activeWindow([])).toEqual({ startMin: 0, endMin: 1440 })
+    const fiveStars = Array.from({ length: 5 }, (_, i) => ({
+      started: `2026-01-03T${String(9 + i).padStart(2, '0')}:00:00`,
+    }))
+    expect(activeWindow(fiveStars)).toEqual({ startMin: 0, endMin: 1440 })
+  })
+
+  it('_constellationActiveWindow returns a padded window for clustered fixtures', () => {
+    loadStatusMonitor()
+    const { activeWindow } = window.__constellationTestHelpers
+    const stars = Array.from({ length: 30 }, (_, i) => {
+      const hour = 9 + (i % 9)
+      const minute = (i * 7) % 60
+      return { started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00` }
+    })
+    const result = activeWindow(stars)
+    expect(result.startMin).toBeGreaterThanOrEqual(0)
+    expect(result.endMin).toBeLessThanOrEqual(1440)
+    expect(result.startMin).toBeLessThan(result.endMin)
+    expect(result.endMin - result.startMin).toBeLessThan(1440)
+    expect(result.startMin).toBeLessThanOrEqual(9 * 60)
+    expect(result.endMin).toBeGreaterThanOrEqual(17 * 60)
+  })
+
+  it('_constellationActiveWindow clamps padded edges to [0, 1440]', () => {
+    loadStatusMonitor()
+    const { activeWindow } = window.__constellationTestHelpers
+    const earlyStars = Array.from({ length: 20 }, (_, i) => ({
+      started: `2026-01-03T00:${String(i % 60).padStart(2, '0')}:00`,
+    }))
+    expect(activeWindow(earlyStars).startMin).toBe(0)
+    const lateStars = Array.from({ length: 20 }, (_, i) => ({
+      started: `2026-01-03T23:${String(i % 60).padStart(2, '0')}:00`,
+    }))
+    expect(activeWindow(lateStars).endMin).toBe(1440)
+  })
+
+  it('_constellationMinuteToX maps a star at minute 800 inside {600, 1080} to the expected position', () => {
+    loadStatusMonitor()
+    const { minuteToX, plotLeft, plotWidth } = window.__constellationTestHelpers
+    const mapper = minuteToX({ startMin: 600, endMin: 1080 })
+    const expected = plotLeft + ((800 - 600) / (1080 - 600)) * plotWidth
+    expect(mapper(800)).toBeCloseTo(expected, 6)
+    expect(mapper(600)).toBeCloseTo(plotLeft, 6)
+    expect(mapper(1080)).toBeCloseTo(plotLeft + plotWidth, 6)
+  })
+
+  it('full-day toggle round-trips through preferences and re-renders the panel', async () => {
+    // Stub the preference helpers — preferences.js itself is exercised by
+    // app.test.js. Here we just verify the constellation toggle reads the
+    // current preference, asks `applyConstellationFullDayPreference` to
+    // persist the new value, and re-renders the panel against the updated
+    // state.
+    let constellationFullDay = 'off'
+    const applySpy = vi.fn((mode) => {
+      constellationFullDay = mode === 'on' ? 'on' : 'off'
+      document.cookie = `pref_constellation_full_day=${constellationFullDay}; path=/`
+      return constellationFullDay
+    })
+    window.applyConstellationFullDayPreference = applySpy
+    window.getConstellationFullDayPreference = () => constellationFullDay
+
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor()
+    await openStatusMonitor({ source: 'test' })
+
+    const toggleBefore = document.querySelector('.status-monitor-constellation-toggle')
+    expect(toggleBefore).not.toBeNull()
+    expect(toggleBefore.getAttribute('aria-pressed')).toBe('false')
+    expect(toggleBefore.textContent).toBe('Active hours')
+
+    toggleBefore.click()
+
+    expect(applySpy).toHaveBeenCalledWith('on', true)
+    expect(constellationFullDay).toBe('on')
+    expect(document.cookie).toContain('pref_constellation_full_day=on')
+
+    const toggleAfter = document.querySelector('.status-monitor-constellation-toggle')
+    expect(toggleAfter).not.toBe(toggleBefore)
+    expect(toggleAfter.getAttribute('aria-pressed')).toBe('true')
+    expect(toggleAfter.textContent).toBe('Full day')
+
+    // And toggling back flips state and re-renders again.
+    toggleAfter.click()
+    expect(applySpy).toHaveBeenLastCalledWith('off', true)
+    const toggleFinal = document.querySelector('.status-monitor-constellation-toggle')
+    expect(toggleFinal.getAttribute('aria-pressed')).toBe('false')
+    expect(toggleFinal.textContent).toBe('Active hours')
+
+    closeStatusMonitor()
+  })
+
+  it('ambient stars carry no data-star-id and do not gain pointer focus', async () => {
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor()
+    await openStatusMonitor({ source: 'test' })
+
+    const ambientNodes = document.querySelectorAll('.status-monitor-star-ambient')
+    expect(ambientNodes.length).toBeGreaterThan(0)
+    ambientNodes.forEach((node) => {
+      expect(node.hasAttribute('data-star-id')).toBe(false)
+      expect(node.classList.contains('status-monitor-star-node')).toBe(false)
+      expect(node.getAttribute('tabindex')).toBeNull()
+    })
+
+    closeStatusMonitor()
+  })
+
+  it('_constellationDeadBands returns empty for sessions under the minimum-star floor', () => {
+    loadStatusMonitor()
+    const { deadBands } = window.__constellationTestHelpers
+    // Five clustered stars — under the 30-star floor — should never trigger
+    // dead-band detection regardless of how empty the rest of the day is.
+    const sparseStars = Array.from({ length: 5 }, (_, i) => ({
+      started: `2026-01-03T${String(14 + (i % 4)).padStart(2, '0')}:00:00`,
+    }))
+    expect(deadBands(sparseStars)).toEqual([])
+  })
+
+  it('_constellationDeadBands finds an interior low-density band when stars cluster at both edges of the day', () => {
+    loadStatusMonitor()
+    const { deadBands } = window.__constellationTestHelpers
+    // Mimic the operator with active hours 00–04 and 11–24 (a sleep window
+    // from roughly 04:00 to 11:00). Generate 200 stars so we're well past
+    // the 30-star floor.
+    const stars = []
+    for (let i = 0; i < 80; i += 1) {
+      const hour = i % 4
+      const minute = (i * 11) % 60
+      stars.push({ started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00` })
+    }
+    for (let i = 0; i < 130; i += 1) {
+      const hour = 11 + (i % 13)
+      const minute = (i * 7) % 60
+      stars.push({ started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00` })
+    }
+    const bands = deadBands(stars)
+    expect(bands.length).toBeGreaterThanOrEqual(1)
+    const sleep = bands.find((band) => band.startMin >= 4 * 60 && band.endMin <= 12 * 60)
+    expect(sleep).toBeDefined()
+    // Edge padding pulls the band inward by 30 min on each side.
+    expect(sleep.startMin).toBeGreaterThanOrEqual(4 * 60 + 30 - 1)
+    expect(sleep.endMin).toBeLessThanOrEqual(11 * 60 - 30 + 1)
+  })
+
+  it('_constellationVisibleSegments crops a single dead band into two visible segments', () => {
+    loadStatusMonitor()
+    const { visibleSegments } = window.__constellationTestHelpers
+    const segments = visibleSegments(
+      { startMin: 0, endMin: 1440 },
+      [{ startMin: 4 * 60 + 30, endMin: 11 * 60 - 30 }],
+    )
+    expect(segments).toEqual([
+      { startMin: 0, endMin: 4 * 60 + 30 },
+      { startMin: 11 * 60 - 30, endMin: 1440 },
+    ])
+  })
+
+  it('_constellationVisibleSegments returns a single segment when there are no dead bands', () => {
+    loadStatusMonitor()
+    const { visibleSegments } = window.__constellationTestHelpers
+    expect(visibleSegments({ startMin: 0, endMin: 1440 }, [])).toEqual([
+      { startMin: 0, endMin: 1440 },
+    ])
+    expect(visibleSegments({ startMin: 480, endMin: 1140 }, [])).toEqual([
+      { startMin: 480, endMin: 1140 },
+    ])
+  })
+
+  it('_constellationMinuteToX is piecewise when given multiple segments and clamps dead-band minutes to the seam', () => {
+    loadStatusMonitor()
+    const { minuteToX, plotLeft, plotWidth } = window.__constellationTestHelpers
+    const window_ = { startMin: 0, endMin: 1440 }
+    const segments = [
+      { startMin: 0, endMin: 270 },   // 00:00 – 04:30 visible (270 min)
+      { startMin: 630, endMin: 1440 }, // 10:30 – 24:00 visible (810 min)
+    ]
+    const map = minuteToX(window_, segments)
+    const totalVisible = 270 + 810
+    // First-segment start anchors to plotLeft, end anchors to seam x.
+    expect(map(0)).toBeCloseTo(plotLeft, 6)
+    expect(map(270)).toBeCloseTo(plotLeft + (270 / totalVisible) * plotWidth, 6)
+    // Any minute inside the dead band [270, 630] maps to the same seam x.
+    const seamX = plotLeft + (270 / totalVisible) * plotWidth
+    expect(map(360)).toBeCloseTo(seamX, 6)
+    expect(map(500)).toBeCloseTo(seamX, 6)
+    expect(map(630)).toBeCloseTo(seamX, 6)
+    // Second-segment start is at the same seam x; its interior maps
+    // proportionally to the combined visible minute mass.
+    expect(map(720)).toBeCloseTo(plotLeft + ((270 + (720 - 630)) / totalVisible) * plotWidth, 6)
+    expect(map(1440)).toBeCloseTo(plotLeft + plotWidth, 6)
+  })
+
+  it('piecewise X axis renders seam markers and skips guides inside the dead band', async () => {
+    // 200 stars clustered in two clear bands (00:00–04:00 and 11:00–23:00)
+    // so dead-band detection cleanly fires for the 04:00–11:00 window.
+    const constellation = []
+    for (let i = 0; i < 90; i += 1) {
+      const hour = i % 4
+      const minute = (i * 11) % 60
+      constellation.push({
+        id: `early-${i}`,
+        root: 'nmap',
+        category: 'Vulnerability Scanning',
+        command: 'nmap -sT example.com',
+        started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+        elapsed_seconds: 12,
+        exit_code: 0,
+        output_line_count: 8,
+      })
+    }
+    for (let i = 0; i < 130; i += 1) {
+      const hour = 11 + (i % 13)
+      const minute = (i * 7) % 60
+      constellation.push({
+        id: `late-${i}`,
+        root: 'curl',
+        category: 'Network Diagnostics',
+        command: 'curl https://example.com',
+        started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+        elapsed_seconds: 4,
+        exit_code: 0,
+        output_line_count: 5,
+      })
+    }
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+      insights: {
+        days: 28,
+        first_run_date: '2026-01-01',
+        max_day_count: 30,
+        activity: [],
+        command_mix: [],
+        constellation,
+        events: [],
+        windows: { constellation: { days: 30, label: 'last 30 days' } },
+      },
+    })
+    await openStatusMonitor({ source: 'test' })
+
+    const seamLines = document.querySelectorAll('.status-monitor-constellation-seam')
+    const seamLabels = document.querySelectorAll('.status-monitor-constellation-seam-label')
+    expect(seamLines.length).toBe(1)
+    expect(seamLabels.length).toBe(1)
+    expect(seamLabels[0].textContent).toBe('//')
+
+    // Guide labels inside the dead band (06, 08, 10) should be suppressed.
+    const labels = [...document.querySelectorAll('.status-monitor-constellation-guide-label')]
+      .map((node) => node.textContent)
+    expect(labels).not.toContain('06')
+    expect(labels).not.toContain('08')
+    expect(labels).not.toContain('10')
+
+    // Meta line should show the multi-segment label.
+    const metaText = document.querySelector('.status-monitor-constellation-card .status-monitor-visual-meta')?.textContent || ''
+    expect(metaText).toContain(',')
+    expect(metaText).toMatch(/\d{2}:\d{2}–\d{2}:\d{2}/)
+
+    closeStatusMonitor()
   })
 })

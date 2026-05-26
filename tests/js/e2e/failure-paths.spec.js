@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, waitForHistoryRuns, makeTestIp } from './helpers.js'
+import { runCommand, openHistoryWithEntries, waitForHistoryRuns } from './helpers.js'
 
 const CMD = 'hostname'
-const TEST_IP = makeTestIp(42)
 
 test.describe('failure paths', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: {

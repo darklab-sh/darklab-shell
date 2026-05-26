@@ -16,9 +16,12 @@ let _workspaceViewerRefreshSpinTimer = null;
 let _workspaceViewerRefreshInFlight = false;
 let _workspaceViewerAutoRefreshEnabled = false;
 let _workspaceViewedSize = null;
-let _workspaceDragPath = '';
-let _workspaceDragKind = '';
 const WorkspaceCore = window.DarklabWorkspaceCore;
+const EntityMetadataClient = (
+  typeof window !== 'undefined' && window.DarklabEntityMetadata
+) || (
+  typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
+) || {};
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
 const WORKSPACE_PREVIEW_TABLE_LIMIT = 250;
@@ -94,6 +97,43 @@ function _workspaceFileReadBlockedReason(path = '') {
   const fileSize = _workspaceViewerFileSize(path);
   if (!(Number.isFinite(fileSize) && fileSize > maxFileBytes)) return '';
   return 'file exceeds session max file size';
+}
+
+function _workspaceFileByPath(path = '') {
+  const target = String(path || '').split('/').filter(Boolean).join('/');
+  if (!target) return null;
+  return _workspaceFiles.find(item => String(item?.path || '').split('/').filter(Boolean).join('/') === target) || null;
+}
+
+function _workspaceLabelValues(file) {
+  const labels = file && Array.isArray(file.labels) ? file.labels : [];
+  return labels
+    .map(label => String(label && typeof label === 'object' ? label.label : label || '').trim())
+    .filter(Boolean);
+}
+
+function _workspaceNoteBody(file) {
+  const note = file && file.note && typeof file.note === 'object' ? file.note : null;
+  return note ? String(note.body || '').trim() : '';
+}
+
+function _workspaceMetadataOptionsForPath(path = '', fallback = {}) {
+  const file = fallback && (Array.isArray(fallback.labels) || fallback.note) ? fallback : _workspaceFileByPath(path);
+  return {
+    labels: _workspaceLabelValues(file),
+    noteBody: _workspaceNoteBody(file),
+  };
+}
+
+function _workspaceMetadataChips(file) {
+  const chips = _workspaceLabelValues(file).map(label => ({ label, kind: 'label' }));
+  if (_workspaceNoteBody(file)) chips.push({ label: 'note', kind: 'note' });
+  return chips;
+}
+
+async function _syncWorkspaceFileMetadata(path, { labels = [], noteBody = '' } = {}) {
+  await EntityMetadataClient.syncEntityLabels('workspace_file', path, Array.isArray(labels) ? labels : []);
+  await EntityMetadataClient.syncEntityNote('workspace_file', path, noteBody);
 }
 
 function _workspaceAutoRefreshDisabledReason() {
@@ -202,6 +242,8 @@ function hideWorkspaceEditor() {
     workspacePathInput.readOnly = false;
     workspacePathInput.classList.remove('workspace-path-readonly');
   }
+  if (typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput) workspaceLabelsInput.value = '';
+  if (typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput) workspaceNotesInput.value = '';
   if (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay) {
     workspaceEditorOverlay.classList.add('u-hidden');
     workspaceEditorOverlay.classList.remove('open');
@@ -214,6 +256,7 @@ function hideWorkspaceViewer() {
   if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
     workspaceViewerOverlay.classList.add('u-hidden');
     workspaceViewerOverlay.classList.remove('open');
+    workspaceViewerOverlay.classList.remove('workspace-viewer-overlay-elevated');
   }
   if (_workspaceViewerRefreshSpinTimer) {
     clearTimeout(_workspaceViewerRefreshSpinTimer);
@@ -297,163 +340,14 @@ function _workspaceAfterPaint() {
   });
 }
 
-function _workspaceFileExt(path = '') {
-  const name = String(path || '').split('/').filter(Boolean).pop() || '';
-  const match = name.match(/\.([a-z0-9]+)$/i);
-  return match ? match[1].toLowerCase() : '';
-}
-
-function _workspaceLooksLikeHttpResponse(text = '') {
-  const raw = String(text || '').replace(/^\uFEFF/, '');
-  return /^HTTP\/\d(?:\.\d)?\s+\d{3}/i.test(raw.trimStart());
-}
-
-function _workspaceParseDelimitedLine(line = '', delimiter = ',') {
-  const cells = [];
-  let cell = '';
-  let quoted = false;
-  const text = String(line || '');
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (char === '"') {
-      if (quoted && text[index + 1] === '"') {
-        cell += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (char === delimiter && !quoted) {
-      cells.push(cell);
-      cell = '';
-    } else {
-      cell += char;
-    }
-  }
-  cells.push(cell);
-  return cells;
-}
-
-function _workspaceParseDelimited(text = '', delimiter = ',') {
-  const rows = String(text || '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .filter(line => line.length > 0)
-    .slice(0, WORKSPACE_PREVIEW_TABLE_LIMIT + 1)
-    .map(line => _workspaceParseDelimitedLine(line, delimiter));
-  const width = Math.max(0, ...rows.map(row => row.length));
-  if (rows.length < 2 || width < 2) return null;
-  return rows.map(row => {
-    const next = row.slice();
-    while (next.length < width) next.push('');
-    return next;
+function _workspaceViewerPayload(path = '', text = '') {
+  return window.DarklabWorkspaceViewerFormats.viewerPayload(path, text, {
+    tableLimit: WORKSPACE_PREVIEW_TABLE_LIMIT,
   });
 }
 
-function _workspaceFormatXml(text = '') {
-  const raw = String(text || '').trim();
-  if (!raw || !/^<[\s\S]*>$/.test(raw)) return null;
-  if (typeof DOMParser !== 'undefined') {
-    try {
-      const parsed = new DOMParser().parseFromString(raw, 'application/xml');
-      if (parsed.querySelector('parsererror')) return null;
-    } catch (_) {
-      return null;
-    }
-  }
-  const lines = raw
-    .replace(/>\s*</g, '>\n<')
-    .split('\n');
-  let depth = 0;
-  return lines.map(line => {
-    const trimmed = line.trim();
-    if (/^<\//.test(trimmed)) depth = Math.max(0, depth - 1);
-    const formatted = `${'  '.repeat(depth)}${trimmed}`;
-    if (/^<[^!?/][^>]*[^/]>\s*$/.test(trimmed) && !/^<([^>\s]+)[^>]*>.*<\/\1>$/.test(trimmed)) {
-      depth += 1;
-    }
-    return formatted;
-  }).join('\n');
-}
-
-function _workspaceParseHttpResponse(text = '') {
-  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const [head = '', ...bodyParts] = normalized.split(/\n\n/);
-  const lines = head.split('\n').filter(Boolean);
-  if (!lines.length || !/^HTTP\/\d(?:\.\d)?\s+\d{3}/i.test(lines[0])) return null;
-  return {
-    status: lines[0],
-    headers: lines.slice(1).map(line => {
-      const index = line.indexOf(':');
-      return index >= 0
-        ? { name: line.slice(0, index).trim(), value: line.slice(index + 1).trim() }
-        : { name: line.trim(), value: '' };
-    }),
-    body: bodyParts.join('\n\n'),
-  };
-}
-
-function _workspaceFormatJsonLines(text = '') {
-  const rawLines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const nonEmptyLines = rawLines.map(line => line.trim()).filter(Boolean);
-  const formatted = [];
-  for (const line of nonEmptyLines) {
-    try {
-      formatted.push(JSON.stringify(JSON.parse(line), null, 2));
-    } catch (_) {
-      return null;
-    }
-  }
-  return nonEmptyLines.length ? formatted.join('\n') : null;
-}
-
-function _workspaceLooksLikeJsonLines(text = '') {
-  const nonEmptyLines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
-    .map(line => line.trim())
-    .filter(Boolean);
-  if (nonEmptyLines.length < 2) return false;
-  return nonEmptyLines.every(line => /^[{[]/.test(line));
-}
-
-function _workspaceViewerPayload(path = '', text = '') {
-  const rawText = String(text || '');
-  const trimmed = rawText.trim();
-  const ext = _workspaceFileExt(path);
-  const http = _workspaceLooksLikeHttpResponse(rawText) ? _workspaceParseHttpResponse(rawText) : null;
-  if (http) return { text: rawText, format: 'http', http };
-  if (ext === 'jsonl' || ext === 'ndjson' || _workspaceLooksLikeJsonLines(rawText)) {
-    const jsonl = _workspaceFormatJsonLines(rawText);
-    if (jsonl) return { text: jsonl, rawText, format: 'jsonl' };
-    if (ext === 'jsonl' || ext === 'ndjson') {
-      return { text: rawText, format: 'text', notice: 'Malformed JSONL; showing raw text.' };
-    }
-  }
-  const looksJson = ext === 'json' || /^[{[]/.test(trimmed);
-  if (looksJson) {
-    try {
-      return {
-        text: JSON.stringify(JSON.parse(trimmed), null, 2),
-        rawText,
-        format: 'json',
-      };
-    } catch (_) {
-      if (ext === 'json') return { text: rawText, format: 'text', notice: 'Malformed JSON; showing raw text.' };
-    }
-  }
-  if (ext === 'csv' || ext === 'tsv') {
-    const table = _workspaceParseDelimited(rawText, ext === 'tsv' ? '\t' : ',');
-    if (table) return { text: rawText, format: ext, table };
-  }
-  if (ext === 'xml' || /^<\?xml/.test(trimmed)) {
-    const xml = _workspaceFormatXml(rawText);
-    if (xml) return { text: xml, rawText, format: 'xml' };
-    if (ext === 'xml') return { text: rawText, format: 'text', notice: 'Malformed XML; showing raw text.' };
-  }
-  return { text: rawText, format: 'text' };
-}
-
 function _workspaceViewerRawText(payload) {
-  return String(payload?.rawText ?? payload?.text ?? '');
+  return window.DarklabWorkspaceViewerFormats.viewerRawText(payload);
 }
 
 function _workspaceUsesLargeSearchMode({ lineCount = 0, charCount = 0, size = null } = {}) {
@@ -706,7 +600,7 @@ async function switchWorkspaceViewerMode(raw = false) {
   _workspaceRenderViewerPayload(_workspaceViewerPayloadCache, { raw });
 }
 
-function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}) {
+function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false, labels = [], noteBody = '' } = {}) {
   if (!workspaceEditor) return;
   hideWorkspaceViewer();
   workspaceEditor.classList.remove('u-hidden');
@@ -722,14 +616,29 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}
     workspacePathInput.readOnly = !!readOnlyPath;
     workspacePathInput.classList.toggle('workspace-path-readonly', !!readOnlyPath);
   }
+  if (typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput) {
+    workspaceLabelsInput.value = (Array.isArray(labels) ? labels : []).join(', ');
+  }
+  if (typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput) {
+    workspaceNotesInput.value = String(noteBody || '');
+  }
   if (workspaceTextInput) workspaceTextInput.value = text;
   setTimeout(() => {
+    const active = document.activeElement;
+    const activeIsEditable = active instanceof HTMLInputElement
+      || active instanceof HTMLTextAreaElement
+      || active instanceof HTMLSelectElement
+      || active?.isContentEditable;
+    const editorHost = (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay)
+      ? workspaceEditorOverlay
+      : workspaceEditor;
+    if (activeIsEditable && editorHost?.contains(active)) return;
     if (workspacePathInput && !path) workspacePathInput.focus();
     else if (workspaceTextInput) workspaceTextInput.focus();
   }, 0);
 }
 
-function showWorkspaceViewer(path = '', text = '', { size = null } = {}) {
+function showWorkspaceViewer(path = '', text = '', { size = null, elevated = false } = {}) {
   hideWorkspaceEditor();
   _workspaceViewedPath = String(path || '').trim();
   const numericSize = size == null ? NaN : Number(size);
@@ -744,6 +653,7 @@ function showWorkspaceViewer(path = '', text = '', { size = null } = {}) {
     workspaceViewer.classList.remove('u-hidden');
     workspaceViewer.scrollTop = 0;
     if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
+      workspaceViewerOverlay.classList.toggle('workspace-viewer-overlay-elevated', !!elevated);
       workspaceViewerOverlay.classList.remove('u-hidden');
       workspaceViewerOverlay.classList.add('open');
     }
@@ -972,9 +882,13 @@ function renderWorkspaceBrowser() {
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
     row.draggable = true;
+    const artifactDetails = _workspaceArtifactDetails(file);
     row.appendChild(_workspaceMetaNode(
       file.name || _workspaceFileBasename(file.path),
-      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}`,
+      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}${artifactDetails}`,
+      '',
+      '',
+      _workspaceMetadataChips(file),
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'view', label: 'View', tone: 'secondary' },
@@ -999,7 +913,20 @@ function renderWorkspaceBrowser() {
   }
 }
 
-function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '') {
+function _workspaceArtifactDetails(file) {
+  const artifactCount = Number(file && file.artifact_count ? file.artifact_count : 0);
+  if (!artifactCount) return '';
+  const runCount = Number(file && file.artifact_run_count ? file.artifact_run_count : 0);
+  const projects = Array.isArray(file.project_names) ? file.project_names.filter(Boolean) : [];
+  const parts = [
+    artifactCount === 1 ? '1 artifact' : `${artifactCount} artifacts`,
+  ];
+  if (runCount) parts.push(runCount === 1 ? '1 run' : `${runCount} runs`);
+  if (projects.length) parts.push(projects.slice(0, 2).join(', '));
+  return ` · ${parts.join(' · ')}`;
+}
+
+function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '', chips = []) {
   const meta = document.createElement('div');
   meta.className = 'workspace-file-meta';
   if (iconText) {
@@ -1019,6 +946,18 @@ function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = ''
   details.textContent = detailsText;
   text.appendChild(name);
   text.appendChild(details);
+  const visibleChips = Array.isArray(chips) ? chips.filter(chip => chip && chip.label) : [];
+  if (visibleChips.length) {
+    const chipWrap = document.createElement('div');
+    chipWrap.className = 'workspace-metadata-chips';
+    for (const chip of visibleChips) {
+      const chipNode = document.createElement('span');
+      chipNode.className = `workspace-metadata-chip ${chip.kind === 'note' ? 'is-note' : 'is-label'}`;
+      chipNode.textContent = chip.label;
+      chipWrap.appendChild(chipNode);
+    }
+    text.appendChild(chipWrap);
+  }
   meta.appendChild(text);
   return meta;
 }
@@ -1095,7 +1034,7 @@ async function refreshWorkspaceFilesFromButton() {
     _workspaceFiles = [];
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to refresh files'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to refresh files'), 'error');
   } finally {
     workspaceRefreshBtn.disabled = false;
     workspaceRefreshBtn.setAttribute('aria-label', 'Refresh files');
@@ -1103,58 +1042,27 @@ async function refreshWorkspaceFilesFromButton() {
   }
 }
 
-async function refreshWorkspaceFileCache() {
-  if (!isWorkspaceEnabled()) return _workspaceFiles;
-  try {
-    const resp = await apiFetch('/workspace/files');
-    const data = await _workspaceJson(resp);
-    _workspaceLoaded = true;
-    _workspaceDirs = Array.isArray(data.directories) ? data.directories : [];
-    _workspaceFiles = Array.isArray(data.files) ? data.files : [];
-    if (workspaceOverlay && workspaceOverlay.classList.contains('open')) renderWorkspaceFiles(data);
-    return _workspaceFiles;
-  } catch (_) {
-    return _workspaceFiles;
-  }
-}
-
-function getWorkspaceAutocompleteFileHints() {
-  if (!_workspaceLoaded || !Array.isArray(_workspaceFiles) || !_workspaceFiles.length) return [];
-  return _workspaceFiles.map(file => {
-    const path = String(file.path || '').trim();
-    return {
-      value: path,
-      description: `session file · ${_formatWorkspaceBytes(file.size)}`,
-    };
-  }).filter(item => item.value);
-}
-
-function getWorkspaceAutocompleteDirectoryHints() {
-  if (!_workspaceLoaded || !Array.isArray(_workspaceDirs) || !_workspaceDirs.length) return [];
-  return _workspaceDirs.map(directory => {
-    const path = String(directory.path || '').trim();
-    return {
-      value: path,
-      description: 'session folder',
-    };
-  }).filter(item => item.value);
-}
-
-function getWorkspaceDirectoryEntries(path = '') {
-  return _workspaceDirectEntries(path);
-}
-
-async function saveWorkspaceFile(path, text) {
+async function saveWorkspaceFile(path, text, metadata = null) {
   const resp = await apiFetch('/workspace/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, text }),
   });
   const data = await _workspaceJson(resp);
-  renderWorkspaceFiles(data.workspace || {});
+  const savedPath = data.file?.path || path;
+  if (metadata) {
+    await _syncWorkspaceFileMetadata(savedPath, metadata);
+    try {
+      await refreshWorkspaceFiles();
+    } catch (_) {
+      renderWorkspaceFiles(data.workspace || {});
+    }
+  } else {
+    renderWorkspaceFiles(data.workspace || {});
+  }
   hideWorkspaceEditor();
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Saved ${data.file?.path || path}`);
+  _showWorkspaceToast(`Saved ${savedPath}`, 'success');
   return data;
 }
 
@@ -1170,7 +1078,7 @@ async function createWorkspaceDirectory(path) {
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceEditor();
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Created folder ${data.directory?.path || normalized}`);
+  _showWorkspaceToast(`Created folder ${data.directory?.path || normalized}`, 'success');
   return data;
 }
 
@@ -1178,7 +1086,7 @@ async function promptWorkspaceFolderName() {
   const current = _normalizeWorkspaceDir(_workspaceCurrentDir);
   const promptDefault = current ? `${current}/` : '';
   if (typeof showConfirm !== 'function') {
-    setWorkspaceMessage('Unable to open folder prompt', 'error');
+    _showWorkspaceToast('Unable to open folder prompt', 'error');
     return null;
   }
 
@@ -1256,7 +1164,7 @@ async function promptWorkspaceFolderName() {
 async function promptWorkspaceMove(sourcePath, { kind = 'file' } = {}) {
   const source = String(sourcePath || '').trim();
   if (!source || typeof showConfirm !== 'function') {
-    setWorkspaceMessage('Unable to open move prompt', 'error');
+    _showWorkspaceToast('Unable to open move prompt', 'error');
     return null;
   }
 
@@ -1332,7 +1240,7 @@ async function deleteWorkspacePath(path) {
   hideWorkspaceViewer();
   const deleted = data.deleted || {};
   const kind = deleted.kind === 'directory' ? 'folder' : 'file';
-  setWorkspaceMessage(`Deleted ${kind} ${path}`);
+  _showWorkspaceToast(`Deleted ${kind} ${path}`, 'success');
   return data;
 }
 
@@ -1346,7 +1254,7 @@ async function moveWorkspacePath(source, destination) {
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceViewer();
   const moved = data.moved || {};
-  setWorkspaceMessage(`Moved ${moved.source || source} to ${moved.destination || destination || 'Files'}`);
+  _showWorkspaceToast(`Moved ${moved.source || source} to ${moved.destination || destination || 'Files'}`, 'success');
   return data;
 }
 
@@ -1361,14 +1269,7 @@ async function downloadWorkspaceFile(path) {
     return false;
   }
   const blob = await resp.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = path.split('/').filter(Boolean).pop() || 'workspace-file.txt';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlobAsAttachment(blob, path.split('/').filter(Boolean).pop() || 'workspace-file.txt');
   return true;
 }
 
@@ -1387,7 +1288,7 @@ async function openWorkspace() {
     _workspaceFiles = [];
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load files'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load files'), 'error');
   }
   if (typeof markInteractionSurfaceReady === 'function') {
     markInteractionSurfaceReady('workspace', workspaceOverlay, workspaceModal);
@@ -1408,7 +1309,11 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
     }
     try {
       const data = await readWorkspaceFile(fileName);
-      showWorkspaceEditor(data.path || fileName, data.text || '', { readOnlyPath: true });
+      const editorPath = data.path || fileName;
+      showWorkspaceEditor(editorPath, data.text || '', {
+        readOnlyPath: true,
+        ..._workspaceMetadataOptionsForPath(editorPath, data),
+      });
     } catch (err) {
       hideWorkspaceEditor();
       _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
@@ -1455,7 +1360,11 @@ async function handleWorkspaceFileAction(action, path) {
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
       if (_workspaceViewedPath !== String(path || '').trim()) return;
-      showWorkspaceEditor(data.path || path, data.text || '', { readOnlyPath: true });
+      const editorPath = data.path || path;
+      showWorkspaceEditor(editorPath, data.text || '', {
+        readOnlyPath: true,
+        ..._workspaceMetadataOptionsForPath(editorPath, data),
+      });
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);
     } else if (action === 'move') {
@@ -1494,53 +1403,6 @@ async function handleWorkspaceFileAction(action, path) {
   } catch (err) {
     if (action === 'view' || action === 'edit') hideWorkspaceViewer();
     _showWorkspaceToast(_workspaceErrorMessage(err), 'error');
-  }
-}
-
-function _workspaceDragSourceFromEvent(event) {
-  const row = event.target && event.target.closest ? event.target.closest('.workspace-file-row[draggable="true"]') : null;
-  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
-}
-
-function _workspaceDropTargetFromEvent(event) {
-  const row = event.target && event.target.closest ? event.target.closest('[data-workspace-drop-target="folder"]') : null;
-  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
-}
-
-function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
-  const source = String(sourcePath || '').trim();
-  const destination = String(destinationPath || '').trim();
-  if (!source) return false;
-  if (!destination) return true;
-  return source !== destination && !destination.startsWith(`${source}/`);
-}
-
-async function _handleWorkspaceDropMove(event) {
-  const target = _workspaceDropTargetFromEvent(event);
-  if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
-  event.preventDefault();
-  target.classList.remove('workspace-drop-target');
-  const destination = target.dataset.path || '';
-  const source = _workspaceDragPath;
-  const kind = _workspaceDragKind === 'folder' ? 'folder' : 'file';
-  if (!source) return;
-  const confirmed = typeof showConfirm === 'function'
-    ? await showConfirm({
-        body: {
-          text: `Move ${kind} ${source}?`,
-          note: destination ? `Destination folder: ${destination}` : 'Destination folder: Files',
-        },
-        actions: [
-          { id: 'cancel', label: 'Cancel', role: 'cancel' },
-          { id: 'move', label: 'Move', role: 'primary' },
-        ],
-      })
-    : 'move';
-  if (confirmed !== 'move') return;
-  try {
-    await moveWorkspacePath(source, destination);
-  } catch (err) {
-    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to move item'), 'error');
   }
 }
 
@@ -1599,9 +1461,18 @@ workspaceViewer?.addEventListener('click', event => {
 workspaceEditor?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await saveWorkspaceFile(_workspacePathInCurrentDir(workspacePathInput?.value || ''), workspaceTextInput?.value || '');
+    await saveWorkspaceFile(
+      _workspacePathInCurrentDir(workspacePathInput?.value || ''),
+      workspaceTextInput?.value || '',
+      {
+        labels: EntityMetadataClient.parseLabelInput(
+          typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput ? workspaceLabelsInput.value : '',
+        ),
+        noteBody: typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput ? workspaceNotesInput.value : '',
+      },
+    );
   } catch (err) {
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
   }
 });
 workspaceFileList?.addEventListener('click', event => {
@@ -1614,42 +1485,6 @@ workspaceFileList?.addEventListener('click', event => {
   if (!path && action !== 'open-folder') return;
   handleWorkspaceFileAction(action, path);
 });
-workspaceFileList?.addEventListener('dragstart', event => {
-  const row = _workspaceDragSourceFromEvent(event);
-  if (!row) return;
-  _workspaceDragPath = row.dataset.path || '';
-  _workspaceDragKind = row.dataset.kind || '';
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', _workspaceDragPath);
-  }
-  row.classList.add('workspace-dragging');
-});
-workspaceFileList?.addEventListener('dragend', event => {
-  const row = _workspaceDragSourceFromEvent(event);
-  if (row) row.classList.remove('workspace-dragging');
-  workspaceFileList.querySelectorAll('.workspace-drop-target').forEach(node => node.classList.remove('workspace-drop-target'));
-  _workspaceDragPath = '';
-  _workspaceDragKind = '';
-});
-workspaceFileList?.addEventListener('dragover', event => {
-  const target = _workspaceDropTargetFromEvent(event);
-  if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
-  event.preventDefault();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-  target.classList.add('workspace-drop-target');
-});
-workspaceFileList?.addEventListener('dragleave', event => {
-  const target = _workspaceDropTargetFromEvent(event);
-  if (!target) return;
-  const related = event.relatedTarget;
-  if (related && target.contains(related)) return;
-  target.classList.remove('workspace-drop-target');
-});
-workspaceFileList?.addEventListener('drop', event => {
-  void _handleWorkspaceDropMove(event);
-});
-
 if (typeof window !== 'undefined') {
   window.openWorkspace = openWorkspace;
   window.closeWorkspace = closeWorkspace;
@@ -1662,6 +1497,7 @@ if (typeof window !== 'undefined') {
   window.moveWorkspacePath = moveWorkspacePath;
   window.deleteWorkspacePath = deleteWorkspacePath;
   window.downloadWorkspaceFile = downloadWorkspaceFile;
+  window.showWorkspaceViewer = showWorkspaceViewer;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

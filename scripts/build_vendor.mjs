@@ -5,6 +5,7 @@
  * jspdf ships a UMD build that works as-is.
  * ansi_up v6+ is ESM-only, so we wrap it in an IIFE that exposes AnsiUp as a
  * browser global — the same interface all callers expect.
+ * xterm and its fit addon ship browser builds that work as-is.
  *
  * Run via:  npm run vendor:sync
  */
@@ -54,3 +55,19 @@ const wrapped = [
 ].join('\n');
 writeFileSync(resolve(VENDOR_DIR, 'ansi_up.js'), wrapped);
 console.log('✓ ansi_up: wrapped ESM as browser global');
+
+// ── xterm ────────────────────────────────────────────────────────────────────
+// xterm and addon-fit both expose browser globals from their lib builds.
+copyFileSync(
+  resolve(NODE_MODULES, '@xterm/xterm/lib/xterm.js'),
+  resolve(VENDOR_DIR, 'xterm.js'),
+);
+copyFileSync(
+  resolve(NODE_MODULES, '@xterm/addon-fit/lib/addon-fit.js'),
+  resolve(VENDOR_DIR, 'xterm-addon-fit.js'),
+);
+copyFileSync(
+  resolve(NODE_MODULES, '@xterm/xterm/css/xterm.css'),
+  resolve(VENDOR_DIR, 'xterm.css'),
+);
+console.log('✓ xterm: copied browser JS/CSS builds');

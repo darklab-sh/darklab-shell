@@ -26,6 +26,7 @@
   {% endfor %}
   <button class="btn btn-secondary btn-compact" id="toggle-ln">line numbers: off</button>
   <button class="btn btn-secondary btn-compact" id="toggle-ts"{% if not page_model.transcript.hasTimestampMetadata %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
+  <button class="btn btn-secondary btn-compact" id="toggle-highlights" aria-pressed="true">highlights: on</button>
   <a class="btn btn-secondary btn-compact" href="{{ page_model.actions.jsonUrl }}">view json</a>
   <button class="btn btn-secondary btn-compact" data-action="copy-txt">copy</button>
   <div class="save-menu-wrap save-menu-down" id="perm-save-wrap">

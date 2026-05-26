@@ -130,7 +130,7 @@ function loadCommands(args) {
     'import json',
     'import sys',
     `sys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'app'))})`,
-    'import commands',
+    'import services.commands.registry as commands',
     'print(json.dumps(commands.load_container_smoke_test_commands()))',
   ].join('\n')
   const output = execFileSync('python3', ['-c', script], { cwd: ROOT, encoding: 'utf8' }).trim()

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "name": "nc_interactive_http_probe",
+      "command": "nc --interactive ip.darklab.sh 80",
+      "input": "HEAD / HTTP/1.0\r\nHost: ip.darklab.sh\r\n\r\n",
+      "expected_patterns": [
+        "HTTP/[0-9.]+"
+      ],
+      "stop_patterns": [
+        "HTTP/[0-9.]+"
+      ]
+    },
+    {
+      "name": "telnet_interactive_http_connects",
+      "command": "telnet --interactive ip.darklab.sh 80",
+      "expected_text": [
+        "Connected to"
+      ],
+      "stop_text": [
+        "Connected to"
+      ]
+    },
+    {
+      "name": "telnet_interactive_https_connects",
+      "command": "telnet --interactive darklab.sh 443",
+      "expected_text": [
+        "Connected to"
+      ],
+      "stop_text": [
+        "Connected to"
+      ]
+    },
+    {
+      "name": "mtr_interactive_starts_live_trace",
+      "command": "mtr --interactive ip.darklab.sh",
+      "expected_patterns": [
+        "(Loss%|Packets|ip\\.darklab\\.sh)"
+      ],
+      "stop_patterns": [
+        "(Loss%|Packets|ip\\.darklab\\.sh)"
+      ]
+    },
+    {
+      "name": "ffuf_interactive_starts_scan",
+      "command": "ffuf --interactive -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "expected_patterns": [
+        "(?i)(ffuf|FUZZ|Status:)"
+      ],
+      "stop_patterns": [
+        "(?i)(ffuf|FUZZ|Status:)"
+      ]
+    },
+    {
+      "name": "masscan_interactive_starts_scan",
+      "command": "masscan --interactive -p 80,443 --rate 500 8.8.8.8",
+      "expected_patterns": [
+        "(?i)(masscan|Starting|rate)"
+      ],
+      "stop_patterns": [
+        "(?i)(masscan|Starting|rate)"
+      ]
+    }
+  ]
+}

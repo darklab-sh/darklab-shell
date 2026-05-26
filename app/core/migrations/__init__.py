@@ -1,0 +1,40 @@
+"""Postgres schema migrations.
+
+SQLite keeps its current bootstrap path in ``core.database``. These migrations
+only run when ``database_backend`` is configured as ``postgres``.
+"""
+
+from . import (
+    v0001_postgres_baseline,
+    v0002_postgres_run_search,
+    v0003_postgres_atlas_search,
+    v0004_postgres_atlas_detail_indexes,
+    v0005_postgres_project_findings_indexes,
+    v0006_postgres_atlas_suppression,
+    v0007_postgres_atlas_metadata_search,
+    v0008_postgres_session_token_last_seen,
+    v0009_notification_channels,
+    v0010_schedules,
+    v0011_watchers,
+    v0012_run_output_summary,
+    v0013_ai_run_assists,
+    v0014_ai_assist_progress,
+)
+from .runner import Migration
+
+MIGRATIONS: tuple[Migration, ...] = (
+    v0001_postgres_baseline.MIGRATION,
+    v0002_postgres_run_search.MIGRATION,
+    v0003_postgres_atlas_search.MIGRATION,
+    v0004_postgres_atlas_detail_indexes.MIGRATION,
+    v0005_postgres_project_findings_indexes.MIGRATION,
+    v0006_postgres_atlas_suppression.MIGRATION,
+    v0007_postgres_atlas_metadata_search.MIGRATION,
+    v0008_postgres_session_token_last_seen.MIGRATION,
+    v0009_notification_channels.MIGRATION,
+    v0010_schedules.MIGRATION,
+    v0011_watchers.MIGRATION,
+    v0012_run_output_summary.MIGRATION,
+    v0013_ai_run_assists.MIGRATION,
+    v0014_ai_assist_progress.MIGRATION,
+)

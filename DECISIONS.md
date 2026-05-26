@@ -13,6 +13,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Redis-Backed Run Broker](#redis-backed-run-broker)
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
+  - [AI Assists: Private Provider, Worker, and Validation Boundary](#ai-assists-private-provider-worker-and-validation-boundary)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
@@ -97,6 +98,30 @@ The old request-owned `POST /run` execution route was removed instead of kept as
 Request identity now follows an explicit trusted-proxy allowlist (`trusted_proxy_cidrs`) instead of honoring arbitrary `X-Forwarded-For` from direct clients. If a request arrives from outside the trusted ranges, the app falls back to the direct peer IP and logs the proxy IP so operators can see which Docker bridge, reverse proxy, or local forwarding hop needs to be added.
 
 This is what motivated the Redis addition in the first place. Once Redis was a dependency for rate limiting, it became the natural fit for PID tracking too (replacing the SQLite `active_procs` workaround).
+
+### AI Assists: Private Provider, Worker, and Validation Boundary
+
+**AI assists are an optional metadata layer, not an autonomous command runner.**
+
+The feature was added to summarize completed run output and draft next commands, but several constraints shape the design:
+
+- provider calls are disabled by default
+- the provider contract is OpenAI-compatible chat completions rather than provider-specific APIs
+- provider URLs are private by default and must resolve to loopback, private, link-local, or explicitly allowed CIDR ranges
+- local llama.cpp support is a Compose profile, not a required runtime dependency
+- slow model calls run in the dedicated AI worker instead of Gunicorn request workers or scheduler workers
+- Redis coordinates write limits, enqueue locks, and global provider-call slots across processes
+- model output is always treated as untrusted data
+
+The worker split matters for local CPU models. A llama.cpp 8B model can take tens of seconds or more per request, especially after a cold start. If browser/API routes waited directly on those calls, ordinary app traffic would compete with model latency and Gunicorn worker capacity. The route path therefore validates the request, reuses cached completed assists when possible, writes a queued row, and returns quickly. The AI worker drains the queue, keeps a heartbeat, records progress, and marks assists completed or failed.
+
+Redis is fail-closed for writes because the expensive part is shared infrastructure. Without Redis, multiple web or worker processes cannot reliably enforce per-session write quotas, global write limits, enqueue locks, or provider-call slots. Read-only cached assist listing can still be scoped by the database, but new provider work should not fan out blindly when coordination is unavailable.
+
+The private-base-URL guard is intentionally conservative. The default use case is a local or self-hosted model near the app, where run output and redacted prompt context stay on infrastructure the operator controls. Hosted or public-compatible providers remain possible, but they require an explicit CIDR/config decision instead of happening accidentally because someone set `AI_BASE_URL`.
+
+Suggestion validation sits outside the model. The model may propose only JSON, but the app still checks the command root, command policy, trusted target presence, known open ports for port-scoped suggestions, redaction sentinels, and a small denylist of known hallucinated flags. Accepted suggestions can be copied, and optional Run buttons still submit through the normal composer path so command policy gets the final say. Rejected suggestions are stored and displayed as blocked drafts because they are useful debugging evidence without becoming executable UI.
+
+AI payloads are stored separately from transcripts, findings, Atlas source text, search text, and comparisons. This keeps assistant text additive and auditable while preserving the original command output as the source of truth.
 
 ---
 
@@ -187,6 +212,24 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 `session-token revoke` deletes the token row from `session_tokens`. But that alone is not enough — any client still holding the token string could keep sending it as `X-Session-ID` and get data back, because the old data routes trusted any header value unconditionally. `get_session_id()` in `helpers.py` now looks up every `tok_`-prefixed header value against `session_tokens` on each request. A revoked or never-issued token returns `""` (anonymous), so the caller immediately loses access to session-scoped runs, snapshots, and stars — no client-side coopertion required. The DB lookup adds a single indexed read per request; the `session_tokens` table is small and hit-rate is high, so the overhead is negligible.
 
+### Scheduled Runs Worker And Audit Model
+
+**Scheduled runs fire from a dedicated worker, not from Flask request handlers.**
+
+The scheduler is a Gunicorn-sibling process supervised by `entrypoint.sh`. It stays outside Flask workers so time-based firing is not tied to browser traffic, request lifetimes, or the number of web workers currently serving users. Manual **Run now** is the exception: it fires directly from the operator's request because it is an on-demand action and should not depend on the background worker being healthy.
+
+Only one scheduler worker should fire due rows for a deployment. Postgres uses the reserved `darklab_shell_scheduler` advisory lock, while SQLite uses a filesystem lock under the app data directory unless `scheduler.lock_path` overrides it. Extra workers that cannot take the lock exit cleanly and let the supervisor retry.
+
+Normal schedules and watcher-owned schedules share the physical `schedules` table. The ownership fields (`owner_kind`, `owner_id`, and `session_token`) keep the behavior explicit: browser/API/CLI schedule lists expose only normal user-owned schedules, while watcher-owned cadence rows stay tied to watcher state and cannot be edited as ordinary command schedules.
+
+The firing policy is deliberately conservative:
+
+- schedules require durable `tok_` sessions so revocation can stop future work
+- strict five-field cron and a five-minute minimum custom interval prevent accidental rapid loops
+- missed fires are coalesced on worker startup instead of replaying every skipped interval
+- overlap policy is stored as `skip` and enforced by recording an audit row instead of starting another copy while the previous scheduled run is still active
+- every fire attempt writes `schedule_fires`, so History, Run Details, API clients, and operators can trace why a due schedule fired, skipped, or failed
+
 ### Deny Flag Matching (anywhere in command)
 
 **Deny entries match denied flags anywhere in the command, not just as a command prefix.**
@@ -230,8 +273,6 @@ The app now standardizes on TCP connect scans for nmap. `rewrite_command()` inje
 **Go tools are installed with `GOBIN=/usr/local/bin` so they are accessible to the `scanner` user.**
 
 All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
-
-`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library used by the app and other Python tooling.
 
 ### SQLite WAL Mode
 
@@ -282,7 +323,7 @@ The concrete event inventory and the operator-facing description of the `text` a
 
 **A single `state.js` module owns shared browser state, with legacy globals rewired to it via `Object.defineProperty` accessors.**
 
-The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
+The browser scripts share a single state layer in `app/static/js/core/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
 
 That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, then prepend `ui_helpers.js` before DOM-bound modules so the extracted scripts see the same helper globals as production without rewriting the production call sites.
 
@@ -296,7 +337,7 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 - `ExportHtmlUtils` owns the shared browser export semantics and acts as the baseline for permalink/share live pages plus saved HTML
 - `ExportPdfUtils` remains a separate renderer because jsPDF cannot reproduce browser layout exactly, but it consumes the same prepared header/meta/line model so PDF visual drift is bounded to renderer limitations rather than duplicated business logic
 
-**Server/page-model follow-through:** permalink/share pages now bootstrap one normalized `page_model` from `app/permalinks.py`, and both the Jinja template layer and `permalink.js` consume that same shape. That keeps the live permalink/share page and the saved export surfaces aligned without reintroducing duplicated page-bootstrap variables.
+**Server/page-model follow-through:** permalink/share pages now bootstrap one normalized `page_model` from `app/services/history/permalinks.py`, and both the Jinja template layer and `permalink.js` consume that same shape. That keeps the live permalink/share page and the saved export surfaces aligned without reintroducing duplicated page-bootstrap variables.
 
 ### Client-Side PDF Export (jsPDF)
 
@@ -373,7 +414,7 @@ The shell had accumulated bespoke button styles on individual surfaces (rail sec
 
 **Disclosure glyphs encode a fixed mapping between glyph and behavior: `▸`/`▾` for expand/collapse in place, `>` for drill-in navigation, static `▾` for dropdown triggers, no glyph for plain toggles. The glyph follows the actual behavior, not the visual hierarchy of the surface.**
 
-Early mobile surfaces used `>` on rows that opened a sub-sheet and on rows that expanded in place, because both "felt like going deeper." Users read the glyph as a consistent signal and got surprised when the two behaved differently. Pinning the glyph to the behavior — and naming the one meta-rule explicitly — kept the FAQ, rail section headers, mobile recents filter, and the save menu predictable as surfaces were added. `bindDisclosure` in `app/static/js/ui_disclosure.js` owns the expand/collapse variant so new disclosure sites pick up `aria-expanded` correctly by default. The full mapping is in [ARCHITECTURE.md § Disclosure Affordance Rules](ARCHITECTURE.md#disclosure-affordance-rules).
+Early mobile surfaces used `>` on rows that opened a sub-sheet and on rows that expanded in place, because both "felt like going deeper." Users read the glyph as a consistent signal and got surprised when the two behaved differently. Pinning the glyph to the behavior — and naming the one meta-rule explicitly — kept the FAQ, rail section headers, mobile recents filter, and the save menu predictable as surfaces were added. `bindDisclosure` in `app/static/js/ui/ui_disclosure.js` owns the expand/collapse variant so new disclosure sites pick up `aria-expanded` correctly by default. The full mapping is in [ARCHITECTURE.md § Disclosure Affordance Rules](ARCHITECTURE.md#disclosure-affordance-rules).
 
 ### Semantic Color Contract
 
@@ -385,7 +426,7 @@ The rules, the binary-not-graded principle, the `running`-is-yellow distinction,
 
 **Every destructive or mode-switching confirmation routes through one imperative primitive, `showConfirm()`, with role-based action ids, default focus on cancel, `bindFocusTrap` on the card, and stacked actions at narrow widths.**
 
-Confirmations were originally per-surface: the kill flow, history clear, history delete, the share-redaction toggle, and session-token migrations each hand-rolled their own markup, Escape handler, mobile-sheet binding, and focus management. Small inconsistencies (Enter activating confirm instead of cancel, Tab falling through to the rail behind the backdrop, the action row overflowing on narrow viewports) had to be fixed separately each time a new confirm shipped. `showConfirm()` in `app/static/js/ui_confirm.js` centralizes the contract so every confirmation inherits the same dismissal ordering, focus trap, and stacking behavior, and new destructive actions only choose copy, tone, and the role of each button. Full semantics are in [ARCHITECTURE.md § Confirmation Dialog Contract](ARCHITECTURE.md#confirmation-dialog-contract).
+Confirmations were originally per-surface: the kill flow, history clear, history delete, the share-redaction toggle, and session-token migrations each hand-rolled their own markup, Escape handler, mobile-sheet binding, and focus management. Small inconsistencies (Enter activating confirm instead of cancel, Tab falling through to the rail behind the backdrop, the action row overflowing on narrow viewports) had to be fixed separately each time a new confirm shipped. `showConfirm()` in `app/static/js/ui/ui_confirm.js` centralizes the contract so every confirmation inherits the same dismissal ordering, focus trap, and stacking behavior, and new destructive actions only choose copy, tone, and the role of each button. Full semantics are in [ARCHITECTURE.md § Confirmation Dialog Contract](ARCHITECTURE.md#confirmation-dialog-contract).
 
 ---
 
@@ -443,7 +484,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 **ESLint was chosen over Prettier for JS linting.** Prettier's `--check` mode only identifies which files differ from its expected output — it does not show which line or rule is violated. ESLint shows the exact file, line, column, and rule name on every violation, which is far more actionable in a pre-commit hook. ESLint is configured in `config/eslint.config.js` with three rules scoped to config and test files (`tests/js/`, `playwright*.js`): 2-space `indent`, `singleQuote`, and `semi: never`. The browser-side app JS (`app/static/js/`) is excluded because it follows a different convention (semicolons) and rewriting it would be a large unrelated diff.
 
-**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers the tracked local checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, jsonlint, markdownlint, and vendor:check).
+**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers the tracked local checks (Ruff, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, jsonlint, markdownlint, and vendor:check).
 
 ### Long-Running and Local-Dev Edge Cases
 
@@ -455,9 +496,25 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 ## Related Docs
 
-- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
-- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
-- [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
-- [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
-- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands
+- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
+- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](FEATURES.md) - full per-feature reference
+- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

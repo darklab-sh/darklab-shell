@@ -25,9 +25,16 @@ import { ensurePromptReady } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 import {
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
+  createCaptureProjectFixture,
+  installCommonCaptureMocks,
+  openCaptureRunComparison,
+} from './ui_capture_shared.js'
+import {
   CAPTURE_SESSION_TOKEN,
   MOBILE_VISUAL_CONTRACT,
-} from '../../../config/playwright.visual.contracts.js'
+} from '../../../.tooling/playwright.visual.contracts.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const KEYBOARD_SRC = `data:image/png;base64,${readFileSync(resolve(__dir, 'fixtures/ios-keyboard-dark.png')).toString('base64')}`
@@ -39,7 +46,7 @@ const DEMO_TOP_SAFE_AREA_PX = Number(
   process.env.DEMO_MOBILE_TOP_SAFE_AREA_PX || (DEMO_OBS_CAPTURE ? 0 : 16),
 )
 const DEMO_BOTTOM_SAFE_AREA_PX = Number(process.env.DEMO_MOBILE_BOTTOM_SAFE_AREA_PX || 14)
-const WORKSPACE_DEMO_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+const WORKSPACE_DEMO_CMD = WORKSPACE_CAPTURE_CMD
 const LONG_DEMO_CMD = 'ping -i 0.5 -c 300 darklab.sh'
 const FFUF_TARGET_URL = 'https://tor-stats.darklab.sh/FUZZ'
 const FFUF_WORDLIST =
@@ -367,6 +374,82 @@ async function openFilesPanelWithResponseFile(page) {
   await page.waitForTimeout(1_000)
 }
 
+async function openProjectsPanelForDemo(page, runId) {
+  await createCaptureProjectFixture(page, {
+    name: 'Mobile Demo Investigation',
+    runIds: [runId],
+    target: 'noc.darklab.sh',
+    note: 'Mobile projects keep linked runs, targets, notes, and evidence together.',
+  })
+  await openMobileMenuAction(page, 'projects')
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-mobile-root')).toBeVisible()
+  const row = page.locator('.project-mobile-row').filter({ hasText: 'Mobile Demo Investigation' }).first()
+  await expect(row).toBeVisible()
+  await page.waitForTimeout(1_100)
+  await row.click()
+  await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+  await page.locator('[data-project-mobile-detail-tab="details"]').click()
+  await expect(page.locator('#project-mobile-detail-body')).toContainText('noc.darklab.sh')
+  await page.waitForTimeout(3_300)
+  await page.evaluate(() => {
+    if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace({ refocus: false })
+  })
+  await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
+async function openAtlasPanelForDemo(page) {
+  await openMobileMenuAction(page, 'atlas')
+  await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+  await page.waitForTimeout(900)
+
+  await page.locator('.atlas-mobile-filters-toggle').click()
+  await expect(page.locator('#atlas-mobile-filters-panel')).toBeVisible()
+  await page.waitForTimeout(1_000)
+
+  await page.locator('.atlas-mobile-overflow-btn').click()
+  await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_100)
+  await page.locator('#action-sheet-overlay').click({ position: { x: 10, y: 10 } })
+  await expect(page.locator('#action-sheet-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(650)
+
+  await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
+  const hostRow = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' }).first()
+  await expect(hostRow).toBeVisible()
+  await page.waitForTimeout(850)
+  await hostRow.click()
+  await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
+  await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Shodan')
+  await page.waitForTimeout(900)
+  await page.locator('#atlas-mobile-entity-body .atlas-intel-card-toggle').filter({ hasText: 'Shodan' }).click()
+  await expect(page.locator('#atlas-mobile-entity-body .atlas-intel-card.is-open')).toContainText(/ports/i)
+  await page.waitForTimeout(3_200)
+  await page.evaluate(() => {
+    if (typeof closeAtlas === 'function') closeAtlas({ refocus: false })
+  })
+  await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
+async function openRunComparisonForDemo(page) {
+  await openCaptureRunComparison(page)
+  await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
+  await page.waitForTimeout(4_200)
+  await page.evaluate(() => {
+    if (typeof closeHistoryCompareOverlay === 'function') {
+      closeHistoryCompareOverlay()
+      return
+    }
+    document.querySelector('.history-compare-close')?.click()
+  })
+  await expect(page.locator('#history-compare-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
 /**
  * Remove the keyboard overlay and restore the full transcript area.
  * Call after the run button is clicked — mimics the keyboard dismissing
@@ -560,6 +643,7 @@ test('demo-mobile', async ({ page }) => {
       // Ignore storage failures in non-standard contexts.
     }
   }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+  await installCommonCaptureMocks(page)
 
   // ── Optional screenshot-frame fallback ────────────────────────────────────
   // The normal OBS wrapper disables this path. It remains useful for quick
@@ -760,11 +844,21 @@ test('demo-mobile', async ({ page }) => {
   await typeSlowly(page, WORKSPACE_DEMO_CMD)
   await page.waitForTimeout(800)
   await waitForFinished(page, WORKSPACE_DEMO_CMD, { timeoutMs: 45_000 })
+  const workspaceRunId = await activeHistoryRunId(page, WORKSPACE_DEMO_CMD)
   await unmountKeyboard(page)
   await page.waitForTimeout(1_500)
 
   // ── Files panel: captured response file ──────────────────────────────────
   await openFilesPanelWithResponseFile(page)
+
+  // ── Projects panel: active project with a linked run ─────────────────────
+  await openProjectsPanelForDemo(page, workspaceRunId)
+
+  // ── Atlas: entity-first triage with intel context ────────────────────────
+  await openAtlasPanelForDemo(page)
+
+  // ── Run comparison: mobile comparison sheet ──────────────────────────────
+  await openRunComparisonForDemo(page)
 
   // ── Switch back to tab 1 — show ping still scrolling ──────────────────────
   await page.waitForTimeout(900)
@@ -798,24 +892,26 @@ test('demo-mobile', async ({ page }) => {
   await page.locator('#status-monitor').waitFor({ state: 'hidden', timeout: 10_000 })
   await page.waitForTimeout(1_000)
 
-  // ── History drawer ────────────────────────────────────────────────────────
+  // ── History panel ─────────────────────────────────────────────────────────
   await page.waitForTimeout(900)
   await openMobileMenuAction(page, 'history')
-  await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+  await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
   await page
-    .locator('#mobile-recents-list .sheet-item')
+    .locator('#history-list .history-entry')
     .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
   // Pause so the viewer can read the top of the list before scrolling.
   await page.waitForTimeout(3_200)
   // Smooth scroll down then back up at a natural reading pace.
-  await smoothScroll(page, '#mobile-recents-list', 425, { durationMs: 1_700 })
+  await smoothScroll(page, '.history-panel-body', 425, { durationMs: 1_700 })
   await page.waitForTimeout(1_250)
-  await smoothScroll(page, '#mobile-recents-list', 0, { durationMs: 1_250 })
+  await smoothScroll(page, '.history-panel-body', 0, { durationMs: 1_250 })
   await page.waitForTimeout(1_200)
 
-  await page.locator('#mobile-recents-sheet .sheet-grab').click()
-  await expect(page.locator('#mobile-recents-sheet')).toBeHidden()
+  await page.evaluate(() => {
+    if (typeof hideHistoryPanel === 'function') hideHistoryPanel()
+  })
+  await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_100)
 
   // ── Theme switching ───────────────────────────────────────────────────────
@@ -827,20 +923,20 @@ test('demo-mobile', async ({ page }) => {
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0
   })
-  await page.waitForTimeout(3_400)
+  await page.waitForTimeout(1_800)
   // Compute actual card positions now that the grid is rendered.
   const charcoalTop = await centeredScrollTop(page, DEMO_THEME_NAME)
-  await smoothScroll(page, '.theme-body', 210, { durationMs: 1_150 }) // quick peek
-  await page.waitForTimeout(1_000)
-  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 120, 570), { durationMs: 1_350 }) // past the card
-  await page.waitForTimeout(1_000)
-  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 950 }) // settle on card
-  await page.waitForTimeout(1_700) // deciding
+  await smoothScroll(page, '.theme-body', 190, { durationMs: 900 }) // quick peek
+  await page.waitForTimeout(650)
+  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 90, 500), { durationMs: 1_050 }) // past the card
+  await page.waitForTimeout(650)
+  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 800 }) // settle on card
+  await page.waitForTimeout(1_000) // deciding
   await switchTheme(page, DEMO_THEME_NAME)
   await page
     .locator(`[data-theme-name="${DEMO_THEME_NAME}"].theme-card-active`)
     .waitFor({ state: 'attached', timeout: 5_000 })
-  await freezeFrame(1_200) // see the selected card
+  await freezeFrame(850) // see the selected card
 
   await page.locator('.theme-close').click()
   await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)

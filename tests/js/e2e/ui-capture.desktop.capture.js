@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test'
 
 import {
   createShareSnapshot,
+  clickHistoryRunMenuAction,
+  openRailAction,
   openHistory,
   openHistoryWithEntries,
   runCommand,
@@ -10,10 +12,15 @@ import {
 } from './helpers.js'
 import {
   FAST_RUN_CMD,
+  INTERACTIVE_CAPTURE_CMD,
   LONG_RUN_CMD,
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
   createManifest,
+  createCaptureProjectFixture,
   freshHome,
   installCommonCaptureMocks,
+  openCaptureRunComparison,
   resolveCaptureThemes,
   saveCapture,
   seedOutput,
@@ -26,8 +33,6 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   ...opts,
   guardrailMode: 'desktop',
 })
-
-const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
 
 async function runLongCaptureCommand(page) {
   await page.locator('#cmd').fill(LONG_RUN_CMD)
@@ -46,6 +51,12 @@ async function runFastCaptureCommand(page) {
     FAST_RUN_CMD,
     { timeout: 10_000 },
   )
+}
+
+async function runCaptureCommandAndGetRunId(page, command) {
+  await runCommand(page, command)
+  await waitForHistoryRuns(page, 1)
+  return activeHistoryRunId(page, command)
 }
 
 async function prepareStatusMonitorTelemetryScene(page) {
@@ -107,6 +118,29 @@ async function createAndOpenWorkspaceResponseFile(page) {
   await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
+async function openProjectsModalWithCaptureProject(page, themeName) {
+  const runId = await runCaptureCommandAndGetRunId(page, 'hostname')
+  await createCaptureProjectFixture(page, {
+    name: `Capture Project ${themeLabel(themeName)}`,
+    runIds: [runId],
+    target: 'capture.darklab.sh',
+  })
+  await page.locator('.rail-nav [data-action="projects"]').click()
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+  await page.locator('[data-project-tab="details"]').click()
+  await expect(page.locator('#project-explorer-body')).toContainText(`Capture Project ${themeLabel(themeName)}`)
+  await expect(page.locator('#project-explorer-body')).toContainText('capture.darklab.sh')
+}
+
+async function openAtlasModalWithCaptureData(page) {
+  await page.locator('.rail-nav [data-action="atlas"]').click()
+  await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await page.locator('[data-atlas-tab="ip"]').click()
+  await expect(page.locator('#atlas-list')).toContainText('107.178.109.44')
+  await expect(page.locator('#atlas-detail')).toContainText('Shodan')
+}
+
 const scenes = [
   {
     slug: 'main-welcome-settled',
@@ -122,7 +156,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await setComposerValueForTest(page, 'curl -')
+      await setComposerValueForTest(page, 'curl -', { waitForAutocomplete: true })
       await expect(page.locator('#ac-dropdown')).not.toHaveClass(/u-hidden/)
     },
   },
@@ -315,6 +349,47 @@ const scenes = [
     },
   },
   {
+    slug: 'projects-modal',
+    title: 'Main UI - Projects modal with active project',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openProjectsModalWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'atlas-modal',
+    title: 'Main UI - Session Entity Atlas modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openAtlasModalWithCaptureData(page)
+    },
+  },
+  {
+    slug: 'run-comparison-modal',
+    title: 'Main UI - run comparison modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openCaptureRunComparison(page)
+      await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+      await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
+    },
+  },
+  {
+    slug: 'interactive-pty-run',
+    title: 'Main UI - interactive PTY run',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await page.locator('#cmd').fill(INTERACTIVE_CAPTURE_CMD)
+      await page.keyboard.press('Enter')
+      await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
+      await expect(page.locator('#pty-modal-screen')).toContainText('capture hop darklab.sh')
+    },
+  },
+  {
     slug: 'history-drawer',
     title: 'Main UI - history drawer',
     route: '/',
@@ -386,7 +461,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="options"]').click()
+      await openRailAction(page, 'options')
       await expect(page.locator('#options-modal')).toBeVisible()
     },
   },
@@ -396,7 +471,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="options"]').click()
+      await openRailAction(page, 'options')
       await expect(page.locator('#options-modal')).toBeVisible()
       await expect(page.locator('#options-session-token-clear-btn')).toBeVisible()
       await page.locator('#options-session-token-clear-btn').click()
@@ -412,7 +487,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="theme"]').click()
+      await openRailAction(page, 'theme')
       await expect(page.locator('#theme-modal')).toBeVisible()
     },
   },
@@ -422,7 +497,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="faq"]').click()
+      await openRailAction(page, 'faq')
       await expect(page.locator('#faq-modal')).toBeVisible()
     },
   },
@@ -505,8 +580,11 @@ const scenes = [
       await page
         .locator('#history-list .history-entry:not(.history-entry-snapshot)')
         .first()
-        .locator('[data-action="permalink"]')
-        .click()
+        .evaluate(node => node.dataset.captureHistoryEntry = 'permalink-source')
+      await clickHistoryRunMenuAction(
+        page.locator('[data-capture-history-entry="permalink-source"]'),
+        'permalink',
+      )
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

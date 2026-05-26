@@ -12,10 +12,25 @@ from pathlib import Path
 
 from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
 
-from commands import command_root, load_command_policy
+from services.commands.registry import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
-from database import DB_PATH, db_connect
-from helpers import (
+from core.database import DB_BACKEND, DB_PATH, db_connect
+from core.database_backend import (
+    DatabaseBackend,
+    sqlite_journal_mode,
+    sqlite_page_stats,
+)
+from services.diagnostics.storage import (
+    PROJECT_WORKSPACE_COUNT_TABLES as _DIAG_PROJECT_WORKSPACE_COUNT_TABLES,
+    format_bytes as _storage_fmt_bytes,
+    storage_snapshot,
+    table_storage_breakdown,
+)
+from services.diagnostics.classifier_drift import classifier_drift_report
+from services.ai.client import AIClientError
+from services.ai.diagnostics import provider_probe as ai_provider_probe, run_test_prompt as ai_run_test_prompt
+from core.output_signals import OutputSignalClassifier, strip_ansi_codes
+from core.helpers import (
     FONT_FILES,
     GRACEFUL_TERMINATION_EXIT_CODE,
     current_theme_name,
@@ -23,13 +38,15 @@ from helpers import (
     get_log_session_id,
     ip_is_in_cidrs,
 )
-from process import fallback_pid_snapshot, redis_client
-from run_broker import (
+from core.process import fallback_pid_snapshot, redis_client
+from services.runs.broker import (
     broker_available,
     broker_mode,
     broker_unavailable_reason,
     memory_store_snapshot,
 )
+from services.runs.output_model import line_event_from_legacy
+from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
 
@@ -49,16 +66,23 @@ def _fmt_elapsed(seconds):
     return f"{s}s"
 
 
-def _diag_sqlite_identifier(name: str) -> str:
-    """Return a safely quoted SQLite identifier for metadata-derived names."""
-    value = str(name)
-    if not value or "\x00" in value:
-        raise ValueError("invalid SQLite identifier")
-    return '"' + value.replace('"', '""') + '"'
+def _fmt_diag_duration_ms(value):
+    ms = float(value or 0)
+    if ms >= 1000:
+        seconds = ms / 1000
+        if seconds >= 10:
+            return f"{seconds:.0f}s"
+        return f"{seconds:.1f}s"
+    if ms >= 100:
+        return f"{ms:.0f} ms"
+    return f"{ms:g} ms"
 
 
 _ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
 _JSPDF_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
+_XTERM_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm.js"
+_XTERM_FIT_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm-addon-fit.js"
+_XTERM_CSS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm.css"
 _FONT_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
 _VENDOR_FONT_FILES = frozenset(filename for _, _, filename in FONT_FILES)
 _APP_BOOT_TIME = time.time()
@@ -76,6 +100,24 @@ _DIAG_REDIS_KEY_PREFIXES = (
     ("procmeta", "procmeta:*"),
     ("sessionprocs", "sessionprocs:*"),
 )
+_DIAG_CLASSIFIER_LINE_LIMIT = 4096
+_DIAG_CLASSIFIER_COMMAND_LIMIT = 512
+_DIAG_CLASSIFIER_CLS_LIMIT = 80
+_DIAG_CLASSIFIER_CMD_TYPES = frozenset({"real", "builtin"})
+_DIAG_AI_TEST_RATE_SECONDS = 60
+_DIAG_AI_TEST_LAST_BY_CLIENT: dict[str, float] = {}
+
+
+def _prune_diag_ai_test_clients(now: float) -> None:
+    cutoff = now - _DIAG_AI_TEST_RATE_SECONDS
+    stale_clients = [
+        client_ip
+        for client_ip, last_seen in _DIAG_AI_TEST_LAST_BY_CLIENT.items()
+        if last_seen <= cutoff
+    ]
+    for client_ip in stale_clients:
+        _DIAG_AI_TEST_LAST_BY_CLIENT.pop(client_ip, None)
+
 
 # Themed groupings for the Config card. Every key emitted into
 # `result["config"]` must appear in exactly one group, otherwise it is
@@ -90,6 +132,18 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Run execution", (
         "command_timeout_seconds",
         "heartbeat_interval_seconds",
+        "high_volume_output_line_threshold",
+        "high_volume_output_status_interval_lines",
+        "interactive_pty_buffer_limit",
+        "interactive_pty_control_poll_seconds",
+        "interactive_pty_heartbeat_seconds",
+        "interactive_pty_input_max_bytes",
+        "interactive_pty_snapshot_min_publish_seconds",
+        "interactive_pty_snapshot_fallback_entry_limit",
+        "interactive_pty_snapshot_publish_bytes",
+        "interactive_pty_snapshot_publish_seconds",
+        "interactive_pty_stream_fetch_count",
+        "interactive_pty_stream_maxlen",
         "max_output_lines",
         "max_tabs",
     )),
@@ -108,20 +162,63 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "log_level",
         "log_format",
     )),
+    ("AI assists", (
+        "ai_enabled",
+        "ai_provider",
+        "ai_base_url_configured",
+        "ai_model",
+        "ai_connect_timeout_seconds",
+        "ai_timeout_seconds",
+        "ai_max_input_chars",
+        "ai_max_output_tokens",
+        "ai_max_concurrent",
+        "ai_max_queue_depth",
+        "ai_allow_full_output",
+        "ai_require_private_base_url",
+        "ai_base_url_allowed_cidrs",
+        "ai_prompt_version_override",
+        "ai_feature_summary",
+        "ai_feature_next_commands",
+        "ai_feature_run_suggestions",
+    )),
 )
+
+
+def _require_diag_access() -> str:
+    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
+    client_ip = get_client_ip()
+    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
+        log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
+        abort(404)
+    return client_ip
 
 
 def _diag_fmt_bytes(n) -> str:
     """Short byte size: '12.4 KB', '3.0 MB', etc. Used by the vendor probe."""
-    n = int(n or 0)
-    if n < 1024:
-        return f"{n} B"
-    if n < 1024 * 1024:
-        return f"{n / 1024:.1f} KB"
-    if n < 1024 * 1024 * 1024:
-        return f"{n / (1024 * 1024):.1f} MB"
-    return f"{n / (1024 * 1024 * 1024):.1f} GB"
+    return _storage_fmt_bytes(n)
 
+
+def _diag_row_value(row, key: str, index: int, default=None):
+    if hasattr(row, "keys"):
+        try:
+            return row[key]
+        except KeyError:
+            pass
+    try:
+        return row[index]
+    except (IndexError, KeyError, TypeError):
+        return default
+
+
+def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = None) -> dict:
+    """Return table/index storage diagnostics for /diag.
+
+    This is an occasional operator probe, not a hot path. The shared
+    diagnostics service owns the backend-specific row counts, dbstat/catalog
+    probes, largest-run hints, and short-lived cache used by /diag and
+    Prometheus scrapes.
+    """
+    return table_storage_breakdown(conn, DB_BACKEND, table_counts)
 
 def _diag_vendor_probe(url: str) -> dict:
     """In-process HEAD against a vendor URL via the Flask test client.
@@ -167,6 +264,57 @@ def _diag_tool_entry(name: str) -> dict | None:
         "name": name,
         "path": path,
     }
+
+
+def _diag_classifier_inspector(args) -> dict:
+    line = str(args.get("classifier_line", ""))[:_DIAG_CLASSIFIER_LINE_LIMIT]
+    command = str(args.get("classifier_command", ""))[:_DIAG_CLASSIFIER_COMMAND_LIMIT]
+    legacy_cls = str(args.get("classifier_cls", ""))[:_DIAG_CLASSIFIER_CLS_LIMIT]
+    cmd_type = str(args.get("classifier_cmd_type", "real")).strip().lower()
+    if cmd_type not in _DIAG_CLASSIFIER_CMD_TYPES:
+        cmd_type = "real"
+    submitted = any(key in args for key in (
+        "classifier_line",
+        "classifier_command",
+        "classifier_cls",
+        "classifier_cmd_type",
+    ))
+    payload: dict = {
+        "submitted": submitted,
+        "line": line,
+        "command": command,
+        "cls": legacy_cls,
+        "cmd_type": cmd_type,
+        "result": None,
+    }
+    if not submitted or not line.strip():
+        return payload
+
+    classifier = OutputSignalClassifier(command, cmd_type=cmd_type)
+    metadata = classifier.classify_line(line, cls=legacy_cls)
+    base_event = line_event_from_legacy(line, legacy_cls)
+    role = str(metadata.get("role") or base_event.role.value)
+    raw_signals = metadata.get("signals")
+    signals = [str(signal) for signal in raw_signals if str(signal)] if isinstance(raw_signals, list) else []
+    raw_entities = metadata.get("entities")
+    entities = [
+        entity
+        for entity in raw_entities
+        if isinstance(entity, dict)
+    ] if isinstance(raw_entities, list) else []
+    raw_line_index = metadata.get("line_index")
+    line_index = raw_line_index if isinstance(raw_line_index, int) and not isinstance(raw_line_index, bool) else 0
+    payload["result"] = {
+        "kind": base_event.kind.value,
+        "role": role,
+        "signals": signals,
+        "entities": entities,
+        "line_index": line_index,
+        "command_root": str(metadata.get("command_root") or ""),
+        "target": str(metadata.get("target") or ""),
+        "normalized_text": strip_ansi_codes(line).strip(),
+    }
+    return payload
 
 
 def _diag_decode_key(raw):
@@ -219,8 +367,8 @@ def _diag_redis_stats(client):
 
     try:
         stats["dbsize"] = int(client.dbsize() or 0)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("DIAG_REDIS_SCAN_INCOMPLETE", extra={"stage": "dbsize", "error": str(exc)})
 
     namespaces: list[dict] = []
     runstream_sample: list[str] = []
@@ -239,7 +387,8 @@ def _diag_redis_stats(client):
         for key in runstream_sample[:_DIAG_REDIS_STREAM_SAMPLE_CAP]:
             try:
                 lengths.append(int(client.xlen(key) or 0))
-            except Exception:
+            except Exception as exc:
+                log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "stream_length", "error": str(exc)})
                 continue
         if lengths:
             lengths.sort()
@@ -269,7 +418,8 @@ def _diag_redis_stats(client):
                 run_id = key.split(":", 1)[-1]
                 try:
                     raw_val = client.get(key)
-                except Exception:
+                except Exception as exc:
+                    log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "orphan_get", "error": str(exc)})
                     continue
                 if raw_val is None:
                     continue
@@ -284,13 +434,14 @@ def _diag_redis_stats(client):
                 try:
                     if not client.sismember(f"sessionprocs:{session_id}", run_id):
                         orphans += 1
-                except Exception:
+                except Exception as exc:
+                    log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "orphan_membership", "error": str(exc)})
                     continue
             if not cursor:
                 break
         stats["orphans"] = {"probed": scanned, "orphaned": orphans}
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("DIAG_REDIS_SCAN_INCOMPLETE", extra={"stage": "orphan_probe", "error": str(exc)})
 
     try:
         memory = client.info("memory") or {}
@@ -337,13 +488,34 @@ def _diag_redis_stats(client):
 
 
 def _diag_db_stats() -> dict:
-    """Snapshot SQLite health beyond a count probe — file/WAL sizes, last
-    write, journal mode, freelist (reclaimable bytes), per-table row
-    counts, and FTS5 orphan probe. Each subsection is independently
-    guarded so a missing pragma or absent FTS table never blanks the
-    whole panel.
-    """
+    """Snapshot database health without letting optional probes blank the panel."""
     info: dict = {}
+    info["backend"] = DB_BACKEND.value
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        with db_connect() as conn:
+            t0 = time.perf_counter()
+            conn.execute("SELECT 1").fetchone()
+            info["ping_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            info["ping_human"] = _fmt_diag_duration_ms(info["ping_ms"])
+            try:
+                snapshot = storage_snapshot(conn, DB_BACKEND, db_path=str(DB_PATH))
+                table_counts = snapshot["table_counts"]
+                info["tables"] = snapshot["tables"]
+                info["runs"] = table_counts.get("runs", 0)
+                info["snapshots"] = table_counts.get("snapshots", 0)
+                info["project_workspace"] = {
+                    label: table_counts.get(table_name, 0)
+                    for table_name, label in _DIAG_PROJECT_WORKSPACE_COUNT_TABLES.items()
+                }
+                info["storage"] = snapshot["storage"]
+                info["dbstat_available"] = bool(info["storage"].get("dbstat_available"))
+                info["storage_stats_available"] = bool(info["storage"].get("storage_stats_available"))
+                info["size"] = int(snapshot.get("size") or 0)
+                info["size_human"] = snapshot.get("size_human") or _diag_fmt_bytes(info["size"])
+            except Exception:
+                pass
+        return info
+
     db_path = Path(DB_PATH)
 
     # File-system stats — independent of the connection.
@@ -369,14 +541,21 @@ def _diag_db_stats() -> dict:
     # Pragma + table queries — single connection.
     with db_connect() as conn:
         try:
-            row = conn.execute("PRAGMA journal_mode").fetchone()
-            info["journal_mode"] = str(row[0]) if row else None
+            t0 = time.perf_counter()
+            conn.execute("SELECT 1").fetchone()
+            info["ping_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            info["ping_human"] = _fmt_diag_duration_ms(info["ping_ms"])
         except Exception:
             pass
         try:
-            page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
-            page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
-            freelist = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+            info["journal_mode"] = sqlite_journal_mode(conn)
+        except Exception:
+            pass
+        try:
+            page_stats = sqlite_page_stats(conn)
+            page_count = page_stats["page_count"]
+            page_size = page_stats["page_size"]
+            freelist = page_stats["freelist_count"]
             info["page_count"] = page_count
             info["page_size"] = page_size
             info["freelist_count"] = freelist
@@ -385,53 +564,32 @@ def _diag_db_stats() -> dict:
         except Exception:
             pass
 
+        snapshot: dict = {}
+
         # Per-table row counts. SQLite stores FTS5 shadow tables
         # (`<vt>_data`, `_idx`, `_content`, `_docsize`, `_config`) under
         # type='table' alongside regular tables, so to exclude them we
         # first find the FTS5 virtual tables and synthesize their shadow
         # names, then filter the table listing against that set.
         try:
-            virtual_names = {
-                str(row[0])
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE sql LIKE 'CREATE VIRTUAL TABLE%'"
-                ).fetchall()
-            }
-            shadow_suffixes = ("_data", "_idx", "_content", "_docsize", "_config")
-            shadow_names: set[str] = {
-                f"{vname}{suffix}"
-                for vname in virtual_names
-                for suffix in shadow_suffixes
-            }
-            rows = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name NOT LIKE 'sqlite_%' "
-                "ORDER BY name"
-            ).fetchall()
-            tables: list[dict] = []
-            for (name,) in rows:
-                name = str(name)
-                if name in shadow_names:
-                    continue
-                try:
-                    table_identifier = _diag_sqlite_identifier(name)
-                    # SQLite does not bind table identifiers; names come from
-                    # sqlite_master and are quoted/escaped before interpolation.
-                    n = conn.execute(
-                        "SELECT COUNT(*) FROM " + table_identifier  # nosec B608
-                    ).fetchone()[0]
-                    tables.append({"name": name, "rows": int(n)})
-                except Exception:
-                    continue
-            info["tables"] = tables
+            snapshot = storage_snapshot(conn, DB_BACKEND, db_path=str(DB_PATH))
+            info["tables"] = snapshot["tables"]
             # Backward-compat: the original /diag schema exposed `runs`
             # and `snapshots` counts at the top level.
-            for t in tables:
+            table_counts = snapshot["table_counts"]
+            for t in snapshot["tables"]:
                 if t["name"] == "runs":
                     info["runs"] = t["rows"]
                 elif t["name"] == "snapshots":
                     info["snapshots"] = t["rows"]
+            project_counts = {
+                label: table_counts.get(table_name, 0)
+                for table_name, label in _DIAG_PROJECT_WORKSPACE_COUNT_TABLES.items()
+            }
+            info["project_workspace"] = project_counts
+            info["storage"] = snapshot["storage"]
+            info["dbstat_available"] = bool(info["storage"].get("dbstat_available"))
+            info["storage_stats_available"] = bool(info["storage"].get("storage_stats_available"))
         except Exception:
             pass
 
@@ -442,11 +600,7 @@ def _diag_db_stats() -> dict:
         # Same operator value as the Redis procmeta orphan probe: surfaces
         # cleanup that has fallen behind.
         try:
-            n = conn.execute(
-                "SELECT COUNT(*) FROM runs_fts "
-                "WHERE rowid NOT IN (SELECT rowid FROM runs)"
-            ).fetchone()[0]
-            info["fts_orphans"] = int(n)
+            info["fts_orphans"] = int(snapshot.get("fts_orphans") or 0)
         except Exception:
             pass
 
@@ -459,6 +613,8 @@ def client_log():
     data = request.get_json(silent=True) or {}
     context = str(data.get("context") or "")[:200]
     message = str(data.get("message") or "")[:500]
+    from services import metrics as app_metrics  # noqa: PLC0415
+    app_metrics.record_client_error(context or "unknown")
     log.warning("CLIENT_ERROR", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(),
@@ -478,6 +634,21 @@ def vendor_jspdf_js():
     return send_file(_JSPDF_JS, mimetype="application/javascript")
 
 
+@assets_bp.route("/vendor/xterm.js")
+def vendor_xterm_js():
+    return send_file(_XTERM_JS, mimetype="application/javascript")
+
+
+@assets_bp.route("/vendor/xterm-addon-fit.js")
+def vendor_xterm_fit_js():
+    return send_file(_XTERM_FIT_JS, mimetype="application/javascript")
+
+
+@assets_bp.route("/vendor/xterm.css")
+def vendor_xterm_css():
+    return send_file(_XTERM_CSS, mimetype="text/css")
+
+
 @assets_bp.route("/vendor/fonts/<path:filename>")
 def vendor_fonts(filename):
     """Serve vendored font files; rejects any filename not in the committed manifest."""
@@ -489,7 +660,7 @@ def vendor_fonts(filename):
 @assets_bp.route("/favicon.ico")
 def favicon():
     return send_file(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "favicon.ico"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "favicon.ico"),
         mimetype="image/x-icon",
     )
 
@@ -571,11 +742,7 @@ def diag():
           - "127.0.0.1/32"
           - "172.16.0.0/12"
     """
-    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
-    client_ip = get_client_ip()
-    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
-        log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
-        abort(404)
+    client_ip = _require_diag_access()
 
     result: dict = {}
 
@@ -592,8 +759,20 @@ def diag():
         "rate_limit_per_second":      CFG.get("rate_limit_per_second"),
         "command_timeout_seconds":    CFG.get("command_timeout_seconds"),
         "heartbeat_interval_seconds": CFG.get("heartbeat_interval_seconds"),
+        "high_volume_output_line_threshold": CFG.get("high_volume_output_line_threshold"),
+        "high_volume_output_status_interval_lines": CFG.get("high_volume_output_status_interval_lines"),
         "max_output_lines":           CFG.get("max_output_lines"),
         "max_tabs":                   CFG.get("max_tabs"),
+        "interactive_pty_buffer_limit": CFG.get("interactive_pty_buffer_limit"),
+        "interactive_pty_control_poll_seconds": CFG.get("interactive_pty_control_poll_seconds"),
+        "interactive_pty_heartbeat_seconds": CFG.get("interactive_pty_heartbeat_seconds"),
+        "interactive_pty_input_max_bytes": CFG.get("interactive_pty_input_max_bytes"),
+        "interactive_pty_snapshot_min_publish_seconds": CFG.get("interactive_pty_snapshot_min_publish_seconds"),
+        "interactive_pty_snapshot_fallback_entry_limit": CFG.get("interactive_pty_snapshot_fallback_entry_limit"),
+        "interactive_pty_snapshot_publish_bytes": CFG.get("interactive_pty_snapshot_publish_bytes"),
+        "interactive_pty_snapshot_publish_seconds": CFG.get("interactive_pty_snapshot_publish_seconds"),
+        "interactive_pty_stream_fetch_count": CFG.get("interactive_pty_stream_fetch_count"),
+        "interactive_pty_stream_maxlen": CFG.get("interactive_pty_stream_maxlen"),
         "persist_full_run_output":    CFG.get("persist_full_run_output"),
         "full_output_max_mb":         CFG.get("full_output_max_mb"),
         "history_panel_limit":        CFG.get("history_panel_limit"),
@@ -603,14 +782,39 @@ def diag():
         "trusted_proxy_cidrs":        CFG.get("trusted_proxy_cidrs", []),
         "log_level":                  CFG.get("log_level"),
         "log_format":                 CFG.get("log_format"),
+        "ai_enabled":                 CFG.get("ai_enabled"),
+        "ai_provider":                CFG.get("ai_provider"),
+        "ai_base_url_configured":     bool(CFG.get("ai_base_url")),
+        "ai_model":                   CFG.get("ai_model"),
+        "ai_connect_timeout_seconds": CFG.get("ai_connect_timeout_seconds"),
+        "ai_timeout_seconds":         CFG.get("ai_timeout_seconds"),
+        "ai_max_input_chars":         CFG.get("ai_max_input_chars"),
+        "ai_max_output_tokens":       CFG.get("ai_max_output_tokens"),
+        "ai_max_concurrent":          CFG.get("ai_max_concurrent"),
+        "ai_max_queue_depth":         CFG.get("ai_max_queue_depth"),
+        "ai_allow_full_output":       CFG.get("ai_allow_full_output"),
+        "ai_require_private_base_url": CFG.get("ai_require_private_base_url"),
+        "ai_base_url_allowed_cidrs":  CFG.get("ai_base_url_allowed_cidrs", []),
+        "ai_prompt_version_override": CFG.get("ai_prompt_version_override"),
+        "ai_feature_summary":         CFG.get("ai_feature_summary"),
+        "ai_feature_next_commands":   CFG.get("ai_feature_next_commands"),
+        "ai_feature_run_suggestions": CFG.get("ai_feature_run_suggestions"),
     }
+
+    # ── AI assists ───────────────────────────────────────────────────────────
+    result["ai"] = ai_provider_probe()
 
     # ── Database ─────────────────────────────────────────────────────────────
     db_info: dict = {"ok": False}
     try:
         t0 = time.perf_counter()
         db_info.update(_diag_db_stats())
-        db_info["query_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        probe_ms = round((time.perf_counter() - t0) * 1000, 2)
+        db_info["probe_ms"] = probe_ms
+        db_info["probe_human"] = _fmt_diag_duration_ms(probe_ms)
+        # Backward-compatible alias for callers that still read the original
+        # field. The top card now labels this as the full diagnostics probe.
+        db_info["query_ms"] = probe_ms
         db_info["ok"] = True
     except Exception as exc:
         db_info["error"] = str(exc)
@@ -647,6 +851,9 @@ def diag():
         }
     result["broker"] = broker_info
 
+    # ── Interactive PTY ──────────────────────────────────────────────────────
+    result["pty"] = app_metrics.pty_metrics_snapshot()
+
     # ── Vendor assets ─────────────────────────────────────────────────────────
     # In-process HEAD probes against the served URLs — file-existence on its
     # own would miss a route that has been accidentally unregistered or a
@@ -661,6 +868,9 @@ def diag():
             "error": "no fonts in manifest",
         },
     }
+
+    # ── Classifier inspector ─────────────────────────────────────────────────
+    result["classifier_inspector"] = _diag_classifier_inspector(request.args)
 
     # ── Usage stats ──────────────────────────────────────────────────────────
     stats: dict = {"ok": False}
@@ -690,32 +900,33 @@ def diag():
                 ]
                 activity = []
                 for label, cutoff in cutoffs:
-                    n = conn.execute(
-                        "SELECT COUNT(*) FROM runs WHERE started >= ?",
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS count FROM runs WHERE started >= ?",
                         (cutoff,),
-                    ).fetchone()[0]
+                    ).fetchone()
+                    n = _diag_row_value(row, "count", 0, 0)
                     activity.append({"label": label, "count": n})
                 stats["activity"] = activity
 
                 # Exit-code outcome breakdown
                 row = conn.execute(
                     """SELECT
-                         SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END),
+                         SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END) AS success,
                          SUM(
                              CASE
                                  WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
                                  THEN 1
                                  ELSE 0
                              END
-                         ),
-                         SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END)
+                         ) AS failed,
+                         SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END) AS incomplete
                        FROM runs""",
                     (GRACEFUL_TERMINATION_EXIT_CODE,),
                 ).fetchone()
                 stats["outcomes"] = {
-                    "success":    row[0] or 0,
-                    "failed":     row[1] or 0,
-                    "incomplete": row[2] or 0,
+                    "success":    _diag_row_value(row, "success", 0, 0) or 0,
+                    "failed":     _diag_row_value(row, "failed", 1, 0) or 0,
+                    "incomplete": _diag_row_value(row, "incomplete", 2, 0) or 0,
                 }
 
                 # Top 10 commands by run count
@@ -723,20 +934,38 @@ def diag():
                     "SELECT command, COUNT(*) AS n FROM runs"
                     " GROUP BY command ORDER BY n DESC LIMIT 10"
                 ).fetchall()
-                stats["top_by_freq"] = [{"command": r[0], "count": r[1]} for r in rows]
+                stats["top_by_freq"] = [
+                    {
+                        "command": _diag_row_value(row, "command", 0, ""),
+                        "count": _diag_row_value(row, "n", 1, 0),
+                    }
+                    for row in rows
+                ]
 
                 # Top 5 longest individual runs
-                rows = conn.execute(
-                    """SELECT command,
-                              ROUND((julianday(finished) - julianday(started)) * 86400) AS elapsed_s
-                         FROM runs
-                        WHERE finished IS NOT NULL AND started IS NOT NULL
-                        ORDER BY elapsed_s DESC
-                        LIMIT 5"""
-                ).fetchall()
+                if DB_BACKEND == DatabaseBackend.POSTGRES:
+                    duration_sql = """SELECT command,
+                                             ROUND(EXTRACT(EPOCH FROM (
+                                                 finished::timestamptz - started::timestamptz
+                                             ))) AS elapsed_s
+                                        FROM runs
+                                       WHERE finished IS NOT NULL AND started IS NOT NULL
+                                       ORDER BY elapsed_s DESC
+                                       LIMIT 5"""
+                else:
+                    duration_sql = """SELECT command,
+                                             ROUND((julianday(finished) - julianday(started)) * 86400) AS elapsed_s
+                                        FROM runs
+                                       WHERE finished IS NOT NULL AND started IS NOT NULL
+                                       ORDER BY elapsed_s DESC
+                                       LIMIT 5"""
+                rows = conn.execute(duration_sql).fetchall()
                 stats["top_by_duration"] = [
-                    {"command": r[0], "elapsed": _fmt_elapsed(r[1])}
-                    for r in rows
+                    {
+                        "command": _diag_row_value(row, "command", 0, ""),
+                        "elapsed": _fmt_elapsed(_diag_row_value(row, "elapsed_s", 1, 0)),
+                    }
+                    for row in rows
                 ]
 
             stats["ok"] = True
@@ -780,4 +1009,83 @@ def diag():
         generated_at=generated_at,
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
+    )
+
+
+@assets_bp.route("/diag/classifier-inspector")
+def diag_classifier_inspector():
+    _require_diag_access()
+    return jsonify(_diag_classifier_inspector(request.args))
+
+
+@assets_bp.route("/diag/classifier-drift")
+def diag_classifier_drift():
+    _require_diag_access()
+    try:
+        with db_connect() as conn:
+            report = classifier_drift_report(
+                conn,
+                run_limit=request.args.get("runs"),
+                line_limit=request.args.get("lines"),
+                command_root_filter=request.args.get("root"),
+                include_full=request.args.get("include_full"),
+            )
+    except Exception as exc:
+        log.warning("CLASSIFIER_DRIFT_REPORT_FAILED", exc_info=True, extra={"reason": type(exc).__name__})
+        report = {"ok": False, "error": str(exc)}
+    return jsonify(report)
+
+
+@assets_bp.route("/diag/ai-test", methods=["POST"])
+def diag_ai_test():
+    client_ip = _require_diag_access()
+    now = time.monotonic()
+    _prune_diag_ai_test_clients(now)
+    last = _DIAG_AI_TEST_LAST_BY_CLIENT.get(client_ip, 0.0)
+    if now - last < _DIAG_AI_TEST_RATE_SECONDS:
+        return jsonify({
+            "ok": False,
+            "error_code": "ai_rate_limited",
+            "error": "AI test prompt is limited to once per minute per diagnostics client.",
+        }), 429
+    _DIAG_AI_TEST_LAST_BY_CLIENT[client_ip] = now
+    try:
+        payload = ai_run_test_prompt()
+    except AIClientError as exc:
+        app_metrics.record_ai_request(
+            "diag_test",
+            "error",
+            0.0,
+            error_code=exc.code,
+            provider=CFG.get("ai_provider", "openai_compatible"),
+        )
+        log.warning(
+            "AI_DIAG_TEST_FAILED",
+            extra={
+                "ip": client_ip,
+                "provider": CFG.get("ai_provider", "openai_compatible"),
+                "model": CFG.get("ai_model", ""),
+                "error_code": exc.code,
+                "status": exc.status,
+            },
+        )
+        return jsonify({"ok": False, "error_code": exc.code, "error": str(exc)}), 502
+    return jsonify(payload)
+
+
+@assets_bp.route("/metrics")
+def metrics():
+    """Prometheus scrape endpoint, hidden behind the diagnostics IP gate."""
+    if not CFG.get("metrics_enabled", True):
+        abort(404)
+    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
+    client_ip = get_client_ip()
+    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
+        log.warning("METRICS_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
+        abort(404)
+
+    from services.metrics import PROMETHEUS_CONTENT_TYPE, render_latest_metrics  # noqa: PLC0415
+    return current_app.response_class(
+        render_latest_metrics(),
+        content_type=PROMETHEUS_CONTENT_TYPE,
     )

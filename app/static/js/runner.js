@@ -7,15 +7,34 @@
 const _stalledTimeouts = new Map();
 const _stalledRuns = new Set();
 const _runStreamStateByTabId = new Map();
+const _streamRecoveryTimers = new Map();
 const _runnerCore = typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null;
+const _RUN_STREAM_MESSAGE_BATCH_LIMIT = 750;
+const _RUN_STREAM_MESSAGE_BATCH_MS = 12;
+let _runnerPersistence = null;
 let _activeRunPollTimer = null;
-const DETACHED_ACTIVE_RUNS_STORAGE_PREFIX = 'detached_active_runs';
 
 // Pending terminal confirmation: used by transcript-owned yes/no flows such as
 // session-token migration and token-clear confirmation. While set, the next
 // typed answer is consumed as part of the active script-style prompt instead of
 // as a normal shell command.
 let _pendingTerminalConfirm = null;
+
+function _runnerPersistenceHelpers() {
+  if (!_runnerPersistence) {
+    if (typeof DarklabRunnerPersistence === 'undefined' || !DarklabRunnerPersistence?.create) {
+      throw new Error('DarklabRunnerPersistence is unavailable');
+    }
+    _runnerPersistence = DarklabRunnerPersistence.create({
+      apiFetch,
+      maskSessionToken,
+      isHistoryPanelOpen: typeof isHistoryPanelOpen === 'function' ? isHistoryPanelOpen : null,
+      refreshHistoryPanel: typeof refreshHistoryPanel === 'function' ? refreshHistoryPanel : null,
+      logClientError: typeof logClientError === 'function' ? logClientError : null,
+    });
+  }
+  return _runnerPersistence;
+}
 
 function _resetStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
@@ -43,6 +62,11 @@ function _clearStalledTimeout(tabId) {
   _stalledRuns.delete(tabId);
 }
 
+function _clearStreamRecoveryTimer(tabId) {
+  clearTimeout(_streamRecoveryTimers.get(tabId));
+  _streamRecoveryTimers.delete(tabId);
+}
+
 function _recoverStalledRun(tabId) {
   if (!_stalledRuns.has(tabId)) return;
   _stalledRuns.delete(tabId);
@@ -58,76 +82,6 @@ function _recoverStalledRun(tabId) {
   showTabKillBtn(tabId);
 }
 
-function _activeRunIdsFromPayload(data) {
-  return new Set((Array.isArray(data && data.runs) ? data.runs : [])
-    .map(run => run && run.run_id)
-    .filter(Boolean));
-}
-
-function _detachedActiveRunsStorageKey() {
-  const sessionId = typeof SESSION_ID !== 'undefined' ? String(SESSION_ID || 'session') : 'session';
-  return `${DETACHED_ACTIVE_RUNS_STORAGE_PREFIX}:${sessionId}`;
-}
-
-function _readDetachedActiveRunIds() {
-  if (typeof localStorage === 'undefined') return {};
-  try {
-    const parsed = JSON.parse(localStorage.getItem(_detachedActiveRunsStorageKey()) || '{}');
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch (_) {
-    return {};
-  }
-}
-
-function _writeDetachedActiveRunIds(detached) {
-  if (typeof localStorage === 'undefined') return;
-  const entries = Object.entries(detached || {})
-    .filter(([runId]) => String(runId || '').trim());
-  try {
-    if (!entries.length) {
-      localStorage.removeItem(_detachedActiveRunsStorageKey());
-      return;
-    }
-    localStorage.setItem(_detachedActiveRunsStorageKey(), JSON.stringify(Object.fromEntries(entries)));
-  } catch (_) {}
-}
-
-function markActiveRunDetachedForRestore(runId) {
-  const normalized = String(runId || '').trim();
-  if (!normalized) return;
-  const detached = _readDetachedActiveRunIds();
-  detached[normalized] = Date.now();
-  _writeDetachedActiveRunIds(detached);
-}
-
-function clearActiveRunDetachedForRestore(runId) {
-  const normalized = String(runId || '').trim();
-  if (!normalized) return;
-  const detached = _readDetachedActiveRunIds();
-  if (!Object.prototype.hasOwnProperty.call(detached, normalized)) return;
-  delete detached[normalized];
-  _writeDetachedActiveRunIds(detached);
-}
-
-function _isActiveRunDetachedForRestore(runId) {
-  const normalized = String(runId || '').trim();
-  if (!normalized) return false;
-  return Object.prototype.hasOwnProperty.call(_readDetachedActiveRunIds(), normalized);
-}
-
-function _pruneDetachedActiveRunRestoreIds(activeRunIds) {
-  const activeIds = activeRunIds instanceof Set ? activeRunIds : new Set();
-  const detached = _readDetachedActiveRunIds();
-  let changed = false;
-  Object.keys(detached).forEach((runId) => {
-    if (!activeIds.has(runId)) {
-      delete detached[runId];
-      changed = true;
-    }
-  });
-  if (changed) _writeDetachedActiveRunIds(detached);
-}
-
 function _tabRunGeneration(tabId) {
   const t = getTab(tabId);
   return t && (t.runId || t.historyRunId) || '';
@@ -135,17 +89,22 @@ function _tabRunGeneration(tabId) {
 
 function _isRunStillActive(runId) {
   if (!runId || typeof apiFetch !== 'function') return Promise.resolve(false);
-  return apiFetch('/history/active')
-    .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
-    .then(data => _activeRunIdsFromPayload(data).has(runId))
-    .catch(err => {
-      _logRunnerError('active run stall check failed', err);
-      return false;
-    });
+  return _fetchActiveRun(runId).then(Boolean);
 }
 
-function _isTabRunStillActive(tabId) {
-  return _isRunStillActive(_tabRunGeneration(tabId));
+function _fetchActiveRun(runId) {
+  if (!runId || typeof apiFetch !== 'function') return Promise.resolve(null);
+  return apiFetch('/history/active')
+    .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
+    .then(data => {
+      const normalized = String(runId || '');
+      return (Array.isArray(data && data.runs) ? data.runs : [])
+        .find(run => String(run && run.run_id || '') === normalized) || null;
+    })
+    .catch(err => {
+      _logRunnerError('active run stall check failed', err);
+      return null;
+    });
 }
 
 function _markStalledButRunning(tabId) {
@@ -179,26 +138,56 @@ function _markStalledAndInactive(tabId) {
 
 function _handleStreamEndedWithoutExit(tabId) {
   _clearStalledTimeout(tabId);
-  return _isTabRunStillActive(tabId).then(active => {
+  const runId = _tabRunGeneration(tabId);
+  return _fetchActiveRun(runId).then(activeRun => {
     const t = getTab(tabId);
     if (!t || t.killed) return;
-    if (active) {
-      appendLine('[live stream detached — process is still running]', 'notice', tabId);
-      appendLine('[this tab will restore the saved result automatically when the run completes]', 'notice', tabId);
-      t.reconnectedRun = true;
-      t.historyRunId = t.historyRunId || t.runId;
-      setTabStatus(tabId, 'running');
-      if (tabId === activeTabId) {
-        setStatus('running');
-        syncActiveRunTimer(tabId);
+    if (activeRun) {
+      if (_activeRunIsInteractivePty(activeRun)) {
+        if (typeof attachInteractivePtyCommand === 'function') {
+          attachInteractivePtyCommand(activeRun, tabId).catch(err => {
+            appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', tabId);
+            setTabStatus(tabId, 'fail');
+          });
+        }
+        return;
       }
-      _setRunButtonDisabled(true);
-      showTabKillBtn(tabId);
-      startPollingActiveRunsAfterReload();
+      _scheduleActiveRunStreamRecovery(activeRun, tabId, {
+        after: t.lastEventId || activeRun.last_event_id || '',
+        mode: t.attachMode || 'reconnected',
+      });
       return;
     }
+    _clearStreamRecoveryTimer(tabId);
+    t.streamRecoveryAttempts = 0;
     stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
   });
+}
+
+function _scheduleActiveRunStreamRecovery(run, tabId, { after = '', mode = 'reconnected' } = {}) {
+  const t = getTab(tabId);
+  if (!t || !run || !run.run_id) return false;
+  if (_streamRecoveryTimers.has(tabId)) return true;
+  const attempts = Number(t.streamRecoveryAttempts || 0) + 1;
+  t.streamRecoveryAttempts = attempts;
+  const recover = () => {
+    _streamRecoveryTimers.delete(tabId);
+    const latest = getTab(tabId);
+    if (!latest || latest.killed || _tabRunGeneration(tabId) !== String(run.run_id || '')) return;
+    _reattachActiveRunToTab(run, tabId, {
+      after: latest.lastEventId || after || run.last_event_id || '',
+      afterStreamRecovery: true,
+      mode,
+      preserveTranscript: true,
+    });
+  };
+  if (attempts <= 1) {
+    recover();
+    return true;
+  }
+  const delayMs = Math.min(1000 * (2 ** Math.max(0, attempts - 2)), 5000);
+  _streamRecoveryTimers.set(tabId, setTimeout(recover, delayMs));
+  return true;
 }
 
 function _shouldSuppressStreamOutputLine(tab, line) {
@@ -279,23 +268,18 @@ function _activeReconnectTabs() {
   return tabs.filter(t => t && t.st === 'running' && t.reconnectedRun && t.historyRunId);
 }
 
-function _activeRunReconnectNotice(run) {
-  const startedAt = new Date(run.started);
-  const startedLabel = Number.isNaN(startedAt.getTime())
-    ? 'unknown start time'
-    : startedAt.toLocaleString();
-  return [
-    `[reconnected to active run started at ${startedLabel}]`,
-    '[restored available output; live output will continue here]',
-  ];
-}
-
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
   if (_isActiveRunDetachedForRestore(run.run_id)) return false;
+  if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
   return !run.has_live_owner;
+}
+
+function _activeRunIsInteractivePty(run) {
+  if (!run || typeof run !== 'object') return false;
+  return run.run_type === 'pty' || run.interactive === true;
 }
 
 function _startedAtLabel(started) {
@@ -303,6 +287,86 @@ function _startedAtLabel(started) {
   return Number.isNaN(startedAt.getTime())
     ? 'unknown start time'
     : startedAt.toLocaleString();
+}
+
+function _activeRunTabForRestore(run) {
+  const runId = String(run && run.run_id || '');
+  if (!runId || !Array.isArray(tabs)) return null;
+  const byRunId = _tabForActiveRunId(runId);
+  if (byRunId) return byRunId;
+  const ownerTabId = String(run && run.owner_tab_id || '');
+  if (run && run.owned_by_this_client && ownerTabId) {
+    return tabs.find(tab => tab && tab.id === ownerTabId) || null;
+  }
+  return null;
+}
+
+function _activeRunReattachNotice(run, { afterStreamRecovery = false } = {}) {
+  const startedLabel = _startedAtLabel(run && run.started);
+  return [
+    afterStreamRecovery
+      ? '[reattached to active run after stream recovery]'
+      : '[reattached to active run after reload]',
+    `[active run started at ${startedLabel}]`,
+    '[live output will continue here]',
+  ];
+}
+
+function _reattachActiveRunToTab(
+  run,
+  tabId,
+  {
+    after = '',
+    afterStreamRecovery = false,
+    mode = 'reconnected',
+    preserveTranscript = false,
+  } = {},
+) {
+  if (!run || !tabId) return false;
+  if (!preserveTranscript) clearTab(tabId);
+  const t = getTab(tabId);
+  if (!t) return false;
+  if (typeof setTabRunningCommand === 'function') {
+    setTabRunningCommand(tabId, run.command);
+  } else {
+    if (!t.renamed) setTabLabel(tabId, run.command);
+    t.command = run.command;
+  }
+  const runId = String(run.run_id || '');
+  t.runId = runId;
+  t.historyRunId = runId;
+  t.reconnectedRun = true;
+  t.attachMode = mode;
+  t.killed = false;
+  t.pendingKill = false;
+  t.previewTruncated = false;
+  t.fullOutputAvailable = false;
+  t.fullOutputLoaded = false;
+  t.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
+  t.currentRunStartIndex = Number.isFinite(Number(t.currentRunStartIndex))
+    ? Number(t.currentRunStartIndex)
+    : (Array.isArray(t.rawLines) ? t.rawLines.length : 0);
+  t.followOutput = true;
+  const resumeAfter = String(after || t.lastEventId || run.last_event_id || '');
+  if (!resumeAfter) t.lastEventId = '';
+  if (!preserveTranscript || !Array.isArray(t.rawLines) || t.rawLines.length === 0) {
+    appendCommandEcho(run.command, tabId);
+  }
+  const streamRecoveryNoticeShown = afterStreamRecovery && t.streamRecoveryNoticeRunId === runId;
+  if (!streamRecoveryNoticeShown) {
+    _activeRunReattachNotice(run, { afterStreamRecovery }).forEach(line => appendLine(line, 'notice', tabId));
+  }
+  if (afterStreamRecovery) t.streamRecoveryNoticeRunId = runId;
+  setTabStatus(tabId, 'running');
+  if (tabId === activeTabId) {
+    setStatus('running');
+    syncActiveRunTimer(tabId);
+  }
+  showTabKillBtn(tabId);
+  _setRunButtonDisabled(true);
+  _subscribeRunStream(runId, tabId, { after: resumeAfter });
+  startPollingActiveRunsAfterReload();
+  return true;
 }
 
 function restoreActiveRunsAfterReload(runs) {
@@ -317,6 +381,23 @@ function restoreActiveRunsAfterReload(runs) {
 
   let firstRestoredTabId = null;
   items.forEach((run, index) => {
+    const originalTab = _activeRunTabForRestore(run);
+    if (originalTab) {
+      if (!firstRestoredTabId) firstRestoredTabId = originalTab.id;
+      if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand === 'function') {
+        attachInteractivePtyCommand(run, originalTab.id).catch(err => {
+          appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', originalTab.id);
+          setTabStatus(originalTab.id, 'fail');
+        });
+        return;
+      }
+      _reattachActiveRunToTab(run, originalTab.id, {
+        after: originalTab.lastEventId || run.last_event_id || '',
+        mode: originalTab.attachMode || 'reconnected',
+        preserveTranscript: true,
+      });
+      return;
+    }
     const bootstrapTab = index === 0 && tabs.length === 1 ? tabs[0] : null;
     const canReuseBootstrapTab = !!(bootstrapTab
       && bootstrapTab.st === 'idle'
@@ -329,32 +410,18 @@ function restoreActiveRunsAfterReload(runs) {
     const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab();
     if (!tabId) return;
     if (!firstRestoredTabId) firstRestoredTabId = tabId;
-    clearTab(tabId);
-    const t = getTab(tabId);
-    if (!t) return;
-    if (typeof setTabRunningCommand === 'function') {
-      setTabRunningCommand(tabId, run.command);
-    } else {
-      if (!t.renamed) setTabLabel(tabId, run.command);
-      t.command = run.command;
+    if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand === 'function') {
+      attachInteractivePtyCommand(run, tabId).catch(err => {
+        appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', tabId);
+        setTabStatus(tabId, 'fail');
+      });
+      return;
     }
-    t.runId = run.run_id;
-    t.historyRunId = run.run_id;
-    t.reconnectedRun = true;
-    t.lastEventId = '';
-    t.killed = false;
-    t.pendingKill = false;
-    t.previewTruncated = false;
-    t.fullOutputAvailable = false;
-    t.fullOutputLoaded = false;
-    t.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
-    t.currentRunStartIndex = 0;
-    t.followOutput = true;
-    appendCommandEcho(run.command, tabId);
-    _activeRunReconnectNotice(run).forEach(line => appendLine(line, 'notice', tabId));
-    setTabStatus(tabId, 'running');
-    showTabKillBtn(tabId);
-    _subscribeRunStream(run.run_id, tabId, { after: run.last_event_id || '' });
+    _reattachActiveRunToTab(run, tabId, {
+      after: run.last_event_id || '',
+      mode: 'reconnected',
+      preserveTranscript: false,
+    });
   });
 
   if (firstRestoredTabId) activateTab(firstRestoredTabId);
@@ -408,6 +475,10 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
 
 function attachActiveRunFromMonitor(run) {
   if (!run || !run.run_id) return Promise.resolve(false);
+  if (run.run_type === 'pty') {
+    if (typeof attachInteractivePtyCommand !== 'function') return Promise.resolve(false);
+    return attachInteractivePtyCommand(run);
+  }
   const tabId = createTab();
   if (!tabId) return Promise.resolve(false);
   activateTab(tabId, { focusComposer: false });
@@ -609,6 +680,7 @@ function _handleRunKilled(msg, tabId) {
   const killedByThisTab = killedByThisBrowser && killerTabId && killerTabId === tabId;
   t.killed = true;
   t.pendingKill = false;
+  if (typeof discardPendingOutputBatch === 'function') discardPendingOutputBatch(tabId);
   if (!killedByThisTab) {
     appendLine(
       killedByThisBrowser ? '[killed from another tab]' : '[killed by another browser]',
@@ -617,6 +689,9 @@ function _handleRunKilled(msg, tabId) {
     );
   }
   setTabStatus(tabId, 'killed');
+  if (typeof disableHighVolumeOutputResumeControls === 'function') {
+    disableHighVolumeOutputResumeControls(tabId);
+  }
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
     setStatus('killed');
@@ -627,17 +702,24 @@ function _handleRunKilled(msg, tabId) {
 function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) {
   const t = getTab(tabId);
   if (!t) return;
+  _clearStreamRecoveryTimer(tabId);
   t.killed = true;
   t.reconnectedRun = false;
   t.lastEventId = '';
   t.attachMode = '';
+  t.streamRecoveryAttempts = 0;
+  t.streamRecoveryNoticeRunId = '';
   stopTimer();
+  if (typeof discardPendingOutputBatch === 'function') discardPendingOutputBatch(tabId);
   if (!t.closing && !suppressTranscript) {
     appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   }
   _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
   if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: 'killed' });
   setTabStatus(tabId, 'killed');
+  if (typeof disableHighVolumeOutputResumeControls === 'function') {
+    disableHighVolumeOutputResumeControls(tabId);
+  }
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
     setStatus('killed');
@@ -653,7 +735,16 @@ function _handleRunTransportFailure(err, tabId) {
   appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
   if (tabId === activeTabId) setStatus('fail');
   setTabStatus(tabId, 'fail');
+  if (typeof disableHighVolumeOutputResumeControls === 'function') {
+    disableHighVolumeOutputResumeControls(tabId);
+  }
   stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+}
+
+function _appendHighVolumeOutputFinalSummary(tabId) {
+  if (typeof appendHighVolumeOutputFinalSummary === 'function') {
+    appendHighVolumeOutputFinalSummary(tabId);
+  }
 }
 
 async function _readRunErrorMessage(res) {
@@ -684,17 +775,212 @@ function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
 function _streamOutputMetadata(msg) {
   if (!msg || typeof msg !== 'object') return null;
   const metadata = {};
+  if (typeof msg.kind === 'string' && msg.kind) metadata.kind = msg.kind;
+  if (typeof msg.role === 'string' && msg.role) metadata.role = msg.role;
   if (Array.isArray(msg.signals) && msg.signals.length) metadata.signals = msg.signals;
   if (Number.isInteger(msg.line_index)) metadata.line_index = msg.line_index;
   if (typeof msg.command_root === 'string' && msg.command_root) metadata.command_root = msg.command_root;
   if (typeof msg.target === 'string' && msg.target) metadata.target = msg.target;
+  if (Array.isArray(msg.entities) && msg.entities.length) metadata.entities = msg.entities;
   return Object.keys(metadata).length ? metadata : null;
 }
 
-function _appendStreamLine(text, cls, tabId, msg) {
-  const metadata = _streamOutputMetadata(msg);
+function _runOutputModel() {
+  return typeof DarklabRunOutputModel !== 'undefined' ? DarklabRunOutputModel : null;
+}
+
+function _streamUnknownCollector(streamState) {
+  const state = streamState || {};
+  if (!state.unknownLineEventValues) state.unknownLineEventValues = new Set();
+  return (family, value) => {
+    const key = `${family}:${value}`;
+    if (state.unknownLineEventValues.has(key)) return;
+    state.unknownLineEventValues.add(key);
+    _logRunnerError(`unknown run output ${family}`, new Error(String(value || 'unknown')));
+  };
+}
+
+function _warnRunStreamSchema(streamState, family, value) {
+  const state = streamState || {};
+  if (!state.unknownLineEventValues) state.unknownLineEventValues = new Set();
+  const key = `schema:${family}:${value}`;
+  if (state.unknownLineEventValues.has(key)) return;
+  state.unknownLineEventValues.add(key);
+  _logRunnerError(`unknown run output schema ${family}`, new Error(String(value || 'unknown')));
+}
+
+function _handleRunStreamSchema(msg, streamState) {
+  if (!msg || typeof msg !== 'object') return;
+  const model = _runOutputModel();
+  const supported = model ? Number(model.LINE_EVENT_SCHEMA_VERSION || 1) : 1;
+  const version = Number(msg.v || 0);
+  if (version > supported) _warnRunStreamSchema(streamState, 'version', msg.v);
+  if (String(msg.kind || '') !== 'line_event') _warnRunStreamSchema(streamState, 'kind', msg.kind || '');
+}
+
+function _typedRunStreamLineMessage(msg, streamState) {
+  if (!msg || typeof msg !== 'object') return msg;
+  const model = _runOutputModel();
+  if (!model || typeof model.fromWireLineEvent !== 'function') return msg;
+  const hasTypedFields = msg.v !== undefined || msg.kind !== undefined || msg.role !== undefined || msg.signals !== undefined;
+  if (!hasTypedFields) return msg;
+  const version = Number(msg.v || 0);
+  if (version > Number(model.LINE_EVENT_SCHEMA_VERSION || 1)) {
+    _warnRunStreamSchema(streamState, 'version', msg.v);
+  }
+  const event = model.fromWireLineEvent(msg, _streamUnknownCollector(streamState));
+  const legacy = typeof model.toLegacyWireLineEvent === 'function'
+    ? model.toLegacyWireLineEvent(event)
+    : { text: event.text || '', cls: event.legacy_cls || '' };
+  return {
+    ...msg,
+    ...legacy,
+    kind: event.kind || 'info',
+    role: event.role || 'body',
+    signals: event.signals || [],
+    line_index: event.line_index,
+    command_root: event.command_root || '',
+    target: event.target || '',
+    entities: event.entities || [],
+  };
+}
+
+function _appendStreamLine(text, cls, tabId, msg, options = {}) {
+  let metadata = _streamOutputMetadata(msg);
+  if (options.liveOutput && APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+    metadata = metadata || {};
+    metadata.live_output = true;
+  }
   if (metadata) appendLine(text, cls, tabId, metadata);
   else appendLine(text, cls, tabId);
+}
+
+function _forEachStreamTextLine(text, callback) {
+  const raw = String(text ?? '');
+  if (raw === '') {
+    callback('');
+    return;
+  }
+  const lines = raw.split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  lines.forEach(line => callback(line));
+}
+
+function _recordRunOutputCoalescing(msg, tabId) {
+  const count = Math.max(0, Number(msg && msg.coalesced_line_count || 0));
+  if (count && typeof recordLiveOutputCoalescedLines === 'function') {
+    recordLiveOutputCoalescedLines(tabId, count);
+  }
+}
+
+function _batchedStreamLineEntry(msg, lineText, streamState) {
+  const lineMsg = _typedRunStreamLineMessage({
+    ...msg,
+    type: 'output',
+    text: lineText,
+  }, streamState);
+  if (APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+    lineMsg.live_output = true;
+  }
+  return lineMsg;
+}
+
+function _handleRunOutputBatch(msg, tabId, streamState = null) {
+  const t = getTab(tabId);
+  if (t && t.killed) return;
+  _recordRunOutputCoalescing(msg, tabId);
+  const lines = Array.isArray(msg.lines) ? msg.lines : [];
+  if (!lines.length) return;
+  const entries = [];
+  lines.forEach(rawLine => {
+    if (!rawLine || typeof rawLine !== 'object') return;
+    const lineMsg = _typedRunStreamLineMessage({ ...rawLine, type: 'output' }, streamState);
+    if (t && typeof lineMsg.text === 'string' && /^Unsupported built-in command: /.test(lineMsg.text)) {
+      t.unknownCommand = true;
+    }
+    _forEachStreamTextLine(lineMsg.text, line => {
+      if (!_shouldSuppressStreamOutputLine(t, line)) {
+        entries.push(_batchedStreamLineEntry(lineMsg, line, streamState));
+      }
+    });
+  });
+  if (entries.length && typeof appendLines === 'function') {
+    appendLines(entries, tabId);
+  }
+}
+
+function _runStreamQueueLength(streamState) {
+  if (!streamState || !Array.isArray(streamState.messageQueue)) return 0;
+  return streamState.messageQueue.length - Number(streamState.messageQueueIndex || 0);
+}
+
+function _runStreamNow() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function _finishRunStreamIfQueueDrained(tabId, streamState) {
+  if (!streamState || !streamState.readDone || _runStreamQueueLength(streamState) > 0) return false;
+  if (streamState.messageQueueScheduled || streamState.messageQueueDraining) return false;
+  if (_finishPausedRunStream(tabId, streamState)) return true;
+  _runStreamStateByTabId.delete(tabId);
+  if (!streamState.sawTerminalEvent) _handleStreamEndedWithoutExit(tabId);
+  return true;
+}
+
+function _scheduleRunStreamMessageDrain(tabId, streamState, { defer = false } = {}) {
+  if (!streamState || streamState.messageQueueScheduled) return;
+  streamState.messageQueueScheduled = true;
+  const run = () => _drainRunStreamMessageQueue(tabId, streamState);
+  if (defer) setTimeout(run, 0);
+  else Promise.resolve().then(run);
+}
+
+function _enqueueRunStreamMessages(messages, tabId, streamState) {
+  if (!streamState || !Array.isArray(messages) || !messages.length) return;
+  if (!Array.isArray(streamState.messageQueue)) {
+    streamState.messageQueue = [];
+    streamState.messageQueueIndex = 0;
+  }
+  streamState.messageQueue.push(...messages);
+  _scheduleRunStreamMessageDrain(tabId, streamState);
+}
+
+function _drainRunStreamMessageQueue(tabId, streamState) {
+  if (!streamState) return;
+  streamState.messageQueueScheduled = false;
+  streamState.messageQueueDraining = true;
+  const queue = Array.isArray(streamState.messageQueue) ? streamState.messageQueue : [];
+  const started = _runStreamNow();
+  let index = Number(streamState.messageQueueIndex || 0);
+  let processed = 0;
+
+  while (index < queue.length) {
+    const msg = queue[index];
+    index += 1;
+    processed += 1;
+    if (msg && ['exit', 'error'].includes(String(msg.type || msg.event || ''))) {
+      streamState.sawTerminalEvent = true;
+    }
+    _handleRunStreamMessage(msg, tabId, streamState);
+    if (processed >= _RUN_STREAM_MESSAGE_BATCH_LIMIT) break;
+    if (_runStreamNow() - started >= _RUN_STREAM_MESSAGE_BATCH_MS) break;
+  }
+
+  streamState.messageQueueIndex = index;
+  if (index >= queue.length) {
+    streamState.messageQueue = [];
+    streamState.messageQueueIndex = 0;
+  }
+  streamState.messageQueueDraining = false;
+
+  if (_runStreamQueueLength(streamState) > 0) {
+    _scheduleRunStreamMessageDrain(tabId, streamState, { defer: true });
+    return;
+  }
+  _finishRunStreamIfQueueDrained(tabId, streamState);
 }
 
 function appendCommandEcho(cmd, tabId) {
@@ -734,7 +1020,15 @@ function _markTabRunStarted(tabId, runId) {
   const sameRun = t.runId === runId || t.historyRunId === runId;
   t.runId = runId;
   t.historyRunId = runId;
-  if (!sameRun) t.lastEventId = '';
+  if (!sameRun) {
+    t.lastEventId = '';
+    t.streamRecoveryAttempts = 0;
+    t.streamRecoveryNoticeRunId = '';
+    _clearStreamRecoveryTimer(tabId);
+  }
+  if (!sameRun && typeof resetHighVolumeOutputState === 'function') {
+    resetHighVolumeOutputState(tabId);
+  }
   t.unknownCommand = false;
   t.reconnectedRun = false;
   if (t.pendingKill) {
@@ -751,14 +1045,37 @@ function _markTabRunStarted(tabId, runId) {
   }
 }
 
-function _handleRunStreamMessage(msg, tabId) {
+function _handleRunStreamMessage(msg, tabId, streamState = null) {
   if (!msg || typeof msg !== 'object') return;
   const t = getTab(tabId);
   if (t && msg.event_id) t.lastEventId = String(msg.event_id || '');
-  if (msg.type === 'started') {
+  if (msg.type === 'schema' || msg.event === 'schema') {
+    _handleRunStreamSchema(msg, streamState);
+  } else if (msg.type === 'started') {
     _markTabRunStarted(tabId, msg.run_id);
   } else if (msg.type === 'notice') {
+    msg = _typedRunStreamLineMessage(msg, streamState);
     _appendStreamLine(msg.text, 'notice', tabId, msg);
+    const notifyProjectChange = typeof globalThis.notifyProjectWorkspaceChanged === 'function'
+      ? globalThis.notifyProjectWorkspaceChanged
+      : (typeof notifyProjectWorkspaceChanged === 'function' ? notifyProjectWorkspaceChanged : null);
+    if (msg.project_linked && notifyProjectChange) {
+      notifyProjectChange('run-linked', msg.project_id || '');
+    }
+    if (msg.project_targets_discovered) {
+      const rawCount = Number(msg.target_count || msg.count || 0);
+      const count = Number.isFinite(rawCount) ? rawCount : 0;
+      if (notifyProjectChange) {
+        notifyProjectChange('target-discovered', msg.project_id || '');
+      }
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-target-discovered', {
+          project_id: msg.project_id || '',
+          project_name: msg.project_name || '',
+          count,
+        });
+      }
+    }
   } else if (msg.type === 'owner') {
     _handleRunOwnerChanged(msg, tabId);
   } else if (msg.type === 'killed') {
@@ -767,18 +1084,24 @@ function _handleRunStreamMessage(msg, tabId) {
     clearTab(tabId);
     const t = getTab(tabId);
     if (t) t.syntheticClear = true;
+  } else if (msg.type === 'output_batch') {
+    _handleRunOutputBatch(msg, tabId, streamState);
   } else if (msg.type === 'output') {
+    _recordRunOutputCoalescing(msg, tabId);
+    msg = _typedRunStreamLineMessage(msg, streamState);
     const t = getTab(tabId);
+    if (t && t.killed) return;
     if (t && typeof msg.text === 'string' && /^Unsupported built-in command: /.test(msg.text)) {
       t.unknownCommand = true;
     }
-    String(msg.text || '').split('\n').forEach((line, i, arr) => {
-      if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
-        _appendStreamLine(line, msg.cls || '', tabId, msg);
+    _forEachStreamTextLine(msg.text, line => {
+      if (!_shouldSuppressStreamOutputLine(t, line)) {
+        _appendStreamLine(line, msg.cls || '', tabId, msg, { liveOutput: true });
       }
     });
   } else if (msg.type === 'exit') {
     _clearStalledTimeout(tabId);
+    _clearStreamRecoveryTimer(tabId);
     const t = getTab(tabId);
     if (t) {
       t.exitCode = msg.code;
@@ -786,6 +1109,8 @@ function _handleRunStreamMessage(msg, tabId) {
       t.reconnectedRun = false;
       t.lastEventId = '';
       t.attachMode = '';
+      t.streamRecoveryAttempts = 0;
+      t.streamRecoveryNoticeRunId = '';
       t.deferPromptMount = true;
       t.previewTruncated = !!msg.preview_truncated;
       t.fullOutputAvailable = !!msg.full_output_available;
@@ -794,8 +1119,13 @@ function _handleRunStreamMessage(msg, tabId) {
     // If already killed by user, ignore the subsequent -15 exit code.
     if (t && t.killed) {
       t.killed = false;
+      if (typeof discardPendingOutputBatch === 'function') discardPendingOutputBatch(tabId);
+      _appendHighVolumeOutputFinalSummary(tabId);
       stopTimer();
       _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+      if (typeof disableHighVolumeOutputResumeControls === 'function') {
+        disableHighVolumeOutputResumeControls(tabId);
+      }
       if (t.closing && typeof finalizeClosingTab === 'function') {
         finalizeClosingTab(tabId);
         if (isHistoryPanelOpen()) refreshHistoryPanel();
@@ -813,16 +1143,25 @@ function _handleRunStreamMessage(msg, tabId) {
     }
     if (msg.code === 0) {
       if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
+      _appendHighVolumeOutputFinalSummary(tabId);
       if (tabId === activeTabId) setStatus('ok');
       setTabStatus(tabId, 'ok');
+      if (typeof disableHighVolumeOutputResumeControls === 'function') {
+        disableHighVolumeOutputResumeControls(tabId);
+      }
     } else {
       appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
+      _appendHighVolumeOutputFinalSummary(tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');
+      if (typeof disableHighVolumeOutputResumeControls === 'function') {
+        disableHighVolumeOutputResumeControls(tabId);
+      }
     }
     if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
       addToRecentPreview(t.command);
     }
+    if (t && t.command) _refreshProjectContextAfterCommand(t.command, msg.code);
     if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof loadSessionVariables === 'function') {
       loadSessionVariables().catch(() => {});
     }
@@ -843,6 +1182,9 @@ function _handleRunStreamMessage(msg, tabId) {
     appendLine('[error] ' + msg.text, 'exit-fail', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
+    if (typeof disableHighVolumeOutputResumeControls === 'function') {
+      disableHighVolumeOutputResumeControls(tabId);
+    }
     stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
   }
 }
@@ -977,9 +1319,9 @@ function _streamRunResponse(res, tabId, state = null) {
   function read() {
     reader.read().then(({ done, value }) => {
       if (done) {
-        if (_finishPausedRunStream(tabId, streamState)) return;
-        _runStreamStateByTabId.delete(tabId);
-        _handleStreamEndedWithoutExit(tabId);
+        streamState.readDone = true;
+        streamState.reader = null;
+        _finishRunStreamIfQueueDrained(tabId, streamState);
         return;
       }
       _recoverStalledRun(tabId);
@@ -987,12 +1329,14 @@ function _streamRunResponse(res, tabId, state = null) {
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split('\n\n');
       buffer = parts.pop();
+      const messages = [];
       parts.forEach(part => {
         try {
           const msg = _sseMessageFromChunk(part);
-          if (msg) _handleRunStreamMessage(msg, tabId);
+          if (msg) messages.push(msg);
         } catch(e) {}
       });
+      _enqueueRunStreamMessages(messages, tabId, streamState);
       read();
     }).catch(err => {
       if (_finishPausedRunStream(tabId, streamState)) return;
@@ -1189,329 +1533,20 @@ function _isSessionTokenSubcommand(cmd) {
 
 function _isClientSideUiCommand(cmd) {
   const root = String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase();
-  return root === 'theme' || root === 'config';
+  return root === 'theme' || root === 'config' || root === 'tour';
+}
+
+function _isClientSideSecretSetCommand(cmd) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  return parts[0]?.toLowerCase() === 'secret' && parts[1]?.toLowerCase() === 'set';
 }
 
 function _isTabCloseCommand(cmd) {
   return /^(exit|quit)$/i.test(String(cmd || '').trim());
 }
 
-function _workspaceDeleteCommand(cmd) {
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  const fileAction = (parts[1] || 'delete').toLowerCase();
-  const usage = root === 'file'
-    ? `Usage: file ${fileAction} [-r|-f|-rf] <file-or-folder>`
-    : 'Usage: rm [-r|-f|-rf] <file-or-folder>';
-  const start = root === 'file' ? 2 : 1;
-  if (root === 'file' && !['rm', 'delete'].includes((parts[1] || '').toLowerCase())) return null;
-  if (root !== 'rm' && root !== 'file') return null;
-  const args = parts.slice(start);
-  const flags = [];
-  const targets = [];
-  args.forEach((part) => {
-    if (/^-[rf]+$/.test(part)) flags.push(part);
-    else if (String(part || '').startsWith('-')) targets.push(part);
-    else targets.push(part);
-  });
-  const recursive = flags.some(flag => flag.includes('r'));
-  const force = flags.some(flag => flag.includes('f'));
-  const invalid = targets.length !== 1 || args.some(part => String(part || '').startsWith('-') && !/^-[rf]+$/.test(part));
-  return {
-    target: invalid ? '' : targets[0],
-    recursive,
-    force,
-    usage,
-    invalid,
-  };
-}
-
-function _workspaceDeleteTarget(cmd) {
-  const parsed = _workspaceDeleteCommand(cmd);
-  return parsed && !parsed.invalid ? parsed.target : '';
-}
-
-function _workspaceMoveCommand(cmd) {
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  if (root === 'mv') {
-    return {
-      source: parts.length === 3 ? parts[1] : '',
-      destination: parts.length === 3 ? parts[2] : '',
-      usage: 'Usage: mv <source> <destination>',
-      invalid: parts.length !== 3,
-    };
-  }
-  const action = (parts[1] || '').toLowerCase();
-  if (root !== 'file' || action !== 'move') return null;
-  return {
-    source: parts.length === 4 ? parts[2] : '',
-    destination: parts.length === 4 ? parts[3] : '',
-    usage: 'Usage: file move <source> <destination>',
-    invalid: parts.length !== 4,
-  };
-}
-
-function _workspaceListCommand(parts) {
-  const root = (parts[0] || '').toLowerCase();
-  const parseListArgs = (args, usage) => {
-    let long = false;
-    let recursive = false;
-    const targets = [];
-    let invalid = false;
-    args.forEach((part) => {
-      const value = String(part || '');
-      if (/^-[lR]+$/.test(value)) {
-        if (value.includes('l')) long = true;
-        if (value.includes('R')) recursive = true;
-      } else if (value.startsWith('-')) {
-        invalid = true;
-      } else {
-        targets.push(part);
-      }
-    });
-    if (targets.length > 1) invalid = true;
-    return {
-      target: targets[0] || '',
-      long,
-      recursive,
-      usage,
-      invalid,
-    };
-  };
-  if (root === 'll') {
-    const parsed = parseListArgs(parts.slice(1), 'Usage: ll [-R] [folder]');
-    parsed.long = true;
-    return parsed;
-  }
-  const usage = root === 'file' ? 'Usage: file list [-lR] [folder]' : 'Usage: ls [-lR] [folder]';
-  const start = root === 'file' ? 2 : 1;
-  if (root === 'file' && !['list', 'ls'].includes((parts[1] || '').toLowerCase())) return null;
-  return parseListArgs(parts.slice(start), usage);
-}
-
-function _workspaceListTarget(parts) {
-  const parsed = _workspaceListCommand(parts);
-  if (parsed && !parsed.invalid) {
-    return parsed.target;
-  }
-  return '';
-}
-
-function _workspaceEditorCommand(cmd) {
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  const action = (parts[1] || '').toLowerCase();
-  if (root !== 'file' || !['add', 'edit'].includes(action)) return null;
-  return { action, target: parts.length === 3 ? parts[2] : '', invalid: parts.length > 3 };
-}
-
-function _workspaceDownloadTarget(cmd) {
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  const action = (parts[1] || '').toLowerCase();
-  if (root === 'file' && action === 'download' && parts.length === 3) return parts[2];
-  return '';
-}
-
-function _workspaceCommandTokens(cmd) {
-  const tokens = [];
-  const re = /"[^"]*"|'[^']*'|\S+/g;
-  let match = re.exec(String(cmd || '').trim());
-  while (match) {
-    let token = match[0];
-    if (token.length >= 2 && ((token[0] === '"' && token[token.length - 1] === '"') || (token[0] === "'" && token[token.length - 1] === "'"))) {
-      token = token.slice(1, -1);
-    }
-    tokens.push(token);
-    match = re.exec(String(cmd || '').trim());
-  }
-  return tokens;
-}
-
-function _workspaceCwd(tabId = activeTabId) {
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
-  return _normalizeWorkspaceTerminalPath(tab && tab.workspaceCwd || '');
-}
-
-function _setWorkspaceCwd(tabId, path = '') {
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
-  const normalized = _normalizeWorkspaceTerminalPath(path);
-  if (tab) tab.workspaceCwd = normalized;
-  if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
-  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
-  return normalized;
-}
-
-function _workspaceDisplayPath(path = '') {
-  if (typeof workspaceDisplayPath === 'function') return workspaceDisplayPath(_normalizeWorkspaceTerminalPath(path));
-  const normalized = _normalizeWorkspaceTerminalPath(path);
-  return normalized ? `/${normalized}` : '/';
-}
-
-function _normalizeWorkspaceTerminalPath(path = '') {
-  const parts = String(path || '').split('/').map(part => String(part || '').trim()).filter(Boolean);
-  return parts.join('/');
-}
-
-function _resolveWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCwd(), defaultToCwd = false } = {}) {
-  const text = String(rawPath ?? '').trim();
-  const normalizedCwd = _normalizeWorkspaceTerminalPath(cwd);
-  if (!text && defaultToCwd) return normalizedCwd;
-  if (typeof normalizeWorkspaceCommandPath === 'function') {
-    return _normalizeWorkspaceTerminalPath(normalizeWorkspaceCommandPath(text || '.', normalizedCwd));
-  }
-  const base = text.startsWith('/') ? [] : normalizedCwd.split('/').filter(Boolean);
-  const parts = String(text || '.').split('/').filter(Boolean);
-  for (const part of parts) {
-    if (part === '.') continue;
-    if (part === '..') {
-      if (!base.length) throw new Error('path escapes the session workspace');
-      base.pop();
-    } else {
-      base.push(part);
-    }
-  }
-  return base.join('/');
-}
-
-function _workspacePathExists(path = '', kind = 'any') {
-  const target = String(path || '').split('/').filter(Boolean).join('/');
-  if (!target) return kind === 'directory' || kind === 'any';
-  if (kind === 'directory' || kind === 'any') {
-    const dirHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
-      ? getWorkspaceAutocompleteDirectoryHints()
-      : [];
-    if (dirHints.some(item => String(item && item.value || '') === target)) return true;
-  }
-  if (kind === 'file' || kind === 'any') {
-    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
-      ? getWorkspaceAutocompleteFileHints()
-      : [];
-    if (fileHints.some(item => String(item && item.value || '') === target)) return true;
-  }
-  return false;
-}
-
-function _workspacePathHasGlob(path = '') {
-  return String(path || '').includes('*');
-}
-
-function _workspaceGlobSegmentToRegExp(segment = '') {
-  const escaped = String(segment || '').replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
-  return new RegExp(`^${escaped}$`);
-}
-
-function _workspaceGlobMatches(pattern = '', path = '') {
-  const patternParts = String(pattern || '').split('/').filter(Boolean);
-  const pathParts = String(path || '').split('/').filter(Boolean);
-  if (patternParts.length !== pathParts.length) return false;
-  return patternParts.every((part, index) => _workspaceGlobSegmentToRegExp(part).test(pathParts[index]));
-}
-
-function _workspaceEntryHints(kind = 'any') {
-  const entries = [];
-  if (kind === 'directory' || kind === 'any') {
-    const dirHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
-      ? getWorkspaceAutocompleteDirectoryHints()
-      : [];
-    (Array.isArray(dirHints) ? dirHints : []).forEach((item) => {
-      const path = String(item && item.value || '').split('/').filter(Boolean).join('/');
-      if (path) entries.push({ path, kind: 'directory' });
-    });
-  }
-  if (kind === 'file' || kind === 'any') {
-    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
-      ? getWorkspaceAutocompleteFileHints()
-      : [];
-    (Array.isArray(fileHints) ? fileHints : []).forEach((item) => {
-      const path = String(item && item.value || '').split('/').filter(Boolean).join('/');
-      if (path) entries.push({ path, kind: 'file', item });
-    });
-  }
-  return entries.sort((a, b) => a.path.localeCompare(b.path));
-}
-
-function _workspaceExpandPathPattern(rawPath = '', { cwd = _workspaceCwd(), kind = 'any', defaultToCwd = false } = {}) {
-  const target = _resolveWorkspaceCommandPath(rawPath, { cwd, defaultToCwd });
-  if (!_workspacePathHasGlob(target)) {
-    if (!_workspacePathExists(target, kind)) {
-      return [];
-    }
-    const entry = _workspaceEntryHints(kind).find(item => item.path === target);
-    return [entry || { path: target, kind: target && _workspacePathExists(target, 'file') ? 'file' : 'directory' }];
-  }
-  return _workspaceEntryHints(kind).filter(item => _workspaceGlobMatches(target, item.path));
-}
-
-function _resolveExistingWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCwd(), kind = 'any', defaultToCwd = false } = {}) {
-  const text = String(rawPath ?? '').trim();
-  const target = _resolveWorkspaceCommandPath(text, { cwd, defaultToCwd });
-  if (_workspacePathExists(target, kind)) return target;
-  const normalizedRaw = String(text || '').split('/').filter(Boolean).join('/');
-  if (text && !text.startsWith('/') && normalizedRaw && normalizedRaw !== target && _workspacePathExists(normalizedRaw, kind)) {
-    return normalizedRaw;
-  }
-  return target;
-}
-
-async function _ensureWorkspaceCache() {
-  if (typeof refreshWorkspaceFileCache === 'function') {
-    await refreshWorkspaceFileCache();
-  }
-}
-
-function _isWorkspaceDeleteCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
-    return false;
-  }
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  const action = (parts[1] || '').toLowerCase();
-  return root === 'rm' || (root === 'file' && ['rm', 'delete'].includes(action));
-}
-
-function _isWorkspaceEditorCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
-    return false;
-  }
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  const action = (parts[1] || '').toLowerCase();
-  return root === 'file' && ['add', 'edit'].includes(action);
-}
-
-function _isWorkspaceDownloadCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
-    return false;
-  }
-  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
-  return (parts[0] || '').toLowerCase() === 'file' && (parts[1] || '').toLowerCase() === 'download';
-}
-
-function _isWorkspaceMoveCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
-    return false;
-  }
-  return !!_workspaceMoveCommand(cmd);
-}
-
-function _isWorkspaceTerminalCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) return false;
-  const parts = _workspaceCommandTokens(cmd);
-  const root = (parts[0] || '').toLowerCase();
-  if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
-  if (root === 'file' && ['list', 'ls', 'show', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
-  return false;
-}
-
 function _historySafeCommand(cmd) {
-  const value = String(cmd || '').trim();
-  if (!value) return '';
-  return value.replace(
-    /\b(session-token\s+(?:set|revoke)\s+)(tok_[A-Za-z0-9]+|[0-9a-f]{8}-[0-9a-f-]{28,})\b/i,
-    (_match, prefix, token) => `${prefix}${maskSessionToken(token)}`,
-  );
+  return _runnerPersistenceHelpers().historySafeCommand(cmd);
 }
 
 function _recordSuccessfulLocalCommand(cmd) {
@@ -1520,8 +1555,54 @@ function _recordSuccessfulLocalCommand(cmd) {
   if (value) addToRecentPreview(value);
 }
 
+function _isProjectWorkspaceCommand(cmd) {
+  return String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase() === 'project';
+}
+
+function _runnerProjectWorkspaceSyncStorageKey() {
+  return 'darklab_project_workspace_changed';
+}
+
+function _broadcastProjectWorkspaceChanged(cmd) {
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:project-workspace-changed', { command: String(cmd || '') });
+  }
+  if (typeof localStorage === 'undefined' || !localStorage || typeof localStorage.setItem !== 'function') return;
+  try {
+    localStorage.setItem(_runnerProjectWorkspaceSyncStorageKey(), JSON.stringify({
+      session_id: typeof SESSION_ID !== 'undefined' ? SESSION_ID : '',
+      command: String(cmd || ''),
+      changed_at: Date.now(),
+    }));
+  } catch (_) {
+    // Cross-tab refresh is best-effort; the local tab still refreshes below.
+  }
+}
+
+function _refreshProjectContextAfterCommand(cmd, exitCode) {
+  if (Number(exitCode) !== 0 || !_isProjectWorkspaceCommand(cmd)) return;
+  _broadcastProjectWorkspaceChanged(cmd);
+  const refreshWorkspace = typeof refreshProjectWorkspace === 'function'
+    && typeof isProjectWorkspaceOpen === 'function'
+    && isProjectWorkspaceOpen()
+    ? refreshProjectWorkspace
+    : null;
+  const refreshActive = refreshWorkspace || (
+    typeof refreshActiveProjectContext === 'function' ? refreshActiveProjectContext : null
+  );
+  if (!refreshActive) return;
+  try {
+    const result = refreshActive();
+    if (result && typeof result.catch === 'function') {
+      result.catch(err => _logRunnerError('failed to refresh active project after command', err));
+    }
+  } catch (err) {
+    _logRunnerError('failed to refresh active project after command', err);
+  }
+}
+
 function _clientSideRunExitCodeFromStatus(statusValue) {
-  return statusValue === 'fail' ? 1 : 0;
+  return _runnerPersistenceHelpers().exitCodeFromStatus(statusValue);
 }
 
 function _finalizeClientSideCommandStatus(tabId, statusValue) {
@@ -1542,39 +1623,20 @@ function _finalizeClientSideCommandStatus(tabId, statusValue) {
 }
 
 function _persistClientSideRun(command, lineItems, statusValue) {
-  const safeCommand = _historySafeCommand(command);
-  if (!safeCommand || typeof apiFetch !== 'function') return;
-  const lines = (Array.isArray(lineItems) ? lineItems : []).map((line) => ({
-    text: String(line && line.text !== undefined ? line.text : line || ''),
-    cls: String(line && line.cls || ''),
-  }));
-  apiFetch('/run/client', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      command: safeCommand,
-      exit_code: _clientSideRunExitCodeFromStatus(statusValue),
-      lines,
-    }),
-  }).then((resp) => {
-    if (!resp || !resp.ok) throw new Error(String(resp && resp.status || 'unknown'));
-    if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) refreshHistoryPanel();
-  }).catch((err) => {
-    if (typeof logClientError === 'function') logClientError('client-side run persistence failed', err);
-  });
+  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, activeTabId);
 }
 
 function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
   _persistClientSideRun(command, lineItems, statusValue);
 }
 
-function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentDomainCount = 0) {
+function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentValueCount = 0) {
   const parts = [];
   if (runCount > 0) parts.push(`${runCount} run(s)`);
   if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
   if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
-  if (recentDomainCount > 0) parts.push(`${recentDomainCount} recent domain(s)`);
-  if (!parts.length) return 'no runs, workspace files, workflows, or recent domains';
+  if (recentValueCount > 0) parts.push(`${recentValueCount} recent value(s)`);
+  if (!parts.length) return 'no runs, workspace files, workflows, or recent values';
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
@@ -1584,7 +1646,7 @@ function _sessionMigrationResultText(data = {}) {
   const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
   const workspaceDirs = Number(data.migrated_workspace_directories || 0);
   const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
-  const recentDomains = Number(data.migrated_recent_domains || 0);
+  const recentValues = Number(data.migrated_recent_values || 0);
   const workspaceParts = [
     `${workspaceFiles} workspace file(s)`,
   ];
@@ -1593,7 +1655,7 @@ function _sessionMigrationResultText(data = {}) {
   if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
   return `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
     + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
-    + `${recentDomains} recent domain(s), `
+    + `${recentValues} recent value(s), `
     + `${workspaceParts.join(', ')}, `
     + 'and saved user options when the destination had none';
 }
@@ -1723,7 +1785,7 @@ function _clearVisibleSessionHistoryState() {
 async function _activateSessionTokenIdentity(token) {
   localStorage.setItem('session_token', token);
   updateSessionId(token);
-  if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
+  if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
   await _seedLocalStorageStarsToServer();
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
   if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
@@ -1744,15 +1806,15 @@ async function _sessionTokenGenerate(tabId) {
     const data = await resp.json();
     const newToken = data.session_token;
 
-    if (typeof flushRecentDomains === 'function') {
-      await flushRecentDomains().catch(() => {});
+    if (typeof flushRecentValues === 'function') {
+      await flushRecentValues().catch(() => {});
     }
 
     // Check run/workspace counts on old session before switching identity.
     let runCount = 0;
     let workspaceFileCount = 0;
     let workflowCount = 0;
-    let recentDomainCount = 0;
+    let recentValueCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
@@ -1760,7 +1822,7 @@ async function _sessionTokenGenerate(tabId) {
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
         workflowCount = countData.workflow_count || 0;
-        recentDomainCount = countData.recent_domain_count || 0;
+        recentValueCount = countData.recent_value_count || 0;
       }
     } catch (_) {}
 
@@ -1769,12 +1831,12 @@ async function _sessionTokenGenerate(tabId) {
     appendLine('use session-token set <value> on another device to continue your session', '', tabId);
     appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
 
-    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
       appendLine(
-        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your previous session. migrate history, files, workflows, and recent domains to your new session token?`,
+        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your previous session. migrate history, files, workflows, and recent values to your new session token?`,
         '',
         tabId
       );
@@ -1791,7 +1853,7 @@ async function _sessionTokenGenerate(tabId) {
             _recordSuccessfulLocalCommand('session-token generate');
             _persistSessionTokenRun('session-token generate', [
               { text: `session token generated:  ${maskSessionToken(newToken)}` },
-              { text: 'history, files, workflows, and recent domains migrated to the new session token' },
+              { text: 'history, files, workflows, and recent values migrated to the new session token' },
             ]);
           }
           setStatus('idle');
@@ -1803,10 +1865,10 @@ async function _sessionTokenGenerate(tabId) {
           if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
           if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
           _recordSuccessfulLocalCommand('session-token generate');
-          appendLine('History, file, workflow, and recent-domain migration skipped.', '', tabId);
+          appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
           _persistSessionTokenRun('session-token generate', [
             { text: `session token generated:  ${maskSessionToken(newToken)}` },
-            { text: 'History, file, workflow, and recent-domain migration skipped.' },
+            { text: 'History, file, workflow, and recent-value migration skipped.' },
           ]);
           setStatus('idle');
         },
@@ -1875,15 +1937,15 @@ async function _sessionTokenSet(value, tabId) {
 
   const oldSessionId = SESSION_ID;
 
-  if (typeof flushRecentDomains === 'function') {
-    await flushRecentDomains().catch(() => {});
+  if (typeof flushRecentValues === 'function') {
+    await flushRecentValues().catch(() => {});
   }
 
   // Check current session's run/workspace counts before switching identity.
   let runCount = 0;
   let workspaceFileCount = 0;
   let workflowCount = 0;
-  let recentDomainCount = 0;
+  let recentValueCount = 0;
   try {
     const countResp = await apiFetch('/session/run-count');
     if (countResp.ok) {
@@ -1891,16 +1953,16 @@ async function _sessionTokenSet(value, tabId) {
       runCount = countData.count || 0;
       workspaceFileCount = countData.workspace_files || 0;
       workflowCount = countData.workflow_count || 0;
-      recentDomainCount = countData.recent_domain_count || 0;
+      recentValueCount = countData.recent_value_count || 0;
     }
   } catch (_) {}
 
-  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
+  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
     appendLine(
-      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your current session. migrate history, files, workflows, and recent domains to this session token?`,
+      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your current session. migrate history, files, workflows, and recent values to this session token?`,
       '',
       tabId
     );
@@ -1923,11 +1985,11 @@ async function _sessionTokenSet(value, tabId) {
         await _activateSessionTokenIdentity(value);
         _appendSessionTokenSetLines(value, tabId);
         _recordSuccessfulLocalCommand(`session-token set ${value}`);
-        appendLine('History, file, workflow, and recent-domain migration skipped.', '', tabId);
+        appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
         _persistSessionTokenRun(`session-token set ${value}`, [
           { text: `session token set: ${maskSessionToken(value)}` },
           { text: 'reload other tabs to apply the new session token' },
-          { text: 'History, file, workflow, and recent-domain migration skipped.' },
+          { text: 'History, file, workflow, and recent-value migration skipped.' },
         ]);
         setStatus('idle');
       },
@@ -1950,8 +2012,8 @@ async function _sessionTokenSet(value, tabId) {
 }
 
 async function _sessionTokenCopy(tabId) {
-  if (typeof flushRecentDomains === 'function') {
-    await flushRecentDomains().catch(() => {});
+  if (typeof flushRecentValues === 'function') {
+    await flushRecentValues().catch(() => {});
   }
   const token = localStorage.getItem('session_token');
   if (!token) {
@@ -2911,8 +2973,13 @@ function submitCommand(rawCmd) {
   }
 
   addToHistory(_historySafeCommand(cmd));
-  if (typeof rememberRecentDomainsFromCommand === 'function') {
-    try { rememberRecentDomainsFromCommand(cmd); } catch (_) { /* autocomplete recents are best-effort */ }
+  if (typeof rememberRecentValuesFromCommand === 'function') {
+    try { rememberRecentValuesFromCommand(cmd); } catch (_) { /* autocomplete recents are best-effort */ }
+  }
+
+  if (typeof isInteractivePtyCommand === 'function' && isInteractivePtyCommand(cmd)) {
+    void startInteractivePtyCommand(cmd, activeTabId);
+    return true;
   }
 
   // Session-token subcommands (generate / set / clear / rotate) run entirely
@@ -2921,6 +2988,19 @@ function submitCommand(rawCmd) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleSessionTokenCommand(baseCommand, activeTabId)
     ));
+    return true;
+  }
+
+  if (_isClientSideSecretSetCommand(cmd)) {
+    const safeCommand = _historySafeCommand(cmd);
+    void _runClientSideCommandWithOptionalPipe(safeCommand, activeTabId, (baseCommand) => {
+      if (typeof handleSecretCommand === 'function') {
+        return handleSecretCommand(baseCommand, activeTabId);
+      }
+      appendLine('[error] secret prompt is not ready — reload the page and try again', 'exit-fail', activeTabId);
+      setStatus('fail');
+      return true;
+    });
     return true;
   }
 
@@ -2981,6 +3061,12 @@ function submitCommand(rawCmd) {
     if (root === 'config' && typeof handleConfigCommand === 'function') {
       void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
         handleConfigCommand(baseCommand, activeTabId)
+      ));
+      return true;
+    }
+    if (root === 'tour' && typeof handleTourCommand === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+        handleTourCommand(baseCommand, activeTabId)
       ));
       return true;
     }

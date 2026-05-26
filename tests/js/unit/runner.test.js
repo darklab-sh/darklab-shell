@@ -1,6 +1,6 @@
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
-const { DarklabRunnerCore } = fromScript('app/static/js/runner_core.js', 'DarklabRunnerCore')
+const { DarklabRunnerCore } = fromScript('app/static/js/core/runner_core.js', 'DarklabRunnerCore')
 const {
   formatElapsed: _formatElapsed,
   isSyntheticGrepCommand: _isSyntheticGrepCommand,
@@ -342,6 +342,9 @@ describe('_isSyntheticGrepCommand', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl')).toBe(true)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -iv ttl')).toBe(true)
     expect(_isSyntheticGrepCommand("ping darklab.sh | grep -E 'ttl|time'")).toBe(true)
+    expect(_isSyntheticGrepCommand("man nmap | grep '-script'")).toBe(true)
+    expect(_isSyntheticGrepCommand('man nmap | grep -- -script')).toBe(true)
+    expect(_isSyntheticGrepCommand("man nmap | grep -i -e '-script'")).toBe(true)
   })
 
   it('accepts no-space pipe variants', () => {
@@ -357,6 +360,7 @@ describe('_isSyntheticGrepCommand', () => {
   it('rejects unsupported shell operator forms', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | cat')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -n ttl')).toBe(false)
+    expect(_isSyntheticGrepCommand('ping darklab.sh | grep -script')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl file.txt')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh || grep ttl')).toBe(false)
     expect(_isSyntheticPostFilterCommand('ping darklab.sh | grep ttl | cat')).toBe(false)
@@ -436,6 +440,23 @@ describe('client-side synthetic post-filters', () => {
     expect(parsed.baseCommand).toBe('theme list')
     expect(parsed.stages).toEqual([
       { kind: 'grep', pattern: 'blue', ignoreCase: true, invertMatch: false, extended: false },
+    ])
+  })
+
+  it('parses grep patterns that start with a dash', () => {
+    const quoted = _parseSyntheticPostFilterCommand("theme list | grep '-dark'")
+    expect(quoted.stages).toEqual([
+      { kind: 'grep', pattern: '-dark', ignoreCase: false, invertMatch: false, extended: false },
+    ])
+
+    const terminator = _parseSyntheticPostFilterCommand('theme list | grep -- -dark')
+    expect(terminator.stages).toEqual([
+      { kind: 'grep', pattern: '-dark', ignoreCase: false, invertMatch: false, extended: false },
+    ])
+
+    const dashE = _parseSyntheticPostFilterCommand("theme list | grep -i -e '-dark'")
+    expect(dashE.stages).toEqual([
+      { kind: 'grep', pattern: '-dark', ignoreCase: true, invertMatch: false, extended: false },
     ])
   })
 
@@ -538,6 +559,7 @@ describe('client-side UI command pipe helpers', () => {
         { text: 'Available themes:', cls: 'builtin-section' },
         { text: 'Dark themes:', cls: 'builtin-section' },
       ],
+      tab_id: 'tab-1',
     })
   })
 
@@ -555,6 +577,62 @@ describe('client-side UI command pipe helpers', () => {
       expect(handleWorkflowTerminalCommand).toHaveBeenCalledWith('workflow list', 'tab-1'),
     )
     expect(appendCommandEcho).not.toHaveBeenCalled()
+  })
+
+  it('routes tour commands to the client-side tour handler', async () => {
+    const handleTourCommand = vi.fn(() => Promise.resolve(true))
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      handleTourCommand,
+      appendCommandEcho,
+    })
+
+    submitCommand('tour')
+    await vi.waitFor(() =>
+      expect(handleTourCommand).toHaveBeenCalledWith('tour', 'tab-1'),
+    )
+    expect(appendCommandEcho).not.toHaveBeenCalled()
+  })
+
+  it('scrubs accidental secret set values before history, echo, and client persistence', async () => {
+    const secretValue = 'plain-secret-value'
+    const addToHistory = vi.fn()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/run/client') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const handleSecretCommand = vi.fn(async (cmd, tabId) => {
+      appendLine('Secret set canceled.', '', tabId)
+      return true
+    })
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      addToHistory,
+      appendLine,
+      apiFetch,
+      handleSecretCommand,
+    })
+
+    await submitCommand(`secret set SHODAN_API_KEY ${secretValue}`)
+    await vi.waitFor(() => expect(handleSecretCommand).toHaveBeenCalled())
+
+    expect(addToHistory).toHaveBeenCalledWith('secret set SHODAN_API_KEY')
+    expect(handleSecretCommand).toHaveBeenCalledWith('secret set SHODAN_API_KEY', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('secret set SHODAN_API_KEY', 'prompt-echo', 'tab-1')
+    expect(tabs[0].command).toBe('secret set SHODAN_API_KEY')
+
+    await vi.waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/run/client', expect.objectContaining({ method: 'POST' })),
+    )
+    const persisted = JSON.parse(apiFetch.mock.calls.find(([url]) => url === '/run/client')[1].body)
+    expect(persisted.command).toBe('secret set SHODAN_API_KEY')
+    expect(JSON.stringify(apiFetch.mock.calls)).not.toContain(secretValue)
+    expect(JSON.stringify(appendLine.mock.calls)).not.toContain(secretValue)
+    expect(JSON.stringify(addToHistory.mock.calls)).not.toContain(secretValue)
   })
 
   it('routes exit and quit commands to tab close without persisting a run', () => {
@@ -613,6 +691,7 @@ function loadRunnerFns({
   addToHistory = () => {},
   addToRecentPreview = () => {},
   appendLine = () => {},
+  appendLines = undefined,
   appendCommandEcho = () => {},
   getComposerValue: getComposerValueOverride = null,
   getVisibleComposerInput: getVisibleComposerInputOverride = null,
@@ -636,7 +715,9 @@ function loadRunnerFns({
   Notification: NotificationOverride = undefined,
   handleThemeCommand: handleThemeCommandOverride = undefined,
   handleConfigCommand: handleConfigCommandOverride = undefined,
+  handleTourCommand: handleTourCommandOverride = undefined,
   handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride = undefined,
+  handleSecretCommand: handleSecretCommandOverride = undefined,
   closeTab: closeTabOverride = vi.fn(),
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
@@ -649,6 +730,16 @@ function loadRunnerFns({
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
   normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
   workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
+  refreshActiveProjectContext: refreshActiveProjectContextOverride = undefined,
+  refreshProjectWorkspace: refreshProjectWorkspaceOverride = undefined,
+  isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = undefined,
+  notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride = undefined,
+  emitUiEvent: emitUiEventOverride = undefined,
+  disableHighVolumeOutputResumeControls = () => {},
+  discardPendingOutputBatch = () => {},
+  appendHighVolumeOutputFinalSummary = () => {},
+  resetHighVolumeOutputState = () => {},
+  logClientError = () => {},
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -720,7 +811,14 @@ function loadRunnerFns({
   const showToast = showToastOverride || vi.fn()
 
   const fns = fromDomScripts(
-    ['app/static/js/runner_core.js', 'app/static/js/runner.js'],
+    [
+      'app/static/js/core/runner_core.js',
+      'app/static/js/core/run_output_model.js',
+      'app/static/js/features/runner/runner_active_restore.js',
+      'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/features/runner/runner_workspace.js',
+      'app/static/js/runner.js',
+    ],
     {
       document,
       Map,
@@ -746,6 +844,7 @@ function loadRunnerFns({
       setTabStatus,
       activateTab,
       appendLine,
+      ...(appendLines ? { appendLines } : {}),
       appendCommandEcho,
       apiFetch,
       localStorage: storage,
@@ -789,16 +888,18 @@ function loadRunnerFns({
         }
         return `Request to the ${context} failed: ${message}`
       },
-      logClientError: () => {},
+      logClientError,
       clearTimeout,
       setTimeout,
       Event,
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
       ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
       ...(handleConfigCommandOverride ? { handleConfigCommand: handleConfigCommandOverride } : {}),
+      ...(handleTourCommandOverride ? { handleTourCommand: handleTourCommandOverride } : {}),
       ...(handleWorkflowTerminalCommandOverride
         ? { handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride }
         : {}),
+      ...(handleSecretCommandOverride ? { handleSecretCommand: handleSecretCommandOverride } : {}),
       ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
       ...(openWorkspaceEditorFromCommandOverride
         ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }
@@ -814,6 +915,15 @@ function loadRunnerFns({
       ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
       ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
       ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
+      ...(refreshActiveProjectContextOverride ? { refreshActiveProjectContext: refreshActiveProjectContextOverride } : {}),
+      ...(refreshProjectWorkspaceOverride ? { refreshProjectWorkspace: refreshProjectWorkspaceOverride } : {}),
+      ...(isProjectWorkspaceOpenOverride ? { isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride } : {}),
+      ...(notifyProjectWorkspaceChangedOverride ? { notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride } : {}),
+      ...(emitUiEventOverride ? { emitUiEvent: emitUiEventOverride } : {}),
+      disableHighVolumeOutputResumeControls,
+      discardPendingOutputBatch,
+      appendHighVolumeOutputFinalSummary,
+      resetHighVolumeOutputState,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -900,14 +1010,19 @@ describe('runner helpers', () => {
   it('doKill sends /kill immediately when runId is already known', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({ ok: true, status: 200 }))
     const maybeMountDeferredPrompt = vi.fn()
-    const { doKill, tabs, runBtn, status } = loadRunnerFns({
+    const appendLine = vi.fn()
+    const discardPendingOutputBatch = vi.fn()
+    const { doKill, tabs, runBtn, status, _handleRunStreamMessage } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
       apiFetch,
       maybeMountDeferredPrompt,
+      appendLine,
+      discardPendingOutputBatch,
     })
 
     doKill('tab-1')
     await flushPromises()
+    _handleRunStreamMessage({ type: 'output', text: 'late buffered line' }, 'tab-1', {})
 
     expect(apiFetch).toHaveBeenCalledWith(
       '/kill',
@@ -924,6 +1039,14 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill killed')
     expect(runBtn.disabled).toBe(false)
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
+    expect(discardPendingOutputBatch).toHaveBeenCalledWith('tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      'late buffered line',
+      '',
+      'tab-1',
+      expect.anything(),
+      expect.anything(),
+    )
   })
 
   it('doKill keeps an attached run active when the server denies the kill request', async () => {
@@ -1158,6 +1281,108 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
   })
 
+  it('restoreActiveRunsAfterReload reuses the restored original tab for the same active run', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'idle',
+          runId: 'run-1',
+          historyRunId: 'run-1',
+          lastEventId: '1-5',
+          command: 'ping darklab.sh',
+          rawLines: [{ text: 'ping darklab.sh', cls: 'prompt-echo' }],
+          pendingKill: false,
+          killed: false,
+        },
+      ],
+      appendLine,
+      createTab,
+      apiFetch,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: true,
+        has_live_owner: false,
+        owner_stale: false,
+      },
+    ])
+
+    expect(restored).toBe(true)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('running')
+    expect(tabs[0].runStart).toBe(Date.parse('2026-01-01T00:00:00Z'))
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
+    expect(appendLine).not.toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('[reattached to active run after reload]', 'notice', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('[live output will continue here]', 'notice', 'tab-1')
+  })
+
+  it('reattaches a detached normal stream in the original running tab', async () => {
+    const appendLine = vi.fn()
+    const firstStream = brokerStreamResponse([
+      'id: 1-5',
+      'data: {"type":"output","text":"before disconnect","event_id":"1-5"}',
+      '',
+    ].join('\n') + '\n')
+    const secondStream = pendingBrokerStreamResponse()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-1/stream?tab_id=tab-1') return Promise.resolve(firstStream)
+      if (url === '/history/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            runs: [{
+              run_id: 'run-1',
+              command: 'ping darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              owned_by_this_client: true,
+              has_live_owner: false,
+              owner_stale: false,
+            }],
+          }),
+        })
+      }
+      if (url === '/runs/run-1/stream?tab_id=tab-1&after=1-5') return Promise.resolve(secondStream)
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _subscribeRunStream, tabs } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        command: 'ping darklab.sh',
+        rawLines: [{ text: 'ping darklab.sh', cls: 'prompt-echo' }],
+        pendingKill: false,
+        killed: false,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-1', 'tab-1')).resolves.toBe(true)
+    await flushPromises()
+
+    expect(tabs[0].st).toBe('running')
+    expect(tabs[0].runStart).toBe(Date.parse('2026-01-01T00:00:00Z'))
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
+    expect(appendLine).toHaveBeenCalledWith('before disconnect', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('[reattached to active run after stream recovery]', 'notice', 'tab-1')
+  })
+
   it('pauses background run streams for Status Monitor API calls and resumes from the last event id', async () => {
     const activeStream = controllableBrokerStreamResponse()
     const backgroundStream = controllableBrokerStreamResponse()
@@ -1306,10 +1531,16 @@ describe('runner helpers', () => {
 
   it('keeps subscribed tabs killable on owner metadata and reports remote kills', () => {
     const appendLine = vi.fn()
+    const notifyProjectWorkspaceChanged = vi.fn()
+    const emitUiEvent = vi.fn()
+    const disableHighVolumeOutputResumeControls = vi.fn()
     const { _handleRunStreamMessage, tabs } = loadRunnerFns({
       clientId: 'client-1',
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'attached' }],
       appendLine,
+      notifyProjectWorkspaceChanged,
+      emitUiEvent,
+      disableHighVolumeOutputResumeControls,
     })
 
     _handleRunStreamMessage({ type: 'owner', owner_client_id: 'client-2', owner_tab_id: 'tab-9' }, 'tab-1')
@@ -1327,6 +1558,100 @@ describe('runner helpers', () => {
       'notice',
       'tab-1',
     )
+    expect(disableHighVolumeOutputResumeControls).toHaveBeenCalledWith('tab-1')
+
+    _handleRunStreamMessage({
+      type: 'notice',
+      text: '[project] discovered 2 targets for Demo',
+      project_targets_discovered: true,
+      project_id: 'project-1',
+      project_name: 'Demo',
+      target_count: 2,
+    }, 'tab-1')
+
+    expect(notifyProjectWorkspaceChanged).toHaveBeenCalledWith('target-discovered', 'project-1')
+    expect(emitUiEvent).toHaveBeenCalledWith('app:project-target-discovered', {
+      project_id: 'project-1',
+      project_name: 'Demo',
+      count: 2,
+    })
+  })
+
+  it('parses typed stream output and logs unknown schema values once per stream', () => {
+    const appendLine = vi.fn()
+    const logClientError = vi.fn()
+    const streamState = {}
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false }],
+      appendLine,
+      logClientError,
+    })
+
+    _handleRunStreamMessage({ type: 'schema', event: 'schema', v: 2, kind: 'line_event' }, 'tab-1', streamState)
+    _handleRunStreamMessage({ type: 'schema', event: 'schema', v: 2, kind: 'line_event' }, 'tab-1', streamState)
+    _handleRunStreamMessage({
+      type: 'output',
+      text: 'future row',
+      cls: 'notice',
+      v: 2,
+      kind: 'future-kind',
+      role: 'future-role',
+      signals: ['findings', 'future-signal'],
+    }, 'tab-1', streamState)
+    _handleRunStreamMessage({
+      type: 'output',
+      text: 'future row 2',
+      cls: 'notice',
+      v: 2,
+      kind: 'future-kind',
+      role: 'future-role',
+      signals: ['findings', 'future-signal'],
+    }, 'tab-1', streamState)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      'future row',
+      'notice',
+      'tab-1',
+      expect.objectContaining({
+        kind: 'notice',
+        role: 'body',
+        signals: ['findings'],
+      }),
+    )
+    expect(logClientError).toHaveBeenCalledTimes(4)
+    expect(logClientError.mock.calls.map(call => call[0])).toEqual([
+      'unknown run output schema version',
+      'unknown run output kind',
+      'unknown run output role',
+      'unknown run output signal',
+    ])
+  })
+
+  it('resets high-volume output state when a new brokered run starts', () => {
+    const resetHighVolumeOutputState = vi.fn()
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: null, pendingKill: false, killed: false }],
+      resetHighVolumeOutputState,
+    })
+
+    _handleRunStreamMessage({ type: 'started', run_id: 'run-fresh' }, 'tab-1')
+
+    expect(resetHighVolumeOutputState).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('disables high-volume resume controls when a brokered run exits', () => {
+    const disableHighVolumeOutputResumeControls = vi.fn()
+    const appendHighVolumeOutputFinalSummary = vi.fn()
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false }],
+      disableHighVolumeOutputResumeControls,
+      appendHighVolumeOutputFinalSummary,
+    })
+
+    _handleRunStreamMessage({ type: 'exit', code: 0, elapsed: 0.1 }, 'tab-1')
+
+    expect(appendHighVolumeOutputFinalSummary).toHaveBeenCalledWith('tab-1')
+    expect(disableHighVolumeOutputResumeControls).toHaveBeenCalledWith('tab-1')
   })
 
   it('pollActiveRunsAfterReload restores a completed reconnected run through history', async () => {
@@ -1735,6 +2060,36 @@ describe('runner helpers', () => {
     expect(runBtn.disabled).toBe(false)
   })
 
+  it('runCommand shows the missing-secret setup hint from the server', async () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        status: 403,
+        json: () => Promise.resolve({
+          error: 'Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set NAME" or the Options > Secrets panel.',
+        }),
+      }),
+    )
+    const appendLine = vi.fn()
+    const { runCommand, status, runBtn } = loadRunnerFns({
+      cmdValue: 'shodan host ip.darklab.sh',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenLastCalledWith(
+      '[denied] Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set NAME" or the Options > Secrets panel.',
+      'denied',
+      'tab-1',
+    )
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+  })
+
   it('runCommand handles a 429 response as rate limited', async () => {
     const apiFetch = vi.fn(() =>
       Promise.resolve({
@@ -1866,13 +2221,43 @@ describe('runner helpers', () => {
     expect(loaded.tabs[0].historyRunId).toBe('run-man')
   })
 
-  it('runCommand preserves output classes from streamed events', async () => {
+  it('runCommand refreshes and broadcasts project context after successful project built-ins', async () => {
+    const refreshActiveProjectContext = vi.fn(() => Promise.resolve())
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-project"}',
+        'data: {"type":"output","text":"project: target added domain new-target.example.com"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-project' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'project target add domain new-target.example.com',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      refreshActiveProjectContext,
+    })
+
+    loaded.runCommand()
+    await flushPromises()
+
+    await vi.waitFor(() => expect(refreshActiveProjectContext).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(loaded.storage.getItem('darklab_project_workspace_changed'))).toEqual(expect.objectContaining({
+      session_id: 'session-old',
+      command: 'project target add domain new-target.example.com',
+    }))
+  })
+
+  it('runCommand preserves output classes and blank streamed lines', async () => {
     const appendLine = vi.fn()
+    const appendLines = vi.fn(() => Promise.resolve())
     const apiFetch = brokerApiFetch(
       [
         'data: {"type":"started","run_id":"run-faq"}',
         'data: {"type":"output","text":"Q  Example question\\n","cls":"builtin-faq-q"}',
+        'data: {"type":"output","text":"","cls":"builtin-faq-spacer"}',
         'data: {"type":"output","text":"A  Example answer\\n","cls":"builtin-faq-a"}',
+        'data: {"type":"output_batch","lines":[{"text":"batched one","v":1,"kind":"info","role":"body"},{"text":"","v":1,"kind":"info","role":"body"},{"text":"batched two","v":1,"kind":"info","role":"body"}]}',
         'data: {"type":"exit","code":0,"elapsed":0.1}',
       ].join('\n\n') + '\n\n',
       { runId: 'run-faq' },
@@ -1882,13 +2267,54 @@ describe('runner helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       apiFetch,
       appendLine,
+      appendLines,
+    })
+
+    loaded.runCommand()
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('', 'builtin-faq-spacer', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    await vi.waitFor(() =>
+      expect(appendLines).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ text: 'batched one', role: 'body' }),
+          expect.objectContaining({ text: '', role: 'body' }),
+          expect.objectContaining({ text: 'batched two', role: 'body' }),
+        ]),
+        'tab-1',
+      ),
+    )
+  })
+
+  it('marks brokered output as live when high-volume output handling is configured', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-live"}',
+        'data: {"type":"output","text":"streamed"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-live' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'printf streamed',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appConfig: { high_volume_output_line_threshold: 50000 },
+      apiFetch,
+      appendLine,
     })
 
     loaded.runCommand()
     await flushPromises()
 
-    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      'streamed',
+      '',
+      'tab-1',
+      expect.objectContaining({ live_output: true }),
+    )
   })
 
   it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {
@@ -2093,10 +2519,13 @@ function loadSeedFns({
   if (localStarred.length) {
     storage.setItem('starred', JSON.stringify(localStarred))
   }
-  const fns = fromDomScript(
-    'app/static/js/runner.js',
+  const fns = fromDomScripts(
+    [
+      'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/runner.js',
+    ],
     { localStorage: storage, apiFetch, loadStarredFromServer },
-    '_seedLocalStorageStarsToServer',
+    '{ _seedLocalStorageStarsToServer }',
   )
   return { ...fns, _storage: storage, apiFetch, loadStarredFromServer }
 }
@@ -2229,8 +2658,11 @@ function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
   const appendLine = vi.fn()
   const setStatus = vi.fn()
   const appendPromptNewline = vi.fn()
-  const fns = fromDomScript(
-    'app/static/js/runner.js',
+  const fns = fromDomScripts(
+    [
+      'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/runner.js',
+    ],
     {
       localStorage: storage,
       apiFetch,
@@ -2245,7 +2677,7 @@ function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
       SESSION_ID: 'uuid-base-session',
       maskSessionToken: (t) => (t ? t.slice(0, 8) + '••••' : '(none)'),
     },
-    '_sessionTokenSet',
+    '{ _sessionTokenSet }',
   )
   return { ...fns, appendLine, setStatus, appendPromptNewline, _storage: storage }
 }
@@ -2329,7 +2761,7 @@ describe('_sessionTokenSet verify failure behavior', () => {
     await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
 
     expect(appendLine).toHaveBeenCalledWith(
-      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
       '',
       'tab-1',
     )
@@ -3427,7 +3859,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3441,7 +3873,7 @@ describe('session-token set pending prompt', () => {
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
-      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
       '',
       'tab-1',
     )
@@ -3474,7 +3906,7 @@ describe('session-token set pending prompt', () => {
       '',
       'tab-1',
     )
-    expect(appendLine).toHaveBeenCalledWith('History, file, workflow, and recent-domain migration skipped.', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('History, file, workflow, and recent-value migration skipped.', '', 'tab-1')
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
   })
 
@@ -3502,7 +3934,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3546,7 +3978,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3584,7 +4016,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 73 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 73 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3612,7 +4044,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 2 workspace file(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 2 workspace file(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),

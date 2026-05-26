@@ -5,7 +5,7 @@
  * only hard-fails on catastrophic regressions (contrast < 1.20) so the suite
  * doesn't block on subjective aesthetic calls.
  *
- * Run: npx playwright test theme-audit --config config/playwright.config.js
+ * Run: npx playwright test theme-audit --config .tooling/playwright.config.js
  */
 
 import { readdirSync } from 'fs'

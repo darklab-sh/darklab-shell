@@ -2,13 +2,121 @@
  * Shared helpers for Playwright e2e tests.
  */
 
+import { spawnSync } from 'child_process'
+import { existsSync, readFileSync, readdirSync } from 'fs'
+import { join } from 'path'
+import { expect } from '@playwright/test'
+
 // Use the RFC 2544 benchmarking range so the test suite never accidentally
 // collides with a real routable address when synthesizing client IPs.
 const TEST_IP_SEED = (Date.now() ^ process.pid) >>> 0
 
+let fixturePython = ''
+
+function e2eDataDirForProject(testInfo) {
+  const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
+  if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')
+  const slot = testInfo.project.name.match(/w\d+$/)?.[0]
+  if (!slot) throw new Error(`Cannot determine e2e server slot from ${testInfo.project.name}`)
+  const logName = readdirSync(logDir).find((name) => name.startsWith(`${slot}-`) && name.endsWith('.log'))
+  if (!logName) throw new Error(`Cannot find e2e server log for ${slot}`)
+  const log = readFileSync(join(logDir, logName), 'utf8')
+  const dataDir = log.match(/^\[e2e-server\] data_dir=(.+)$/m)?.[1]
+  if (!dataDir) throw new Error(`Cannot find data_dir in ${logName}`)
+  return dataDir
+}
+
+function pythonForE2EFixture() {
+  if (fixturePython) return fixturePython
+  const candidates = [
+    process.env.PYTHON,
+    '.venv/bin/python3',
+    'python3',
+    'python',
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    if (candidate.includes('/') && !existsSync(candidate)) continue
+    const probe = spawnSync(candidate, ['-c', 'import sqlite3'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    })
+    if (probe.status === 0) {
+      fixturePython = candidate
+      return candidate
+    }
+  }
+  throw new Error('Failed to find a Python executable with sqlite3 for the e2e run fixture')
+}
+
+export async function browserSessionId(page) {
+  return page.evaluate(() => (
+    typeof SESSION_ID === 'string' && SESSION_ID
+      ? SESSION_ID
+      : localStorage.getItem('session_id')
+  ))
+}
+
+export function seedExternalHistoryRuns(testInfo, { sessionId, commands }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, commands_json = sys.argv[1:4]
+commands = json.loads(commands_json)
+created = []
+
+def preview(command, lines):
+    return json.dumps([
+        {"text": "$ " + command, "cls": "prompt-echo", "line_index": 0},
+        *[
+            {"text": text, "cls": "", "line_index": index + 1}
+            for index, text in enumerate(lines)
+        ],
+        {"text": "[process exited with code 0]", "cls": "exit-ok", "line_index": len(lines) + 1},
+    ])
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    for index, command in enumerate(commands):
+        run_id = "run_ext_e2e_" + uuid.uuid4().hex[:16]
+        lines = [
+            "external fixture output",
+            "command: " + command,
+        ]
+        time_modifier = f"-{index} seconds"
+        conn.execute(
+            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, ?, 'external', ?, datetime('now', ?), datetime('now', ?), 0, ?, 0, ?, 0, 0)",
+            (run_id, session_id, command, time_modifier, time_modifier, preview(command, lines), len(lines) + 2),
+        )
+        created.append({"id": run_id, "command": command})
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps(created))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, JSON.stringify(commands)],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed external history runs: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 /**
- * Return a per-test-run deterministic test-network address so repeated suite
- * runs and parallel specs do not reuse the same rate-limit bucket.
+ * Return a per-test-run deterministic test-network address for specs that
+ * explicitly exercise per-IP behavior.
  */
 export function makeTestIp(offset = 0) {
   const value = (TEST_IP_SEED + Math.max(0, offset)) >>> 0
@@ -22,19 +130,17 @@ export function makeTestIp(offset = 0) {
  * then optionally cancel it or request an immediate settle and wait for the
  * prompt to become fully usable.
  */
-export async function ensurePromptReady(page, { cancelWelcome = false, timeout = 15_000 } = {}) {
+export async function ensurePromptReady(
+  page,
+  { cancelWelcome = false, timeout = 15_000, waitForAutocomplete = false } = {},
+) {
   await page.waitForFunction(
     () => {
-      const active = typeof _welcomeActive !== 'undefined' ? _welcomeActive : false
-      const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
-      const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
-      const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
-      return (
-        (active && welcomeTabId === activeTab) ||
-        !bootPending ||
-        (active && welcomeTabId !== activeTab)
-      )
+      const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const input = document.getElementById('cmd')
+      return !!activeTab && input instanceof HTMLInputElement
     },
+    undefined,
     { timeout },
   )
 
@@ -64,10 +170,11 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
       const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
       const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
-      return (!active && !bootPending) || (active && welcomeTabId !== activeTab)
+      return !bootPending || (active && welcomeTabId !== activeTab)
     },
-    { timeout },
-  )
+    undefined,
+    { timeout: Math.min(timeout, 3_000) },
+  ).catch(() => {})
 
   await page.waitForFunction(
     () => {
@@ -79,9 +186,16 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
       const style = window.getComputedStyle(target)
       return style.display !== 'none' && style.visibility !== 'hidden'
     },
+    undefined,
     { timeout },
   )
 
+  if (waitForAutocomplete) {
+    await ensureAutocompleteReady(page, { timeout })
+  }
+}
+
+export async function ensureAutocompleteReady(page, { timeout = 15_000 } = {}) {
   // Wait for the /autocomplete fetch to populate the context registry.
   // setComposerValueForTest calls getAutocompleteMatches synchronously, so if
   // the registry is still empty it returns no items and immediately hides the
@@ -89,9 +203,44 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
   // Note: acSuggestions (flat suggestions) was removed; the registry is the
   // sole signal that the autocomplete fetch has completed.
   await page.waitForFunction(
-    () => {
-      return typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
+    async () => {
+      if (typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0) {
+        return true
+      }
+      if (
+        typeof apiFetch !== 'function' ||
+        window.__e2eAutocompleteRecoveryPending
+      ) {
+        return false
+      }
+      window.__e2eAutocompleteRecoveryPending = true
+      try {
+        const resp = await apiFetch('/autocomplete')
+        if (!resp.ok) return false
+        const data = await resp.json()
+        acSuggestions = data.suggestions || []
+        acContextRegistry = data.context || {}
+        acWordlists = Array.isArray(data.wordlists) ? data.wordlists : []
+        acSpecialCommands = data.special_commands || []
+        acBuiltinCommandRoots = data.builtin_command_roots || []
+        if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {})
+        if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {})
+        if (typeof loadProjectAutocompleteTargets === 'function') {
+          loadProjectAutocompleteTargets().catch(() => {})
+        }
+        if (typeof scheduleSearchDiscoverabilityRefresh === 'function') {
+          scheduleSearchDiscoverabilityRefresh()
+        } else if (typeof refreshSearchDiscoverabilityUi === 'function') {
+          refreshSearchDiscoverabilityUi()
+        }
+        return Object.keys(acContextRegistry).length > 0
+      } catch {
+        return false
+      } finally {
+        window.__e2eAutocompleteRecoveryPending = false
+      }
     },
+    undefined,
     { timeout },
   )
 }
@@ -103,22 +252,25 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
 export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
   await ensurePromptReady(page, { timeout })
   const input = page.locator('#cmd')
+  await input.waitFor({ state: 'visible', timeout })
   const beforeLineCount = await page.evaluate(() => {
     const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
     return Array.isArray(tab?.rawLines) ? tab.rawLines.length : 0
   })
-  await input.fill(cmd)
-  await page.keyboard.press('Enter')
+  await input.focus()
+  await setComposerValueForTest(page, cmd, { waitForAutocomplete: false })
+  await input.press('Enter')
   await page.waitForFunction(
     ({ expectedCmd, previousLineCount }) => {
       const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
       if (!tab || tab.st === 'running') return false
       const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : []
-      if (rawLines.length <= previousLineCount) return false
-      if (tab.command === expectedCmd) return true
       const output = document.querySelector('.tab-panel.active .output')
       const text = output ? output.textContent || '' : ''
-      return text.includes(`$${expectedCmd}`)
+      const sawNewLine = rawLines.length > previousLineCount
+      const sawEcho = text.includes(`$${expectedCmd}`) || text.includes(`$ ${expectedCmd}`)
+      if (tab.command === expectedCmd && sawNewLine) return true
+      return sawNewLine && sawEcho
     },
     { expectedCmd: cmd, previousLineCount: beforeLineCount },
     { timeout },
@@ -142,6 +294,7 @@ export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}
         typeof _pendingOutputBatches !== 'undefined' ? _pendingOutputBatches.get(tabId) : null
       return !pending || (!pending.scheduled && pending.items.length === 0)
     },
+    undefined,
     { timeout },
   )
 
@@ -152,7 +305,14 @@ export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}
  * Set a composer value through the app's shared input-change path so
  * autocomplete and shared prompt state update deterministically.
  */
-export async function setComposerValueForTest(page, value, { mobile = false } = {}) {
+export async function setComposerValueForTest(
+  page,
+  value,
+  { mobile = false, waitForAutocomplete = false } = {},
+) {
+  if (waitForAutocomplete) {
+    await ensureAutocompleteReady(page)
+  }
   await page.evaluate(
     ({ nextValue, useMobile }) => {
       const input = useMobile
@@ -182,13 +342,38 @@ export async function setComposerValueForTest(page, value, { mobile = false } = 
  */
 export async function openHistory(page) {
   const panel = page.locator('#history-panel')
-  const isOpen = await panel.evaluate((node) => node.classList.contains('open')).catch(() => false)
-  if (!isOpen) {
-    await page.locator('.rail-nav [data-action="history"]').click()
-    await panel.waitFor({ state: 'visible' })
+  await page.waitForFunction(
+    () => typeof refreshHistoryPanel === 'function'
+      && (typeof showHistoryPanel === 'function' || typeof toggleHistoryPanelSurface === 'function'),
+    undefined,
+    { timeout: 15_000 },
+  )
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.evaluate(async () => {
+        if (typeof showHistoryPanel === 'function') showHistoryPanel()
+        else if (typeof toggleHistoryPanelSurface === 'function') toggleHistoryPanelSurface(true)
+        await refreshHistoryPanel()
+      })
+      break
+    } catch (error) {
+      if (attempt === 2) throw error
+      await page.waitForTimeout(250)
+    }
   }
+  await panel.waitFor({ state: 'visible' })
   // refreshHistoryPanel() fires an async /history fetch after the panel opens.
   // Wait for at least one child (either a .history-entry or the "No runs" div).
+  await page.waitForFunction(
+    () => {
+      const panelEl = document.getElementById('history-panel')
+      const list = document.getElementById('history-list')
+      if (!panelEl || !panelEl.classList.contains('open') || !list) return false
+      return list.children.length > 0
+    },
+    undefined,
+    { timeout: 15_000 },
+  )
   await page.locator('#history-list > *').first().waitFor({ state: 'visible' })
 }
 
@@ -211,13 +396,21 @@ export async function openHistoryWithEntries(page) {
     .waitFor({ state: 'visible', timeout: 10_000 })
 }
 
+export async function clickHistoryRunMenuAction(entry, action) {
+  const menu = entry.locator('.history-action-menu-wrap')
+  await menu.locator('[data-action="history-menu"]').click()
+  await menu.locator(`[data-action="${action}"]`).click()
+}
+
 export async function waitForHistoryRuns(page, minRuns) {
   await page.waitForFunction(
     async (min) => {
       try {
         const resp = await apiFetch('/history')
         const data = await resp.json()
-        return data.runs && data.runs.length >= min
+        const runs = data.runs || []
+        window.__e2eLastHistoryRuns = runs
+        return runs.length >= min
       } catch {
         return false
       }
@@ -226,11 +419,19 @@ export async function waitForHistoryRuns(page, minRuns) {
     { timeout: 20_000 },
   )
 
-  return page.evaluate(async () => {
-    const resp = await apiFetch('/history')
-    const data = await resp.json()
-    return data.runs || []
-  })
+  return page.evaluate(() => window.__e2eLastHistoryRuns || [])
+}
+
+export async function openRailAction(page, action) {
+  const primary = page.locator(`.rail-nav > [data-action="${action}"]`)
+  if (await primary.isVisible().catch(() => false)) {
+    await primary.click()
+    return
+  }
+  const more = page.locator('#rail-more-btn')
+  await more.click()
+  await expect(page.locator('#rail-more-menu')).toBeVisible()
+  await page.locator(`#rail-more-menu [data-action="${action}"]`).click()
 }
 
 /**

@@ -2,26 +2,16 @@ import { test, expect } from '@playwright/test'
 import {
   runCommand,
   openHistoryWithEntries,
-  makeTestIp,
   createShareSnapshot,
   ensurePromptReady,
+  clickHistoryRunMenuAction,
 } from './helpers.js'
 
 const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
 
-// Browser specs share the same backend rate limiter, so derive a stable test-
-// scoped IP from the file/title instead of reusing one bucket for the suite.
-function testScopedIp(testInfo, baseOffset = 0) {
-  const key = `${testInfo.file}:${testInfo.title}`
-  let sum = 0
-  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
-  return makeTestIp(baseOffset + sum)
-}
-
 test.describe('permalink / share', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 61) })
+  test.beforeEach(async ({ page }) => {
     // Mock clipboard so writeText() resolves in headless Chromium without
     // requiring the clipboard-write permission grant.
     await page.addInitScript(() => {
@@ -72,7 +62,7 @@ test.describe('permalink / share', () => {
 
     await page
       .context()
-      .addCookies([{ name: 'pref_theme_name', value: 'apricot_sand', url: 'http://localhost:5001' }])
+      .addCookies([{ name: 'pref_theme_name', value: 'apricot_sand', url: 'http://127.0.0.1:5001' }])
     await page.goto(data.url)
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
@@ -132,7 +122,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+    await clickHistoryRunMenuAction(page.locator('.history-entry').first(), 'permalink')
 
     const copied = await page.evaluate(() => window.__clipboardText)
     expect(copied).toMatch(/\/history\/[0-9a-f-]+$/)
@@ -151,7 +141,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+    await clickHistoryRunMenuAction(page.locator('.history-entry').first(), 'permalink')
     const copied = await page.evaluate(() => window.__clipboardText)
 
     await page.goto(copied)
@@ -202,8 +192,8 @@ test.describe('permalink / share', () => {
     const data = await shareResp.json()
 
     await page.context().addCookies([
-      { name: 'pref_line_numbers', value: 'on', url: 'http://localhost:5001' },
-      { name: 'pref_timestamps', value: 'elapsed', url: 'http://localhost:5001' },
+      { name: 'pref_line_numbers', value: 'on', url: 'http://127.0.0.1:5001' },
+      { name: 'pref_timestamps', value: 'elapsed', url: 'http://127.0.0.1:5001' },
     ])
 
     await page.goto(data.url)

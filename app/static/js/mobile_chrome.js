@@ -35,6 +35,7 @@
   const menuTsState           = document.getElementById('mobile-menu-ts-state');
   const menuWorkflowsCount    = document.getElementById('mobile-menu-workflows-count');
   const menuHistoryCount      = document.getElementById('mobile-menu-history-count');
+  const menuProjectHint       = document.getElementById('mobile-menu-project-hint');
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
   const kbHelper              = document.getElementById('mobile-kb-helper');
 
@@ -96,205 +97,17 @@
   syncRunState();
 
   // ── Mobile non-active running-state indicator ──
-  // The mobile status pill reflects the active tab only; this surface is
-  // the system-level signal that work is happening on a backgrounded tab.
-  // Trailing-edge chip with the running non-active count cycles through
-  // those tabs on tap (in tab-row order).
-  //
-  // Kill switch for debugging iOS scroll interactions: append ?ri=off
-  // (or ?ri=0) to the URL to fully skip mounting the chip and observers.
-  const _runningIndicatorDisabled = (() => {
+  const runningIndicatorDisabled = (() => {
     try {
       const q = (typeof location !== 'undefined' && location.search) ? location.search : '';
       return /[?&]ri=(?:off|0)\b/.test(q);
     } catch (_) { return false; }
   })();
-  const tabsBarEl    = _runningIndicatorDisabled ? null : document.getElementById('tabs-bar');
-  const terminalBarEl = tabsBarEl ? tabsBarEl.closest('.terminal-bar') : null;
-  let runningChipEl       = null;
-  let runningChipCountEl  = null;
-  let edgeGlowLeftEl      = null;
-  let edgeGlowRightEl     = null;
-  let _runningCycleIdx    = 0;
-
-  function _ensureRunningIndicatorMounts() {
-    if (!terminalBarEl) return;
-    if (!runningChipEl) {
-      runningChipEl = document.createElement('button');
-      runningChipEl.type = 'button';
-      runningChipEl.id = 'mobile-running-chip';
-      runningChipEl.className = 'mobile-running-chip u-hidden';
-      runningChipEl.setAttribute('aria-label', 'Cycle to next running tab');
-      runningChipEl.title = 'Cycle to next running tab';
-      const dot = document.createElement('span');
-      dot.className = 'mobile-running-dot';
-      dot.setAttribute('aria-hidden', 'true');
-      dot.textContent = '●';
-      runningChipCountEl = document.createElement('span');
-      runningChipCountEl.className = 'mobile-running-count';
-      runningChipCountEl.textContent = '0';
-      runningChipEl.append(dot, runningChipCountEl);
-      runningChipEl.addEventListener('click', _onRunningChipTap);
-      terminalBarEl.appendChild(runningChipEl);
-    }
-    // Edge glows are position:fixed overlays parented to body so they
-    // never live inside the tabs-bar flex/scroll chain (which empirically
-    // destabilises iOS Safari momentum scroll — see the comment block in
-    // mobile.css for the full rationale).
-    if (!edgeGlowLeftEl && document.body) {
-      edgeGlowLeftEl = document.createElement('span');
-      edgeGlowLeftEl.className = 'tab-edge-glow tab-edge-glow-left';
-      edgeGlowLeftEl.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(edgeGlowLeftEl);
-    }
-    if (!edgeGlowRightEl && document.body) {
-      edgeGlowRightEl = document.createElement('span');
-      edgeGlowRightEl.className = 'tab-edge-glow tab-edge-glow-right';
-      edgeGlowRightEl.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(edgeGlowRightEl);
-    }
-  }
-
-  function _runningNonActiveTabs() {
-    if (!tabsBarEl) return [];
-    const tabsList = (typeof global.getTabs === 'function') ? global.getTabs() : null;
-    if (!Array.isArray(tabsList)) return [];
-    const activeId = (typeof global.getActiveTabId === 'function') ? global.getActiveTabId() : null;
-    const byId = new Map(tabsList.map(t => [t.id, t]));
-    // Tab-row order is the visual order, not the array order — drag-reorder
-    // mutates the DOM but not the underlying tabs array.
-    const orderedIds = Array.from(tabsBarEl.querySelectorAll('.tab')).map(n => n.dataset.id);
-    return orderedIds
-      .map(id => byId.get(id))
-      .filter(t => !!t && t.st === 'running' && t.id !== activeId);
-  }
-
-  // iOS Safari has a known bug where smooth scrollTo/scrollIntoView is
-  // silently dropped on the first call to a horizontal scroll container
-  // that has never been scrolled (the "cold container" case). Subsequent
-  // calls work because the container is "warm". We avoid the bug by
-  // setting scrollLeft directly, which always takes effect.
-  function _scrollTabIntoView(id) {
-    if (!tabsBarEl || !id) return;
-    const node = tabsBarEl.querySelector(`.tab[data-id="${id}"]`);
-    if (!node) return;
-    const tabRect = node.getBoundingClientRect();
-    const barRect = tabsBarEl.getBoundingClientRect();
-    const visibleLeft = tabRect.left >= barRect.left;
-    const visibleRight = tabRect.right <= barRect.right;
-    if (visibleLeft && visibleRight) return;
-    const tabLeftInContent = tabRect.left - barRect.left + tabsBarEl.scrollLeft;
-    const centered = tabLeftInContent - (barRect.width - tabRect.width) / 2;
-    const maxScroll = Math.max(0, tabsBarEl.scrollWidth - tabsBarEl.clientWidth);
-    tabsBarEl.scrollLeft = Math.max(0, Math.min(maxScroll, centered));
-  }
-
-  function _onRunningChipTap() {
-    const running = _runningNonActiveTabs();
-    if (running.length === 0) return;
-    const next = running[_runningCycleIdx % running.length];
-    _runningCycleIdx += 1;
-    const activate = (typeof window !== 'undefined' && typeof window.activateTab === 'function')
-      ? window.activateTab
-      : (typeof activateTab === 'function' ? activateTab : null);
-    if (activate) activate(next.id, { focusComposer: false });
-    // activateTab calls ensureActiveTabVisible internally with smooth
-    // scroll, but that gets dropped on the first (cold-container) call.
-    // Override with an instant scrollLeft after the activation DOM work
-    // has settled so the user always sees the newly-active tab.
-    _scrollTabIntoView(next.id);
-  }
-
-  function _hideEdgeGlows() {
-    if (edgeGlowLeftEl) edgeGlowLeftEl.classList.remove('is-active');
-    if (edgeGlowRightEl) edgeGlowRightEl.classList.remove('is-active');
-  }
-
-  function _syncEdgeGlows(running) {
-    if (!tabsBarEl || !edgeGlowLeftEl || !edgeGlowRightEl) return;
-    if (!running || running.length === 0) { _hideEdgeGlows(); return; }
-    const barRect = tabsBarEl.getBoundingClientRect();
-    // Position both overlays flush against the visible tab-bar edges.
-    // Round to whole pixels so the glow edge doesn't sub-pixel blur.
-    const top = Math.round(barRect.top) + 'px';
-    const height = Math.round(barRect.height) + 'px';
-    edgeGlowLeftEl.style.top = top;
-    edgeGlowLeftEl.style.height = height;
-    edgeGlowLeftEl.style.left = Math.round(barRect.left) + 'px';
-    edgeGlowRightEl.style.top = top;
-    edgeGlowRightEl.style.height = height;
-    edgeGlowRightEl.style.left = Math.round(barRect.right - 22) + 'px';
-    // Direction: which side(s) have a running non-active tab off-screen.
-    let leftActive = false;
-    let rightActive = false;
-    for (const t of running) {
-      const node = tabsBarEl.querySelector(`.tab[data-id="${t.id}"]`);
-      if (!node) continue;
-      const r = node.getBoundingClientRect();
-      if (r.left < barRect.left + 4) leftActive = true;
-      if (r.right > barRect.right - 4) rightActive = true;
-    }
-    edgeGlowLeftEl.classList.toggle('is-active', leftActive);
-    edgeGlowRightEl.classList.toggle('is-active', rightActive);
-  }
-
-  let _runningSyncRaf = 0;
-  let _scrollSyncTimer = 0;
-
-  function _applyRunningState() {
-    if (!terminalBarEl || !tabsBarEl) return;
-    const isMobile = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
-    if (!isMobile) {
-      if (runningChipEl) runningChipEl.classList.add('u-hidden');
-      _hideEdgeGlows();
-      return;
-    }
-    _ensureRunningIndicatorMounts();
-    const running = _runningNonActiveTabs();
-    const count = running.length;
-    if (count === 0) {
-      runningChipEl.classList.add('u-hidden');
-      _hideEdgeGlows();
-      _runningCycleIdx = 0;
-      return;
-    }
-    runningChipEl.classList.remove('u-hidden');
-    runningChipCountEl.textContent = String(count);
-    _syncEdgeGlows(running);
-  }
-
-  // rAF-coalesced so a burst of class mutations on the tab row folds
-  // into a single sync per frame.
-  function syncRunningIndicator() {
-    if (_runningSyncRaf) return;
-    _runningSyncRaf = (typeof requestAnimationFrame === 'function'
-      ? requestAnimationFrame
-      : (cb) => setTimeout(cb, 16))(() => {
-      _runningSyncRaf = 0;
-      _applyRunningState();
-    });
-  }
-
-  if (terminalBarEl && tabsBarEl) {
-    _ensureRunningIndicatorMounts();
-    window.addEventListener('resize', syncRunningIndicator);
-    // Edge glow direction depends on scroll position; debounce to
-    // scroll-end so we never force layout during momentum. 120ms feels
-    // immediate enough once the finger lifts but avoids firing per-frame
-    // during the flick.
-    tabsBarEl.addEventListener('scroll', () => {
-      if (_scrollSyncTimer) clearTimeout(_scrollSyncTimer);
-      _scrollSyncTimer = setTimeout(syncRunningIndicator, 120);
-    }, { passive: true });
-  }
-  if (typeof onUiEvent === 'function') {
-    onUiEvent('app:tab-created', () => syncRunningIndicator());
-    onUiEvent('app:tab-closed', () => syncRunningIndicator());
-    onUiEvent('app:tab-status-changed', () => syncRunningIndicator());
-    onUiEvent('app:tab-activated', () => syncRunningIndicator());
-    onUiEvent('app:tab-order-changed', () => syncRunningIndicator());
-  }
-  syncRunningIndicator();
+  const tabsBarEl = runningIndicatorDisabled ? null : document.getElementById('tabs-bar');
+  global.DarklabMobileRunningIndicator?.create({
+    tabsBarEl,
+    terminalBarEl: tabsBarEl ? tabsBarEl.closest('.terminal-bar') : null,
+  });
 
   // ── 2C: Menu sheet ───────────────────────────────────────────────
   function setActionHint(el, text) {
@@ -334,10 +147,57 @@
     const list = Array.isArray(items) ? items : [];
     menuWorkflowsCount.textContent = list.length ? `${list.length} saved` : '';
   }
+  let historyCountRequestSeq = 0;
+  function setMenuHistoryCount(count) {
+    const total = Number(count || 0);
+    menuHistoryCount.textContent = total > 0 ? `${total}` : '';
+  }
+  function _recentsTotalCountFromCache() {
+    if (!_recentsLoaded) return null;
+    const total = Number(_recentsPaging.totalCount || 0);
+    return Number.isFinite(total) ? Math.max(0, total) : 0;
+  }
   function refreshHistoryCount() {
     if (!menuHistoryCount) return;
     const runs = readCmdHistory();
-    menuHistoryCount.textContent = runs.length ? `${runs.length}` : '';
+    setMenuHistoryCount(runs.length);
+    const requestSeq = ++historyCountRequestSeq;
+    const cachedTotal = _recentsTotalCountFromCache();
+    if (cachedTotal !== null) {
+      setMenuHistoryCount(cachedTotal);
+      return;
+    }
+    _recentsPrefetch()
+      .then(() => {
+        if (requestSeq !== historyCountRequestSeq) return;
+        const total = _recentsTotalCountFromCache();
+        if (total !== null) setMenuHistoryCount(total);
+      })
+      .catch(() => {});
+  }
+  function _projectHintName(project) {
+    if (!project || typeof project !== 'object') return '';
+    return String(project.name || project.slug || project.id || '').trim();
+  }
+  function refreshProjectHint(project) {
+    if (!menuProjectHint) return;
+    const current = project || (
+      typeof global.getActiveProjectContext === 'function'
+        ? global.getActiveProjectContext()
+        : null
+    );
+    const name = _projectHintName(current);
+    menuProjectHint.textContent = name;
+    menuProjectHint.title = name ? `Active project: ${name}` : '';
+  }
+  function refreshProjectHintFromServer() {
+    refreshProjectHint();
+    if (typeof global.refreshActiveProjectContext !== 'function') return;
+    global.refreshActiveProjectContext()
+      .then(project => refreshProjectHint(project))
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load active project for mobile menu', err);
+      });
   }
   function refreshThemeHint() {
     if (!menuThemeHint) return;
@@ -360,6 +220,7 @@
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
+    refreshProjectHintFromServer();
     tsDisclosure?.close();
     show(menuSheetScrim);
     show(menuSheet);
@@ -378,15 +239,28 @@
   global.hideMobileMenu = closeMenuSheet;
   global.isMobileMenuOpen = isMenuSheetOpen;
 
-  // Mobile re-routes the 'history' action to the recents pull-up sheet rather
-  // than the desktop history side panel. controller.js owns the rest of the dispatch.
+  function openMobileHistorySurface() {
+    if (typeof global.resetHistoryMobileFilters === 'function') {
+      global.resetHistoryMobileFilters();
+    }
+    if (typeof global.openHistoryWithFilters === 'function') {
+      global.openHistoryWithFilters();
+    } else if (typeof global.dispatchMobileMenuAction === 'function') {
+      global.dispatchMobileMenuAction('history', null);
+    } else {
+      showRecentsSheet();
+    }
+  }
+
+  // Mobile routes both History entry points to the full History panel so the
+  // quick path and menu path expose the same filtering and bulk controls.
   menuSheet?.querySelectorAll('button[data-menu-action]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const action = btn.dataset.menuAction;
       if (action === 'history') {
         e.stopImmediatePropagation();
         closeMenuSheet();
-        showRecentsSheet();
+        openMobileHistorySurface();
       }
     }, true);
   });
@@ -617,6 +491,164 @@
     });
     return btn;
   }
+  function _recentsCloseActionMenus(except = null) {
+    recentsSheetList?.querySelectorAll('.sheet-item-action-menu-wrap.open').forEach((wrap) => {
+      if (except && wrap === except) return;
+      wrap.classList.remove('open');
+      wrap.querySelector('.sheet-item-action-menu-trigger')?.setAttribute('aria-expanded', 'false');
+      _recentsResetActionMenuPosition(wrap);
+    });
+  }
+  function _recentsResetActionMenuPosition(wrap) {
+    const menu = wrap?.querySelector?.('.sheet-item-action-menu');
+    if (!menu) return;
+    menu.style.position = '';
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.right = '';
+    menu.style.bottom = '';
+    menu.style.width = '';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+    wrap.classList.add('save-menu-down');
+  }
+  function _recentsPositionActionMenu(wrap) {
+    const trigger = wrap?.querySelector?.('.sheet-item-action-menu-trigger');
+    const menu = wrap?.querySelector?.('.sheet-item-action-menu');
+    if (!trigger || !menu || typeof trigger.getBoundingClientRect !== 'function') return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const sheetRect = recentsSheet?.getBoundingClientRect?.();
+    const viewportHeight = typeof window !== 'undefined'
+      ? window.innerHeight
+      : document.documentElement.clientHeight;
+    const gutter = 8;
+    const lowerBound = Math.min(viewportHeight || 0, sheetRect?.bottom || viewportHeight || 0) - gutter;
+    const upperBound = Math.max(0, sheetRect?.top || 0) + gutter;
+    const spaceBelow = Math.max(0, lowerBound - triggerRect.bottom);
+    const spaceAbove = Math.max(0, triggerRect.top - upperBound);
+    const viewportWidth = typeof window !== 'undefined'
+      ? window.innerWidth
+      : document.documentElement.clientWidth;
+    const menuWidth = Math.max(190, menu.offsetWidth || 190);
+    const menuHeight = Math.max(1, menu.scrollHeight || menu.offsetHeight || 1);
+    const openDown = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
+    wrap.classList.toggle('save-menu-down', openDown);
+    const availableSpace = openDown ? spaceBelow : spaceAbove;
+    const left = Math.min(
+      Math.max(gutter, triggerRect.right - menuWidth),
+      Math.max(gutter, (viewportWidth || menuWidth) - menuWidth - gutter),
+    );
+    const top = openDown
+      ? triggerRect.bottom + 4
+      : Math.max(gutter, triggerRect.top - Math.min(menuHeight, Math.max(44, availableSpace)) - 4);
+    menu.style.position = 'fixed';
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.style.right = 'auto';
+    menu.style.bottom = 'auto';
+    menu.style.width = `${menuWidth}px`;
+    if (menuHeight > availableSpace && availableSpace > 0) {
+      menu.style.maxHeight = `${Math.max(44, availableSpace)}px`;
+      menu.style.overflowY = 'auto';
+    } else {
+      menu.style.maxHeight = '';
+      menu.style.overflowY = '';
+    }
+  }
+  function _recentsCopyCommand(run) {
+    const command = run?.command || '';
+    if (typeof global.copyTextToClipboard !== 'function') return;
+    global.copyTextToClipboard(command)
+      .then(() => global.showToast && global.showToast('Command copied'))
+      .catch(() => global.showToast && global.showToast('Failed to copy command', 'error'));
+  }
+  function _recentsRunActionMenu(run) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet-item-action-menu-wrap save-menu-wrap save-menu-down';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'sheet-item-action sheet-item-action-menu-trigger btn btn-secondary btn-compact';
+    trigger.textContent = 'more';
+    trigger.setAttribute('aria-label', 'More run actions');
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    const menu = document.createElement('div');
+    menu.className = 'sheet-item-action-menu save-menu dropdown-surface';
+    menu.setAttribute('role', 'menu');
+    const addItem = (label, handler) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'dropdown-item dropdown-item-compact';
+      item.setAttribute('role', 'menuitem');
+      item.textContent = label;
+      item.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        _recentsCloseActionMenus();
+        handler();
+      });
+      menu.appendChild(item);
+    };
+    addItem('permalink', () => {
+      if (!run.id) return;
+      const url = `${location.origin}/history/${run.id}`;
+      if (typeof global.shareUrl === 'function') {
+        global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
+      }
+    });
+    addItem('compare', () => {
+      if (typeof global.openHistoryCompareLauncher === 'function') {
+        global.openHistoryCompareLauncher(run);
+        closeRecentsSheet();
+      }
+    });
+    addItem('edit', () => {
+      if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
+    });
+    addItem('add to active project', () => {
+      if (typeof global._historyAddRunToActiveProject === 'function') {
+        global._historyAddRunToActiveProject(run)
+          .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
+      }
+    });
+    addItem('add to project', () => {
+      if (typeof global._historyAddRunToProject === 'function') {
+        global._historyAddRunToProject(run)
+          .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
+      }
+    });
+    addItem('copy run id', () => {
+      if (typeof global.copyTextToClipboard === 'function') {
+        global.copyTextToClipboard(run.id)
+          .then(() => global.showToast && global.showToast('Run ID copied'))
+          .catch(() => global.showToast && global.showToast('Failed to copy run ID', 'error'));
+      }
+    });
+    addItem('delete', () => {
+      if (run.id && typeof global.confirmHistAction === 'function') {
+        global.confirmHistAction('delete', run.id, run.command, 'run');
+      }
+    });
+    bindPressable(trigger, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const open = !wrap.classList.contains('open');
+        _recentsCloseActionMenus(open ? wrap : null);
+        wrap.classList.toggle('open', open);
+        trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+          _recentsPositionActionMenu(wrap);
+        } else {
+          _recentsResetActionMenuPosition(wrap);
+        }
+      },
+    });
+    wrap.append(trigger, menu);
+    return wrap;
+  }
   function _recentsMakeKindBadge(kind, label = kind.toUpperCase()) {
     const badge = document.createElement('span');
     const tone = kind === 'run' ? 'badge-tone-green' : 'badge-tone-muted';
@@ -738,6 +770,7 @@
       const actions = document.createElement('div');
       actions.className = 'sheet-item-actions';
       if (isRun) {
+        actions.appendChild(_recentsMakeAction('copy command', () => _recentsCopyCommand(run)));
         actions.appendChild(_recentsMakeAction('restore', () => {
           if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
           const cmdEl2 = item.querySelector('.sheet-item-cmd');
@@ -749,13 +782,7 @@
               if (typeof global.showToast === 'function') global.showToast('Failed to load run');
             });
         }));
-        actions.appendChild(_recentsMakeAction('permalink', () => {
-          if (!run.id) return;
-          const url = `${location.origin}/history/${run.id}`;
-          if (typeof global.shareUrl === 'function') {
-            global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
-          }
-        }));
+        actions.appendChild(_recentsRunActionMenu(run));
       } else {
         actions.appendChild(_recentsMakeAction('open', () => {
           _recentsOpenSnapshot(snapshot);
@@ -768,27 +795,33 @@
           }
         }));
       }
-      actions.appendChild(_recentsMakeAction('delete', () => {
-        if (!entryData.id) return;
-        if (typeof global.confirmHistAction === 'function') {
-          global.confirmHistAction('delete', entryData.id, isRun ? run.command : snapshot.label, isRun ? 'run' : 'snapshot');
-        }
-      }));
+      if (!isRun) {
+        actions.appendChild(_recentsMakeAction('delete', () => {
+          if (!entryData.id) return;
+          if (typeof global.confirmHistAction === 'function') {
+            global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
+          }
+        }));
+      }
 
       item.appendChild(head);
       item.appendChild(meta);
       item.appendChild(actions);
 
       item.addEventListener('click', (e) => {
-        if (e.target.closest('.sheet-item-action, .sheet-item-star')) return;
+        if (e.target.closest('.sheet-item-action, .sheet-item-star, .sheet-item-action-menu-wrap')) return;
+        _recentsCloseActionMenus();
         if (!isRun) {
           _recentsOpenSnapshot(snapshot);
           closeRecentsSheet();
           return;
         }
-        if (typeof global.setComposerValue === 'function') {
-          global.setComposerValue(cmd, cmd.length, cmd.length);
+        if (typeof global.openHistoryRunDetails === 'function') {
+          global.openHistoryRunDetails(run);
+          closeRecentsSheet();
+          return;
         }
+        if (typeof global.setComposerValue === 'function') global.setComposerValue(cmd, cmd.length, cmd.length);
         closeRecentsSheet();
       });
 
@@ -872,6 +905,7 @@
   }
   function closeRecentsSheet() {
     _closeRecentsDropdowns();
+    _recentsCloseActionMenus();
     hide(recentsSheet);
     hide(recentsSheetScrim);
   }
@@ -926,7 +960,7 @@
   }, { passive: true });
 
   // Drag/tap/keyboard close behavior is provided by the shared bindMobileSheet
-  // helper (see app/static/js/mobile_sheet.js) so the recents sheet matches
+  // helper (see app/static/js/ui/mobile_sheet.js) so the recents sheet matches
   // every other mobile bottom sheet.
   if (typeof global.bindMobileSheet === 'function') {
     global.bindMobileSheet(recentsSheet, { onClose: closeRecentsSheet });
@@ -1155,12 +1189,13 @@
   // other surface.
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
-  function openPeekSurface() {
+  function openPeekSurface(event) {
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
     if (recentPeek && recentPeek.dataset.peekMode === 'status-monitor') {
       if (typeof global.openStatusMonitor === 'function') void global.openStatusMonitor({ source: 'mobile-peek' });
       return;
     }
-    showRecentsSheet();
+    openMobileHistorySurface();
   }
   if (recentPeek) {
     // role="button" div — Enter/Space handled by bindPressable; opt into
@@ -1192,17 +1227,27 @@
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-rendered', () => {
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+      if (isMenuSheetOpen()) {
+        try { refreshHistoryCount(); } catch (_) { /* non-critical */ }
+      }
     });
     onUiEvent('app:tab-status-changed', (e) => {
       const activeId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
+      const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
       const detail = e && e.detail ? e.detail : {};
-      if (detail.id === activeId && detail.status && detail.status !== 'running') {
+      const suppressStatusMonitorHold = !!(activeTab && activeTab.suppressStatusMonitorPeekHold);
+      if (detail.id === activeId && detail.status && detail.status !== 'running' && suppressStatusMonitorHold) {
+        _statusMonitorPeekHoldUntil = 0;
+      } else if (detail.id === activeId && detail.status && detail.status !== 'running') {
         _statusMonitorPeekHoldUntil = Date.now() + 2500;
         window.setTimeout(() => {
           try { renderRecentPeek(); } catch (_) { /* non-critical */ }
         }, 2550);
       }
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+      if (isMenuSheetOpen()) {
+        try { refreshHistoryCount(); } catch (_) { /* non-critical */ }
+      }
     });
     onUiEvent('app:tab-activated', () => {
       _statusMonitorPeekHoldUntil = 0;
@@ -1216,6 +1261,9 @@
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:workflows-rendered', (e) => {
       try { refreshWorkflowsCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:active-project-changed', (e) => {
+      try { refreshProjectHint(e.detail && e.detail.project); } catch (_) { /* non-critical */ }
     });
   }
 

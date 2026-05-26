@@ -1,0 +1,7461 @@
+{
+  "components": {
+    "schemas": {
+      "AIAssist": {
+        "properties": {
+          "active_project_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "estimated_input_tokens": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_chars": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output_chars": {
+            "type": "integer"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "payload_schema_version": {
+            "type": "string"
+          },
+          "pre_redaction_bytes": {
+            "type": "integer"
+          },
+          "progress": {
+            "additionalProperties": true,
+            "properties": {
+              "elapsed_ms": {
+                "type": "integer"
+              },
+              "input_tokens_seen": {
+                "type": "integer"
+              },
+              "output_chars_seen": {
+                "type": "integer"
+              },
+              "output_tokens_seen": {
+                "type": "integer"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "tokens_seen": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "prompt_version": {
+            "type": "string"
+          },
+          "prompt_version_source": {
+            "enum": [
+              "canonical",
+              "override"
+            ],
+            "type": "string"
+          },
+          "redacted_bytes": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "summary",
+              "next_commands"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "variant",
+          "status",
+          "payload",
+          "progress"
+        ],
+        "type": "object"
+      },
+      "AIAssistList": {
+        "properties": {
+          "assists": {
+            "items": {
+              "$ref": "#/components/schemas/AIAssist"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assists"
+        ],
+        "type": "object"
+      },
+      "AIAssistRequest": {
+        "properties": {
+          "force": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "AIAssistResponse": {
+        "properties": {
+          "assist": {
+            "$ref": "#/components/schemas/AIAssist"
+          }
+        },
+        "required": [
+          "assist"
+        ],
+        "type": "object"
+      },
+      "ActiveRunList": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "total"
+        ],
+        "type": "object"
+      },
+      "ApiError": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "ArtifactList": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifacts"
+        ],
+        "type": "object"
+      },
+      "ArtifactSummary": {
+        "properties": {
+          "byte_size": {
+            "type": "integer"
+          },
+          "content_sha256": {
+            "type": "string"
+          },
+          "content_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "detected_by": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "file_available": {
+            "type": "boolean"
+          },
+          "file_status": {
+            "type": "string"
+          },
+          "file_status_detail": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "preview_type": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "workspace_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "workspace_path",
+          "display_name",
+          "kind",
+          "byte_size",
+          "detected_by",
+          "content_type",
+          "preview_type",
+          "content_sha256",
+          "created",
+          "file_available",
+          "file_status",
+          "file_status_detail"
+        ],
+        "type": "object"
+      },
+      "AtlasEntity": {
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "last_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "project_link_count": {
+            "type": "integer"
+          },
+          "project_links": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectLink"
+            },
+            "type": "array"
+          },
+          "run_count": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "suppressed_at": {
+            "type": "string"
+          },
+          "suppressed_reason": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "canonical_value",
+          "occurrence_count",
+          "run_count"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityDetail": {
+        "properties": {
+          "detail_limits": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/AtlasEntity"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasFinding"
+            },
+            "type": "array"
+          },
+          "intel_snapshots": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "intel_summary": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity",
+          "runs",
+          "findings",
+          "intel_snapshots",
+          "intel_summary",
+          "detail_limits"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityPage": {
+        "properties": {
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntity"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entities",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "AtlasFinding": {
+        "properties": {
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "entity_value": {
+            "type": "string"
+          },
+          "first_run_id": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "line_number": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "raw_line": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "run_command": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subject_key": {
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "suppressed_at": {
+            "type": "string"
+          },
+          "suppressed_reason": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tool_root": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "entity_id",
+          "status",
+          "title",
+          "raw_line",
+          "occurrence_count"
+        ],
+        "type": "object"
+      },
+      "AtlasFindingDetail": {
+        "properties": {
+          "detail_limits": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "finding": {
+            "$ref": "#/components/schemas/AtlasFinding"
+          },
+          "occurrences": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "finding",
+          "occurrences",
+          "detail_limits"
+        ],
+        "type": "object"
+      },
+      "AtlasFindingPage": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasFinding"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "findings",
+          "total",
+          "limit",
+          "offset",
+          "counts"
+        ],
+        "type": "object"
+      },
+      "AtlasRunList": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasSourceRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "AtlasSourceRun": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "entity_count": {
+            "type": "integer"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "command",
+          "entity_count",
+          "finding_count"
+        ],
+        "type": "object"
+      },
+      "AtlasSummary": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "findings": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "counts",
+          "findings"
+        ],
+        "type": "object"
+      },
+      "DeleteResponse": {
+        "properties": {
+          "removed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "type": "object"
+      },
+      "EvidencePackage": {
+        "properties": {
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "include_artifacts": {
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "redaction_mode": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "project_id",
+          "name",
+          "description",
+          "redaction_mode",
+          "include_artifacts",
+          "manifest",
+          "status",
+          "created",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "Health": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "version"
+        ],
+        "type": "object"
+      },
+      "HistorySearchMatch": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "context_after": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "context_before": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/RunStreamEntity"
+            },
+            "type": "array"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "info",
+              "notice",
+              "warn",
+              "error"
+            ],
+            "type": "string"
+          },
+          "line": {
+            "type": "string"
+          },
+          "line_number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "signals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "command",
+          "started",
+          "finished",
+          "line_number",
+          "line",
+          "context_before",
+          "context_after"
+        ],
+        "type": "object"
+      },
+      "HistorySearchPage": {
+        "properties": {
+          "context": {
+            "type": "integer"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/HistorySearchMatch"
+            },
+            "type": "array"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "matches",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "query",
+          "context"
+        ],
+        "type": "object"
+      },
+      "Label": {
+        "properties": {
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "NdjsonStream": {
+        "description": "Newline-delimited RunStreamEvent objects. The first row is the line-event schema row; output rows include v=1 plus kind/role metadata, and idle streams may include heartbeat rows.",
+        "type": "string"
+      },
+      "Note": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "NotificationChannel": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "slack",
+              "discord",
+              "telegram",
+              "pushover",
+              "email"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "secret_fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationSecretField"
+            },
+            "type": "array"
+          },
+          "triggers": {
+            "items": {
+              "enum": [
+                "run_complete",
+                "pty_session_ended",
+                "watcher_changed",
+                "watcher_error",
+                "watcher_recovered",
+                "scheduled_run_failed"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "config",
+          "triggers",
+          "secret_fields",
+          "muted",
+          "created",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelCreateRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "slack",
+              "discord",
+              "telegram",
+              "pushover",
+              "email"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "secret_values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "writeOnly": true
+          },
+          "triggers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelKind": {
+        "additionalProperties": false,
+        "properties": {
+          "config_fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannelKindField"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "slack",
+              "discord",
+              "telegram",
+              "pushover",
+              "email"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "secret_fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannelKindField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "secret_fields",
+          "config_fields"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelKindField": {
+        "additionalProperties": false,
+        "properties": {
+          "help": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "optional": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "label"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelKindList": {
+        "properties": {
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannelKind"
+            },
+            "type": "array"
+          },
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationTriggerOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kinds",
+          "triggers"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelList": {
+        "properties": {
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannel"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelResponse": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/NotificationChannel"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelUpdateRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "slack",
+              "discord",
+              "telegram",
+              "pushover",
+              "email"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "secret_values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "writeOnly": true
+          },
+          "triggers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "NotificationEvent": {
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "dead_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "retry_wait",
+              "sent",
+              "dead"
+            ],
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "channel_id",
+          "trigger",
+          "payload",
+          "status",
+          "attempts",
+          "created"
+        ],
+        "type": "object"
+      },
+      "NotificationEventPage": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationEvent"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "NotificationSecretField": {
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "configured"
+        ],
+        "type": "object"
+      },
+      "NotificationTestResponse": {
+        "properties": {
+          "event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "properties": {
+                "event_id": {
+                  "type": "string"
+                },
+                "last_error": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "retry_wait",
+                    "sent",
+                    "dead"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event_id",
+                "status",
+                "last_error"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "queued": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "event_ids",
+          "events"
+        ],
+        "type": "object"
+      },
+      "NotificationTriggerOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "type": "object"
+      },
+      "OkResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "PackagePage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "packages": {
+            "items": {
+              "$ref": "#/components/schemas/EvidencePackage"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "packages",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "Project": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ProjectCounts"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "finding_summary": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "name",
+          "slug",
+          "description",
+          "status",
+          "color",
+          "created",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "ProjectCounts": {
+        "properties": {
+          "artifacts": {
+            "type": "integer"
+          },
+          "entities": {
+            "type": "integer"
+          },
+          "findings": {
+            "type": "integer"
+          },
+          "labels": {
+            "type": "integer"
+          },
+          "notes": {
+            "type": "integer"
+          },
+          "packages": {
+            "type": "integer"
+          },
+          "pending_targets": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "targets": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectDetail": {
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/Project"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "type": "object"
+      },
+      "ProjectEntity": {
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "intel_last_refreshed": {
+            "type": "string"
+          },
+          "intel_provider_count": {
+            "type": "integer"
+          },
+          "intel_providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "run_count": {
+            "type": "integer"
+          },
+          "seen_count": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_detail": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "source_run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "suppressed_at": {
+            "type": "string"
+          },
+          "suppressed_reason": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "value",
+          "canonical_value",
+          "occurrence_count",
+          "run_count"
+        ],
+        "type": "object"
+      },
+      "ProjectEntityPage": {
+        "properties": {
+          "counts_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectEntity"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entities",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "counts_by_type"
+        ],
+        "type": "object"
+      },
+      "ProjectFinding": {
+        "properties": {
+          "command_root": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "line_number": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "orphan_source": {
+            "type": "boolean"
+          },
+          "raw_line": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "run_command": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source_run_exists": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subject_key": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "target_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "status",
+          "review_state",
+          "title",
+          "raw_line",
+          "target_ids",
+          "run_command"
+        ],
+        "type": "object"
+      },
+      "ProjectFindingPage": {
+        "properties": {
+          "collapsed_group_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectFinding"
+            },
+            "type": "array"
+          },
+          "group_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "group_order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "findings",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "group_counts",
+          "collapsed_group_counts",
+          "group_order"
+        ],
+        "type": "object"
+      },
+      "ProjectLink": {
+        "properties": {
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "entity_type",
+          "entity_id",
+          "source",
+          "created"
+        ],
+        "type": "object"
+      },
+      "ProjectPage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projects",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "ProjectRun": {
+        "properties": {
+          "artifact_count": {
+            "type": "integer"
+          },
+          "command": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "full_output_available": {
+            "type": "boolean"
+          },
+          "full_output_byte_size": {
+            "type": "integer"
+          },
+          "full_output_line_count": {
+            "type": "integer"
+          },
+          "full_output_truncated": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "link_source": {
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "output_line_count": {
+            "type": "integer"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "started",
+          "finished",
+          "exit_code",
+          "output_line_count",
+          "created",
+          "link_source"
+        ],
+        "type": "object"
+      },
+      "ProjectRunLinkResponse": {
+        "properties": {
+          "link": {
+            "$ref": "#/components/schemas/ProjectLink"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "link"
+        ],
+        "type": "object"
+      },
+      "ProjectRunPage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectRun"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "RunCancelResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "killed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "killed",
+          "id"
+        ],
+        "type": "object"
+      },
+      "RunDetail": {
+        "properties": {
+          "run": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RunSummary"
+              },
+              {
+                "properties": {
+                  "artifacts": {
+                    "items": {
+                      "$ref": "#/components/schemas/ArtifactSummary"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "type": "object"
+      },
+      "RunOutput": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RunStreamEvent"
+            },
+            "type": "array"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "full_output_available": {
+            "type": "boolean"
+          },
+          "line_count": {
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preview": {
+            "type": "boolean"
+          },
+          "range": {
+            "properties": {
+              "end": {
+                "type": "integer"
+              },
+              "returned": {
+                "type": "integer"
+              },
+              "start": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "returned"
+            ],
+            "type": "object"
+          },
+          "returned": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "run_id",
+          "preview",
+          "full_output_available",
+          "truncated",
+          "line_count",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "RunPage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "RunStartRequest": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "RunStarted": {
+        "properties": {
+          "history_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "stream_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "stream_url",
+          "history_url"
+        ],
+        "type": "object"
+      },
+      "RunStatus": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/RunSummary"
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "type": "object"
+      },
+      "RunStreamEntity": {
+        "additionalProperties": true,
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "end": {
+            "type": "integer"
+          },
+          "source_line": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RunStreamEvent": {
+        "additionalProperties": true,
+        "description": "Broker event object. Streams start with a schema row ({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the versioned line-event payload while preserving type and legacy cls for older clients. High-volume live streams may emit output_batch rows with a lines array of line events. Idle streams may emit type=heartbeat events.",
+        "properties": {
+          "cls": {
+            "type": "string"
+          },
+          "code": {
+            "type": "integer"
+          },
+          "command_root": {
+            "type": "string"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/RunStreamEntity"
+            },
+            "type": "array"
+          },
+          "event": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "line_index": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "role": {
+            "type": "string"
+          },
+          "signals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tsC": {
+            "type": "string"
+          },
+          "tsE": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "v": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RunSummary": {
+        "properties": {
+          "artifact_count": {
+            "type": "integer"
+          },
+          "atlas_entity_count": {
+            "type": "integer"
+          },
+          "atlas_finding_count": {
+            "type": "integer"
+          },
+          "command": {
+            "type": "string"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "full_output_available": {
+            "type": "boolean"
+          },
+          "full_output_truncated": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label_count": {
+            "type": "integer"
+          },
+          "note_count": {
+            "type": "integer"
+          },
+          "output_line_count": {
+            "type": "integer"
+          },
+          "preview_truncated": {
+            "type": "boolean"
+          },
+          "run_kind": {
+            "type": "string"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "scheduled": {
+            "type": "boolean"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "started",
+          "finished",
+          "status",
+          "exit_code",
+          "run_kind",
+          "output_line_count",
+          "preview_truncated",
+          "full_output_available",
+          "full_output_truncated",
+          "artifact_count",
+          "finding_count",
+          "label_count",
+          "note_count",
+          "atlas_entity_count",
+          "atlas_finding_count",
+          "scheduled",
+          "schedule_id"
+        ],
+        "type": "object"
+      },
+      "Schedule": {
+        "additionalProperties": false,
+        "properties": {
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "command"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "last_run_at": {
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "overlap_policy": {
+            "enum": [
+              "skip"
+            ],
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "user",
+              "watcher"
+            ],
+            "type": "string"
+          },
+          "paused_reason": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_kind",
+          "owner_id",
+          "kind",
+          "command_text",
+          "cron_expr",
+          "timezone",
+          "enabled",
+          "next_run_at",
+          "last_run_at",
+          "last_run_id",
+          "overlap_policy",
+          "consecutive_failures",
+          "label",
+          "paused_reason",
+          "last_error",
+          "created",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "ScheduleCreateRequest": {
+        "properties": {
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "ScheduleFire": {
+        "properties": {
+          "fired_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "skipped_overlap",
+              "skipped_revoked",
+              "fired",
+              "fire_failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schedule_id",
+          "owner_kind",
+          "owner_id",
+          "fired_at",
+          "run_id",
+          "status",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ScheduleFirePage": {
+        "properties": {
+          "fires": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleFire"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fires",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "SchedulePage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schedules",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "ScheduleResponse": {
+        "properties": {
+          "next_fires": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          }
+        },
+        "required": [
+          "schedule"
+        ],
+        "type": "object"
+      },
+      "ScheduleRunNowResponse": {
+        "properties": {
+          "fired_at": {
+            "type": "string"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "fired_at",
+          "schedule"
+        ],
+        "type": "object"
+      },
+      "ScheduleUpdateRequest": {
+        "properties": {
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "paused_reason": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Watcher": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "consecutive_changed": {
+            "type": "integer"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "consecutive_no_change": {
+            "type": "integer"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_diff_summary": {
+            "$ref": "#/components/schemas/WatcherDiffSummary"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/WatcherOptions"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "changed",
+              "error",
+              "firing",
+              "ok",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "state_reason": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "command_text",
+          "schedule_id",
+          "baseline_run_id",
+          "last_run_id",
+          "last_diff_summary",
+          "state",
+          "state_reason",
+          "last_error",
+          "options",
+          "consecutive_no_change",
+          "consecutive_changed",
+          "consecutive_failures",
+          "created",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "WatcherAcceptBaselineRequest": {
+        "properties": {
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WatcherCreateRequest": {
+        "properties": {
+          "baseline_mode": {
+            "enum": [
+              "existing_run",
+              "first_run"
+            ],
+            "type": "string"
+          },
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/WatcherOptions"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "timezone_name": {
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WatcherDiffSummary": {
+        "additionalProperties": true,
+        "description": "Bounded classifier summary for added, removed, and changed signals.",
+        "type": "object"
+      },
+      "WatcherFire": {
+        "properties": {
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "diff_kind": {
+            "enum": [
+              "none",
+              "signal",
+              "textual"
+            ],
+            "type": "string"
+          },
+          "diff_summary": {
+            "$ref": "#/components/schemas/WatcherDiffSummary"
+          },
+          "id": {
+            "type": "string"
+          },
+          "notification_event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "state_at_fire": {
+            "enum": [
+              "changed",
+              "error",
+              "firing",
+              "ok",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "watcher_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "watcher_id",
+          "baseline_run_id",
+          "run_id",
+          "diff_summary",
+          "diff_kind",
+          "truncated",
+          "notification_event_ids",
+          "state_at_fire",
+          "created"
+        ],
+        "type": "object"
+      },
+      "WatcherFirePage": {
+        "properties": {
+          "fires": {
+            "items": {
+              "$ref": "#/components/schemas/WatcherFire"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fires",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "WatcherOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "notify_metadata_changes": {
+            "type": "boolean"
+          },
+          "suppress_removals": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "WatcherPage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "watchers": {
+            "items": {
+              "$ref": "#/components/schemas/Watcher"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "watchers",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "WatcherResponse": {
+        "properties": {
+          "watcher": {
+            "$ref": "#/components/schemas/Watcher"
+          }
+        },
+        "required": [
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "WatcherRunNowResponse": {
+        "properties": {
+          "fired_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "watcher": {
+            "$ref": "#/components/schemas/Watcher"
+          }
+        },
+        "required": [
+          "status",
+          "fired_at",
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "WatcherUpdateRequest": {
+        "properties": {
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/WatcherOptions"
+          },
+          "pause": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resume": {
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "active",
+              "resume",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "timezone_name": {
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Whoami": {
+        "properties": {
+          "last_seen_at": {
+            "description": "Timestamp recorded for the current successful API authentication.",
+            "nullable": true,
+            "type": "string"
+          },
+          "token_created": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_created",
+          "last_seen_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerToken": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "darklab_shell API",
+    "version": "2.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/atlas": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppression_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasSummary"
+                }
+              }
+            },
+            "description": "Atlas summary"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/entities": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "enum": [
+                "domain",
+                "ip",
+                "url",
+                "hash",
+                "cve"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppression_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasEntityPage"
+                }
+              }
+            },
+            "description": "Atlas entities"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/entities/{entity_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Atlas entity id",
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runs_offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "findings_offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasEntityDetail"
+                }
+              }
+            },
+            "description": "Atlas entity detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Atlas entity not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/findings": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "review_state",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppression_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasFindingPage"
+                }
+              }
+            },
+            "description": "Atlas findings"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/findings/{finding_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Atlas finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasFindingDetail"
+                }
+              }
+            },
+            "description": "Atlas finding detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Atlas finding not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/runs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 30,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasRunList"
+                }
+              }
+            },
+            "description": "Atlas source runs"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "Liveness payload"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": []
+      }
+    },
+    "/history": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_kind",
+            "schema": {
+              "enum": [
+                "external",
+                "real",
+                "builtin",
+                "missing"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exit_code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description": "Paginated run history"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/history/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Literal text to locate in saved run output. Structured selector tokens such as signal:findings are also accepted.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "context",
+            "schema": {
+              "default": 2,
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_kind",
+            "schema": {
+              "enum": [
+                "external",
+                "real",
+                "builtin",
+                "missing"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exit_code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistorySearchPage"
+                }
+              }
+            },
+            "description": "Paginated output search matches"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing query or invalid filter"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/history/{run_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Run detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/history/{run_id}/artifacts": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactList"
+                }
+              }
+            },
+            "description": "Run artifacts"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/history/{run_id}/artifacts/{artifact_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artifact id",
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Artifact download"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Artifact unavailable"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run or artifact not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/history/{run_id}/output": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "text",
+              "enum": [
+                "text",
+                "json"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "1-based inclusive line range, such as 10-40.",
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "pattern": "^[1-9][0-9]*-[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOutput"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Run output"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid range"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/notification-channel-kinds": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelKindList"
+                }
+              }
+            },
+            "description": "Notification channel kind contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/notification-channels": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelList"
+                }
+              }
+            },
+            "description": "Notification channels"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationChannelCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelResponse"
+                }
+              }
+            },
+            "description": "Notification channel created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid notification channel"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Vault unavailable"
+          }
+        }
+      }
+    },
+    "/notification-channels/{channel_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Notification channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            },
+            "description": "Notification channel deleted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Notification channel not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Notification channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationChannelUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelResponse"
+                }
+              }
+            },
+            "description": "Notification channel updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid notification channel"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Notification channel not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Vault unavailable"
+          }
+        }
+      }
+    },
+    "/notification-channels/{channel_id}/test": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Notification channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResponse"
+                }
+              }
+            },
+            "description": "Test notification queued and delivered when possible"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Notification channel not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Vault unavailable"
+          }
+        }
+      }
+    },
+    "/notification-events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trigger",
+            "schema": {
+              "enum": [
+                "run_complete",
+                "pty_session_ended",
+                "watcher_changed",
+                "watcher_error",
+                "watcher_recovered",
+                "scheduled_run_failed",
+                "test"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "pending",
+                "retry_wait",
+                "sent",
+                "dead"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationEventPage"
+                }
+              }
+            },
+            "description": "Notification delivery audit events"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid notification event filter"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OpenAPI contract"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": []
+      }
+    },
+    "/projects": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPage"
+                }
+              }
+            },
+            "description": "Projects"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDetail"
+                }
+              }
+            },
+            "description": "Project detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/entities": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "enum": [
+                "domain",
+                "ip",
+                "url",
+                "hash",
+                "cve"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "target_id",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectEntityPage"
+                }
+              }
+            },
+            "description": "Project entities"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/findings": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "target_id",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "review_state",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "severity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "command_root",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "only",
+                "all"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectFindingPage"
+                }
+              }
+            },
+            "description": "Project findings"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/packages": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackagePage"
+                }
+              }
+            },
+            "description": "Evidence packages"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/runs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRunPage"
+                }
+              }
+            },
+            "description": "Project runs"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveRunList"
+                }
+              }
+            },
+            "description": "Active runs for the current token"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStarted"
+                }
+              }
+            },
+            "description": "Run started"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid or missing command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unsupported run mode or archived project"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Broker unavailable"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            },
+            "description": "Run status"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/ai-assists": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistList"
+                }
+              }
+            },
+            "description": "Cached and in-flight AI assists"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/ai-next-commands": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIAssistRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Cached next-command assist"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Queued or in-progress next-command assist"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI disabled"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run still active"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No useful AI context"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI queue full or rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI coordination or provider unavailable"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/ai-summary": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIAssistRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Cached summary assist"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Queued or in-progress summary assist"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI disabled"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run still active"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No useful AI context"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI queue full or rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI coordination or provider unavailable"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelResponse"
+                }
+              }
+            },
+            "description": "Run cancelled"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/output": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "text",
+              "enum": [
+                "text",
+                "json"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "1-based inclusive line range, such as 10-40.",
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "pattern": "^[1-9][0-9]*-[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOutput"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Run output"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid range"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/projects/{project_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Run unlinked from project"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid project link"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run, project, or project link not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Archived project"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRunLinkResponse"
+                }
+              }
+            },
+            "description": "Run linked to project"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid project link"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run or project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Archived project or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/stream": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "sse",
+              "enum": [
+                "sse",
+                "ndjson"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/NdjsonStream"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Run stream"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/wait": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "default": 30,
+              "maximum": 3600,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            },
+            "description": "Terminal run status"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "408": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run is still running"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/schedules": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulePage"
+                }
+              }
+            },
+            "description": "Scheduled commands"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            },
+            "description": "Schedule created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid schedule or command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/schedules/{schedule_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Schedule id",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            },
+            "description": "Schedule deleted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Schedule id",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            },
+            "description": "Schedule detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Schedule id",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            },
+            "description": "Schedule updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid schedule or command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/schedules/{schedule_id}/fires": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Schedule id",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleFirePage"
+                }
+              }
+            },
+            "description": "Schedule fire audit rows"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/schedules/{schedule_id}/run-now": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Schedule id",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRunNowResponse"
+                }
+              }
+            },
+            "description": "Schedule fired immediately"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid schedule"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Schedule not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherPage"
+                }
+              }
+            },
+            "description": "Change-detection watchers"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatcherCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid watcher or command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Baseline run not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            },
+            "description": "Watcher deleted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatcherUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid watcher or command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}/accept-baseline": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatcherAcceptBaselineRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher baseline accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid baseline"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}/fires": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherFirePage"
+                }
+              }
+            },
+            "description": "Watcher fire audit rows"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}/run-now": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherRunNowResponse"
+                }
+              }
+            },
+            "description": "Watcher fired immediately"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid watcher"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/whoami": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Whoami"
+                }
+              }
+            },
+            "description": "Current API token metadata"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerToken": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ]
+}

@@ -1,0 +1,1494 @@
+/* darklab_shell CSS module: components
+   Reusable shell components: tabs, search, toast, permalink/history surfaces, and menus. */
+
+/* ── Tabs ── */
+.tabs-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 6px 8px 0;
+  background: var(--theme-terminal-bar-bg);
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+}
+.tabs-bar.tabs-bar-touch-sorting {
+  cursor: grabbing;
+}
+.tabs-bar.tabs-bar-desktop-sorting {
+  cursor: grabbing;
+}
+.tabs-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+.tabs-scroll-btn {
+  background: var(--theme-toolbar-button-bg);
+  border: 1px solid transparent;
+  color: var(--theme-toolbar-button-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s, opacity 0.15s;
+}
+#tabs-scroll-left {
+  border-right-color: transparent;
+}
+#tabs-scroll-right {
+  border-left-color: transparent;
+}
+.tabs-scroll-btn:hover:not(:disabled) {
+  color: var(--theme-toolbar-button-hover-text);
+  border-color: transparent;
+  background: var(--theme-toolbar-button-hover-bg);
+}
+.tabs-scroll-btn:disabled {
+  opacity: 0;
+  cursor: default;
+  pointer-events: none;
+  border-color: transparent;
+}
+
+.tabs-scroll-btn.u-hidden {
+  display: none;
+}
+.tabs-scroll-btn.btn {
+  border-color: transparent;
+}
+.tabs-scroll-btn.btn:hover:not(:disabled) {
+  border-color: transparent;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid var(--border-bright);
+  border-bottom: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  cursor: grab;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  flex-shrink: 0;
+  touch-action: pan-y;
+  margin-bottom: -1px;
+}
+.tab:active { cursor: grabbing; }
+.tab.tab-dragging {
+  opacity: 0.32;
+  transform: translateY(-1px);
+}
+.tab.tab-pointer-dragging {
+  opacity: 0.96;
+  color: var(--text);
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-tab-drop-shadow) 55%, transparent);
+  z-index: 2;
+}
+.tab.tab-touch-dragging {
+  opacity: 0.96;
+  color: var(--text);
+  transform: translateY(-3px) scale(1.03);
+  text-shadow: var(--theme-tab-touch-drag-text-shadow);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-tab-drop-shadow) 55%, transparent);
+  z-index: 2;
+}
+.tab.tab-touch-dragging .tab-status {
+  box-shadow: 0 0 10px currentColor;
+}
+.tab.tab-touch-dragging.tab-drop-before::before,
+.tab.tab-touch-dragging.tab-drop-after::after {
+  display: none;
+}
+.tab.tab-drop-before,
+.tab.tab-drop-after {
+  position: relative;
+}
+.tabs-bar.tabs-bar-desktop-sorting .tab:not(.tab-pointer-dragging),
+.tabs-bar.tabs-bar-touch-sorting .tab:not(.tab-touch-dragging) {
+  transition: transform 0.1s ease, opacity 0.1s ease, border-color 0.1s ease, background 0.1s ease, color 0.1s ease;
+  opacity: 0.42;
+  transform: scale(0.985);
+}
+.tabs-bar.tabs-bar-desktop-sorting .tab.active:not(.tab-pointer-dragging),
+.tabs-bar.tabs-bar-touch-sorting .tab.active:not(.tab-touch-dragging) {
+  opacity: 0.58;
+  transform: scale(0.992);
+}
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-before,
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-after {
+  transform: none;
+}
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-before::before,
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-after::after {
+  display: none;
+}
+.tab.tab-drop-before::before,
+.tab.tab-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--green);
+  box-shadow: var(--theme-tab-drop-shadow);
+  border-radius: 999px;
+}
+.tab.tab-drop-before::before { left: -5px; }
+.tab.tab-drop-after::after { right: -5px; }
+.tab:hover:not(.active) { color: var(--green); opacity: 0.96; }
+.tab:focus,
+.tab:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.tab.active {
+  color: var(--green);
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--surface);
+  box-shadow: none;
+}
+.tab.active:has(.tab-status.running) {
+  border-top-color: color-mix(in srgb, var(--amber) 60%, transparent);
+}
+body .tab:not(.active) { opacity: 0.82; }
+body .hist-chip {
+  background: var(--theme-toolbar-button-bg);
+  border-color: var(--theme-toolbar-button-border);
+  color: var(--theme-toolbar-button-text);
+}
+@media (hover: hover) {
+  body .hist-chip:hover {
+    background: var(--theme-toolbar-button-hover-bg);
+    border-color: var(--theme-toolbar-button-hover-border);
+    color: var(--theme-toolbar-button-hover-text);
+  }
+}
+
+/* ── Tab rename input ── */
+.tab-rename-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--green);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+  width: 80px;
+  padding: 0;
+  caret-color: var(--green);
+}
+
+body .hist-chip-overflow { color: var(--theme-toolbar-button-hover-text); }
+body #search-toggle-btn,
+body #search-summary-btn,
+body #ts-btn,
+body #ln-btn {
+  background: var(--theme-toolbar-button-bg);
+  border-color: var(--theme-toolbar-button-border);
+  color: var(--theme-toolbar-button-text);
+}
+body #hamburger-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--theme-toolbar-button-text);
+}
+body #search-toggle-btn:hover,
+body #search-summary-btn:hover,
+body #ts-btn:hover,
+body #ln-btn:hover {
+  background: var(--theme-toolbar-button-hover-bg);
+  border-color: var(--theme-toolbar-button-hover-border);
+  color: var(--theme-toolbar-button-hover-text);
+}
+body #hamburger-btn:active {
+  background: transparent;
+  border-color: transparent;
+  color: var(--theme-toolbar-button-hover-text);
+}
+@media (hover: hover) {
+  body #hamburger-btn:hover {
+    background: transparent;
+    border-color: transparent;
+    color: var(--theme-toolbar-button-hover-text);
+  }
+}
+.tab .tab-close {
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 999px;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--theme-tab-close-bg);
+  border: 1px solid var(--theme-tab-close-border);
+  color: inherit;
+  cursor: pointer;
+}
+.tab .tab-close:focus,
+.tab .tab-close:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: var(--theme-tab-close-bg);
+  color: inherit;
+  opacity: 0;
+}
+.tab:hover .tab-close { opacity: 1; }
+.tab.active .tab-close { opacity: 1; }
+.tab .tab-close:hover { opacity: 1; background: var(--theme-tab-close-hover-bg); border-color: var(--theme-tab-close-hover-border); color: var(--theme-tab-close-hover-text); }
+.tab .tab-grip {
+  display: inline-block;
+  width: 2px;
+  height: 2px;
+  margin: 0 4px 0 -2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.3;
+  box-shadow:
+    3px 0 0 currentColor,
+    0 3px 0 currentColor,
+    3px 3px 0 currentColor,
+    0 6px 0 currentColor,
+    3px 6px 0 currentColor;
+  flex: 0 0 auto;
+  align-self: center;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease;
+}
+.tab:hover .tab-grip { opacity: 0.6; }
+.tab.active .tab-grip { opacity: 0.55; }
+.tab .tab-status { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tab .tab-status.running {
+  background: var(--amber);
+  animation: pulse 1s infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 55%, transparent);
+}
+.tab .tab-status.ok     { background: var(--green); }
+.tab .tab-status.fail   { background: var(--red); }
+.tab .tab-status.killed { background: var(--red); }
+.tab .tab-status.idle { background: var(--muted); }
+
+#new-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-end;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--theme-tab-text);
+  font-size: 18px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-bottom: -1px;
+  box-shadow: none;
+}
+#new-tab-btn:hover {
+  color: var(--theme-tab-hover-text);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+#new-tab-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+#new-tab-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+#new-tab-btn:disabled:hover { color: var(--theme-tab-text); }
+
+.tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; position: relative; }
+.tab-panel.active { display: flex; }
+
+/* ── Output search ── */
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.search-scopes {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.search-scopes .search-scope-btn {
+  min-width: max-content;
+}
+.search-scope-btn.active {
+  color: var(--text);
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+body #search-toggle-btn.search-discover-pulse {
+  border-color: color-mix(in srgb, var(--amber) 78%, var(--border-bright));
+  color: var(--text);
+  animation: search-discover-pulse 1.4s ease-in-out 5;
+}
+@keyframes search-discover-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent);
+    background: transparent;
+  }
+  45% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 20%, transparent);
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
+  }
+}
+
+/* ── Row primitives ───────────────────────────────────────────────────────── */
+.chrome-row {
+  background: var(--theme-chrome-row-bg);
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.15s;
+}
+
+.chrome-row-clickable {
+  cursor: pointer;
+}
+
+.chrome-row-clickable:hover,
+.chrome-row-clickable:focus-visible {
+  background: var(--theme-chrome-row-hover-bg);
+  outline: none;
+}
+
+.row-accent-green {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--green) 72%, transparent);
+}
+
+.row-accent-amber {
+  border-left: 2px solid var(--amber);
+}
+
+.panel-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.panel-row-clickable {
+  cursor: pointer;
+}
+
+.panel-row-clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--muted) 75%, white);
+  outline-offset: 2px;
+}
+
+/* ── Chip and badge primitives ───────────────────────────────────────────── */
+.chip,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+}
+
+.chip {
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chip-action {
+  background: color-mix(in srgb, var(--theme-toolbar-button-bg) 74%, color-mix(in srgb, var(--surface) 88%, transparent));
+  border-color: var(--border-bright);
+  color: var(--muted);
+}
+
+.chip-removable {
+  color: var(--green);
+}
+
+.chip:hover,
+.chip:focus-visible {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  border-color: color-mix(in srgb, var(--green) 60%, transparent);
+  color: var(--text);
+}
+
+.chip:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 1px;
+}
+
+.chip:active {
+  border-color: var(--green-dim);
+  color: var(--text);
+  opacity: 0.7;
+}
+.chip[data-pressable-clearing="1"],
+.chip[data-pressable-clearing="1"]:hover,
+.chip[data-pressable-clearing="1"]:active {
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  border-color: color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  opacity: 1;
+  transform: none;
+}
+
+.badge {
+  justify-content: center;
+  min-height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border-bright);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.badge-tone-green {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+.badge-tone-amber {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
+}
+
+.badge-tone-red {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
+}
+
+.badge-tone-muted {
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+}
+
+.badge-tone-cyan {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 42%, var(--border));
+}
+
+/* ── Form/control primitives ─────────────────────────────────────────────── */
+.form-control,
+.control-row {
+  box-sizing: border-box;
+  background: var(--theme-chrome-control-bg);
+  border: 1px solid var(--theme-chrome-control-border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  outline: none;
+}
+
+.form-control {
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.form-control-compact {
+  font-size: 11px;
+  padding: 7px 9px;
+  border-radius: 4px;
+}
+
+.form-control-quiet {
+  background: transparent;
+  border-color: var(--border-bright);
+  border-radius: 3px;
+}
+
+.form-control:focus,
+.form-control:focus-visible,
+.control-row:focus-visible {
+  border-color: var(--green-dim);
+}
+
+.form-control[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--red) 72%, var(--border-bright));
+}
+
+.form-error {
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-row-touch {
+  min-height: 40px;
+  padding: 9px 12px;
+  font-size: 12px;
+}
+
+/* ── Drawer and sheet primitives ─────────────────────────────────────────── */
+.chrome-drawer {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--theme-chrome-bg);
+  font-family: var(--font-mono);
+}
+
+.surface-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--theme-chrome-header-bg);
+}
+
+.surface-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bottom-sheet {
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-chrome-bg);
+  border-top: 1px solid var(--border-bright);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
+}
+
+.bottom-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 10px;
+}
+
+.bottom-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bottom-sheet-footer {
+  border-top: 1px solid var(--border);
+}
+
+.action-sheet-overlay {
+  z-index: 380;
+}
+
+.action-sheet {
+  gap: 0;
+  height: auto;
+  min-height: 0;
+  max-height: 88svh;
+  padding-bottom: 0;
+  isolation: isolate;
+}
+
+.action-sheet-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+
+.action-sheet-title {
+  margin: 0;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.action-sheet-items {
+  display: grid;
+  flex: 0 1 auto;
+  gap: 8px;
+  align-content: start;
+  grid-auto-rows: max-content;
+  max-height: calc(88svh - 48px);
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.action-sheet-item {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 48px;
+  font-size: 13px;
+}
+
+.action-sheet-item.is-danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.action-sheet-item-icon {
+  flex: 0 0 auto;
+}
+
+.action-sheet-field {
+  display: grid;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 0;
+}
+
+.action-sheet-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--theme-panel-border);
+}
+
+.search-bar input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+  transition: border-color 0.2s;
+}
+.search-bar input:focus { border-color: var(--green-dim); }
+.search-bar input::placeholder { color: var(--muted); }
+.search-count {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.search-nav {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.search-nav .btn {
+  min-height: 22px;
+  padding: 3px 8px;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border-bright) 72%, transparent);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+}
+.search-nav .btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
+.search-close-btn {
+  display: none;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.search-close-btn:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+.search-toggles { display: flex; gap: 4px; }
+mark.search-hl { background: var(--theme-search-highlight-bg); color: inherit; border-radius: 2px; }
+mark.search-hl.current { background: var(--theme-search-highlight-current-bg); }
+.line.search-signal-hl {
+  background: var(--theme-search-signal-bg);
+  box-shadow: inset 2px 0 0 var(--theme-search-signal-accent);
+}
+.line.search-signal-hl.current {
+  background: var(--theme-search-signal-current-bg);
+  box-shadow: inset 3px 0 0 var(--theme-search-signal-current-accent);
+}
+
+/* ── Permalink toast ── */
+#permalink-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(60px);
+  background: var(--surface);
+  border: 1px solid var(--green-dim);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 18px;
+  border-radius: 4px;
+  z-index: 400;
+  transition: transform 0.3s ease;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+#permalink-toast.toast-has-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast-action-btn {
+  background: none;
+  border: 1px solid currentColor;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.toast-action-btn:hover,
+.toast-action-btn:active {
+  opacity: 1;
+}
+#permalink-toast.toast-success {
+  background: var(--surface);
+  border-color: var(--green-dim);
+  color: var(--green);
+}
+#permalink-toast.toast-error {
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--red);
+}
+#permalink-toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
+}
+body #permalink-toast {
+  background: var(--theme-toast-bg);
+  border-color: var(--theme-toast-border);
+  color: var(--theme-toast-text);
+  box-shadow: var(--theme-toast-shadow);
+}
+body #permalink-toast.toast-success {
+  background: var(--theme-toast-bg);
+  border-color: var(--theme-toast-border);
+  color: var(--theme-toast-text);
+}
+body #permalink-toast.toast-error {
+  background: var(--theme-toast-error-bg);
+  border-color: var(--theme-toast-error-border);
+  color: var(--theme-toast-error-text);
+}
+
+/* ── Permalink pages ── */
+/* Shared header/output/line chrome lives in terminal_export.css, which is
+ * linked after styles.css on all permalink/diag pages and inlined into HTML
+ * exports by buildTerminalExportStyles. Only permalink-specific overrides live
+ * here. */
+body.permalink-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+body.permalink-page::before {
+  display: none;
+}
+body.permalink-page .permalink-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+body.permalink-page .permalink-expiry {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--amber);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+body.permalink-page .output:empty::before {
+  content: none;
+}
+body.permalink-page .permalink-error-heading {
+  color: var(--red);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.2px;
+}
+body.permalink-page .permalink-error-detail {
+  color: var(--muted);
+  max-width: 960px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+body.permalink-page .permalink-error-state {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding-top: 8px;
+  white-space: normal;
+}
+
+/* ── Hamburger / mobile menu ── */
+#hamburger-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+  margin-left: auto;
+  /* Opt out of the 300ms double-tap-to-zoom gesture on this control. Without
+     it, a double tap on the hamburger (or the empty space immediately around
+     it) triggers the browser's double-tap zoom instead of a second click. */
+  touch-action: manipulation;
+}
+/* Press-only glow. Hover-capable pointers (desktop) get the same cue on real
+   hover; touch devices show the glow only while the finger is down so the
+   button does not stay green after release until focus moves elsewhere. */
+#hamburger-btn:active { color: var(--green); border-color: var(--green-dim); }
+@media (hover: hover) {
+  #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
+}
+
+/* ── Selected-card primitive ─────────────────────────────────────────────
+   Shared visual for "this card is the current selection from a set."
+   Apply by toggling .is-selected-card on the surface element (e.g. theme
+   picker cards). The treatment uses the bright --green token, an outer
+   glow ring, and a soft halo to stay visibly distinct from :hover (which
+   uses --green-dim) and :focus-visible (which uses an outline). Surfaces
+   that have a :hover or :focus-visible rule on the same element should
+   add :not(.is-selected-card) to those rules so the selected visual is
+   not overridden when the user hovers or tabs onto the selected card. */
+.is-selected-card {
+  border-color: var(--green);
+  box-shadow:
+    0 0 0 2px var(--green-glow),
+    0 0 14px color-mix(in srgb, var(--green) 22%, transparent),
+    0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
+}
+
+/* ── Chev primitives ─────────────────────────────────────────────────────
+   Two shared glyph classes for the app's navigation vocabulary:
+
+   .disclosure-chev — rotating ▸ glyph for a button that expands an inline
+     section (block disclosure). Rotation activates when any ancestor's
+     aria-expanded="true" matches, turning the right-pointing ▸ visually
+     into ▾.
+
+   .drill-chev — static › glyph for rows that navigate to another surface
+     (sheet, modal, panel). Non-rotating by design.
+
+   Both inherit color via currentColor so each surface keeps its theming.
+   Dropdown carets use a separate 180° rotating ▾ convention and are not
+   part of this primitive set. */
+.disclosure-chev {
+  display: inline-block;
+  font-size: 24px;
+  line-height: 1;
+  transition: transform 160ms ease;
+  opacity: 1;
+  flex: 0 0 auto;
+}
+[aria-expanded="true"] .disclosure-chev {
+  transform: rotate(90deg);
+}
+.drill-chev {
+  display: inline-block;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+/* ── Button primitives ─────────────────────────────────────────────────────
+   Closed primitive set every clickable control in the app must map to.
+   No surface-scoped button classes for button-like actions; one-offs are
+   defects unless documented in the allowlist fixture.
+
+   Primitives:
+     .btn        — role × tone × size × state composable CTA
+     .nav-item   — sidebar rail and mobile menu rows (navigation)
+     .tab-strip-item — modal and panel tab in a .tab-strip
+     .close-btn  — icon-only X button
+     .toggle-btn — aria-pressed mode toggle
+     .kb-key     — mobile on-screen keyboard key (see mobile-chrome.css)
+     .dropdown-item — app-owned menu/listbox option
+     .control-row   — row-shaped filter/select trigger
+     .hud-action-cell — clickable HUD summary cell
+     .gesture-handle — mobile bottom-sheet drag/tap handle
+
+   Composition rules for .btn:
+     role  — pick exactly one: btn-primary | btn-secondary | btn-ghost | btn-destructive
+     tone  — pick zero-or-one: btn-warning | btn-danger  (accent is default;
+             btn-destructive defaults its tone to danger)
+     size  — default unless marked btn-compact
+     state — aria-disabled="true" (all roles) or aria-busy="true"
+             (primary + destructive only)
+     icon-only — btn-icon-only permitted on ghost role only (plus close-btn)
+
+   Role chrome:
+     primary     — filled, high-emphasis CTA
+     secondary   — outlined, neutral/mid emphasis
+     ghost       — transparent, low emphasis; only role allowed icon-only on btn
+     destructive — outlined-tint chrome reserved for destructive action weight
+
+   Tone colors flow through the local --_tone custom property so role rules
+   can compose with tone overrides without long :is() selectors. */
+
+.btn {
+  --_tone: var(--green);
+  --_tone-dim: var(--green-dim);
+  --_tone-bg: var(--green);
+  --_tone-fg: var(--theme-on-accent-text);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.3px;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+  background: transparent;
+  color: var(--text);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
+/* Inside a confirm modal, always render the focus indicator on :focus — not
+   just :focus-visible. When the user opens a confirm via a mouse click (e.g.
+   the history-row trash icon), the browser's :focus-visible heuristic
+   suppresses the keyboard-cue outline on the programmatically-focused cancel
+   button, leaving keyboard users without a visible focus target. Inside a
+   modal dialog that auto-focuses a button, the focus location matters for
+   keyboard users regardless of how the modal was opened. */
+#confirm-host .btn:focus {
+  outline: 1px solid color-mix(in srgb, var(--green-dim) 82%, var(--text) 18%);
+  outline-offset: 0;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--green-dim) 18%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+.btn[aria-disabled="true"],
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* u-hidden escape hatch: the primitive's display:inline-flex is a single-class
+   rule that out-ranks the .u-hidden utility by load order. Re-assert hide
+   when both classes are present. */
+.btn.u-hidden,
+.nav-item.u-hidden,
+.tab-strip-item.u-hidden,
+.close-btn.u-hidden,
+.toggle-btn.u-hidden {
+  display: none;
+}
+
+.btn[aria-busy="true"] {
+  cursor: progress;
+  color: transparent !important;
+  position: relative;
+}
+.btn[aria-busy="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  color: var(--_tone);
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Tone overrides — applied to any role */
+.btn.btn-warning {
+  --_tone: var(--amber);
+  --_tone-dim: color-mix(in srgb, var(--amber) 58%, transparent);
+  --_tone-bg: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
+  --_tone-fg: var(--theme-modal-warning-btn-text);
+}
+.btn.btn-danger,
+.btn.btn-destructive {
+  --_tone: var(--red);
+  --_tone-dim: color-mix(in srgb, var(--red) 54%, transparent);
+  --_tone-bg: var(--red);
+  --_tone-fg: var(--theme-modal-danger-btn-text);
+}
+
+/* Role: primary — filled */
+.btn-primary {
+  background: var(--_tone-bg);
+  border: 1px solid var(--_tone-dim);
+  color: var(--_tone-fg);
+}
+.btn-primary:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone-bg) 92%, var(--text));
+  transform: translateY(-1px);
+}
+.btn-primary[data-pressable-clearing="1"],
+.btn-primary[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--_tone-bg);
+  border-color: var(--_tone-dim);
+  color: var(--_tone-fg);
+  transform: none;
+}
+
+/* Role: secondary — outlined with neutral default; tone pulls the outline
+   and hover wash toward the tone color while keeping the resting state
+   restrained. */
+.btn-secondary {
+  background: var(--theme-button-secondary-bg);
+  border: 1px solid var(--theme-button-secondary-border);
+  color: var(--theme-button-secondary-text);
+}
+.btn-secondary:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: var(--theme-button-secondary-hover-border);
+  color: var(--text);
+  background: var(--theme-button-secondary-hover-bg);
+  transform: translateY(-1px);
+}
+.btn-secondary[data-pressable-clearing="1"],
+.btn-secondary[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--theme-button-secondary-bg);
+  border-color: var(--theme-button-secondary-border);
+  color: var(--theme-button-secondary-text);
+  transform: none;
+}
+.btn-secondary.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-secondary.btn-danger:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--_tone);
+  border-color: color-mix(in srgb, var(--_tone) 52%, transparent);
+  background: color-mix(in srgb, var(--_tone) 6%, transparent);
+}
+
+/* Role: ghost — transparent, low emphasis; icon-only permitted */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--theme-button-ghost-border);
+  color: var(--theme-button-ghost-text);
+}
+.btn-ghost.btn-warning,
+.btn-ghost.btn-danger,
+.btn-ghost.btn-destructive {
+  color: var(--_tone);
+}
+.btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--theme-button-ghost-hover-bg);
+  border-color: var(--theme-button-ghost-hover-border);
+  color: var(--text);
+}
+.btn-ghost[data-pressable-clearing="1"],
+.btn-ghost[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: transparent;
+  border-color: var(--theme-button-ghost-border);
+  color: var(--theme-button-ghost-text);
+  transform: none;
+}
+.btn-ghost.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-ghost.btn-danger:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-ghost.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--_tone);
+  background: color-mix(in srgb, var(--_tone) 12%, transparent);
+}
+
+/* Role: destructive — outlined chrome with tone-tinted background.
+   Default tone is danger (irreversible); btn-warning on destructive renders
+   the reversible-destructive treatment (caution yellow). Accepts labels
+   only — never icon-only, to prevent unlabeled destructive controls. */
+.btn-destructive {
+  background: var(--theme-button-destructive-bg);
+  border: 1px solid var(--_tone-dim);
+  color: var(--theme-button-destructive-text);
+}
+.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--theme-button-destructive-hover-bg);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.btn-destructive[data-pressable-clearing="1"],
+.btn-destructive[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--theme-button-destructive-bg);
+  border-color: var(--_tone-dim);
+  color: var(--theme-button-destructive-text);
+  transform: none;
+}
+
+@media (hover: none) {
+  .btn-primary:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: var(--_tone-bg);
+    transform: none;
+  }
+  .btn-secondary:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: var(--theme-button-secondary-bg);
+    border-color: var(--theme-button-secondary-border);
+    color: var(--theme-button-secondary-text);
+    transform: none;
+  }
+  .btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: transparent;
+    border-color: var(--theme-button-ghost-border);
+    color: var(--theme-button-ghost-text);
+  }
+  .btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: var(--theme-button-destructive-bg);
+    color: var(--theme-button-destructive-text);
+    transform: none;
+  }
+  .chip:hover {
+    background: color-mix(in srgb, var(--green) 8%, transparent);
+    border-color: color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+    color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  }
+}
+
+/* Size — compact */
+.btn-compact {
+  min-height: 22px;
+  padding: 3px 9px;
+  font-size: 10px;
+  gap: 4px;
+}
+
+/* Icon-only — ghost only */
+.btn-icon-only {
+  padding: 4px 6px;
+  min-width: 26px;
+  min-height: 26px;
+  gap: 0;
+}
+.btn-icon-only.btn-compact {
+  padding: 2px 4px;
+  min-width: 22px;
+  min-height: 22px;
+}
+
+
+/* ── Nav-item primitive ─────────────────────────────────────────────────────
+   Row-shaped navigation / menu control. Covers sidebar rail items, rail
+   section headers, mobile hamburger menu rows, submenu rows, recents-row
+   action chips, FAQ question toggles. Distinct from .btn because these are
+   *rows in a list* — wider, left-aligned, and visually subordinate to the
+   CTAs in their surface. Compose with .disclosure-chev or .drill-chev from
+   the chev primitives to signal behavior. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+  color: var(--green);
+}
+.nav-item[data-pressable-clearing="1"],
+.nav-item[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
+.nav-item:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.nav-item[aria-disabled="true"],
+.nav-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.nav-item.is-active,
+.nav-item[aria-current="page"] {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+@media (hover: none) {
+  .nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
+}
+
+/* ── Close-btn primitive ────────────────────────────────────────────────────
+   The single icon-close control. Composes with faq-close, workflows-close,
+   shortcuts-close, theme-close, options-close, history-panel-close,
+   search-close-btn, sheet-close. Surface classes remain as JS hooks and
+   for surface-local overrides (e.g. sheet-close mobile touch padding).
+
+   Documented exception: .tab .tab-close retains its own surface-specific
+   chrome (circular shape, per-theme bg/border tokens, parent-hover opacity
+   reveal) because the primitive's shape-and-state model doesn't fit. */
+.close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.close-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+}
+.close-btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.close-btn[aria-disabled="true"],
+.close-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ── Toggle-btn primitive ───────────────────────────────────────────────────
+   aria-pressed mode toggles: case-sensitive / regex in search, starred
+   filter, and mobile recents filter-checks. The "is the mode on?" state is
+   always carried by aria-pressed; the
+   CSS only reacts to that attribute. */
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-height: 22px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 72%, transparent);
+  border-radius: 3px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toggle-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
+.toggle-btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.toggle-btn[aria-pressed="true"] {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+.toggle-btn[aria-disabled="true"],
+.toggle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ── Tab-strip primitive ───────────────────────────────────────────────────
+   Horizontal modal/panel tab rows. Terminal tabs keep their dedicated .tab
+   contract because they are draggable document tabs; these strips are simple
+   role=tab controls with one active item and optional count chips. */
+.tab-strip {
+  --tab-strip-gap: 4px;
+  --tab-strip-min-height: 42px;
+  --tab-strip-padding: 6px 20px 0;
+  --tab-strip-bg: var(--theme-terminal-bar-bg);
+  --tab-strip-border-color: var(--border-bright);
+  --tab-strip-active-bg: var(--surface);
+  --tab-strip-item-min-height: 34px;
+  --tab-strip-item-max-width: none;
+  --tab-strip-item-padding: 8px 12px;
+  --tab-strip-item-radius: 6px 6px 0 0;
+  --tab-strip-item-gap: 6px;
+  --tab-strip-item-font-size: 11px;
+
+  display: flex;
+  align-items: flex-end;
+  gap: var(--tab-strip-gap);
+  min-height: var(--tab-strip-min-height);
+  padding: var(--tab-strip-padding);
+  border-bottom: 1px solid var(--tab-strip-border-color);
+  background: var(--tab-strip-bg);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-strip::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.tab-strip-item {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: var(--tab-strip-item-gap);
+  width: auto;
+  max-width: var(--tab-strip-item-max-width);
+  box-sizing: border-box;
+  min-height: var(--tab-strip-item-min-height);
+  margin-bottom: -1px;
+  padding: var(--tab-strip-item-padding);
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid var(--border-bright);
+  border-bottom: 1px solid transparent;
+  border-radius: var(--tab-strip-item-radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--tab-strip-item-font-size);
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tab-strip-item:hover:not(.is-active):not([aria-selected="true"]):not([aria-pressed="true"]):not([aria-disabled="true"]):not(:disabled),
+.tab-strip-item:focus-visible:not(.is-active):not([aria-selected="true"]):not([aria-pressed="true"]) {
+  border-color: var(--border-bright);
+  border-top-color: var(--border-bright);
+  border-bottom-color: transparent;
+  background: transparent;
+  color: var(--green);
+  opacity: 0.96;
+}
+
+.tab-strip-item:focus,
+.tab-strip-item:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.tab-strip-item.is-active,
+.tab-strip-item[aria-selected="true"],
+.tab-strip-item[aria-pressed="true"] {
+  border-color: var(--border-bright);
+  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--tab-strip-active-bg);
+  background: var(--tab-strip-active-bg);
+  color: var(--green);
+  opacity: 1;
+}
+
+.tab-strip-item.is-active:hover:not([aria-disabled="true"]):not(:disabled),
+.tab-strip-item.is-active:active:not([aria-disabled="true"]):not(:disabled),
+.tab-strip-item[aria-selected="true"]:hover:not([aria-disabled="true"]):not(:disabled),
+.tab-strip-item[aria-pressed="true"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: var(--border-bright);
+  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--tab-strip-active-bg);
+  background: var(--tab-strip-active-bg);
+  color: var(--green);
+  opacity: 1;
+}
+
+.tab-strip-item[data-pressable-clearing="1"],
+.tab-strip-item[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: var(--border-bright);
+  border-top-color: var(--border-bright);
+  border-bottom-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tab-strip-item.is-active[data-pressable-clearing="1"],
+.tab-strip-item[aria-selected="true"][data-pressable-clearing="1"],
+.tab-strip-item[aria-pressed="true"][data-pressable-clearing="1"] {
+  border-color: var(--border-bright);
+  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--tab-strip-active-bg);
+  background: var(--tab-strip-active-bg);
+  color: var(--green);
+}

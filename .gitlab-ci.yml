@@ -3,10 +3,10 @@ default:
     - self-hosted
 
 variables:
-  CI_DEFAULT_IMAGE: "python:3.14-slim"
-  CI_PYTHON_E2E_IMAGE: "python:3.14.4"
-  CI_NODE_IMAGE: "node:25.9.0-slim"
-  CI_DOCKER_IMAGE: "docker:27"
+  CI_DEFAULT_IMAGE: "python:3.14.5-slim"
+  CI_PYTHON_E2E_IMAGE: "python:3.14.5"
+  CI_NODE_IMAGE: "node:26.1.0-slim"
+  CI_DOCKER_IMAGE: "docker:29.4.3"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -36,6 +36,8 @@ before_script:
 test-py-pytest:
   stage: test
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -46,10 +48,35 @@ test-py-pytest:
   script:
     - pytest tests/py/ -v
 
+test-py-postgres:
+  stage: test
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: darklab_shell
+    POSTGRES_USER: darklab
+    POSTGRES_PASSWORD: darklab_dev_password
+    DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
+  script:
+    - bash scripts/run_postgres_tests.sh
+
 test-js-unit:
   stage: test
   image: $CI_NODE_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -66,7 +93,11 @@ test-js-unit:
 test-js-e2e:
   stage: test
   image: $CI_PYTHON_E2E_IMAGE
+  variables:
+    PLAYWRIGHT_PROJECT_COUNT: "3"
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -88,19 +119,23 @@ test-js-e2e:
 lint-py:
   stage: lint
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
-    - flake8 app/ tests/py/
+    - ruff check --config .tooling/ruff.toml app/ tests/py/
     - bandit -r app/ -ll -q
-    - yamllint -c config/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
+    - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
 lint-js:
   stage: lint
   image: $CI_NODE_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -125,6 +160,8 @@ lint-js:
 audit-py:
   stage: audit
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -137,6 +174,8 @@ audit-js:
   stage: audit
   image: $CI_NODE_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -195,6 +234,8 @@ docker-build:
     DOCKER_BUILDKIT: "1"
   before_script: []
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     # Always build on the main branch so there is always a verified image
     - if: $CI_COMMIT_BRANCH == "main"
     # Always build for merge requests targeting main so the merge gate sees a build
@@ -210,3 +251,32 @@ docker-build:
       allow_failure: true
   script:
     - docker build -t darklab_shell:$CI_COMMIT_SHA .
+
+.scheduled-docker-build:
+  stage: build
+  image: $CI_DOCKER_IMAGE
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - when: never
+  script:
+    - docker build -t darklab_shell:$CI_COMMIT_SHA .
+
+docker-build-bael:
+  extends: .scheduled-docker-build
+  tags:
+    - bael
+
+docker-build-bune:
+  extends: .scheduled-docker-build
+  tags:
+    - bune
+
+docker-build-botis:
+  extends: .scheduled-docker-build
+  tags:
+    - botis

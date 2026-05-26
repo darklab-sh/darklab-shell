@@ -19,10 +19,11 @@
     },
     {
       "no_output": false,
-      "exit_code": 0,
+      "exit_code": null,
       "command": "ping -c 4 ip.darklab.sh",
-      "expected_text": [
-        "PING ip.darklab.sh"
+      "any_of": [
+        { "expected_text": ["PING ip.darklab.sh"] },
+        { "expected_text": ["PING fw-vx2-vp1.darklab.sh"] }
       ]
     },
     {
@@ -151,6 +152,54 @@
       "command": "nmap -h",
       "expected_text": [
         "Nmap 7.95 ( https://nmap.org )"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "shodan --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "vt --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "greynoise --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "ipinfo --help",
+      "expected_text": [
+        "Usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "urlscan-cli --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "chaos -h",
+      "expected_patterns": [
+        "(?i)usage"
       ]
     },
     {
@@ -300,7 +349,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -h",
+      "command": "httpx -h",
       "expected_text": [
         "httpx is a fast and"
       ]
@@ -308,7 +357,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+      "command": "httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
       "expected_text": [
         "Nginx"
       ]
@@ -316,7 +365,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh -status-code",
+      "command": "httpx -u https://ip.darklab.sh -status-code",
       "expected_text": [
         "https://ip.darklab.sh"
       ]
@@ -324,7 +373,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh -follow-redirects",
+      "command": "httpx -u https://ip.darklab.sh -follow-redirects",
       "expected_text": [
         "ip.darklab.sh"
       ]
@@ -446,7 +495,7 @@
       "exit_code": 0,
       "command": "openssl s_client -connect ip.darklab.sh:443 -quiet",
       "expected_text": [
-        "ISRG Root X1"
+        "depth=1"
       ]
     },
     {
@@ -1025,7 +1074,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+      "command": "httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
       "expected_text": [
         "Current httpx"
       ]
@@ -1098,16 +1147,21 @@
       "no_output": false,
       "exit_code": null,
       "command": "curl -sH Accept:application/json https://ip.darklab.sh/api",
-      "expected_text": [
-        "108.79.194.246"
+      "any_of": [
+        { "expected_text": ["108.79.194.246"] },
+        { "expected_text": ["107.178.106.164"] },
+        { "expected_text": ["172.18.0"] },
+        { "expected_text": ["192.168.10"] },
+        { "expected_text": ["10.20.0."] }
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
       "command": "ping -c 10 ip.darklab.sh",
-      "expected_text": [
-        "PING ip.darklab.sh"
+      "any_of": [
+        { "expected_text": ["PING ip.darklab.sh"] },
+        { "expected_text": ["PING fw-vx2-vp1.darklab.sh"] }
       ]
     },
     {

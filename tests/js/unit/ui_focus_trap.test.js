@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const UI_FOCUS_TRAP_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/ui_focus_trap.js'),
+  resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'),
   'utf8',
 )
 
@@ -146,6 +146,24 @@ describe('bindFocusTrap', () => {
     trailingHidden.style.display = 'none'
     card.appendChild(trailingHidden)
     const [first, last] = card.querySelectorAll('button:not([style*="display: none"])')
+    g.bindFocusTrap(card)
+    last.focus()
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('skips focusables inside a CSS-hidden ancestor', () => {
+    const card = makeCard({ buttons: 2 })
+    const hiddenMenu = document.createElement('div')
+    hiddenMenu.style.display = 'none'
+    const hiddenOption = document.createElement('button')
+    hiddenOption.textContent = 'hidden-option'
+    hiddenMenu.appendChild(hiddenOption)
+    card.appendChild(hiddenMenu)
+    const [first, last] = Array.from(card.querySelectorAll('button'))
+      .filter(button => button !== hiddenOption)
     g.bindFocusTrap(card)
     last.focus()
     const ev = tabEvent()

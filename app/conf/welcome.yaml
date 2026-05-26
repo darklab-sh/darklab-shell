@@ -84,7 +84,7 @@
   group: "recon"
   out: "resolve discovered hostnames quickly"
 
-- cmd: "pd-httpx -u https://darklab.sh"
+- cmd: "httpx -u https://darklab.sh"
   group: "web"
   out: "probe HTTP services and inspect responses"
 

@@ -5,12 +5,18 @@ Imported by database, process, permalinks, and app modules.
 
 import os
 import pwd
+import logging
+import ipaddress
 from pathlib import Path
 import yaml
-from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
+from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.7"
+log = logging.getLogger("shell")
+CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
+
+APP_VERSION = "2.0"
 PROJECT_NAME = "darklab_shell"
+APP_NAME_MAX_CHARS = 20
 
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
@@ -42,7 +48,10 @@ def _load_yaml_config(path):
 def _load_yaml_config_optional(path):
     try:
         return _load_yaml_config(path)
-    except yaml.YAMLError:
+    except yaml.YAMLError as exc:
+        payload = {"path": str(path), "error": str(exc)}
+        CONFIG_LOAD_WARNINGS.append(payload)
+        log.warning("CONFIG_LOCAL_LOAD_FAILED", extra=payload)
         return {}
 
 
@@ -71,6 +80,62 @@ def _coerce_mb_value(value):
     return None
 
 
+def _coerce_int_value(value, default=0, *, minimum=0):
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        try:
+            parsed = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return default
+    return max(minimum, parsed)
+
+
+def _coerce_bool_value(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _normalize_app_name(value):
+    raw = str(value or PROJECT_NAME).strip() or PROJECT_NAME
+    normalized = " ".join(raw.split())
+    if len(normalized) <= APP_NAME_MAX_CHARS:
+        return normalized
+    log.warning(
+        "APP_NAME_TRUNCATED",
+        extra={"configured_chars": len(normalized), "max_chars": APP_NAME_MAX_CHARS},
+    )
+    return normalized[:APP_NAME_MAX_CHARS].rstrip() or PROJECT_NAME
+
+
+def _normalize_ai_base_url_allowed_cidrs(value):
+    if isinstance(value, str):
+        raw_values = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = [str(item).strip() for item in value if str(item or "").strip()]
+    else:
+        raw_values = []
+    normalized = []
+    for cidr in raw_values:
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            log.warning("AI_BASE_URL_ALLOWED_CIDR_INVALID", extra={"cidr": cidr[:120]})
+            continue
+        normalized.append(cidr)
+    return normalized
+
+
 def load_config(conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
@@ -86,20 +151,127 @@ def load_config(conf_dir=None):
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
         "data_dir":                   "",
+        "database_backend":           "sqlite",
+        "database_url":               "",
+        "database_pool_min":          1,
+        "database_pool_max":          5,
+        "database_postgres_jit":       False,
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "diagnostics_allowed_cidrs":  [],
+        "metrics_enabled":            True,
+        "prometheus_multiproc_dir":   "/tmp/darklab_shell-prom",
+        "metrics_histogram_buckets_run_duration": [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600],
+        "metrics_histogram_buckets_http_duration": [0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+        "metrics_histogram_buckets_ai_provider_duration": [0.1, 0.5, 1, 2, 5, 10, 30, 60],
+        "ai_enabled":                 False,
+        "ai_provider":                "openai_compatible",
+        "ai_base_url":                "",
+        "ai_model":                   "",
+        "ai_api_key_secret_name":     "",
+        "ai_api_key":                 "",
+        "ai_connect_timeout_seconds": 5,
+        "ai_timeout_seconds":         120,
+        "ai_max_input_chars":         24000,
+        "ai_max_output_tokens":       120,
+        "ai_next_commands_max_output_tokens": 180,
+        "ai_max_concurrent":          1,
+        "ai_max_queue_depth":         20,
+        "ai_rate_limit_per_session_hour": 5,
+        "ai_rate_limit_global_per_minute": 2,
+        "ai_allow_full_output":       False,
+        "ai_require_private_base_url": True,
+        "ai_base_url_allowed_cidrs":  [],
+        "ai_prompt_version_override": "",
+        "ai_feature_summary":         False,
+        "ai_feature_next_commands":   False,
+        "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
+        "intel_cache_ttl_shodan_ip_seconds": 86400,
+        "intel_cache_ttl_shodan_search_seconds": 21600,
+        "intel_cache_ttl_censys_host_seconds": 21600,
+        "intel_cache_ttl_virustotal_domain_seconds": 21600,
+        "intel_cache_ttl_virustotal_file_seconds": 86400,
+        "intel_cache_ttl_greynoise_ip_seconds": 3600,
+        "intel_cache_ttl_otx_indicator_seconds": 21600,
+        "intel_cache_ttl_abuseipdb_ip_seconds": 21600,
+        "intel_cache_ttl_ipinfo_ip_seconds": 21600,
+        "intel_cache_ttl_teamcymru_ip_seconds": 86400,
+        "intel_cache_ttl_crtsh_domain_seconds": 86400,
+        "intel_cache_ttl_hibp_password_seconds": 604800,
+        "intel_cache_ttl_nvd_cve_seconds": 86400,
+        "intel_cache_ttl_vulners_cve_seconds": 86400,
+        "intel_cache_ttl_urlscan_search_seconds": 21600,
+        "intel_cache_ttl_urlscan_result_seconds": 86400,
+        "intel_cache_ttl_urlhaus_host_seconds": 21600,
+        "intel_cache_ttl_urlhaus_payload_seconds": 86400,
+        "intel_cache_ttl_urlhaus_url_seconds": 21600,
+        "intel_cache_ttl_threatfox_ioc_seconds": 21600,
+        "intel_cache_ttl_threatfox_hash_seconds": 86400,
+        "intel_cache_ttl_securitytrails_domain_seconds": 86400,
+        "intel_cache_ttl_routeviews_prefix_seconds": 21600,
+        "intel_rate_limit_shodan_bucket": 5,
+        "intel_rate_limit_shodan_refill_seconds": 1,
+        "intel_rate_limit_censys_bucket": 10,
+        "intel_rate_limit_censys_refill_seconds": 6,
+        "intel_rate_limit_virustotal_public_bucket": 4,
+        "intel_rate_limit_virustotal_public_refill_seconds": 15,
+        "intel_rate_limit_greynoise_community_bucket": 50,
+        "intel_rate_limit_greynoise_community_refill_seconds": 12096,
+        "intel_rate_limit_greynoise_unauthenticated_bucket": 10,
+        "intel_rate_limit_greynoise_unauthenticated_refill_seconds": 8640,
+        "intel_rate_limit_otx_bucket": 30,
+        "intel_rate_limit_otx_refill_seconds": 2,
+        "intel_rate_limit_abuseipdb_bucket": 20,
+        "intel_rate_limit_abuseipdb_refill_seconds": 4,
+        "intel_rate_limit_ipinfo_bucket": 30,
+        "intel_rate_limit_ipinfo_refill_seconds": 2,
+        "intel_rate_limit_teamcymru_bucket": 30,
+        "intel_rate_limit_teamcymru_refill_seconds": 2,
+        "intel_rate_limit_crtsh_bucket": 10,
+        "intel_rate_limit_crtsh_refill_seconds": 6,
+        "intel_rate_limit_hibp_bucket": 10,
+        "intel_rate_limit_hibp_refill_seconds": 2,
+        "intel_rate_limit_nvd_anonymous_bucket": 5,
+        "intel_rate_limit_nvd_anonymous_refill_seconds": 6,
+        "intel_rate_limit_vulners_bucket": 10,
+        "intel_rate_limit_vulners_refill_seconds": 6,
+        "intel_rate_limit_urlscan_bucket": 10,
+        "intel_rate_limit_urlscan_refill_seconds": 6,
+        "intel_rate_limit_urlhaus_bucket": 20,
+        "intel_rate_limit_urlhaus_refill_seconds": 3,
+        "intel_rate_limit_threatfox_bucket": 20,
+        "intel_rate_limit_threatfox_refill_seconds": 3,
+        "intel_rate_limit_securitytrails_bucket": 10,
+        "intel_rate_limit_securitytrails_refill_seconds": 6,
+        "intel_rate_limit_routeviews_bucket": 20,
+        "intel_rate_limit_routeviews_refill_seconds": 3,
+        "intel_negative_cache_virustotal_quota_seconds": 21600,
+        "intel_negative_cache_censys_quota_seconds": 21600,
+        "intel_negative_cache_otx_quota_seconds": 21600,
+        "intel_negative_cache_abuseipdb_quota_seconds": 21600,
+        "intel_negative_cache_ipinfo_quota_seconds": 21600,
+        "intel_negative_cache_urlhaus_quota_seconds": 21600,
+        "intel_negative_cache_vulners_quota_seconds": 21600,
+        "intel_negative_cache_urlscan_quota_seconds": 21600,
+        "intel_negative_cache_threatfox_quota_seconds": 21600,
+        "intel_negative_cache_securitytrails_quota_seconds": 21600,
         "max_output_lines":           5000,
+        "high_volume_output_line_threshold": 50000,
+        "high_volume_output_status_interval_lines": 50000,
+        "output_preview_max_mb":      1,
         "persist_full_run_output":    True,
         "full_output_max_mb":         5,
+        "runs_search_text_inline_max_bytes": 0,
+        "snapshots_inline_max_bytes": 0,
+        "intel_payload_inline_max_bytes": 0,
         "workspace_enabled":          False,
         "workspace_backend":          "tmpfs",
         # Intentional server-side workspace root default. Workspaces are
@@ -110,6 +282,53 @@ def load_config(conf_dir=None):
         "workspace_max_file_mb":      5,
         "workspace_max_files":        100,
         "workspace_inactivity_ttl_hours": 1,
+        "max_projects_per_session":   100,
+        "max_project_links_per_project": 5000,
+        "max_project_entities_per_project": 5000,
+        "max_project_targets_per_project": 200,
+        "max_evidence_packages_per_project": 25,
+        "max_entity_labels_per_session": 5000,
+        "max_entity_labels_per_entity": 20,
+        "max_entity_notes_per_session": 2000,
+        "evidence_package_max_mb":    25,
+        "evidence_package_max_uncompressed_mb": 500,
+        "evidence_package_max_artifacts": 100,
+        "evidence_package_download_rate_limit_per_minute": 10,
+        "evidence_package_download_rate_limit_per_second": 2,
+        "notifications": {
+            "do_not_disturb": False,
+            "delivery_rate_per_minute": 10,
+            "http_timeout_seconds": 8,
+            "test_timeout_seconds": 4,
+            "http_private_host_allowlist": [],
+            "smtp": {
+                "host": "",
+                "port": 587,
+                "user": "",
+                "password_secret_id": "",
+                "from_address": "",
+                "tls": "starttls",
+            },
+            "retry": {
+                "max_attempts": 6,
+                "max_age_hours": 24,
+                "base_delay_seconds": 30,
+            },
+            "events": {
+                "retention_days": 30,
+            },
+        },
+        "scheduler": {
+            "lock_path": "",
+            "tick_seconds": 5,
+            "max_per_session": 32,
+            "missed_fire_policy": "coalesce",
+            "max_catchup_window_seconds": 3600,
+            "default_timezone": "UTC",
+        },
+        "watchers": {
+            "max_per_session": 32,
+        },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,
@@ -121,6 +340,21 @@ def load_config(conf_dir=None):
         "run_broker_subscriber_block_seconds": 15,
         "run_broker_heartbeat_seconds": 20,
         "run_broker_owner_stale_seconds": 75,
+        "interactive_pty_enabled":     False,
+        "interactive_pty_max_runtime_seconds": 900,
+        "interactive_pty_max_concurrent_per_session": 4,
+        "interactive_pty_input_rate_limit_per_minute": 500,
+        "interactive_pty_input_rate_limit_per_second": 10,
+        "interactive_pty_buffer_limit": 512,
+        "interactive_pty_input_max_bytes": 4096,
+        "interactive_pty_heartbeat_seconds": 15,
+        "interactive_pty_control_poll_seconds": 0.2,
+        "interactive_pty_stream_fetch_count": 100,
+        "interactive_pty_stream_maxlen": 5000,
+        "interactive_pty_snapshot_publish_bytes": 8192,
+        "interactive_pty_snapshot_publish_seconds": 1,
+        "interactive_pty_snapshot_min_publish_seconds": 0.2,
+        "interactive_pty_snapshot_fallback_entry_limit": 200,
         "welcome_char_ms":            18,
         "welcome_jitter_ms":          12,
         "welcome_post_cmd_ms":        650,
@@ -131,6 +365,7 @@ def load_config(conf_dir=None):
         "welcome_status_labels":      ["CONFIG", "RUNNER", "HISTORY", "LIMITS", "AUTOCOMPLETE"],
         "welcome_hint_interval_ms":   4200,
         "welcome_hint_rotations":     0,
+        "tour_enabled":               True,
     }
     if conf_dir is not None:
         conf_path = Path(conf_dir)
@@ -140,6 +375,68 @@ def load_config(conf_dir=None):
         conf_path = Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
     defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
+    env_workspace_root = str(os.environ.get("WORKSPACE_ROOT") or "").strip()
+    if env_workspace_root:
+        defaults["workspace_root"] = env_workspace_root
+    env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
+    if env_prometheus_multiproc_dir:
+        defaults["prometheus_multiproc_dir"] = env_prometheus_multiproc_dir
+    env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
+    if env_database_backend:
+        defaults["database_backend"] = env_database_backend
+    env_database_url = str(os.environ.get("DATABASE_URL") or "").strip()
+    if env_database_url:
+        defaults["database_url"] = env_database_url
+    env_database_pool_min = str(os.environ.get("DATABASE_POOL_MIN") or "").strip()
+    if env_database_pool_min:
+        defaults["database_pool_min"] = env_database_pool_min
+    env_database_pool_max = str(os.environ.get("DATABASE_POOL_MAX") or "").strip()
+    if env_database_pool_max:
+        defaults["database_pool_max"] = env_database_pool_max
+    env_database_postgres_jit = str(os.environ.get("DATABASE_POSTGRES_JIT") or "").strip()
+    if env_database_postgres_jit:
+        defaults["database_postgres_jit"] = env_database_postgres_jit
+    ai_env_keys = {
+        "AI_ENABLED": "ai_enabled",
+        "AI_PROVIDER": "ai_provider",
+        "AI_BASE_URL": "ai_base_url",
+        "AI_MODEL": "ai_model",
+        "AI_API_KEY_SECRET_NAME": "ai_api_key_secret_name",
+        "AI_API_KEY": "ai_api_key",
+        "AI_CONNECT_TIMEOUT_SECONDS": "ai_connect_timeout_seconds",
+        "AI_TIMEOUT_SECONDS": "ai_timeout_seconds",
+        "AI_MAX_INPUT_CHARS": "ai_max_input_chars",
+        "AI_MAX_OUTPUT_TOKENS": "ai_max_output_tokens",
+        "AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS": "ai_next_commands_max_output_tokens",
+        "AI_MAX_CONCURRENT": "ai_max_concurrent",
+        "AI_MAX_QUEUE_DEPTH": "ai_max_queue_depth",
+        "AI_RATE_LIMIT_PER_SESSION_HOUR": "ai_rate_limit_per_session_hour",
+        "AI_RATE_LIMIT_GLOBAL_PER_MINUTE": "ai_rate_limit_global_per_minute",
+        "AI_ALLOW_FULL_OUTPUT": "ai_allow_full_output",
+        "AI_REQUIRE_PRIVATE_BASE_URL": "ai_require_private_base_url",
+        "AI_BASE_URL_ALLOWED_CIDRS": "ai_base_url_allowed_cidrs",
+        "AI_PROMPT_VERSION_OVERRIDE": "ai_prompt_version_override",
+        "AI_FEATURE_SUMMARY": "ai_feature_summary",
+        "AI_FEATURE_NEXT_COMMANDS": "ai_feature_next_commands",
+        "AI_FEATURE_RUN_SUGGESTIONS": "ai_feature_run_suggestions",
+    }
+    for env_name, cfg_key in ai_env_keys.items():
+        raw = str(os.environ.get(env_name) or "").strip()
+        if not raw:
+            continue
+        if cfg_key == "ai_base_url_allowed_cidrs":
+            defaults[cfg_key] = [item.strip() for item in raw.split(",") if item.strip()]
+        else:
+            defaults[cfg_key] = raw
+    defaults["ai_base_url_allowed_cidrs"] = _normalize_ai_base_url_allowed_cidrs(
+        defaults.get("ai_base_url_allowed_cidrs")
+    )
+    defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
+    defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)
+    defaults["database_postgres_jit"] = _coerce_bool_value(defaults.get("database_postgres_jit"), False)
+    if defaults["database_pool_max"] < defaults["database_pool_min"]:
+        defaults["database_pool_max"] = defaults["database_pool_min"] or 1
+    defaults["app_name"] = _normalize_app_name(defaults.get("app_name"))
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
     full_output_max_mb = _coerce_mb_value(defaults.get("full_output_max_mb"))
     if full_output_max_mb is None and legacy_full_output_max_bytes is not None:
@@ -149,11 +446,37 @@ def load_config(conf_dir=None):
             legacy_bytes = 0
         defaults["full_output_max_mb"] = max(0, (legacy_bytes + (1024 * 1024) - 1) // (1024 * 1024))
         defaults["full_output_max_bytes"] = legacy_bytes
-        return defaults
-    if full_output_max_mb is None:
-        full_output_max_mb = 5
-    defaults["full_output_max_mb"] = full_output_max_mb
-    defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
+    else:
+        if full_output_max_mb is None:
+            full_output_max_mb = 5
+        defaults["full_output_max_mb"] = full_output_max_mb
+        defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
+    output_preview_max_mb = _coerce_mb_value(defaults.get("output_preview_max_mb"))
+    if output_preview_max_mb is None:
+        output_preview_max_mb = 1
+    defaults["output_preview_max_mb"] = output_preview_max_mb
+    defaults["output_preview_max_bytes"] = output_preview_max_mb * 1024 * 1024
+    for key in (
+        "ai_enabled",
+        "ai_allow_full_output",
+        "ai_require_private_base_url",
+        "ai_feature_summary",
+        "ai_feature_next_commands",
+        "ai_feature_run_suggestions",
+    ):
+        defaults[key] = _coerce_bool_value(defaults.get(key), bool(defaults[key]))
+    for key, fallback, minimum in (
+        ("ai_connect_timeout_seconds", 5, 1),
+        ("ai_timeout_seconds", 120, 1),
+        ("ai_max_input_chars", 24000, 1000),
+        ("ai_max_output_tokens", 120, 1),
+        ("ai_next_commands_max_output_tokens", 180, 1),
+        ("ai_max_concurrent", 1, 1),
+        ("ai_max_queue_depth", 20, 0),
+        ("ai_rate_limit_per_session_hour", 5, 1),
+        ("ai_rate_limit_global_per_minute", 2, 1),
+    ):
+        defaults[key] = _coerce_int_value(defaults.get(key), fallback, minimum=minimum)
     # Share/export redaction rules are normalized up front so the browser and
     # the snapshot endpoint both receive the same validated rule set.
     defaults["share_redaction_rules"] = normalize_redaction_rules(
@@ -203,7 +526,7 @@ def resolve_data_dir(cfg=None):
 
     if _is_writable_directory("/data"):
         return "/data"
-    return _require_writable_data_dir("/tmp", "fallback data_dir")  # nosec B108
+    return _require_writable_data_dir("/tmp", "fallback data_dir")  # nosec
 
 
 def get_share_redaction_rules(cfg=None):
@@ -774,9 +1097,10 @@ def get_theme_entry(name, fallback="dark"):
 # Scanner user wrapping — prepend sudo to run commands as the unprivileged
 # scanner user with the shared appuser group. The explicit run group keeps
 # validated workspace files readable/writable without making them world-accessible.
-# appuser (Gunicorn) is granted NOPASSWD sudo rights to that runas pair in
-# /etc/sudoers. Falls back to running directly if sudo/scanner aren't available
-# (local dev).
+# appuser (Gunicorn) is granted NOPASSWD sudo rights with SETENV to that runas
+# pair in /etc/sudoers. SETENV is needed so the app can preserve only declared
+# encrypted-secret env vars through sudo without putting values in argv. Falls
+# back to running directly if sudo/scanner aren't available (local dev).
 SCANNER_PREFIX = []
 try:
     pwd.getpwnam("scanner")

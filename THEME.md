@@ -338,7 +338,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `dropdown_item_text` | `#9a9a9a` | `#4a5868` | Text for autocomplete and menu items |
 | `overlay_backdrop_bg` | `rgba(0,0,0,0.76)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
 
-Files drag-and-drop feedback does not introduce its own theme keys. The dragged row uses opacity only, and folder drop targets derive their border/glow from existing semantic green and border tokens. If that state ever needs stronger per-theme tuning, add a chrome token here instead of hardcoding a new one-off color in `shell.css`.
+Files drag-and-drop feedback does not introduce its own theme keys. The dragged row uses opacity only, and folder drop targets derive their border/glow from existing semantic green and border tokens. If that state ever needs stronger per-theme tuning, add a chrome token here instead of hardcoding a new one-off color in `app/static/css/features/workspace.css`.
 
 ### Search and Output Highlights
 
@@ -393,9 +393,25 @@ Files drag-and-drop feedback does not introduce its own theme keys. The dragged 
 
 ## Related Docs
 
-- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
-- [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
-- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
-- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
-- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands
+- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
+- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](FEATURES.md) - full per-feature reference
+- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
+- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

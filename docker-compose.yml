@@ -13,6 +13,65 @@ services:
       retries: 3
       start_period: 5s
 
+  postgres:
+    image: postgres:17-alpine
+    container_name: darklab-postgres
+    restart: unless-stopped
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-darklab_shell}
+      POSTGRES_USER: ${POSTGRES_USER:-darklab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darklab_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-darklab} -d ${POSTGRES_DB:-darklab_shell}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: darklab-llama
+    restart: unless-stopped
+    profiles:
+      - llama
+    cap_add:
+      - IPC_LOCK
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - llama-cache:/root/.cache
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -hf
+      - ${LLAMA_HF_MODEL:-bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M}
+      - --alias
+      - ${AI_MODEL:-Llama-3.1-8B-Instruct}
+      - -t
+      - "${LLAMA_THREADS:-8}"
+      - -c
+      - "${LLAMA_CTX_SIZE:-2048}"
+      - -n
+      - "${LLAMA_N_PREDICT:-180}"
+      - -np
+      - "${LLAMA_PARALLEL:-1}"
+      - --mlock
+      - --cont-batching
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
   shell:
     build:
       context: .
@@ -35,10 +94,38 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
-      # Must match app/conf/config.yaml workspace_root when customized.
+      - PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}
+      - DATABASE_BACKEND=${DATABASE_BACKEND:-sqlite}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-1}
+      - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-5}
+      - DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-false}
+      - AI_WORKER_ENABLED=${AI_WORKER_ENABLED:-0}
+      - AI_ENABLED=${AI_ENABLED:-false}
+      - AI_PROVIDER=${AI_PROVIDER:-openai_compatible}
+      - AI_BASE_URL=${AI_BASE_URL:-http://llama:8080}
+      - AI_MODEL=${AI_MODEL:-Llama-3.1-8B-Instruct}
+      - AI_API_KEY_SECRET_NAME=${AI_API_KEY_SECRET_NAME:-}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_CONNECT_TIMEOUT_SECONDS=${AI_CONNECT_TIMEOUT_SECONDS:-5}
+      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-120}
+      - AI_MAX_INPUT_CHARS=${AI_MAX_INPUT_CHARS:-24000}
+      - AI_MAX_OUTPUT_TOKENS=${AI_MAX_OUTPUT_TOKENS:-120}
+      - AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS=${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-180}
+      - AI_MAX_CONCURRENT=${AI_MAX_CONCURRENT:-1}
+      - AI_MAX_QUEUE_DEPTH=${AI_MAX_QUEUE_DEPTH:-20}
+      - AI_RATE_LIMIT_PER_SESSION_HOUR=${AI_RATE_LIMIT_PER_SESSION_HOUR:-5}
+      - AI_RATE_LIMIT_GLOBAL_PER_MINUTE=${AI_RATE_LIMIT_GLOBAL_PER_MINUTE:-2}
+      - AI_ALLOW_FULL_OUTPUT=${AI_ALLOW_FULL_OUTPUT:-false}
+      - AI_REQUIRE_PRIVATE_BASE_URL=${AI_REQUIRE_PRIVATE_BASE_URL:-true}
+      - AI_BASE_URL_ALLOWED_CIDRS=${AI_BASE_URL_ALLOWED_CIDRS:-}
+      - AI_PROMPT_VERSION_OVERRIDE=${AI_PROMPT_VERSION_OVERRIDE:-}
+      - AI_FEATURE_SUMMARY=${AI_FEATURE_SUMMARY:-false}
+      - AI_FEATURE_NEXT_COMMANDS=${AI_FEATURE_NEXT_COMMANDS:-false}
+      - AI_FEATURE_RUN_SUGGESTIONS=${AI_FEATURE_RUN_SUGGESTIONS:-false}
       # The entrypoint uses this path to normalize workspace permissions before
-      # dropping privileges; the app uses workspace_root for runtime access.
-      # Set WORKSPACE_ROOT directly here, in an override, or via .env.
+      # dropping privileges. The app also treats WORKSPACE_ROOT as the runtime
+      # workspace_root override, so Compose deployments only need this setting.
       - WORKSPACE_ROOT=${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
@@ -49,3 +136,13 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+        required: false
+      llama:
+        condition: service_healthy
+        required: false
+
+volumes:
+  postgres-data:
+  llama-cache:

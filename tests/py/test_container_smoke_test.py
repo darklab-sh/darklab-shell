@@ -15,6 +15,7 @@ Run with:
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -27,17 +28,26 @@ import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
+from typing import Any
 from urllib.error import HTTPError
 
 import pytest
 import yaml
-from commands import load_container_smoke_test_commands, split_command_argv
+from services.commands.registry import (
+    load_container_smoke_test_commands,
+    load_container_smoke_test_interactive_commands,
+    split_command_argv,
+)
+from core.output_signals import strip_ansi_codes
 
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
 WORKSPACE_EXPECTATIONS_FILE = (
     ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-workspace-expectations.json"
+)
+INTERACTIVE_EXPECTATIONS_FILE = (
+    ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-interactive-expectations.json"
 )
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
@@ -53,6 +63,7 @@ SMOKE_COMMAND_RETRY_DELAY_SECONDS = float(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS", "3")
 )
 SMOKE_PROJECT_PREFIX = "darklab_shell-test-"
+SMOKE_IMAGE_CACHE_KEY_LABEL = "org.darklab.shell.container-smoke.cache-key"
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
@@ -66,6 +77,10 @@ def _new_smoke_session_id() -> str:
 def _require_docker() -> None:
     if shutil.which("docker") is None:
         pytest.skip("docker CLI is required for the container smoke test")
+
+
+def _force_smoke_image_build() -> bool:
+    return os.environ.get("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD") == "1"
 
 
 def _run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
@@ -123,6 +138,56 @@ def _run_streaming(cmd: list[str], *, timeout: int) -> subprocess.CompletedProce
             f"command failed: {cmd}\nstdout:\n{stdout}\nstderr:\n"
         )
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, "")
+
+
+def _hash_smoke_build_input(hasher: Any, path: Path) -> None:
+    hasher.update(str(path).encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(path.read_bytes())
+    hasher.update(b"\0")
+
+
+def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(b"container-smoke-cache-v1\0")
+    for path in (
+        dockerfile_path,
+        build_context / "app" / "requirements.txt",
+        build_context / "entrypoint.sh",
+    ):
+        _hash_smoke_build_input(hasher, path)
+    return hasher.hexdigest()
+
+
+def _smoke_image_cache_status(image_tag: str, expected_cache_key: str) -> tuple[bool, str]:
+    proc = _run(
+        [
+            "docker",
+            "image",
+            "inspect",
+            image_tag,
+            "--format",
+            "{{json .Config.Labels}}",
+        ],
+        timeout=30,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False, "cache image missing"
+
+    try:
+        labels = json.loads(proc.stdout.strip() or "null") or {}
+    except json.JSONDecodeError:
+        return False, "cache labels unreadable"
+    if not isinstance(labels, Mapping):
+        return False, "cache labels unreadable"
+
+    actual_cache_key = labels.get(SMOKE_IMAGE_CACHE_KEY_LABEL)
+    if actual_cache_key == expected_cache_key:
+        return True, "cache image current"
+    if actual_cache_key is None:
+        return False, "cache image missing cache label"
+    return False, "cache image stale"
 
 
 def _docker_names_matching(prefix: str) -> list[str]:
@@ -208,6 +273,33 @@ def _cleanup_stale_smoke_compose_projects(*, exclude: str | None = None) -> None
         _cleanup_compose_project_resources(project)
 
 
+def _running_inside_container() -> bool:
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
+    return any(marker in cgroup for marker in ("/docker/", "/kubepods/", "/containerd/"))
+
+
+def _default_gateway_from_proc_net_route() -> str | None:
+    try:
+        lines = Path("/proc/net/route").read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines[1:]:
+        fields = line.split()
+        if len(fields) < 3 or fields[1] != "00000000":
+            continue
+        try:
+            gateway = int(fields[2], 16).to_bytes(4, "little")
+        except (ValueError, OverflowError):
+            continue
+        return ".".join(str(part) for part in gateway)
+    return None
+
+
 def _docker_reach_host() -> str:
     """Return the hostname used to reach ports published by Docker containers.
 
@@ -224,6 +316,10 @@ def _docker_reach_host() -> str:
         host = urlparse(docker_host).hostname
         if host:
             return host
+    if docker_host.startswith("unix://") and _running_inside_container():
+        gateway = _default_gateway_from_proc_net_route()
+        if gateway:
+            return gateway
     return "127.0.0.1"
 
 
@@ -237,12 +333,22 @@ def _docker_reach_host() -> str:
     ],
 )
 def test_docker_reach_host(monkeypatch: pytest.MonkeyPatch, docker_host: str | None, expected: str) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_running_inside_container", lambda: False)
     if docker_host is None:
         monkeypatch.delenv("DOCKER_HOST", raising=False)
     else:
         monkeypatch.setenv("DOCKER_HOST", docker_host)
 
     assert _docker_reach_host() == expected
+
+    if docker_host == "unix:///var/run/docker.sock":
+        monkeypatch.setattr(sys.modules[__name__], "_running_inside_container", lambda: True)
+        monkeypatch.setattr(
+            sys.modules[__name__],
+            "_default_gateway_from_proc_net_route",
+            lambda: "172.18.0.1",
+        )
+        assert _docker_reach_host() == "172.18.0.1"
 
 
 @pytest.mark.parametrize(
@@ -341,6 +447,66 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
     assert waited == [("http://example.test", "session-123", "run-123")]
 
 
+def test_post_run_reads_batched_output_for_stop_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResponse:
+        def __init__(self, lines: list[str] | None = None, body: str = ""):
+            self._lines = [line.encode("utf-8") for line in lines or []]
+            self._body = body.encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def readline(self):
+            if not self._lines:
+                return b""
+            return self._lines.pop(0)
+
+        def read(self):
+            return self._body
+
+    killed: list[tuple[str, str, str]] = []
+
+    def _fake_urlopen(req, timeout=0):
+        del timeout
+        if req.full_url == "http://example.test/runs":
+            return _FakeResponse(body='{"run_id":"run-123","stream":"/runs/run-123/stream"}')
+        assert req.full_url == "http://example.test/runs/run-123/stream"
+        return _FakeResponse([
+            'id: 1-0\n',
+            'data: {"type":"started","run_id":"run-123"}\n',
+            '\n',
+            'id: 2-0\n',
+            'data: {"type":"output_batch","lines":[{"text":"Usage: ping [options]\\n"},{"text":"more help\\n"}]}\n',
+            '\n',
+            'id: 3-0\n',
+            'data: {"type":"exit","code":0}\n',
+            '\n',
+        ])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_post_kill",
+        lambda base_url, session_id, run_id: killed.append((base_url, session_id, run_id)),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_wait_for_run_to_stop", lambda *args, **kwargs: None)
+
+    events, killed_early = _post_run(
+        "http://example.test",
+        "ping -h",
+        "session-123",
+        timeout=10,
+        stop_text=["Usage"],
+    )
+
+    assert killed_early is True
+    assert _collect_visible_lines(events, "ping -h") == ["Usage: ping [options]", "more help"]
+    assert killed == [("http://example.test", "session-123", "run-123")]
+
+
 @pytest.mark.parametrize(
     ("cases", "expected"),
     [
@@ -354,8 +520,93 @@ def test_needs_nuclei_template_warmup(cases: list[dict[str, object]], expected: 
     assert _needs_nuclei_template_warmup(cases) is expected
 
 
+def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
+    monkeypatch.delenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", raising=False)
+    assert _force_smoke_image_build() is False
+
+    monkeypatch.setenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", "0")
+    assert _force_smoke_image_build() is False
+
+    monkeypatch.setenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", "1")
+    assert _force_smoke_image_build() is True
+
+
+def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> None:
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    dockerfile = tmp_path / "Dockerfile"
+    requirements = app_dir / "requirements.txt"
+    entrypoint = tmp_path / "entrypoint.sh"
+
+    dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
+    requirements.write_text("flask==3.1.2\n", encoding="utf-8")
+    entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+
+    original_key = _smoke_image_cache_key(tmp_path, dockerfile)
+
+    requirements.write_text("flask==3.1.2\nprometheus-client==0.25.0\n", encoding="utf-8")
+    requirements_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert requirements_key != original_key
+
+    dockerfile.write_text("FROM python:3.14.5-slim\n", encoding="utf-8")
+    dockerfile_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert dockerfile_key != requirements_key
+
+    entrypoint.write_text("#!/usr/bin/env sh\nexec \"$@\"\n", encoding="utf-8")
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != dockerfile_key
+
+
+def test_smoke_image_cache_status_requires_matching_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    def inspect_with_labels(labels: object):
+        def fake_run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(labels), "")
+
+        return fake_run
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", inspect_with_labels({
+        SMOKE_IMAGE_CACHE_KEY_LABEL: "expected",
+    }))
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        True,
+        "cache image current",
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", inspect_with_labels({}))
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        False,
+        "cache image missing cache label",
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", inspect_with_labels({
+        SMOKE_IMAGE_CACHE_KEY_LABEL: "old",
+    }))
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        False,
+        "cache image stale",
+    )
+
+
+def test_smoke_image_cache_status_rebuilds_when_image_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "missing")
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", fake_run)
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        False,
+        "cache image missing",
+    )
+
+
 def _load_expectations() -> dict[str, dict[str, object]]:
     data = json.loads(EXPECTATIONS_FILE.read_text())
+    records: dict[str, dict[str, object]] = {
+        str(record["command"]): record for record in data["records"]
+    }
+    return records
+
+
+def _load_interactive_expectations() -> dict[str, dict[str, object]]:
+    data = json.loads(INTERACTIVE_EXPECTATIONS_FILE.read_text())
     records: dict[str, dict[str, object]] = {
         str(record["command"]): record for record in data["records"]
     }
@@ -406,14 +657,10 @@ def _normalize_line(command: str, line: str) -> str:
 
 def _collect_visible_lines(events: list[dict[str, object]], command: str) -> list[str]:
     lines: list[str] = []
-    for event in events:
-        if event.get("type") not in {"output", "notice"}:
-            continue
-        text = event.get("text")
-        if not isinstance(text, str):
-            continue
+
+    def _append_text(text: str) -> None:
         for raw_line in text.splitlines():
-            line = raw_line.rstrip()
+            line = strip_ansi_codes(raw_line).rstrip()
             if not line:
                 continue
             if line.startswith("anon@") and "$" in line:
@@ -423,12 +670,40 @@ def _collect_visible_lines(events: list[dict[str, object]], command: str) -> lis
             if line.startswith("# note:"):
                 continue
             lines.append(_normalize_line(command, line))
+
+    for event in events:
+        event_type = event.get("type")
+        if event_type == "output_batch":
+            batch_lines = event.get("lines")
+            if isinstance(batch_lines, Sequence) and not isinstance(batch_lines, (str, bytes, bytearray)):
+                for item in batch_lines:
+                    text = item.get("text") if isinstance(item, Mapping) else None
+                    if isinstance(text, str):
+                        _append_text(text)
+            continue
+        text = event.get("text")
+        if event_type in {"output", "notice"} and isinstance(text, str):
+            _append_text(text)
     return lines
 
 
 def _load_cases() -> list[dict[str, object]]:
     records = _load_expectations()
     commands = load_container_smoke_test_commands()
+    cases: list[dict[str, object]] = []
+
+    for command in commands:
+        record = records.get(command)
+        if record is None:
+            continue
+        cases.append({"command": command, **record})
+
+    return cases
+
+
+def _load_interactive_cases() -> list[dict[str, object]]:
+    records = _load_interactive_expectations()
+    commands = load_container_smoke_test_interactive_commands()
     cases: list[dict[str, object]] = []
 
     for command in commands:
@@ -464,6 +739,14 @@ def _missing_expectation_commands() -> list[str]:
     records = _load_expectations()
     return [
         command for command in load_container_smoke_test_commands()
+        if command not in records
+    ]
+
+
+def _missing_interactive_expectation_commands() -> list[str]:
+    records = _load_interactive_expectations()
+    return [
+        command for command in load_container_smoke_test_interactive_commands()
         if command not in records
     ]
 
@@ -752,11 +1035,97 @@ def _post_run(
                 run_id = str(event.get("run_id", ""))
             if event.get("type") == "exit":
                 break
-            if (stop_text or stop_patterns) and event.get("type") in {"output", "notice"}:
+            if (stop_text or stop_patterns) and event.get("type") in {"output", "output_batch", "notice"}:
                 if _is_output_satisfied(events, command, stop_text, stop_patterns):
                     if run_id:
                         _post_kill(base_url, session_id, run_id)
                         _wait_for_run_to_stop(base_url, session_id, run_id)
+                    killed_early = True
+                    break
+    return events, killed_early
+
+
+def _send_pty_input(base_url: str, session_id: str, run_id: str, text: str) -> None:
+    status, payload = _json_request(
+        f"{base_url}/pty/runs/{run_id}/input",
+        session_id=session_id,
+        method="POST",
+        payload={"data": text},
+    )
+    assert status == 200, (
+        f"PTY input failed for run {run_id!r}: HTTP {status}: {payload}"
+    )
+
+
+def _post_pty_run(
+    base_url: str,
+    command: str,
+    session_id: str,
+    timeout: int,
+    input_text: str = "",
+    input_after_text: list[str] | None = None,
+    stop_text: list[str] | None = None,
+    stop_patterns: list[str] | None = None,
+) -> tuple[list[dict[str, object]], bool]:
+    payload = json.dumps({"command": command, "rows": 24, "cols": 100}).encode("utf-8")
+    start_req = urllib.request.Request(
+        f"{base_url}/pty/runs",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-Session-ID": session_id,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(start_req, timeout=timeout) as resp:
+        started = json.loads(resp.read().decode("utf-8"))
+    run_id = str(started.get("run_id", ""))
+    stream_url = str(started.get("stream", ""))
+    if stream_url.startswith("/"):
+        stream_url = f"{base_url}{stream_url}"
+    req = urllib.request.Request(
+        stream_url,
+        headers={"X-Session-ID": session_id},
+        method="GET",
+    )
+
+    events: list[dict[str, object]] = []
+    killed_early = False
+    data_lines: list[str] = []
+    input_sent = False
+    input_after_text = input_after_text or []
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        while True:
+            raw_line = resp.readline()
+            if not raw_line:
+                break
+            line = raw_line.decode("utf-8", "replace").strip()
+            if not line:
+                if not data_lines:
+                    continue
+                event = json.loads("\n".join(data_lines))
+                data_lines = []
+            elif line.startswith("data: "):
+                data_lines.append(line[6:])
+                continue
+            else:
+                continue
+            events.append(event)
+            event_type = str(event.get("type", ""))
+            if event_type == "started" and input_text and not input_after_text:
+                _send_pty_input(base_url, session_id, run_id, input_text)
+                input_sent = True
+            if input_text and input_after_text and not input_sent:
+                joined = "\n".join(_collect_visible_lines(events, command))
+                if all(snippet in joined for snippet in input_after_text):
+                    _send_pty_input(base_url, session_id, run_id, input_text)
+                    input_sent = True
+            if event_type in {"exit", "error"}:
+                break
+            if stop_text or stop_patterns:
+                if _is_output_satisfied(events, command, stop_text, stop_patterns):
+                    _post_kill(base_url, session_id, run_id)
+                    _wait_for_run_to_stop(base_url, session_id, run_id)
                     killed_early = True
                     break
     return events, killed_early
@@ -832,6 +1201,9 @@ def container_smoke_test():
             "workspace_max_file_mb: 5\n"
             "workspace_max_files: 100\n"
             "workspace_inactivity_ttl_hours: 1\n"
+            "interactive_pty_enabled: true\n"
+            "interactive_pty_max_runtime_seconds: 120\n"
+            "interactive_pty_max_concurrent_per_session: 4\n"
         )
 
         runtime_container_name = f"darklab_shell-test-runtime-{uuid.uuid4().hex[:12]}"
@@ -874,19 +1246,28 @@ def container_smoke_test():
 
         try:
             try:
-                print(f"[container-smoke-test] building image: {image_tag}", flush=True)
-                _run_streaming(
-                    [
-                        "docker",
-                        "build",
-                        "-t",
-                        image_tag,
-                        "-f",
-                        str(dockerfile_path),
-                        str(build_context),
-                    ],
-                    timeout=DEFAULT_BUILD_TIMEOUT,
-                )
+                force_build = _force_smoke_image_build()
+                cache_key = _smoke_image_cache_key(build_context, dockerfile_path)
+                cache_current, cache_reason = _smoke_image_cache_status(image_tag, cache_key)
+                if cache_current and not force_build:
+                    print(f"[container-smoke-test] using cached image: {image_tag}", flush=True)
+                else:
+                    reason = "forced rebuild" if force_build else cache_reason
+                    print(f"[container-smoke-test] building image: {image_tag} ({reason})", flush=True)
+                    _run_streaming(
+                        [
+                            "docker",
+                            "build",
+                            "-t",
+                            image_tag,
+                            "--label",
+                            f"{SMOKE_IMAGE_CACHE_KEY_LABEL}={cache_key}",
+                            "-f",
+                            str(dockerfile_path),
+                            str(build_context),
+                        ],
+                        timeout=DEFAULT_BUILD_TIMEOUT,
+                    )
                 print(f"[container-smoke-test] building runtime image: {runtime_image_tag}", flush=True)
                 _run(["docker", "create", "--name", runtime_container_name, image_tag], timeout=30)
                 _run(
@@ -910,7 +1291,7 @@ def container_smoke_test():
                 _wait_for_health(base_url)
                 print(f"[container-smoke-test] container ready: {base_url}", flush=True)
             except AssertionError as exc:
-                pytest.skip(f"container setup failed — {exc}")
+                pytest.exit(f"container setup failed — {exc}", returncode=1)
             yield base_url
         finally:
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
@@ -931,13 +1312,23 @@ def container_smoke_test_session_id() -> str:
 _SELECTED_COMMANDS = _selected_commands_from_env()
 WORKSPACE_SMOKE_CASES = _load_workspace_cases()
 _WORKSPACE_SMOKE_COMMANDS = {str(case["command"]) for case in WORKSPACE_SMOKE_CASES}
+INTERACTIVE_SMOKE_CASES = _load_interactive_cases()
+_INTERACTIVE_SMOKE_COMMANDS = {str(case["command"]) for case in INTERACTIVE_SMOKE_CASES}
 SMOKE_TEST_CASES = _load_cases()
 if _SELECTED_COMMANDS:
     SMOKE_TEST_CASES = [
         case for case in SMOKE_TEST_CASES
         if str(case["command"]) in set(_SELECTED_COMMANDS)
     ]
-    if not SMOKE_TEST_CASES and not any(command in _WORKSPACE_SMOKE_COMMANDS for command in _SELECTED_COMMANDS):
+    INTERACTIVE_SMOKE_CASES = [
+        case for case in INTERACTIVE_SMOKE_CASES
+        if str(case["command"]) in set(_SELECTED_COMMANDS)
+    ]
+    if (
+        not SMOKE_TEST_CASES
+        and not any(command in _WORKSPACE_SMOKE_COMMANDS for command in _SELECTED_COMMANDS)
+        and not any(command in _INTERACTIVE_SMOKE_COMMANDS for command in _SELECTED_COMMANDS)
+    ):
         raise RuntimeError(
             "RUN_CONTAINER_SMOKE_TEST_COMMANDS did not match any smoke-test commands: "
             + ", ".join(_SELECTED_COMMANDS)
@@ -990,6 +1381,14 @@ def test_container_smoke_test_expectations_cover_all_user_facing_commands(contai
     missing = _missing_expectation_commands()
     assert not missing, (
         "Container smoke test expectations are missing records for these user-facing commands:\n"
+        + "\n".join(f"- {command}" for command in missing)
+    )
+
+
+def test_container_smoke_test_interactive_expectations_cover_all_pty_examples(container_smoke_test):
+    missing = _missing_interactive_expectation_commands()
+    assert not missing, (
+        "Interactive container smoke test expectations are missing records for these commands:\n"
         + "\n".join(f"- {command}" for command in missing)
     )
 
@@ -1157,6 +1556,62 @@ def _assert_workspace_smoke_case_matches(
             _workspace_delete_file(base_url, session_id, path)
 
 
+def _assert_interactive_smoke_case_matches(
+    base_url: str,
+    session_id: str,
+    case: Mapping[str, object],
+) -> None:
+    command = str(case["command"])
+    expected_exit_code = _case_exit_code(case)
+    expected_text = _case_string_list(case, "expected_text")
+    expected_patterns = _case_string_list(case, "expected_patterns")
+    stop_text = _case_string_list(case, "stop_text") or expected_text or None
+    stop_patterns = _case_string_list(case, "stop_patterns") or expected_patterns or None
+    input_text = str(case.get("input") or "")
+    input_after_text = _case_string_list(case, "input_after_text") or None
+
+    events, killed_early = _post_pty_run(
+        base_url,
+        command,
+        session_id,
+        timeout=DEFAULT_RUN_TIMEOUT,
+        input_text=input_text,
+        input_after_text=input_after_text,
+        stop_text=stop_text,
+        stop_patterns=stop_patterns,
+    )
+
+    event_types = [str(event.get("type", "")) for event in events]
+    texts = [str(event.get("text", "")) for event in events if isinstance(event.get("text"), str)]
+
+    assert "started" in event_types, f"{command!r} never emitted a started event; events={events[:5]}"
+    assert "error" not in event_types, f"{command!r} emitted an error event; events={events[:10]}"
+    assert "Command is not installed" not in "\n".join(texts), (
+        f"{command!r} referenced a missing runtime command; events={events[:10]}"
+    )
+
+    if not killed_early:
+        exit_events = [event for event in events if event.get("type") == "exit"]
+        assert exit_events, f"{command!r} never emitted an exit event; events={events[:5]}"
+        assert len(exit_events) == 1, f"{command!r} emitted multiple exit events; events={events[:5]}"
+        if expected_exit_code is not None:
+            assert exit_events[0].get("code") == expected_exit_code, (
+                f"{command!r} exited with the wrong status; events={events[:10]}"
+            )
+
+    visible_lines = _collect_visible_lines(events, command)
+    if bool(case.get("no_output")):
+        assert not visible_lines, f"{command!r} should not emit visible output; events={events[:10]}"
+        return
+
+    if expected_text:
+        _assert_contains(visible_lines, expected_text, command)
+    if expected_patterns:
+        _assert_patterns("\n".join(visible_lines), expected_patterns, command)
+
+    assert visible_lines, f"{command!r} produced no visible output; events={events[:10]}"
+
+
 @pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))
 def test_container_smoke_test_command_matches_expected_output(
     container_smoke_test,
@@ -1219,6 +1674,38 @@ def test_container_smoke_test_workspace_file_flags(
             print(
                 "[container-smoke-test] retrying workspace case after failure: "
                 f"{case['name']}; attempt={attempt}/{max_attempts}; error={exc}",
+                flush=True,
+            )
+            time.sleep(SMOKE_COMMAND_RETRY_DELAY_SECONDS)
+            continue
+        return
+
+
+@pytest.mark.parametrize("case", INTERACTIVE_SMOKE_CASES, ids=lambda case: str(case["command"]))
+def test_container_smoke_test_interactive_pty_commands(
+    container_smoke_test,
+    case,
+):
+    command = str(case["command"])
+    if _SELECTED_COMMANDS and command not in set(_SELECTED_COMMANDS):
+        pytest.skip("interactive smoke case was not selected by RUN_CONTAINER_SMOKE_TEST_COMMANDS")
+
+    max_attempts = max(1, SMOKE_COMMAND_RETRIES + 1)
+    for attempt in range(1, max_attempts + 1):
+        session_id = _new_smoke_session_id()
+        print(
+            f"[container-smoke-test] running interactive PTY case: {command}"
+            + (f" (attempt {attempt}/{max_attempts})" if max_attempts > 1 else ""),
+            flush=True,
+        )
+        try:
+            _assert_interactive_smoke_case_matches(container_smoke_test, session_id, case)
+        except Exception as exc:
+            if attempt >= max_attempts:
+                raise
+            print(
+                "[container-smoke-test] retrying interactive PTY case after failure: "
+                f"{command}; attempt={attempt}/{max_attempts}; error={exc}",
                 flush=True,
             )
             time.sleep(SMOKE_COMMAND_RETRY_DELAY_SECONDS)

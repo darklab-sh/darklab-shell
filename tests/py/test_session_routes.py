@@ -5,13 +5,12 @@ import json
 import sqlite3
 
 import app as shell_app
-from database import DB_PATH
-import workspace
+from core.database import DB_PATH
+import services.workspace.files as workspace
 
 
 def get_client():
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     return shell_app.app.test_client()
 
 
@@ -127,7 +126,7 @@ class TestSessionMigrate:
     def _count_rows(self, table, session_id):
         with sqlite3.connect(DB_PATH) as conn:
             return conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE session_id = ?",  # nosec B608
+                f"SELECT COUNT(*) FROM {table} WHERE session_id = ?",
                 (session_id,),
             ).fetchone()[0]
 
@@ -175,14 +174,67 @@ class TestSessionMigrate:
             )
             conn.commit()
 
-    def _seed_recent_domains(self, session_id, rows):
+    def _seed_recent_values(self, session_id, rows):
         with sqlite3.connect(DB_PATH) as conn:
-            for domain, last_used, use_count in rows:
+            for kind, value, last_used, use_count in rows:
                 conn.execute(
-                    "INSERT OR REPLACE INTO recent_domains (session_id, domain, last_used, use_count) "
-                    "VALUES (?, ?, ?, ?)",
-                    (session_id, domain, last_used, use_count),
+                    "INSERT OR REPLACE INTO recent_values (session_id, kind, value, last_used, use_count) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (session_id, kind, value, last_used, use_count),
                 )
+            conn.commit()
+
+    def _seed_project_workspace_records(self, session_id, *, project_id="prj_migrate_test", slug="case"):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO projects "
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, 'Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
+                (project_id, session_id, slug),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', 'sig_migrate_test', "
+                "datetime('now'), datetime('now'), 1, datetime('now'))",
+                ("ent_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now'))",
+                ("pl_migrate_test", project_id, "ent_migrate_test"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, created) "
+                "VALUES (?, ?, ?, ?, datetime('now'))",
+                ("rfa_migrate_test", session_id, "run_migrate_test", "findings.txt"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO findings "
+                "(id, session_id, run_id, target_id, entity_id, scope, raw_line, created) "
+                "VALUES (?, ?, ?, ?, ?, 'finding', 'open port 443', datetime('now'))",
+                ("fnd_migrate_test", session_id, "run_migrate_test", "ent_migrate_test", "ent_migrate_test"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
+                ("lbl_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run', 'run_migrate_test', 'note', datetime('now'), datetime('now'))",
+                ("note_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO evidence_packages "
+                "(id, session_id, project_id, name, manifest, created, updated) "
+                "VALUES (?, ?, ?, 'Package', '{}', datetime('now'), datetime('now'))",
+                ("pkg_migrate_test", session_id, project_id),
+            )
             conn.commit()
 
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
@@ -475,16 +527,82 @@ class TestSessionMigrate:
         assert self._count_rows("user_workflows", from_id) == 0
         assert self._count_rows("user_workflows", to_id) == 1
 
-    def test_migrates_recent_domains_and_merges_destination(self):
+    def test_migrates_project_workspace_records(self):
+        client = get_client()
+        from_id = "migrate-projects-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        self._seed_project_workspace_records(from_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO projects "
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', "
+                "datetime('now'), datetime('now'))",
+                (to_id,),
+            )
+            conn.commit()
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            migrated_slug = conn.execute(
+                "SELECT slug FROM projects WHERE session_id = ? AND id = 'prj_migrate_test'",
+                (to_id,),
+            ).fetchone()[0]
+            project_target = conn.execute(
+                "SELECT e.session_id, e.canonical_value "
+                "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+                "WHERE l.id = 'pl_migrate_test'",
+            ).fetchone()
+            run_artifact = conn.execute(
+                "SELECT session_id, workspace_path FROM run_file_artifacts "
+                "WHERE id = 'rfa_migrate_test'",
+            ).fetchone()
+            finding_occurrence = conn.execute(
+                "SELECT f.session_id, fo.finding_id, f.entity_id "
+                "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+                "WHERE fo.finding_id = 'fnd_migrate_test'",
+            ).fetchone()
+            evidence_package = conn.execute(
+                "SELECT session_id, project_id FROM evidence_packages "
+                "WHERE id = 'pkg_migrate_test'",
+            ).fetchone()
+        assert resp.status_code == 200
+        assert data["migrated_projects"] == 1
+        assert data["migrated_run_file_artifacts"] == 1
+        assert data["migrated_findings"] == 1
+        assert data["migrated_finding_targets"] == 0
+        assert data["migrated_entity_labels"] == 1
+        assert data["migrated_entity_notes"] == 1
+        assert data["migrated_evidence_packages"] == 1
+        assert self._count_rows("projects", from_id) == 0
+        assert self._count_rows("projects", to_id) == 2
+        assert self._count_rows("run_file_artifacts", from_id) == 0
+        assert self._count_rows("findings", from_id) == 0
+        assert self._count_rows("entity_labels", from_id) == 0
+        assert self._count_rows("entity_notes", from_id) == 0
+        assert migrated_slug == "case-2"
+        assert tuple(project_target) == (to_id, "darklab.sh")
+        assert tuple(run_artifact) == (to_id, "findings.txt")
+        assert tuple(finding_occurrence) == (to_id, "fnd_migrate_test", "ent_migrate_test")
+        assert tuple(evidence_package) == (to_id, "prj_migrate_test")
+
+    def test_migrates_recent_values_and_merges_destination(self):
         client = get_client()
         from_id = "migrate-recents-from-" + __import__("uuid").uuid4().hex[:8]
         to_id = str(__import__("uuid").uuid4())
-        self._seed_recent_domains(from_id, [
-            ("alpha.example.com", "2026-05-01 10:00:00.000001", 2),
-            ("shared.example.com", "2026-05-01 11:00:00.000001", 3),
+        self._seed_recent_values(from_id, [
+            ("domain", "alpha.example.com", "2026-05-01 10:00:00.000001", 2),
+            ("domain", "shared.example.com", "2026-05-01 11:00:00.000001", 3),
+            ("ip", "192.0.2.10", "2026-05-01 12:00:00.000001", 1),
         ])
-        self._seed_recent_domains(to_id, [
-            ("shared.example.com", "2026-05-01 09:00:00.000001", 4),
+        self._seed_recent_values(to_id, [
+            ("domain", "shared.example.com", "2026-05-01 09:00:00.000001", 4),
         ])
 
         resp = client.post(
@@ -496,20 +614,21 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             source_count = conn.execute(
-                "SELECT COUNT(*) FROM recent_domains WHERE session_id = ?",
+                "SELECT COUNT(*) FROM recent_values WHERE session_id = ?",
                 (from_id,),
             ).fetchone()[0]
             rows = conn.execute(
-                "SELECT domain, last_used, use_count FROM recent_domains WHERE session_id = ?",
+                "SELECT kind, value, last_used, use_count FROM recent_values WHERE session_id = ?",
                 (to_id,),
             ).fetchall()
-        by_domain = {row[0]: {"last_used": row[1], "use_count": row[2]} for row in rows}
+        by_value = {(row[0], row[1]): {"last_used": row[2], "use_count": row[3]} for row in rows}
         assert resp.status_code == 200
-        assert data["migrated_recent_domains"] == 2
+        assert data["migrated_recent_values"] == 3
         assert source_count == 0
-        assert by_domain["alpha.example.com"]["use_count"] == 2
-        assert by_domain["shared.example.com"]["use_count"] == 7
-        assert by_domain["shared.example.com"]["last_used"] == "2026-05-01 11:00:00.000001"
+        assert by_value[("domain", "alpha.example.com")]["use_count"] == 2
+        assert by_value[("domain", "shared.example.com")]["use_count"] == 7
+        assert by_value[("domain", "shared.example.com")]["last_used"] == "2026-05-01 11:00:00.000001"
+        assert by_value[("ip", "192.0.2.10")]["use_count"] == 1
 
     def test_migrate_keeps_existing_destination_session_preferences(self):
         client = get_client()
@@ -532,6 +651,40 @@ class TestSessionMigrate:
                 (to_id,),
             ).fetchone()
         assert json.loads(dst[0]) == dst_prefs
+
+    def test_migrate_merges_active_project_preference_into_existing_destination_preferences(self):
+        client = get_client()
+        from_id = "migrate-active-project-src-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        project_id = "prj_active_pref_migrate"
+        self._seed_project_workspace_records(from_id, project_id=project_id, slug="active-pref")
+        self._seed_preferences(from_id, {
+            "pref_active_project_id": project_id,
+            "pref_theme_name": "theme_light_blue",
+        })
+        self._seed_preferences(to_id, {
+            "pref_theme_name": "darklab_obsidian.yaml",
+            "pref_timestamps": "off",
+        })
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            dst = conn.execute(
+                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                (to_id,),
+            ).fetchone()
+        preferences = json.loads(dst[0])
+        assert resp.status_code == 200
+        assert data["migrated_active_project_preference"] == 1
+        assert preferences["pref_active_project_id"] == project_id
+        assert preferences["pref_theme_name"] == "darklab_obsidian.yaml"
+        assert preferences["pref_timestamps"] == "off"
 
     def test_migrate_workspace_returns_zero_without_source_workspace(self, tmp_path, monkeypatch):
         client = get_client()
@@ -614,6 +767,71 @@ class TestSessionMigrate:
         assert workspace.read_workspace_text_file(to_id, "shared.txt", cfg) == "dest\n"
         assert workspace.read_workspace_text_file(to_id, "from-only.txt", cfg) == "move\n"
         assert workspace.read_workspace_text_file(from_id, "shared.txt", cfg) == "source\n"
+
+    def test_migrate_workspace_file_metadata_only_for_moved_files(self, tmp_path, monkeypatch):
+        client = get_client()
+        cfg = self._enable_workspace(monkeypatch, tmp_path)
+        from_id = "migrate-ws-meta-src-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
+        workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
+        workspace.write_workspace_text_file(to_id, "shared.txt", "dest\n", cfg)
+        with sqlite3.connect(DB_PATH) as conn:
+            for path, label in (("shared.txt", "source-shared"), ("from-only.txt", "source-only")):
+                conn.execute(
+                    "INSERT OR REPLACE INTO entity_labels "
+                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'))",
+                    ("lbl_" + __import__("uuid").uuid4().hex, from_id, path, label),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO entity_notes "
+                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'), datetime('now'))",
+                    ("note_" + __import__("uuid").uuid4().hex, from_id, path, f"note {label}"),
+                )
+            conn.commit()
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            moved_label = conn.execute(
+                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
+                (to_id,),
+            ).fetchone()
+            skipped_label = conn.execute(
+                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
+                (from_id,),
+            ).fetchone()
+            drifted_label = conn.execute(
+                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
+                (to_id,),
+            ).fetchone()
+            moved_note = conn.execute(
+                "SELECT body FROM entity_notes WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
+                (to_id,),
+            ).fetchone()
+
+        assert resp.status_code == 200
+        assert data["migrated_workspace_files"] == 1
+        assert data["skipped_workspace_files"] == 1
+        assert data["migrated_entity_labels"] == 1
+        assert data["migrated_entity_notes"] == 1
+        assert data["skipped_workspace_file_labels"] == 1
+        assert data["skipped_workspace_file_notes"] == 1
+        assert tuple(moved_label) == ("source-only",)
+        assert tuple(moved_note) == ("note source-only",)
+        assert tuple(skipped_label) == ("source-shared",)
+        assert drifted_label is None
 
 
 # ── /session/workflows ────────────────────────────────────────────────────────
@@ -704,49 +922,64 @@ class TestSessionWorkflows:
         ).data)["items"] == []
 
 
-# ── /session/recent-domains ───────────────────────────────────────────────────
+# ── /session/recent-values ───────────────────────────────────────────────────
 
-class TestSessionRecentDomains:
-    def _domains(self, session_id):
+class TestSessionRecentValues:
+    def _values(self, session_id, kind):
         with sqlite3.connect(DB_PATH) as conn:
             rows = conn.execute(
-                "SELECT domain FROM recent_domains WHERE session_id = ? ORDER BY last_used DESC, domain ASC",
-                (session_id,),
+                "SELECT value FROM recent_values "
+                "WHERE session_id = ? AND kind = ? "
+                "ORDER BY last_used DESC, value ASC",
+                (session_id, kind),
             ).fetchall()
         return [row[0] for row in rows]
 
     def test_get_returns_empty_list_for_new_session(self):
         client = get_client()
         session_id = "recent-empty-" + __import__("uuid").uuid4().hex[:8]
-        resp = client.get("/session/recent-domains", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/recent-values", headers={"X-Session-ID": session_id})
 
         assert resp.status_code == 200
-        assert json.loads(resp.data)["domains"] == []
+        assert json.loads(resp.data)["values"] == {
+            "domain": [],
+            "ip": [],
+            "port_set": [],
+            "url": [],
+        }
 
-    def test_post_normalizes_filters_and_caps_domains(self):
+    def test_post_normalizes_filters_and_caps_values_per_kind(self):
         client = get_client()
         session_id = "recent-save-" + __import__("uuid").uuid4().hex[:8]
         valid = [f"d{i}.example.com" for i in range(12)]
         resp = client.post(
-            "/session/recent-domains",
+            "/session/recent-values",
             json={
-                "domains": [
-                    "Alpha.Example.com.",
-                    "https://ignored.example",
-                    "127.0.0.1",
-                    "user@example.com",
-                    "with/path.example",
-                    "Alpha.Example.com",
-                    *valid,
-                ],
+                "values": [
+                    {"kind": "domain", "value": "Alpha.Example.com."},
+                    {"kind": "domain", "value": "https://ignored.example"},
+                    {"kind": "domain", "value": "127.0.0.1"},
+                    {"kind": "domain", "value": "user@example.com"},
+                    {"kind": "domain", "value": "with/path.example"},
+                    {"kind": "domain", "value": "Alpha.Example.com"},
+                    {"kind": "ip", "value": "192.0.2.10"},
+                    {"kind": "ip", "value": "2001:db8::1"},
+                    {"kind": "ip", "value": "999.0.0.1"},
+                    {"kind": "url", "value": "HTTPS://Example.com/login?token=secret#frag"},
+                    {"kind": "url", "value": "ftp://ignored.example/file"},
+                    {"kind": "url", "value": "https://user:pass@example.com"},
+                    {"kind": "port_set", "value": "80, 443, 8000 - 8080"},
+                    {"kind": "port_set", "value": "65536"},
+                    *[{"kind": "domain", "value": value} for value in valid],
+                ]
             },
             headers={"X-Session-ID": session_id},
         )
         data = json.loads(resp.data)
 
         assert resp.status_code == 200
-        assert data["saved"] == 10
-        assert data["domains"] == [
+        assert data["saved"] == 14
+        assert data["values"]["domain"] == [
             "alpha.example.com",
             "d0.example.com",
             "d1.example.com",
@@ -758,7 +991,10 @@ class TestSessionRecentDomains:
             "d7.example.com",
             "d8.example.com",
         ]
-        assert self._domains(session_id) == data["domains"]
+        assert data["values"]["ip"] == ["192.0.2.10", "2001:db8::1"]
+        assert data["values"]["url"] == ["https://example.com/login"]
+        assert data["values"]["port_set"] == ["80,443,8000-8080"]
+        assert self._values(session_id, "domain") == data["values"]["domain"]
 
     def test_post_is_session_scoped(self):
         client = get_client()
@@ -766,51 +1002,59 @@ class TestSessionRecentDomains:
         session_b = "recent-scope-b-" + __import__("uuid").uuid4().hex[:8]
 
         client.post(
-            "/session/recent-domains",
-            json={"domains": ["alpha.example.com"]},
+            "/session/recent-values",
+            json={"values": [{"kind": "domain", "value": "alpha.example.com"}]},
             headers={"X-Session-ID": session_a},
         )
-        resp = client.get("/session/recent-domains", headers={"X-Session-ID": session_b})
+        resp = client.get("/session/recent-values", headers={"X-Session-ID": session_b})
 
-        assert json.loads(resp.data)["domains"] == []
+        assert json.loads(resp.data)["values"]["domain"] == []
 
-    def test_post_updates_existing_domain_count_and_recency(self):
+    def test_post_updates_existing_value_count_and_recency(self):
         client = get_client()
         session_id = "recent-upsert-" + __import__("uuid").uuid4().hex[:8]
 
         client.post(
-            "/session/recent-domains",
-            json={"domains": ["alpha.example.com"]},
+            "/session/recent-values",
+            json={"values": [{"kind": "domain", "value": "alpha.example.com"}]},
             headers={"X-Session-ID": session_id},
         )
         client.post(
-            "/session/recent-domains",
-            json={"domains": ["beta.example.org"]},
+            "/session/recent-values",
+            json={"values": [{"kind": "domain", "value": "beta.example.org"}]},
             headers={"X-Session-ID": session_id},
         )
         client.post(
-            "/session/recent-domains",
-            json={"domains": ["alpha.example.com"]},
+            "/session/recent-values",
+            json={"values": [{"kind": "domain", "value": "alpha.example.com"}]},
             headers={"X-Session-ID": session_id},
         )
 
         with sqlite3.connect(DB_PATH) as conn:
             count = conn.execute(
-                "SELECT use_count FROM recent_domains WHERE session_id = ? AND domain = ?",
-                (session_id, "alpha.example.com"),
+                "SELECT use_count FROM recent_values WHERE session_id = ? AND kind = ? AND value = ?",
+                (session_id, "domain", "alpha.example.com"),
             ).fetchone()[0]
-        resp = client.get("/session/recent-domains", headers={"X-Session-ID": session_id})
-        assert json.loads(resp.data)["domains"][0] == "alpha.example.com"
+        resp = client.get("/session/recent-values?kind=domain", headers={"X-Session-ID": session_id})
+        assert json.loads(resp.data)["values"]["domain"][0] == "alpha.example.com"
         assert count == 2
 
     def test_post_rejects_non_list_payload(self):
         client = get_client()
         session_id = "recent-invalid-" + __import__("uuid").uuid4().hex[:8]
         resp = client.post(
-            "/session/recent-domains",
-            json={"domains": "alpha.example.com"},
+            "/session/recent-values",
+            json={"values": "alpha.example.com"},
             headers={"X-Session-ID": session_id},
         )
+
+        assert resp.status_code == 400
+
+    def test_get_rejects_unknown_kind(self):
+        client = get_client()
+        session_id = "recent-invalid-kind-" + __import__("uuid").uuid4().hex[:8]
+
+        resp = client.get("/session/recent-values?kind=cve", headers={"X-Session-ID": session_id})
 
         assert resp.status_code == 400
 
@@ -876,18 +1120,21 @@ class TestSessionRunCount:
 
         assert json.loads(resp.data)["workflow_count"] == 1
 
-    def test_returns_recent_domain_count(self):
+    def test_returns_recent_value_count(self):
         client = get_client()
         session_id = "run-count-recents-" + __import__("uuid").uuid4().hex[:8]
         client.post(
-            "/session/recent-domains",
+            "/session/recent-values",
             headers={"X-Session-ID": session_id},
-            json={"domains": ["alpha.example.com", "beta.example.org"]},
+            json={"values": [
+                {"kind": "domain", "value": "alpha.example.com"},
+                {"kind": "ip", "value": "192.0.2.10"},
+            ]},
         )
 
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
 
-        assert json.loads(resp.data)["recent_domain_count"] == 2
+        assert json.loads(resp.data)["recent_value_count"] == 2
 
 
 # ── /session/starred ──────────────────────────────────────────────────────────
@@ -1148,8 +1395,13 @@ class TestSessionPreferences:
             "preferences": {
                 "pref_theme_name": "theme_light_blue",
                 "pref_timestamps": "clock",
+                "pref_project_auto_link_external_runs": "off",
+                "pref_project_auto_link_run_entities": "off",
                 "pref_run_notify": "on",
                 "pref_prompt_username": "operator_1",
+                "pref_compare_view_mode": "unified",
+                "pref_compare_context": "10",
+                "pref_options_modal_last_tab": "secrets",
             }
         }
         save_resp = client.post("/session/preferences", json=payload, headers={"X-Session-ID": session_id})
@@ -1169,6 +1421,9 @@ class TestSessionPreferences:
                 "preferences": {
                     "pref_theme_name": "theme_light_blue",
                     "pref_prompt_username": "../bad",
+                    "pref_compare_view_mode": "split",
+                    "pref_compare_context": "0",
+                    "pref_options_modal_last_tab": "advanced",
                     "pref_unknown": "x",
                 }
             },

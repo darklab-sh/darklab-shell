@@ -73,7 +73,7 @@ while (($#)); do
 done
 
 if ((has_config == 0)); then
-  playwright_args=(--config config/playwright.parallel.config.js "${playwright_args[@]}")
+  playwright_args=(--config .tooling/playwright.parallel.config.js "${playwright_args[@]}")
 fi
 
 if ((webserver_logs)); then
@@ -97,6 +97,10 @@ fi
 if ((serial_mode)); then
   export PLAYWRIGHT_PROJECT_COUNT=1
 fi
+
+# Playwright's optional TS/ESM transform loader uses Node's deprecated
+# module.register() API under Node 26. The e2e suite is plain JS, so skip it.
+export PW_DISABLE_TS_ESM="${PW_DISABLE_TS_ESM:-1}"
 
 if [[ -n "$web_server_timeout" ]]; then
   if [[ ! "$web_server_timeout" =~ ^[0-9]+$ || "$web_server_timeout" -lt 1000 ]]; then

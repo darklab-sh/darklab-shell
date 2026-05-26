@@ -8,8 +8,10 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from helpers import get_client_ip, get_log_session_id, get_session_id
-from workspace import (
+from core.database import DB_BACKEND, db_connect
+from core.database_backend import dialect_for_backend
+from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceDisabled,
     WorkspaceBinaryFile,
@@ -35,6 +37,14 @@ log = logging.getLogger("shell")
 workspace_bp = Blueprint("workspace", __name__)
 
 
+def _workspace_project_names_expr() -> str:
+    return dialect_for_backend(DB_BACKEND).string_agg_distinct("p.name")
+
+
+def _workspace_label_order_sql() -> str:
+    return dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC"
+
+
 def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:
     session_id = get_session_id()
     if not session_id:
@@ -45,11 +55,15 @@ def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:
 def _workspace_payload(session_id: str) -> dict[str, Any]:
     settings = workspace_settings()
     usage = workspace_usage(session_id)
+    files = list_workspace_files(session_id)
+    metadata_by_path = _workspace_file_metadata_by_path(session_id, [item.get("path") for item in files])
+    for item in files:
+        item.update(metadata_by_path.get(str(item.get("path") or ""), {}))
     return {
         "enabled": True,
         "backend": settings.backend,
         "directories": list_workspace_directories(session_id),
-        "files": list_workspace_files(session_id),
+        "files": files,
         "usage": {
             "bytes_used": usage.bytes_used,
             "file_count": usage.file_count,
@@ -60,6 +74,170 @@ def _workspace_payload(session_id: str) -> dict[str, Any]:
             "max_files": settings.max_files,
         },
     }
+
+
+def _workspace_file_metadata_by_path(session_id: str, paths: list[Any]) -> dict[str, dict[str, Any]]:
+    clean_paths = sorted({str(path) for path in paths if path})
+    if not clean_paths:
+        return {}
+    placeholders = ",".join("?" for _ in clean_paths)
+    project_names_expr = _workspace_project_names_expr()
+    label_order_sql = _workspace_label_order_sql()
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "  # nosec
+            "COUNT(DISTINCT rfa.run_id) AS run_count, MAX(r.started) AS last_seen, "
+            f"{project_names_expr} AS project_names "
+            "FROM run_file_artifacts rfa "
+            "LEFT JOIN runs r ON r.id = rfa.run_id AND r.session_id = rfa.session_id "
+            "LEFT JOIN project_links pl ON pl.entity_type = 'run' AND pl.entity_id = rfa.run_id "
+            "LEFT JOIN projects p ON p.id = pl.project_id AND p.session_id = rfa.session_id "
+            "WHERE rfa.session_id = ? "
+            f"AND rfa.workspace_path IN ({placeholders}) "
+            "GROUP BY rfa.workspace_path",
+            [session_id, *clean_paths],
+        ).fetchall()
+        label_rows = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
+            "FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "
+            f"AND entity_id IN ({placeholders}) "
+            f"ORDER BY {label_order_sql}",
+            [session_id, *clean_paths],
+        ).fetchall()
+        note_rows = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, body, created, updated "  # nosec
+            "FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "
+            f"AND entity_id IN ({placeholders})",
+            [session_id, *clean_paths],
+        ).fetchall()
+    metadata = {}
+    for row in rows:
+        project_names = [
+            name for name in str(row["project_names"] or "").split(",")
+            if name
+        ]
+        metadata[str(row["workspace_path"])] = {
+            "artifact_count": int(row["artifact_count"] or 0),
+            "artifact_run_count": int(row["run_count"] or 0),
+            "artifact_last_seen": row["last_seen"] or "",
+            "project_names": project_names,
+        }
+    for row in label_rows:
+        path = str(row["entity_id"])
+        item = metadata.setdefault(path, {})
+        item.setdefault("labels", []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "label": row["label"],
+            "source": row["source"],
+            "created": row["created"],
+        })
+    for row in note_rows:
+        path = str(row["entity_id"])
+        item = metadata.setdefault(path, {})
+        item["note"] = {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "body": row["body"],
+            "created": row["created"],
+            "updated": row["updated"],
+        }
+    return metadata
+
+
+def _workspace_normalize_path(path: str) -> str:
+    return "/".join(part for part in str(path or "").split("/") if part)
+
+
+def _workspace_file_metadata_paths(session_id: str, path: str) -> list[str]:
+    normalized = _workspace_normalize_path(path)
+    if not normalized:
+        return []
+    files = list_workspace_files(session_id)
+    prefix = f"{normalized}/"
+    matches = [
+        str(item.get("path") or "")
+        for item in files
+        if str(item.get("path") or "") == normalized
+        or str(item.get("path") or "").startswith(prefix)
+    ]
+    return sorted({item for item in matches if item})
+
+
+def _delete_workspace_file_metadata(session_id: str, paths: list[str]) -> None:
+    clean_paths = sorted({str(path) for path in paths if path})
+    if not clean_paths:
+        return
+    placeholders = ",".join("?" for _ in clean_paths)
+    with db_connect() as conn:
+        conn.execute(
+            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
+            [session_id, *clean_paths],
+        )
+        conn.execute(
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
+            [session_id, *clean_paths],
+        )
+        conn.commit()
+
+
+def _move_workspace_file_metadata(session_id: str, path_map: dict[str, str]) -> None:
+    clean_map = {
+        str(source): str(destination)
+        for source, destination in path_map.items()
+        if source and destination and str(source) != str(destination)
+    }
+    if not clean_map:
+        return
+    destinations = sorted(set(clean_map.values()))
+    placeholders = ",".join("?" for _ in destinations)
+    with db_connect() as conn:
+        conn.execute(
+            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
+            [session_id, *destinations],
+        )
+        conn.execute(
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
+            [session_id, *destinations],
+        )
+        for source, destination in clean_map.items():
+            conn.execute(
+                "UPDATE entity_labels SET entity_id = ? "
+                "WHERE session_id = ? AND entity_type = 'workspace_file' AND entity_id = ?",
+                (destination, session_id, source),
+            )
+            conn.execute(
+                "UPDATE entity_notes SET entity_id = ? "
+                "WHERE session_id = ? AND entity_type = 'workspace_file' AND entity_id = ?",
+                (destination, session_id, source),
+            )
+        conn.commit()
+
+
+def _workspace_moved_metadata_path_map(source: str, destination: str, paths: list[str]) -> dict[str, str]:
+    source_normalized = _workspace_normalize_path(source)
+    destination_normalized = _workspace_normalize_path(destination)
+    if not source_normalized or not destination_normalized:
+        return {}
+    path_map = {}
+    for old_path in paths:
+        old_normalized = _workspace_normalize_path(old_path)
+        if old_normalized == source_normalized:
+            path_map[old_normalized] = destination_normalized
+            continue
+        prefix = f"{source_normalized}/"
+        if old_normalized.startswith(prefix):
+            suffix = old_normalized[len(prefix):]
+            path_map[old_normalized] = f"{destination_normalized}/{suffix}"
+    return path_map
 
 
 def _workspace_error_response(exc: Exception) -> tuple[Response, int]:
@@ -148,7 +326,10 @@ def workspace_files_read():
     try:
         text = read_workspace_text_file(str(session_id), path)
         info = workspace_path_info(str(session_id), path)
-        return jsonify({"path": path, "text": text, "size": info.get("size")})
+        normalized_path = str(info.get("path") or path)
+        payload = {"path": normalized_path, "text": text, "size": info.get("size")}
+        payload.update(_workspace_file_metadata_by_path(str(session_id), [normalized_path]).get(normalized_path, {}))
+        return jsonify(payload)
     except Exception as exc:
         return _workspace_error_response(exc)
 
@@ -172,7 +353,9 @@ def workspace_files_delete():
         return error
     path = _path_from_request()
     try:
+        metadata_paths = _workspace_file_metadata_paths(str(session_id), path)
         deleted = delete_workspace_path(str(session_id), path)
+        _delete_workspace_file_metadata(str(session_id), metadata_paths)
         log.info("WORKSPACE_FILE_DELETE", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
@@ -204,7 +387,12 @@ def workspace_files_move():
     source = str(data.get("source") or "").strip()
     destination = str(data.get("destination") or "").strip()
     try:
+        metadata_paths = _workspace_file_metadata_paths(str(session_id), source)
         moved = move_workspace_path(str(session_id), source, destination)
+        _move_workspace_file_metadata(
+            str(session_id),
+            _workspace_moved_metadata_path_map(moved.source, moved.destination, metadata_paths),
+        )
         log.info("WORKSPACE_FILE_MOVE", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),

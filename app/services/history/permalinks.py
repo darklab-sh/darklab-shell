@@ -1,0 +1,354 @@
+"""
+Permalink page rendering — styled HTML pages for run history and tab snapshots.
+"""
+
+import base64
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from flask import Response, render_template
+
+from config import (
+    CFG,
+    DARK_THEME,
+    THEME_REGISTRY,
+    get_theme_entry,
+    theme_runtime_css_vars,
+)
+from core.helpers import FONT_FILES, current_theme_name
+from services.runs.output_model import LineRole, line_event_from_legacy, to_legacy_entry
+
+_FONT_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
+
+
+def _font_face_css(*, embed: bool = False) -> str:
+    # Downloaded HTML can either reference app-hosted font files or embed them
+    # directly so the export stays portable offline.
+    rules = []
+    for family, weight, filename in FONT_FILES:
+        font_path = _FONT_DIR / filename
+        if embed:
+            try:
+                data = base64.b64encode(font_path.read_bytes()).decode("ascii")
+                src = f"url(data:font/ttf;base64,{data}) format('truetype')"
+            except OSError:
+                continue
+        else:
+            src = f"url('/vendor/fonts/{filename}') format('truetype')"
+        rules.append(
+            "@font-face {"
+            f" font-family: '{family}';"
+            " font-style: normal;"
+            f" font-weight: {weight};"
+            " font-display: swap;"
+            f" src: {src};"
+            " }"
+        )
+    return "\n".join(rules)
+
+
+def _format_retention(days: int) -> str:
+    """Return a human-friendly retention description."""
+    if days == 0:
+        return "unlimited — snapshots are never automatically deleted"
+
+    def _unit(n: int, singular: str) -> str:
+        return f"{n} {singular}{'s' if n != 1 else ''}"
+
+    years, r = divmod(days, 365)
+    months, rem = divmod(r, 30)
+    parts = []
+    if years:
+        parts.append(_unit(years, "year"))
+    if months:
+        parts.append(_unit(months, "month"))
+    if rem:
+        parts.append(_unit(rem, "day"))
+    if not parts:
+        parts = [_unit(days, "day")]
+
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _prompt_echo_text(label: str) -> str:
+    # Single server-side source of truth for prompt-echo text on synthesized
+    # history/snapshot lines. Reads CFG prompt identity settings so permalinks render
+    # the full configured prefix (e.g. "anon@darklab:~ $ ls -la") rather than a
+    # reduced "$ ls -la" echo that drifts from the live shell. Paired with the
+    # JS export helper (ExportHtmlUtils.renderExportPromptEcho) that consumes
+    # this text by splitting on its first space to colorize the prefix.
+    username = str(CFG.get("prompt_username") or "anon").strip() or "anon"
+    domain = str(CFG.get("prompt_domain") or "darklab.sh").strip() or "darklab.sh"
+    prefix = f"{username}@{domain}:~ $"
+    return f"{prefix} {label}".rstrip()
+
+
+def _normalize_permalink_lines(content_lines, label: str):
+    # History pages, share pages, and HTML exports feed slightly different line
+    # shapes into this layer; normalize them once for the shared template.
+    content_items = list(content_lines or [])
+    is_structured_snapshot = any(isinstance(entry, dict) for entry in content_items)
+    normalized_lines = []
+    echo_text = _prompt_echo_text(label)
+
+    if is_structured_snapshot:
+        has_prompt_echo = any(
+            isinstance(entry, dict)
+            and str(entry.get("cls", "")) == "prompt-echo"
+            and len(str(entry.get("text", "")).split(None, 1)) > 1
+            for entry in content_items
+        )
+        if not has_prompt_echo:
+            normalized_lines.append(to_legacy_entry(line_event_from_legacy(echo_text, role=LineRole.prompt_echo)))
+            normalized_lines.append(to_legacy_entry(line_event_from_legacy("")))
+        for entry in content_items:
+            if isinstance(entry, str):
+                normalized_lines.append(to_legacy_entry(line_event_from_legacy(entry)))
+            else:
+                normalized = to_legacy_entry(
+                    line_event_from_legacy(
+                        entry.get("text", ""),
+                        entry.get("cls", ""),
+                        ts_clock=entry.get("tsC", ""),
+                        ts_elapsed=entry.get("tsE", ""),
+                        signals=entry.get("signals") if isinstance(entry.get("signals"), list) else None,
+                        line_index=entry.get("line_index"),
+                        command_root=entry.get("command_root", ""),
+                        target=entry.get("target", ""),
+                        entities=entry.get("entities") if isinstance(entry.get("entities"), list) else None,
+                    )
+                )
+                normalized_lines.append(normalized)
+    else:
+        normalized_lines.append(to_legacy_entry(line_event_from_legacy(echo_text, role=LineRole.prompt_echo)))
+        normalized_lines.append(to_legacy_entry(line_event_from_legacy("")))
+        for entry in content_items:
+            normalized_lines.append(to_legacy_entry(line_event_from_legacy(str(entry))))
+
+    return normalized_lines
+
+
+def _format_duration(started: str, finished: str) -> str | None:
+    """Return a human-readable elapsed duration string, or None on any error."""
+    try:
+        t0 = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        t1 = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+        s = max(0.0, (t1 - t0).total_seconds())
+        if s < 60:
+            return f"{s:.1f}s"
+        minutes, secs = divmod(int(s), 60)
+        if minutes < 60:
+            return f"{minutes}m {secs:02d}s"
+        hours, mins = divmod(minutes, 60)
+        return f"{hours}h {mins:02d}m {secs:02d}s"
+    except Exception:
+        return None
+
+
+def _build_export_meta_line(label: str, created_text: str) -> str:
+    trimmed_label = str(label or "").strip()
+    trimmed_created = str(created_text or "").strip()
+    if trimmed_label and trimmed_created:
+        return f"{trimmed_label} · {trimmed_created}"
+    return trimmed_label or trimmed_created
+
+
+def _normalize_permalink_run_meta(meta: dict | None) -> dict | None:
+    if not meta:
+        return None
+    return {
+        "exitCode": meta.get("exit_code"),
+        "duration": meta.get("duration") or None,
+        "lines": meta.get("lines") or None,
+        "artifactCount": meta.get("artifact_count") or 0,
+        "findingCount": meta.get("finding_count") or 0,
+        "atlasEntityCount": meta.get("atlas_entity_count") or 0,
+        "atlasFindingCount": meta.get("atlas_finding_count") or 0,
+        "labelCount": meta.get("label_count") or 0,
+        "noteCount": meta.get("note_count") or 0,
+        "version": meta.get("version") or None,
+    }
+
+
+def _build_permalink_run_meta_items(run_meta: dict | None) -> list[dict]:
+    if not run_meta:
+        return []
+    items = []
+    exit_code = run_meta.get("exitCode")
+    if exit_code is not None:
+        items.append({
+            "kind": "badge",
+            "tone": "ok" if exit_code == 0 else "fail",
+            "text": f"exit {exit_code}",
+        })
+    if run_meta.get("duration"):
+        items.append({"kind": "item", "text": str(run_meta["duration"])})
+    if run_meta.get("lines"):
+        items.append({"kind": "item", "text": str(run_meta["lines"])})
+    artifact_count = run_meta.get("artifactCount")
+    if isinstance(artifact_count, int) and artifact_count > 0:
+        label = "artifact" if artifact_count == 1 else "artifacts"
+        items.append({"kind": "item", "text": f"{artifact_count} {label}"})
+    finding_count = run_meta.get("findingCount")
+    if isinstance(finding_count, int) and finding_count > 0:
+        label = "finding" if finding_count == 1 else "findings"
+        items.append({"kind": "item", "text": f"{finding_count} {label}"})
+    atlas_entity_count = run_meta.get("atlasEntityCount")
+    if isinstance(atlas_entity_count, int) and atlas_entity_count > 0:
+        label = "Atlas entity" if atlas_entity_count == 1 else "Atlas entities"
+        items.append({"kind": "item", "text": f"{atlas_entity_count} {label}"})
+    atlas_finding_count = run_meta.get("atlasFindingCount")
+    if isinstance(atlas_finding_count, int) and atlas_finding_count > 0:
+        label = "Atlas finding" if atlas_finding_count == 1 else "Atlas findings"
+        items.append({"kind": "item", "text": f"{atlas_finding_count} {label}"})
+    label_count = run_meta.get("labelCount")
+    if isinstance(label_count, int) and label_count > 0:
+        label = "label" if label_count == 1 else "labels"
+        items.append({"kind": "item", "text": f"{label_count} {label}"})
+    note_count = run_meta.get("noteCount")
+    if isinstance(note_count, int) and note_count > 0:
+        label = "note" if note_count == 1 else "notes"
+        items.append({"kind": "item", "text": f"{note_count} {label}"})
+    if run_meta.get("version"):
+        items.append({"kind": "item", "text": f"v{run_meta['version']}"})
+    return items
+
+
+def _build_permalink_header_model(
+    app_name: str,
+    label: str,
+    created_display: str,
+    run_meta: dict | None,
+    expiry_html: str,
+) -> dict:
+    return {
+        "appName": app_name,
+        "metaLine": _build_export_meta_line(label, created_display),
+        "runMetaItems": _build_permalink_run_meta_items(run_meta),
+        "expiryHtml": expiry_html,
+        "createdDisplay": created_display,
+    }
+
+
+def _expiry_note(created: str) -> str:
+    """Return an HTML snippet showing how long until this permalink expires."""
+    retention = CFG.get("permalink_retention_days", 0)
+    if not retention:
+        return ""
+    try:
+        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=timezone.utc)
+        expiry_dt = created_dt + timedelta(days=retention)
+        remaining = expiry_dt - datetime.now(timezone.utc)
+        days_left = remaining.days
+        if remaining.total_seconds() <= 0:
+            return ""
+        expiry_date = expiry_dt.strftime("%Y-%m-%d")
+        label = "expires today" if days_left == 0 else f"expires in {_format_retention(days_left)}"
+        return (
+            f'<div class="meta expiry" title="Expires {expiry_date}">'
+            f'{label} &nbsp;·&nbsp; {expiry_date}'
+            f'</div>'
+        )
+    except Exception:
+        return ""
+
+
+def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None, meta=None):
+    # Build one context shape for both live responses and downloadable HTML so
+    # metadata/actions stay in sync across both surfaces.
+    app_name = CFG.get("app_name", "darklab_shell")
+    theme_entry = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    normalized_lines = _normalize_permalink_lines(content_lines, label)
+    has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
+    created_fmt = created[:19].replace("T", " ") + " UTC"
+    expiry_html = _expiry_note(created)
+    run_meta = _normalize_permalink_run_meta(meta)
+    header_model = _build_permalink_header_model(
+        app_name=app_name,
+        label=label,
+        created_display=created_fmt,
+        run_meta=run_meta,
+        expiry_html=expiry_html,
+    )
+    page_model = {
+        "header": header_model,
+        "transcript": {
+            "lines": normalized_lines,
+            "hasTimestampMetadata": has_timestamp_metadata,
+        },
+        "export": {
+            "appName": app_name,
+            "label": label,
+            "created": created,
+            "createdDisplay": created_fmt,
+            "fontFacesCss": _font_face_css(embed=True),
+            "runMeta": run_meta,
+        },
+        "actions": {
+            "jsonUrl": json_url,
+            "extraActions": extra_actions or [],
+        },
+    }
+
+    return {
+        "page_title": f"{app_name} — {title}",
+        "current_theme": theme_entry,
+        "current_theme_css": theme_entry["vars"],
+        "theme_registry": {"current": theme_entry, "themes": THEME_REGISTRY},
+        "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
+        "page_model": page_model,
+        "page_model_json": json.dumps(page_model),
+    }
+
+
+def _permalink_error_page(noun: str) -> Response:
+    """Render a themed 404 page for a missing permalink (snapshot or run)."""
+    retention = CFG.get("permalink_retention_days", 0)
+    retention_str = _format_retention(retention)
+    if retention == 0:
+        detail = (
+            f"This {noun} link is no longer available. The ID may be invalid, "
+            f"the {noun} may never have been saved, or it may have been deleted."
+        )
+    else:
+        detail = (
+            f"This {noun} link is no longer available. The ID may be invalid, "
+            f"the {noun} may have been deleted, or it may have expired under "
+            f"the current retention period ({retention_str})."
+        )
+    app_name = CFG.get("app_name", "darklab_shell")
+    current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    html = render_template(
+        "permalink_error.html",
+        page_title=f"{app_name} — {noun} not found",
+        app_name=app_name,
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+        theme_registry={"current": current_theme, "themes": THEME_REGISTRY},
+        fallback_theme_css=theme_runtime_css_vars(DARK_THEME),
+        noun=noun,
+        detail=detail,
+    )
+    return Response(html, status=404, mimetype="text/html")
+
+
+def _permalink_page(title, label, created, content_lines, json_url, extra_actions=None, meta=None) -> Response:
+    """Render a themed HTML page for a permalink."""
+    html = render_template(
+        "permalink.html",
+        **_permalink_context(
+            title=title,
+            label=label,
+            created=created,
+            content_lines=content_lines,
+            json_url=json_url,
+            extra_actions=extra_actions,
+            meta=meta,
+        ),
+    )
+    return Response(html, mimetype="text/html")

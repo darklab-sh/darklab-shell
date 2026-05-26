@@ -8,9 +8,13 @@ import {
 import {
   FAST_RUN_CMD,
   LONG_RUN_CMD,
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
   createManifest,
+  createCaptureProjectFixture,
   freshHome,
   installCommonCaptureMocks,
+  openCaptureRunComparison,
   resolveCaptureThemes,
   saveCapture,
   seedOutput,
@@ -23,8 +27,6 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   guardrailMode: 'mobile',
 })
 
-const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
-
 async function runCommandMobile(page, cmd) {
   await setComposerValueForTest(page, cmd, { mobile: true })
   await page.locator('#mobile-run-btn').click()
@@ -36,6 +38,12 @@ async function runCommandMobile(page, cmd) {
     cmd,
     { timeout: 15_000 },
   )
+}
+
+async function runCommandMobileAndGetRunId(page, cmd) {
+  await runCommandMobile(page, cmd)
+  await waitForHistoryRuns(page, 1)
+  return activeHistoryRunId(page, cmd)
 }
 
 async function runLongCaptureCommandMobile(page) {
@@ -65,7 +73,7 @@ async function openMenu(page) {
 async function openRecentsSheet(page) {
   await openMenu(page)
   await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-  await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+  await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 }
 
 async function createAndOpenWorkspaceResponseFileMobile(page) {
@@ -78,6 +86,51 @@ async function createAndOpenWorkspaceResponseFileMobile(page) {
   await row.locator('[data-workspace-action="view"]').click()
   await expect(page.locator('#workspace-viewer')).toBeVisible()
   await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
+}
+
+async function openMobileProjectsWithCaptureProject(page, themeName) {
+  const runId = await runCommandMobileAndGetRunId(page, 'hostname')
+  await createCaptureProjectFixture(page, {
+    name: `Mobile Capture ${themeLabel(themeName)}`,
+    runIds: [runId],
+    target: 'mobile.capture.darklab.sh',
+  })
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="projects"]').click()
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-mobile-root')).toBeVisible()
+  const row = page.locator('.project-mobile-row').filter({ hasText: `Mobile Capture ${themeLabel(themeName)}` }).first()
+  await expect(row).toBeVisible()
+  await row.click()
+  await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+  await page.locator('[data-project-mobile-detail-tab="details"]').click()
+  await expect(page.locator('#project-mobile-detail-body')).toContainText('mobile.capture.darklab.sh')
+}
+
+async function openMobileAtlasWithCaptureData(page) {
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+  await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+
+  await page.locator('#atlas-mobile-filters-panel').waitFor({ state: 'attached' })
+  await page.locator('.atlas-mobile-filters-toggle').click()
+  await expect(page.locator('#atlas-mobile-filters-panel')).toBeVisible()
+
+  await page.locator('.atlas-mobile-overflow-btn').click()
+  await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#action-sheet')).toContainText('Select mode')
+  await page.locator('#action-sheet-overlay').click({ position: { x: 10, y: 10 } })
+  await expect(page.locator('#action-sheet-overlay')).not.toHaveClass(/\bopen\b/)
+
+  await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
+  const hostRow = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' }).first()
+  await expect(hostRow).toBeVisible()
+  await hostRow.click()
+  await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
+  await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Shodan')
+  await page.locator('#atlas-mobile-entity-body .atlas-intel-card-toggle').filter({ hasText: 'Shodan' }).click()
+  await expect(page.locator('#atlas-mobile-entity-body .atlas-intel-card.is-open')).toContainText(/ports/i)
 }
 
 const scenes = [
@@ -188,6 +241,35 @@ const scenes = [
     },
   },
   {
+    slug: 'projects-modal',
+    title: 'Projects modal with active project',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectsWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'atlas-modal',
+    title: 'Session Entity Atlas modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileAtlasWithCaptureData(page)
+    },
+  },
+  {
+    slug: 'run-comparison-modal',
+    title: 'Run comparison modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openCaptureRunComparison(page)
+      await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+      await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
+    },
+  },
+  {
     slug: 'line-numbers-enabled',
     title: 'Main UI - line numbers enabled',
     route: '/',
@@ -233,8 +315,8 @@ const scenes = [
     },
   },
   {
-    slug: 'history-sheet',
-    title: 'History sheet',
+    slug: 'history-panel',
+    title: 'History panel',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
@@ -245,24 +327,24 @@ const scenes = [
     },
   },
   {
-    slug: 'history-sheet-snapshot-row',
-    title: 'History sheet - snapshot row',
+    slug: 'history-panel-snapshot-row',
+    title: 'History panel - snapshot row',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await createShareSnapshot(page)
       await openRecentsSheet(page)
-      const snapshotItem = page.locator('#mobile-recents-list .sheet-item', { hasText: 'SNAPSHOT' }).first()
+      const snapshotItem = page.locator('#history-list .history-entry-snapshot').first()
       await expect(snapshotItem).toBeVisible()
-      await expect(snapshotItem.locator('.sheet-item-action', { hasText: 'open' })).toBeVisible()
-      await expect(snapshotItem.locator('.sheet-item-action', { hasText: 'copy link' })).toBeVisible()
-      await expect(snapshotItem.locator('.sheet-item-action', { hasText: 'delete' })).toBeVisible()
+      await expect(snapshotItem.locator('[data-action="open"]')).toBeVisible()
+      await expect(snapshotItem.locator('[data-action="link"]')).toBeVisible()
+      await expect(snapshotItem.locator('[data-action="delete"]')).toBeVisible()
     },
   },
   {
-    slug: 'history-sheet-search-filters-expanded',
-    title: 'History sheet - command search with filters expanded',
+    slug: 'history-panel-search-filters-expanded',
+    title: 'History panel - command search with filters expanded',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
@@ -270,15 +352,15 @@ const scenes = [
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
       await openRecentsSheet(page)
-      await page.locator('#mobile-recents-search').fill('host')
-      await page.locator('#mobile-recents-filters-toggle').click()
-      await expect(page.locator('#mobile-recents-filters-expanded')).toBeVisible()
-      await page.locator('#mobile-recents-filter-root').fill('host')
+      await page.locator('#history-mobile-filters-toggle').click()
+      await page.locator('#history-search-input').fill('host')
+      await expect(page.locator('#history-advanced-filters')).toBeVisible()
+      await page.locator('#history-root-input').fill('host')
     },
   },
   {
-    slug: 'history-sheet-search-filters-collapsed-chip',
-    title: 'History sheet - command search with filters collapsed and chip shown',
+    slug: 'history-panel-search-chip',
+    title: 'History panel - command search with chip shown',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
@@ -286,16 +368,15 @@ const scenes = [
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
       await openRecentsSheet(page)
-      await page.locator('#mobile-recents-search').fill('host')
-      await page.locator('#mobile-recents-filters-toggle').click()
-      await page.locator('#mobile-recents-filter-root').fill('host')
-      await page.locator('#mobile-recents-filters-toggle').click()
-      await expect(page.locator('#mobile-recents-chips > *').first()).toBeVisible()
+      await page.locator('#history-mobile-filters-toggle').click()
+      await page.locator('#history-search-input').fill('host')
+      await page.waitForTimeout(300)
+      await expect(page.locator('#history-active-filters')).not.toHaveClass(/u-hidden/)
     },
   },
   {
-    slug: 'history-sheet-delete-all-confirmation',
-    title: 'History sheet - delete-all confirmation modal',
+    slug: 'history-panel-delete-all-confirmation',
+    title: 'History panel - delete-all confirmation modal',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
@@ -303,20 +384,20 @@ const scenes = [
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
       await openRecentsSheet(page)
-      await page.locator('#mobile-recents-clear').click()
+      await page.locator('#hist-clear-all-btn').click()
       await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {
-    slug: 'history-sheet-delete-confirmation',
-    title: 'History sheet - delete confirmation modal',
+    slug: 'history-panel-delete-confirmation',
+    title: 'History panel - delete confirmation modal',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)
-      await page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-action', { hasText: 'delete' }).click()
+      await page.locator('#history-list .history-entry').first().locator('[data-action="delete"]').click()
       await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
@@ -413,12 +494,13 @@ const scenes = [
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)
       const runItem = page
-        .locator('#mobile-recents-list .sheet-item')
+        .locator('#history-list .history-entry')
         .filter({
-          has: page.locator('.sheet-item-action', { hasText: 'permalink' }),
+          has: page.locator('[data-action="history-menu"]'),
         })
         .first()
-      await runItem.locator('.sheet-item-action', { hasText: 'permalink' }).click()
+      await runItem.locator('[data-action="history-menu"]').click()
+      await runItem.locator('.history-action-menu .dropdown-item', { hasText: 'permalink' }).click()
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

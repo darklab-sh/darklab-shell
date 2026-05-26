@@ -14,6 +14,7 @@ export async function loadAppFns({
   requestWelcomeSettle: requestWelcomeSettleOverride = vi.fn(),
   tabs: tabsOverride = [],
   confirmKill: confirmKillOverride = vi.fn(),
+  bindOutsideClickClose: bindOutsideClickCloseOverride = undefined,
   interruptPromptLine: interruptPromptLineOverride = vi.fn(),
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
@@ -32,9 +33,24 @@ export async function loadAppFns({
   openWorkspace: openWorkspaceOverride = vi.fn(),
   closeWorkspace: closeWorkspaceOverride = vi.fn(),
   isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride = vi.fn(() => false),
+  isSchedulesOverlayOpen: isSchedulesOverlayOpenOverride = vi.fn(() => false),
+  openSchedulesModal: openSchedulesModalOverride = vi.fn(),
+  closeSchedulesModal: closeSchedulesModalOverride = vi.fn(),
+  isWatchersOverlayOpen: isWatchersOverlayOpenOverride = vi.fn(() => false),
+  openWatchersModal: openWatchersModalOverride = vi.fn(),
+  closeWatchersModal: closeWatchersModalOverride = vi.fn(),
   openStatusMonitor: openStatusMonitorOverride = vi.fn(() => Promise.resolve(false)),
   closeStatusMonitor: closeStatusMonitorOverride = vi.fn(),
   isStatusMonitorOpen: isStatusMonitorOpenOverride = vi.fn(() => false),
+  openProjectWorkspace: openProjectWorkspaceOverride = vi.fn(() => Promise.resolve(false)),
+  closeProjectWorkspace: closeProjectWorkspaceOverride = vi.fn(),
+  isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = vi.fn(() => false),
+  cycleProjectWorkspaceTab: cycleProjectWorkspaceTabOverride = vi.fn(() => false),
+  isAtlasOverlayOpen: isAtlasOverlayOpenOverride = vi.fn(() => false),
+  cycleAtlasTab: cycleAtlasTabOverride = vi.fn(() => false),
+  isHistoryRunOverlayOpen: isHistoryRunOverlayOpenOverride = vi.fn(() => false),
+  cycleHistoryRunOverlayTab: cycleHistoryRunOverlayTabOverride = vi.fn(() => false),
+  openTourModal: openTourModalOverride = vi.fn(() => true),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
@@ -54,6 +70,11 @@ export async function loadAppFns({
   copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
   reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
   seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
+  setTimeout: setTimeoutOverride = (fn) => {
+    fn()
+    return 0
+  },
+  clearTimeout: clearTimeoutOverride = () => {},
   hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
   hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
@@ -171,47 +192,121 @@ export async function loadAppFns({
         <div id="command-catalog-body"></div>
       </div>
     </div>
+    <div id="project-workspace-overlay" class="u-hidden">
+      <div id="project-workspace-modal">
+        <button class="project-workspace-close"></button>
+      </div>
+    </div>
+    <div id="project-target-editor-overlay" class="u-hidden">
+      <div id="project-target-editor-modal">
+        <button class="project-target-editor-close"></button>
+      </div>
+    </div>
+    <div id="project-package-manifest-overlay" class="u-hidden">
+      <div id="project-package-manifest-modal">
+        <button class="project-package-manifest-close"></button>
+      </div>
+    </div>
+    <div id="project-package-wizard-overlay" class="u-hidden">
+      <div id="project-package-wizard-modal">
+        <button class="project-package-wizard-close"></button>
+      </div>
+    </div>
+    <div id="project-entity-editor-overlay" class="u-hidden">
+      <div id="project-entity-editor-modal">
+        <button class="project-entity-editor-close"></button>
+      </div>
+    </div>
+    <div id="schedules-overlay" class="u-hidden">
+      <div id="schedules-modal">
+        <button class="schedules-close"></button>
+      </div>
+    </div>
+    <div id="watchers-overlay" class="u-hidden">
+      <div id="watchers-modal">
+        <button class="watchers-close"></button>
+      </div>
+    </div>
     <div id="theme-overlay"></div>
     <button class="theme-close"></button>
     <div id="theme-modal"></div>
     <div id="theme-select" tabindex="-1"></div>
-    <div id="options-overlay"></div>
-    <button class="options-close"></button>
-    <div id="options-modal"></div>
-    <span id="options-session-token-status"></span>
-    <button id="options-session-token-generate-btn"></button>
-    <button id="options-session-token-set-btn"></button>
-    <button id="options-session-token-rotate-btn"></button>
-    <button id="options-session-token-clear-btn"></button>
-    <button id="options-session-token-copy-btn"></button>
-    <div id="options-session-token-msg"></div>
+    <div id="options-overlay">
+      <button class="options-close"></button>
+      <div id="options-modal">
+        <div id="options-tabs" role="tablist">
+          <button id="options-tab-preferences" data-options-tab="preferences" class="is-active" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
+          <button id="options-tab-secrets" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+        </div>
+        <div id="options-panel-preferences" data-options-panel="preferences" role="tabpanel" aria-labelledby="options-tab-preferences">
+          <select id="options-ts-select">
+            <option value="off">off</option>
+            <option value="elapsed">elapsed</option>
+            <option value="clock">clock</option>
+          </select>
+          <input id="options-ln-toggle" type="checkbox" />
+          <select id="options-welcome-select">
+            <option value="animated">animated</option>
+            <option value="disable_animation">disable_animation</option>
+            <option value="remove">remove</option>
+          </select>
+          <select id="options-share-redaction-select">
+            <option value="unset">unset</option>
+            <option value="redacted">redacted</option>
+            <option value="raw">raw</option>
+          </select>
+          <label class="options-desktop-only">
+            <input id="options-notify-toggle" type="checkbox" />
+          </label>
+          <input id="options-project-auto-link-external-runs-toggle" type="checkbox" />
+          <input id="options-project-auto-link-run-entities-toggle" type="checkbox" />
+          <label class="options-desktop-only">
+            <select id="options-hud-clock-select">
+              <option value="utc">utc</option>
+              <option value="local">local</option>
+            </select>
+          </label>
+          <select id="options-compare-view-mode-select">
+            <option value="auto">auto</option>
+            <option value="side_by_side">side_by_side</option>
+            <option value="unified">unified</option>
+            <option value="changes_only">changes_only</option>
+            <option value="findings_only">findings_only</option>
+          </select>
+          <select id="options-compare-context-select">
+            <option value="3">3</option>
+            <option value="10">10</option>
+            <option value="all">all</option>
+          </select>
+          <input id="options-prompt-username-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" />
+          <div id="options-prompt-username-error" class="u-hidden"></div>
+          <span id="options-session-token-status"></span>
+          <button id="options-session-token-generate-btn"></button>
+          <button id="options-session-token-set-btn"></button>
+          <button id="options-session-token-rotate-btn"></button>
+          <button id="options-session-token-clear-btn"></button>
+          <button id="options-session-token-copy-btn"></button>
+          <div id="options-session-token-msg"></div>
+        </div>
+        <div id="options-panel-secrets" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
+          <button id="options-provider-status-btn"></button>
+          <button id="options-secret-new-btn"></button>
+          <button id="options-secrets-refresh-btn"></button>
+          <div id="options-secrets-msg"></div>
+          <div id="options-secrets-list"></div>
+        </div>
+      </div>
+    </div>
+    <div id="provider-status-overlay" class="u-hidden" aria-hidden="true">
+      <div id="provider-status-modal">
+        <button type="button" class="provider-status-close"></button>
+        <div id="provider-status-body"></div>
+      </div>
+    </div>
     <div id="workflows-overlay"></div>
     <button class="workflows-close"></button>
-    <select id="options-ts-select">
-      <option value="off">off</option>
-      <option value="elapsed">elapsed</option>
-      <option value="clock">clock</option>
-      </select>
-      <input id="options-ln-toggle" type="checkbox" />
-      <select id="options-welcome-select">
-        <option value="animated">animated</option>
-        <option value="disable_animation">disable_animation</option>
-        <option value="remove">remove</option>
-      </select>
-      <select id="options-share-redaction-select">
-        <option value="unset">unset</option>
-        <option value="redacted">redacted</option>
-        <option value="raw">raw</option>
-      </select>
-      <input id="options-notify-toggle" type="checkbox" />
-      <select id="options-hud-clock-select">
-        <option value="utc">utc</option>
-        <option value="local">local</option>
-      </select>
-      <input id="options-prompt-username-input" />
-      <div id="options-prompt-username-error" class="u-hidden"></div>
       <div id="shell-input-row" data-mobile-label="$">
-        <input id="cmd" />
+        <input id="cmd" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="none" />
       </div>
       <div id="history-panel"></div>
       <div id="history-list"></div>
@@ -264,6 +359,9 @@ export async function loadAppFns({
       if (url === '/faq') {
         return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
       }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
@@ -299,12 +397,17 @@ export async function loadAppFns({
     searchPrevBtn: document.getElementById('search-prev'),
     searchNextBtn: document.getElementById('search-next'),
     searchCloseBtn: document.getElementById('search-close-btn'),
+    optionsTabs: document.getElementById('options-tabs'),
     optionsTsSelect: document.getElementById('options-ts-select'),
     optionsLnToggle: document.getElementById('options-ln-toggle'),
     optionsWelcomeSelect: document.getElementById('options-welcome-select'),
     optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
     optionsNotifyToggle: document.getElementById('options-notify-toggle'),
+    optionsProjectAutoLinkExternalRunsToggle: document.getElementById('options-project-auto-link-external-runs-toggle'),
+    optionsProjectAutoLinkRunEntitiesToggle: document.getElementById('options-project-auto-link-run-entities-toggle'),
     optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
+    optionsCompareViewModeSelect: document.getElementById('options-compare-view-mode-select'),
+    optionsCompareContextSelect: document.getElementById('options-compare-context-select'),
     optionsPromptUsernameInput: document.getElementById('options-prompt-username-input'),
     optionsPromptUsernameError: document.getElementById('options-prompt-username-error'),
     themeSelect: document.getElementById('theme-select'),
@@ -422,11 +525,28 @@ export async function loadAppFns({
 
   const fns = fromDomScripts(
     [
-      'app/static/js/output_core.js',
+      'app/static/js/core/output_core.js',
       'app/static/js/output.js',
-      'app/static/js/app_preferences_core.js',
+      'app/static/js/core/app_preferences_core.js',
       'app/static/js/app.js',
+      'app/static/js/features/mobile/mobile_shell_layout.js',
+      'app/static/js/features/tabs/tab_session_state.js',
+      'app/static/js/features/preferences/preferences.js',
+      'app/static/js/features/preferences/secrets_panel.js',
+      'app/static/js/features/preferences/session_token_controls.js',
+      'app/static/js/features/command-registry/command_registry.js',
+      'app/static/js/features/theme/theme.js',
+      'app/static/js/features/terminal/composer_editing.js',
+      'app/static/js/features/terminal/local_commands.js',
+      'app/static/js/features/terminal/mobile_composer_keyboard.js',
+      'app/static/js/features/autocomplete/runtime_context.js',
+      'app/static/js/features/tour/tour_cli.js',
+      'app/static/js/features/workflows/workflows.js',
+      'app/static/js/features/mobile/mobile_menu_actions.js',
+      'app/static/js/features/shortcuts/global_shortcuts.js',
+      'app/static/js/features/shortcuts/shortcuts_key_handler.js',
       'app/static/js/controller.js',
+      'app/static/js/features/terminal/composer_controller.js',
     ],
     {
       document,
@@ -516,9 +636,25 @@ export async function loadAppFns({
       openWorkspace: openWorkspaceOverride,
       closeWorkspace: closeWorkspaceOverride,
       isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride,
+      isSchedulesOverlayOpen: isSchedulesOverlayOpenOverride,
+      openSchedulesModal: openSchedulesModalOverride,
+      closeSchedulesModal: closeSchedulesModalOverride,
+      isWatchersOverlayOpen: isWatchersOverlayOpenOverride,
+      openWatchersModal: openWatchersModalOverride,
+      closeWatchersModal: closeWatchersModalOverride,
       openStatusMonitor: openStatusMonitorOverride,
       closeStatusMonitor: closeStatusMonitorOverride,
       isStatusMonitorOpen: isStatusMonitorOpenOverride,
+      openProjectWorkspace: openProjectWorkspaceOverride,
+      closeProjectWorkspace: closeProjectWorkspaceOverride,
+      isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride,
+      cycleProjectWorkspaceTab: cycleProjectWorkspaceTabOverride,
+      isAtlasOverlayOpen: isAtlasOverlayOpenOverride,
+      cycleAtlasTab: cycleAtlasTabOverride,
+      isHistoryRunOverlayOpen: isHistoryRunOverlayOpenOverride,
+      cycleHistoryRunOverlayTab: cycleHistoryRunOverlayTabOverride,
+      openTourModal: openTourModalOverride,
+      bindOutsideClickClose: bindOutsideClickCloseOverride,
       interruptPromptLine: interruptPromptLineOverride,
       _welcomeActive: welcomeActive,
       welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -552,10 +688,8 @@ export async function loadAppFns({
       Event,
       showToast: showToastOverride,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
-      setTimeout: (fn) => {
-        fn()
-        return 0
-      },
+      setTimeout: setTimeoutOverride,
+      clearTimeout: clearTimeoutOverride,
     },
     `{
     _setTsMode,
@@ -584,17 +718,38 @@ export async function loadAppFns({
     confirmPermalinkRedactionChoice,
     getWelcomeIntroPreference,
     getShareRedactionDefaultPreference,
+    getProjectAutoLinkExternalRunsPreference,
+    getProjectAutoLinkRunEntitiesPreference,
     getRunNotifyPreference,
     getHudClockPreference,
     getPromptUsernamePreference,
+    getCompareViewModePreference,
+    getCompareContextPreference,
+    getOptionsModalLastTabPreference,
+    getTourSeenVersionPreference,
+    recordTourOpened,
     applyRunNotifyPreference,
+    applyProjectAutoLinkExternalRunsPreference,
+    applyProjectAutoLinkRunEntitiesPreference,
     applyHudClockPreference,
+    applyCompareViewModePreference,
+    applyCompareContextPreference,
     applyPromptUsernamePreference,
+    activateOptionsTab,
+    cycleOptionsTab,
     syncOptionsControls,
+    refreshOptionsSecrets,
+    invalidateOptionsSecrets,
+    openSecretEditor,
+    deleteOptionsSecret,
+    handleSecretCommand,
     handleThemeCommand,
     handleConfigCommand,
+    handleTourCommand,
+    handleTabShortcut,
     renderWorkflowItems,
     reloadWorkflowCatalog,
+    ensureWorkflowCatalogLoaded,
     handleWorkflowTerminalCommand,
     getRuntimeAutocompleteContext,
     getWorkspaceAutocompletePathHints,
@@ -636,6 +791,7 @@ export async function loadAppFns({
     hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
     cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
     confirmKill: confirmKillOverride,
+    bindOutsideClickClose: bindOutsideClickCloseOverride,
     createTab: createTabOverride,
     closeTab: closeTabOverride,
     activateTab: activateTabOverride,
@@ -649,6 +805,7 @@ export async function loadAppFns({
     runCommand: runCommandOverride,
     submitComposerCommand: submitComposerCommandOverride,
     submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
+    openTourModal: openTourModalOverride,
     logClientError,
     appendLine,
     appendCommandEcho,

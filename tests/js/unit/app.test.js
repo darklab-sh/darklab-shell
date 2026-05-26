@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
 import { loadAppFns } from './helpers/app_harness.js'
+import { fromDomScripts } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -24,6 +25,110 @@ const THEME_BASE_KEYS = new Set([
   'terminal_font_size',
   'terminal_line_height',
 ])
+
+function loadSchedulesModalTestFns({
+  apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+  showConfirm = vi.fn(async () => null),
+  showToast = vi.fn(),
+  openHistoryRunDetails = vi.fn(),
+  fetchAndRenderHistoryComparison = vi.fn(),
+} = {}) {
+  document.body.innerHTML = `
+    <div id="schedules-overlay" class="u-hidden">
+      <div id="schedules-modal">
+        <button class="schedules-close" type="button"></button>
+        <button id="schedules-new-btn" type="button"></button>
+        <button id="schedules-refresh-btn" type="button"></button>
+        <span id="schedules-count"></span>
+        <div id="schedules-list"></div>
+        <div id="schedules-detail"></div>
+      </div>
+    </div>
+  `
+  const bindDismissible = vi.fn()
+  const fns = fromDomScripts(
+    ['app/static/js/features/schedules/schedules_modal.js'],
+    {
+      document,
+      window,
+      apiFetch,
+      showConfirm,
+      showToast,
+      openHistoryRunDetails,
+      fetchAndRenderHistoryComparison,
+      bindDismissible,
+      refocusComposerAfterAction: vi.fn(),
+    },
+    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, closeSchedulesModal })',
+  )
+  return {
+    ...fns,
+    apiFetch,
+    bindDismissible,
+    showConfirm,
+    showToast,
+    openHistoryRunDetails,
+    fetchAndRenderHistoryComparison,
+    list: document.getElementById('schedules-list'),
+    detail: document.getElementById('schedules-detail'),
+  }
+}
+
+function loadWatchersModalTestFns({
+  apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+  showConfirm = vi.fn(async () => null),
+  showToast = vi.fn(),
+  openHistoryRunDetails = vi.fn(),
+  fetchAndRenderHistoryComparison = vi.fn(),
+} = {}) {
+  document.body.innerHTML = `
+    <div id="watchers-overlay" class="u-hidden">
+      <div id="watchers-modal">
+        <button class="watchers-close" type="button"></button>
+        <button id="watchers-new-btn" type="button"></button>
+        <button id="watchers-refresh-btn" type="button"></button>
+        <span id="watchers-count"></span>
+        <div id="watchers-list"></div>
+        <div id="watchers-detail"></div>
+      </div>
+    </div>
+  `
+  const bindDismissible = vi.fn()
+  const compareMetricCell = (label, value, tone = '') => {
+    const cell = document.createElement('div')
+    cell.className = `history-compare-metric${tone ? ` ${tone}` : ''}`
+    cell.textContent = `${label}${value}`
+    return cell
+  }
+  const fns = fromDomScripts(
+    ['app/static/js/features/watchers/watchers_modal.js'],
+    {
+      document,
+      window,
+      apiFetch,
+      showConfirm,
+      showToast,
+      openHistoryRunDetails,
+      fetchAndRenderHistoryComparison,
+      _compareMetricCell: compareMetricCell,
+      _closeMajorOverlays: vi.fn(),
+      bindDismissible,
+      refocusComposerAfterAction: vi.fn(),
+    },
+    '({ _bindWatchersModal, _deleteSelectedWatcher, refreshWatchersModal, _newWatcher, openWatchersModal, closeWatchersModal })',
+  )
+  return {
+    ...fns,
+    apiFetch,
+    bindDismissible,
+    showConfirm,
+    showToast,
+    openHistoryRunDetails,
+    fetchAndRenderHistoryComparison,
+    list: document.getElementById('watchers-list'),
+    detail: document.getElementById('watchers-detail'),
+  }
+}
 
 function builtInAutocompleteBase() {
   const hint = (value, description = '', insertValue = undefined) => {
@@ -127,6 +232,14 @@ function builtInAutocompleteBase() {
         ],
       },
     },
+    tour: {
+      ...emptyBuiltIn('built-in: print the onboarding tour inside the terminal'),
+      feature_required: 'tour',
+      arg_hints: {
+        help: [],
+        __positional__: [hint('help', 'Show tour command usage')],
+      },
+    },
     file: {
       ...emptyBuiltIn('built-in: list, view, create, edit, download, move, or remove session files'),
       feature_required: 'workspace',
@@ -216,15 +329,561 @@ describe('app helpers', () => {
   beforeEach(() => {
     ;[
       'pref_theme',
+      'pref_active_project_id',
       'pref_theme_name',
       'pref_timestamps',
       'pref_line_numbers',
       'pref_welcome_intro',
       'pref_share_redaction_default',
+      'pref_project_auto_link_external_runs',
+      'pref_project_auto_link_run_entities',
+      'pref_run_notify',
+      'pref_hud_clock',
       'pref_prompt_username',
+      'pref_compare_view_mode',
+      'pref_compare_context',
+      'pref_options_modal_last_tab',
+      'pref_tour_seen_version',
+      'pref_constellation_full_day',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
+  })
+
+  it('binds focus traps for persistent app modal surfaces at startup', async () => {
+    await loadAppFns()
+
+    ;[
+      'project-workspace-modal',
+      'project-target-editor-modal',
+      'project-package-manifest-modal',
+      'project-package-wizard-modal',
+      'project-entity-editor-modal',
+      'schedules-modal',
+      'watchers-modal',
+    ].forEach((id) => {
+      expect(document.getElementById(id)?.dataset.focusTrapBound).toBe('1')
+    })
+  })
+
+  it('uses the shared confirmation action contract before deleting schedules', async () => {
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/schedules/sch_1' && options.method === 'DELETE') {
+        return { ok: true, json: async () => ({ removed: true }) }
+      }
+      if (url === '/schedules') {
+        return { ok: true, json: async () => ({ schedules: [] }) }
+      }
+      return { ok: true, json: async () => ({}) }
+    })
+    const showConfirm = vi.fn(async () => 'delete')
+    const { _deleteSelectedSchedule } = loadSchedulesModalTestFns({ apiFetch, showConfirm })
+
+    await _deleteSelectedSchedule({ id: 'sch_1', label: 'Hourly Echo' })
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      tone: 'danger',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'delete', label: 'Delete', role: 'destructive' },
+      ],
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/schedules/sch_1', { method: 'DELETE' })
+  })
+
+  it('opens schedule fire runs without using the run id as the command title', async () => {
+    const openHistoryRunDetails = vi.fn()
+    const { _bindSchedulesModal } = loadSchedulesModalTestFns({ openHistoryRunDetails })
+    _bindSchedulesModal()
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.scheduleRunId = 'run_scheduled_1'
+    document.getElementById('schedules-overlay').appendChild(button)
+    button.click()
+
+    await vi.waitFor(() => expect(openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run_scheduled_1' }))
+  })
+
+  it('creates schedules from the modal with cadence preview details', async () => {
+    let schedules = []
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/schedules' && !options.method) {
+        return { ok: true, json: async () => ({ schedules }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: '0 * * * *',
+            cadence_preset: 'hourly',
+            timezone: 'UTC',
+            next_fires: ['2026-05-20T13:00:00+00:00', '2026-05-20T14:00:00+00:00'],
+          }),
+        }
+      }
+      if (url === '/schedules' && options.method === 'POST') {
+        schedules = [{
+          id: 'sch_created',
+          label: 'Hourly darklab',
+          command_text: 'ping -c 1 darklab.sh',
+          cadence_preset: 'hourly',
+          cron_expr: '0 * * * *',
+          timezone: 'UTC',
+          enabled: true,
+          next_run_at: '2026-05-20T13:00:00+00:00',
+        }]
+        return { ok: true, json: async () => ({ schedule: schedules[0] }) }
+      }
+      if (url.startsWith('/schedules/sch_created/fires')) {
+        return { ok: true, json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const showConfirm = vi.fn(async () => null)
+    const { _bindSchedulesModal, _newSchedule, closeSchedulesModal, list } = loadSchedulesModalTestFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+    })
+    _bindSchedulesModal()
+
+    _newSchedule('ping -c 1 darklab.sh')
+    await vi.waitFor(() => expect(document.getElementById('schedules-form')).not.toBeNull())
+    expect(document.getElementById('schedules-detail').textContent).toContain('Next runs (UTC)')
+    document.getElementById('schedules-label-input').value = 'Hourly darklab'
+    await closeSchedulesModal()
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Discard unsaved schedule changes?',
+      tone: 'warning',
+    }))
+    expect(document.getElementById('schedules-form')).not.toBeNull()
+    document.getElementById('schedules-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/schedules' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      label: 'Hourly darklab',
+      command: 'ping -c 1 darklab.sh',
+      cadence_preset: 'hourly',
+      timezone: 'UTC',
+      enabled: true,
+    })
+    expect(list.textContent).toContain('Hourly darklab')
+  })
+
+  it('pauses resumes and fires schedules from the modal action buttons', async () => {
+    let schedule = {
+      id: 'sch_actions',
+      label: 'Action schedule',
+      command_text: 'echo actions',
+      cadence_preset: 'hourly',
+      cron_expr: '0 * * * *',
+      timezone: 'UTC',
+      enabled: true,
+      next_run_at: '2026-05-20T13:00:00+00:00',
+      last_error: '',
+      paused_reason: '',
+      consecutive_failures: 0,
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/schedules' && !options.method) {
+        return { ok: true, json: async () => ({ schedules: [schedule] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: schedule.cron_expr,
+            cadence_preset: schedule.cadence_preset,
+            timezone: schedule.timezone,
+            next_fires: [schedule.next_run_at],
+          }),
+        }
+      }
+      if (url.startsWith('/schedules/sch_actions/fires')) {
+        return {
+          ok: true,
+          json: async () => ({
+            fires: [
+              { status: 'fired', fired_at: '2026-05-20T12:00:00+00:00', run_id: 'run_actions' },
+              { status: 'skipped', fired_at: '2026-05-20T11:00:00+00:00', run_id: '', reason: 'overlap' },
+              { status: 'fired', fired_at: '2026-05-20T10:00:00+00:00', run_id: 'run_previous' },
+            ],
+            total: 3,
+            limit: 20,
+            offset: 0,
+            has_more: false,
+          }),
+        }
+      }
+      if (url === '/schedules/sch_actions' && options.method === 'PATCH') {
+        const body = JSON.parse(options.body)
+        schedule = { ...schedule, ...body }
+        return { ok: true, json: async () => ({ schedule }) }
+      }
+      if (url === '/schedules/sch_actions/run-now' && options.method === 'POST') {
+        schedule = { ...schedule, last_run_at: '2026-05-20T12:00:00+00:00', last_run_id: 'run_actions' }
+        return { ok: true, json: async () => ({ status: 'fired', schedule }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const fetchAndRenderHistoryComparison = vi.fn()
+    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({
+      apiFetch,
+      showToast,
+      fetchAndRenderHistoryComparison,
+    })
+    _bindSchedulesModal()
+
+    await refreshSchedulesModal()
+    await vi.waitFor(() => expect(document.getElementById('schedules-detail').textContent).toContain('Action schedule'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Pause').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule paused', 'success'))
+    expect(JSON.parse(apiFetch.mock.calls.find(([url, options]) => (
+      url === '/schedules/sch_actions' && options?.method === 'PATCH'
+    ))[1].body)).toMatchObject({ enabled: false, paused_reason: 'paused' })
+
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Resume').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule resumed', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Run now').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule fired', 'success'))
+    expect(document.getElementById('schedules-detail').textContent).toContain('Compare previous')
+    expect(document.getElementById('schedules-detail').textContent).toContain('Open run')
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Compare previous').click()
+    await vi.waitFor(() => (
+      expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run_previous', 'run_actions')
+    ))
+  })
+
+  it('prompts before switching schedules or creating a new schedule with unsaved edits', async () => {
+    const schedules = [
+      {
+        id: 'sch_one',
+        label: 'One',
+        command_text: 'ping one.darklab.sh',
+        cadence_preset: 'hourly',
+        cron_expr: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+      },
+      {
+        id: 'sch_two',
+        label: 'Two',
+        command_text: 'ping two.darklab.sh',
+        cadence_preset: 'hourly',
+        cron_expr: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+      },
+    ]
+    const apiFetch = vi.fn(async (url) => {
+      if (url === '/schedules') {
+        return { ok: true, json: async () => ({ schedules }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: '0 * * * *',
+            cadence_preset: 'hourly',
+            timezone: 'UTC',
+            next_fires: [],
+          }),
+        }
+      }
+      if (url.includes('/fires')) {
+        return { ok: true, json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }) }
+      }
+      return { ok: true, json: async () => ({}) }
+    })
+    const showConfirm = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('discard')
+    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({ apiFetch, showConfirm })
+    _bindSchedulesModal()
+
+    await refreshSchedulesModal({ selectId: 'sch_one' })
+    await vi.waitFor(() => expect(document.getElementById('schedules-label-input')).not.toBeNull())
+    const labelInput = document.getElementById('schedules-label-input')
+    labelInput.value = 'Changed one'
+    labelInput.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector('[data-schedule-id="sch_two"]').click()
+
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1))
+    expect(document.getElementById('schedules-label-input').value).toBe('Changed one')
+
+    document.getElementById('schedules-new-btn').click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => {
+      expect(document.getElementById('schedules-detail').textContent).toContain('New schedule')
+    })
+  })
+
+  it('creates watchers from a baseline run and renders diff audit rows', async () => {
+    let watchers = []
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: '0 * * * *',
+            cadence_preset: 'hourly',
+            timezone: 'UTC',
+            next_fires: ['2026-05-20T13:00:00+00:00'],
+          }),
+        }
+      }
+      if (url === '/watchers' && options.method === 'POST') {
+        watchers = [{
+          id: 'wtr_created',
+          label: 'Watch nmap',
+          command_text: 'nmap -sV darklab.sh',
+          baseline_run_id: 'run_base',
+          last_run_id: 'run_current',
+          state: 'changed',
+          options: { suppress_removals: true, notify_metadata_changes: false },
+          last_diff_summary: {
+            classifier: 'ports',
+            added_port_count: 1,
+            added_ports: [{ key: '443/tcp', state: 'open', service: 'https' }],
+          },
+          schedule: {
+            id: 'sch_watcher',
+            cadence_preset: 'hourly',
+            cron_expr: '0 * * * *',
+            timezone: 'UTC',
+            enabled: true,
+          },
+        }]
+        return { ok: true, json: async () => ({ watcher: watchers[0] }) }
+      }
+      if (url.startsWith('/watchers/wtr_created/fires')) {
+        return {
+          ok: true,
+          json: async () => ({
+            fires: [{
+              id: 'fire_1',
+              watcher_id: 'wtr_created',
+              run_id: 'run_current',
+              baseline_run_id: 'run_base',
+              diff_kind: 'signal',
+              diff_summary: {
+                classifier: 'findings',
+                added_finding_count: 2,
+                removed_finding_count: 0,
+                unchanged_finding_count: 14,
+                added_findings: [
+                  { title: 'Exposed HTTP service', severity: 'medium', line_number: 22 },
+                  { title: 'TLS certificate expiring soon', severity: 'low', line_number: 45 },
+                ],
+              },
+              state_at_fire: 'changed',
+              created: '2026-05-20T12:00:00+00:00',
+            }],
+            total: 1,
+            limit: 20,
+            offset: 0,
+            has_more: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const showConfirm = vi.fn(async () => null)
+    const fetchAndRenderHistoryComparison = vi.fn()
+    const { _bindWatchersModal, openWatchersModal, closeWatchersModal, detail, list } = loadWatchersModalTestFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+      fetchAndRenderHistoryComparison,
+    })
+    _bindWatchersModal()
+
+    await openWatchersModal({ baselineRun: { id: 'run_base', command: 'nmap -sV darklab.sh' } })
+    await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
+    const baselineHelp = document.querySelector('.watchers-help-trigger')
+    expect(baselineHelp.textContent).toBe('?')
+    baselineHelp.click()
+    expect(document.querySelector('.watchers-help-card').classList.contains('u-hidden')).toBe(false)
+    expect(document.querySelector('.watchers-help-card').textContent).toContain('Create watcher from this baseline')
+    document.getElementById('watchers-label-input').value = 'Watch nmap'
+    document.getElementById('watchers-suppress-removals-input').checked = true
+    await closeWatchersModal()
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Discard unsaved watcher changes?',
+      tone: 'warning',
+    }))
+    expect(document.getElementById('watchers-form')).not.toBeNull()
+    document.getElementById('watchers-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_mode: 'existing_run',
+      baseline_run_id: 'run_base',
+      command: 'nmap -sV darklab.sh',
+      cadence_preset: 'hourly',
+      options: { suppress_removals: true },
+    })
+    expect(list.textContent).toContain('Watch nmap')
+    expect(detail.textContent).toContain('Last diff')
+    expect(detail.textContent).toContain('443/tcp')
+    expect(detail.textContent).toContain('Findings: +2, -0, unchanged 14')
+    expect(detail.textContent).toContain('Diff details')
+    expect(detail.textContent).toContain('Exposed HTTP service')
+    expect(detail.textContent).not.toContain('findings classifier')
+    expect(detail.textContent).toContain('Compare')
+    expect(detail.textContent).toContain('Open run')
+    Array.from(detail.querySelectorAll('button'))
+      .find(btn => btn.textContent === 'Compare')
+      .click()
+    await vi.waitFor(() => expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run_base', 'run_current'))
+  })
+
+  it('creates watchers that capture the first run as the baseline', async () => {
+    let watcher = null
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers: watcher ? [watcher] : [] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return { ok: true, json: async () => ({ cron_expr: '0 * * * *', timezone: 'UTC', next_fires: [] }) }
+      }
+      if (url === '/watchers' && options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        watcher = {
+          id: 'wtr_first_run',
+          label: body.label,
+          command_text: body.command,
+          baseline_run_id: '',
+          last_run_id: '',
+          state: 'ok',
+          state_reason: 'pending_baseline',
+          options: body.options,
+          last_diff_summary: {},
+          schedule: {
+            id: 'sch_first_run',
+            cadence_preset: 'hourly',
+            cron_expr: '0 * * * *',
+            timezone: 'UTC',
+            enabled: true,
+          },
+        }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      if (url.startsWith('/watchers/wtr_first_run/fires')) {
+        return {
+          ok: true,
+          json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }),
+        }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const { _bindWatchersModal, openWatchersModal, detail, list } = loadWatchersModalTestFns({ apiFetch, showToast })
+    _bindWatchersModal()
+
+    await openWatchersModal()
+    await vi.waitFor(() => expect(document.getElementById('watchers-new-btn')).not.toBeNull())
+    document.getElementById('watchers-new-btn').click()
+    await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
+    expect(document.querySelector('[data-watcher-baseline-mode="first_run"]').classList.contains('is-active')).toBe(true)
+    expect(document.getElementById('watchers-baseline-input').disabled).toBe(true)
+    document.getElementById('watchers-label-input').value = 'Watch first run'
+    document.getElementById('watchers-command-input').value = 'nmap -sV darklab.sh'
+    document.getElementById('watchers-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_mode: 'first_run',
+      baseline_run_id: '',
+      command: 'nmap -sV darklab.sh',
+    })
+    expect(list.textContent).toContain('baseline pending')
+    expect(detail.textContent).toContain('pending baseline')
+  })
+
+  it('pauses resumes fires and accepts watcher baselines from action buttons', async () => {
+    let watcher = {
+      id: 'wtr_actions',
+      label: 'Action watcher',
+      command_text: 'echo watch',
+      baseline_run_id: 'run_base',
+      last_run_id: 'run_current',
+      state: 'ok',
+      options: {},
+      last_diff_summary: { classifier: 'textual', added_line_count: 0 },
+      schedule: {
+        id: 'sch_watcher',
+        cadence_preset: 'hourly',
+        cron_expr: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+      },
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers: [watcher] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return { ok: true, json: async () => ({ cron_expr: '0 * * * *', timezone: 'UTC', next_fires: [] }) }
+      }
+      if (url.startsWith('/watchers/wtr_actions/fires')) {
+        return {
+          ok: true,
+          json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }),
+        }
+      }
+      if (url === '/watchers/wtr_actions' && options.method === 'PATCH') {
+        const body = JSON.parse(options.body)
+        watcher = { ...watcher, state: body.resume ? 'ok' : 'paused' }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      if (url === '/watchers/wtr_actions/run-now' && options.method === 'POST') {
+        watcher = { ...watcher, last_run_id: 'run_current' }
+        return { ok: true, json: async () => ({ status: 'fired', watcher }) }
+      }
+      if (url === '/watchers/wtr_actions/accept-baseline' && options.method === 'POST') {
+        watcher = { ...watcher, baseline_run_id: 'run_current', state: 'ok' }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const showConfirm = vi.fn(async () => 'accept')
+    const { _bindWatchersModal, refreshWatchersModal } = loadWatchersModalTestFns({ apiFetch, showToast, showConfirm })
+    _bindWatchersModal()
+
+    await refreshWatchersModal()
+    await vi.waitFor(() => expect(document.getElementById('watchers-detail').textContent).toContain('Action watcher'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Pause').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher paused', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Resume').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher resumed', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Run now').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher fired', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Accept baseline').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Baseline accepted', 'success'))
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
+  })
+
+  it('does not let history outside-click dismissal close behind modal overlays', async () => {
+    const bindOutsideClickClose = vi.fn()
+    await loadAppFns({ bindOutsideClickClose })
+
+    const historyCall = bindOutsideClickClose.mock.calls.find(([panel]) => panel?.id === 'history-panel')
+    expect(historyCall?.[1].exemptSelectors).toEqual(expect.arrayContaining([
+      '.modal-overlay',
+      '#history-compare-overlay',
+    ]))
   })
 
   it('applies the saved theme at startup', async () => {
@@ -249,9 +908,22 @@ describe('app helpers', () => {
     })
   })
 
-  it('applies saved timestamp, line number, and HUD clock preferences from cookies at startup', async () => {
-    const { getHudClockPreference } = await loadAppFns({
-      cookies: { pref_timestamps: 'clock', pref_line_numbers: 'on', pref_hud_clock: 'local' },
+  it('applies saved timestamp, line number, HUD clock, and compare preferences from cookies at startup', async () => {
+    const {
+      getHudClockPreference,
+      getProjectAutoLinkExternalRunsPreference,
+      getProjectAutoLinkRunEntitiesPreference,
+      getCompareViewModePreference,
+      getCompareContextPreference,
+    } = await loadAppFns({
+      cookies: {
+        pref_timestamps: 'clock',
+        pref_line_numbers: 'on',
+        pref_hud_clock: 'local',
+        pref_compare_view_mode: 'unified',
+        pref_compare_context: '10',
+        pref_tour_seen_version: 2,
+      },
     })
 
     expect(document.body.classList.contains('ts-clock')).toBe(true)
@@ -259,7 +931,15 @@ describe('app helpers', () => {
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(document.getElementById('options-compare-view-mode-select').value).toBe('unified')
+    expect(document.getElementById('options-compare-context-select').value).toBe('10')
+    expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(true)
+    expect(document.getElementById('options-project-auto-link-run-entities-toggle').checked).toBe(true)
     expect(getHudClockPreference()).toBe('local')
+    expect(getProjectAutoLinkExternalRunsPreference()).toBe('on')
+    expect(getProjectAutoLinkRunEntitiesPreference()).toBe('on')
+    expect(getCompareViewModePreference()).toBe('unified')
+    expect(getCompareContextPreference()).toBe('10')
   })
 
   it('applies saved session preferences on startup over stale local cookies', async () => {
@@ -274,8 +954,14 @@ describe('app helpers', () => {
               pref_line_numbers: 'on',
               pref_welcome_intro: 'disable_animation',
               pref_share_redaction_default: 'redacted',
+              pref_project_auto_link_external_runs: 'off',
+              pref_project_auto_link_run_entities: 'off',
               pref_run_notify: 'off',
               pref_hud_clock: 'local',
+              pref_compare_view_mode: 'changes_only',
+              pref_compare_context: 'all',
+              pref_options_modal_last_tab: 'secrets',
+              pref_tour_seen_version: 3,
             },
           }),
         })
@@ -308,7 +994,14 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
-    const { getHudClockPreference } = await loadAppFns({
+    const {
+      getHudClockPreference,
+      getProjectAutoLinkExternalRunsPreference,
+      getProjectAutoLinkRunEntitiesPreference,
+      getCompareViewModePreference,
+      getCompareContextPreference,
+      getOptionsModalLastTabPreference,
+    } = await loadAppFns({
       apiFetch,
       cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
       themeRegistry: {
@@ -344,7 +1037,60 @@ describe('app helpers', () => {
     expect(document.getElementById('options-welcome-select').value).toBe('disable_animation')
     expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(document.getElementById('options-compare-view-mode-select').value).toBe('changes_only')
+    expect(document.getElementById('options-compare-context-select').value).toBe('all')
+    expect(document.getElementById('options-tab-secrets').classList.contains('is-active')).toBe(true)
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(false)
+    expect(document.getElementById('options-panel-preferences').hidden).toBe(true)
+    expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(false)
+    expect(document.getElementById('options-project-auto-link-run-entities-toggle').checked).toBe(false)
+    expect(document.getElementById('options-project-auto-link-run-entities-toggle').disabled).toBe(true)
     expect(getHudClockPreference()).toBe('local')
+    expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
+    expect(getProjectAutoLinkRunEntitiesPreference()).toBe('off')
+    expect(getCompareViewModePreference()).toBe('changes_only')
+    expect(getCompareContextPreference()).toBe('all')
+    expect(getOptionsModalLastTabPreference()).toBe('secrets')
+  })
+
+  it('persists the selected options tab and keeps desktop-only controls in the preferences panel', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/session/preferences') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference } = await loadAppFns({ apiFetch })
+
+    activateOptionsTab('secrets')
+
+    expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(false)
+    expect(document.getElementById('options-panel-preferences').hidden).toBe(true)
+    expect(getOptionsModalLastTabPreference()).toBe('secrets')
+    expect(document.cookie).toContain('pref_options_modal_last_tab=secrets')
+    await vi.waitFor(() => {
+      const calls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
+      expect(calls.length).toBeGreaterThan(0)
+      const payload = JSON.parse(calls.at(-1)[1].body)
+      expect(payload.preferences.pref_options_modal_last_tab).toBe('secrets')
+    })
+
+    activateOptionsTab('preferences')
+
+    expect(document.getElementById('options-tab-preferences').getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelectorAll('#options-panel-preferences .options-desktop-only')).toHaveLength(2)
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(true)
+
+    expect(cycleOptionsTab(-1)).toBe(true)
+    expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement?.matches('[data-options-tab]')).toBe(false)
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -374,17 +1120,29 @@ describe('app helpers', () => {
   })
 
   it('applies the saved prompt username preference to the live prompt', async () => {
-    const { applyPromptUsernamePreference } = await loadAppFns({
+    const showToast = vi.fn()
+    await loadAppFns({
       cookies: { pref_prompt_username: 'nona' },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      showToast,
     })
     const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix')
+    const input = document.getElementById('options-prompt-username-input')
     expect(promptPrefix.textContent).toBe('nona@darklab.sh:/ $')
-    expect(document.getElementById('options-prompt-username-input').value).toBe('nona')
+    expect(input.value).toBe('nona')
+    expect(input.getAttribute('aria-label')).toBe('Prompt name')
+    expect(input.getAttribute('data-bwignore')).toBe('true')
+    expect(input.getAttribute('data-1p-ignore')).toBe('true')
+    expect(input.getAttribute('data-lpignore')).toBe('true')
 
-    applyPromptUsernamePreference('ops-user')
+    input.value = 'ops-user'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 550))
 
-    expect(promptPrefix.textContent).toBe('ops-user@darklab.sh:/ $')
+    expect(promptPrefix.textContent).toContain('ops-user@darklab.sh:')
     expect(document.cookie).toContain('pref_prompt_username=ops-user')
+    expect(showToast).toHaveBeenCalledWith('Prompt name saved', 'success')
   })
 
   it('shows live validation for invalid prompt username input without saving it', async () => {
@@ -836,13 +1594,23 @@ describe('app helpers', () => {
           pref_line_numbers: 'off',
           pref_timestamps: 'off',
           pref_welcome_intro: 'animated',
+          pref_project_auto_link_external_runs: 'on',
+          pref_project_auto_link_run_entities: 'on',
           pref_prompt_username: '',
+          pref_compare_view_mode: 'auto',
+          pref_compare_context: '3',
+          pref_tour_seen_version: '',
         },
       })
 
     await handleConfigCommand('config set line-numbers on', 'tab-1')
     await handleConfigCommand('config set welcome static', 'tab-1')
+    await handleConfigCommand('config set project-auto-link-runs off', 'tab-1')
+    await handleConfigCommand('config set project-auto-link-run-entities off', 'tab-1')
     await handleConfigCommand('config set prompt-username nona', 'tab-1')
+    await handleConfigCommand('config set compare-view changes-only', 'tab-1')
+    await handleConfigCommand('config set compare-context all', 'tab-1')
+    await handleConfigCommand('config get project-auto-link-run-entities', 'tab-1')
     await handleConfigCommand('config get prompt-username', 'tab-1')
     await handleConfigCommand('config list', 'tab-1')
 
@@ -850,11 +1618,20 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
+    expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
+    expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
     expect(document.cookie).toContain('pref_prompt_username=nona')
+    expect(document.cookie).toContain('pref_compare_view_mode=changes_only')
+    expect(document.cookie).toContain('pref_compare_context=all')
     expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:~ $')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-runs off')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-run-entities off')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-view changes-only')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-context all')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get project-auto-link-run-entities')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
     expect(setStatus).toHaveBeenCalledWith('ok')
@@ -908,6 +1685,134 @@ describe('app helpers', () => {
     expect(scrollTop).toBe(500)
   })
 
+  async function advanceTerminalTour(output, pendingTour, chapterCount) {
+    const promptCount = output.querySelectorAll('.builtin-tour-prompt').length
+    for (let index = 0; index < chapterCount; index += 1) {
+      await vi.waitFor(() => {
+        expect(output.querySelectorAll('.builtin-tour-prompt')).toHaveLength(promptCount + index + 1)
+      })
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    }
+    await pendingTour
+  }
+
+  it('renders the guided terminal tour, records it once, and opens sample chips in a new tab', async () => {
+    const output = document.createElement('div')
+    const tourConfig = {
+      workspace_enabled: true,
+      tour_enabled: true,
+      tour_version: 3,
+      tour_chapters: [
+        {
+          id: 'running_commands',
+          title: 'Running commands',
+          summary: 'Run something useful.\nCapture the output.',
+          sample: 'dig darklab.sh A',
+        },
+        {
+          id: 'interactive_pty',
+          title: 'Interactive tools',
+          summary: 'Open supported interactive tools.',
+          sample: 'mtr --interactive darklab.sh',
+        },
+      ],
+    }
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/config') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(tourConfig) })
+      }
+      if (url === '/session/tour-seen') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            tour_version: 3,
+            preferences: { pref_tour_seen_version: 3 },
+          }),
+        })
+      }
+      if (url === '/session/preferences' && (!opts.method || opts.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const submitVisibleComposerCommand = vi.fn()
+    const createTab = vi.fn(() => 'tab-tour-sample')
+    const activateTab = vi.fn()
+    const {
+      handleTourCommand,
+      getTourSeenVersionPreference,
+      setStatus,
+    } = await loadAppFns({
+      apiFetch,
+      getOutput: () => output,
+      submitVisibleComposerCommand,
+      createTab,
+      activateTab,
+      appConfig: tourConfig,
+    })
+
+    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 2)
+    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 2)
+
+    expect(output.textContent).toContain('Running commands')
+    expect(output.textContent).toContain('Capture the output.')
+    expect(output.textContent).toContain('Interactive tools')
+    expect(output.textContent).toContain('Press any key to continue, or press q to quit the tour.')
+    const chips = output.querySelectorAll('.faq-chip[data-faq-command]')
+    expect(chips).toHaveLength(4)
+    chips[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(createTab).toHaveBeenCalled()
+    expect(activateTab).toHaveBeenCalledWith('tab-tour-sample')
+    expect(document.getElementById('cmd').value).toBe('dig darklab.sh A')
+    expect(submitVisibleComposerCommand).not.toHaveBeenCalled()
+    expect(getTourSeenVersionPreference()).toBe(3)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/session/tour-seen')).toHaveLength(1)
+    expect(setStatus).toHaveBeenLastCalledWith('ok')
+  })
+
+  it('omits the interactive tools chapter from the terminal tour on mobile', async () => {
+    const output = document.createElement('div')
+    const tourConfig = {
+      workspace_enabled: true,
+      tour_enabled: true,
+      tour_version: 1,
+      tour_chapters: [
+        {
+          id: 'running_commands',
+          title: 'Running commands',
+          summary: 'Run something useful.',
+          sample: 'dig darklab.sh A',
+        },
+        {
+          id: 'interactive_pty',
+          title: 'Interactive tools',
+          summary: 'Open supported interactive tools.',
+          sample: 'mtr --interactive darklab.sh',
+        },
+      ],
+    }
+    const { handleTourCommand, restoreViewport } = await loadAppFns({
+      apiFetch: (url) => {
+        if (url === '/config') return Promise.resolve({ ok: true, json: () => Promise.resolve(tourConfig) })
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      },
+      getOutput: () => output,
+      mobileViewport: { width: 390, height: 844 },
+      appConfig: tourConfig,
+    })
+    try {
+      await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 1)
+      expect(output.textContent).toContain('Running commands')
+      expect(output.textContent).not.toContain('Interactive tools')
+    } finally {
+      restoreViewport()
+    }
+  })
+
   it('serves runtime autocomplete context for theme and config values', async () => {
     const { getRuntimeAutocompleteContext } = await loadAppFns({
       themeRegistry: {
@@ -944,7 +1849,16 @@ describe('app helpers', () => {
       .toContain('(current)')
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
     expect(context.config.arg_hints.set.map(item => item.value)).toContain('prompt-username')
+    expect(context.config.arg_hints.set.map(item => item.value)).toContain('compare-view')
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.config.sequence_arg_hints['set compare-view'].map(item => item.value)).toEqual([
+      'auto',
+      'side-by-side',
+      'unified',
+      'changes-only',
+      'findings-only',
+    ])
+    expect(context.config.sequence_arg_hints['set compare-context'].map(item => item.value)).toEqual(['3', '10', 'all'])
     expect(context.config.sequence_arg_hints['set prompt-username'].map(item => item.value)).toEqual(['<username> | default'])
     expect(context.var.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'set', 'unset'])
     expect(context.var.arg_hints.set.filter(item => item.value === 'HOST')).toEqual([
@@ -1003,7 +1917,27 @@ describe('app helpers', () => {
   })
 
   it('renders user workflows above built-ins with edit actions', async () => {
-    const { renderWorkflowItems } = await loadAppFns()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/workflows') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            items: [
+              {
+                id: 'builtin:dns',
+                source: 'builtin',
+                title: 'DNS Troubleshooting',
+                description: '',
+                inputs: [],
+                steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+              },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { renderWorkflowItems, ensureWorkflowCatalogLoaded } = await loadAppFns({ apiFetch })
     document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
 
     renderWorkflowItems([
@@ -1030,6 +1964,10 @@ describe('app helpers', () => {
     expect(labels).toEqual(['My workflows', 'Built-ins'])
     expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting'])
     expect(document.querySelector('.is-user-workflow .workflow-edit-btn')).toBeTruthy()
+    const workflowFetchesBefore = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
+    await ensureWorkflowCatalogLoaded()
+    const workflowFetchesAfter = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
+    expect(workflowFetchesAfter).toBe(workflowFetchesBefore)
   })
 
   it('runs a workflow from the terminal command with flag-provided inputs', async () => {
@@ -1243,6 +2181,16 @@ describe('app helpers', () => {
     expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
   })
 
+  it('hides the tour built-in from runtime autocomplete when the feature is disabled', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      appConfig: { workspace_enabled: true, tour_enabled: false },
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.tour).toBeUndefined()
+  })
+
   it('keeps code-owned built-ins out of commands.yaml', () => {
     const commandsYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/commands.yaml'), 'utf8')
     const yamlRoots = new Set(
@@ -1252,7 +2200,7 @@ describe('app helpers', () => {
       'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'exit', 'faq', 'fortune', 'free',
       'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
       'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
-      'tail', 'theme', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
+      'tail', 'theme', 'tour', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
     ]
 
     expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])
@@ -1568,6 +2516,28 @@ describe('app helpers', () => {
     expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
   })
 
+  it('keeps macOS double-space substitution out of the command composer', async () => {
+    const { cmdInput, getComposerState, setComposerState } = await loadAppFns()
+
+    setComposerState({
+      value: 'echo ',
+      selectionStart: 5,
+      selectionEnd: 5,
+      activeInput: 'desktop',
+    })
+    cmdInput.value = 'echo. '
+    cmdInput.setSelectionRange(6, 6)
+    cmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(cmdInput.value).toBe('echo  ')
+    expect(getComposerState()).toMatchObject({
+      value: 'echo  ',
+      selectionStart: 6,
+      selectionEnd: 6,
+      activeInput: 'desktop',
+    })
+  })
+
   it('settles welcome immediately when Enter is pressed during welcome playback', async () => {
     const requestWelcomeSettle = vi.fn()
     const welcomeOwnsTab = vi.fn(() => true)
@@ -1599,6 +2569,26 @@ describe('app helpers', () => {
 
     expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
     expect(runCommand).not.toHaveBeenCalled()
+  })
+
+  it('does not let welcome playback steal Space from schedules form fields', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    await loadAppFns({
+      requestWelcomeSettle,
+      welcomeActive: true,
+      welcomeOwnsTab,
+      isSchedulesOverlayOpen: () => true,
+    })
+    const labelInput = document.createElement('input')
+    labelInput.id = 'schedules-label-input'
+    document.body.appendChild(labelInput)
+    labelInput.focus()
+
+    const event = new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })
+    labelInput.dispatchEvent(event)
+
+    expect(requestWelcomeSettle).not.toHaveBeenCalled()
   })
 
   it('renders the shell prompt line from composer state instead of the stale hidden input', async () => {
@@ -1664,9 +2654,16 @@ describe('app helpers', () => {
     persistTabSessionStateNow()
 
     const saved = JSON.parse(sessionStorage.getItem(_getTabSessionStateKey()))
-    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs).toHaveLength(2)
     expect(saved.tabs[0].label).toBe('tab 1')
     expect(saved.tabs[0].draftInput).toBe('')
+    expect(saved.tabs[1]).toMatchObject({
+      label: 'ping',
+      command: 'ping darklab.sh',
+      st: 'running',
+      runId: '',
+      historyRunId: 'run-1',
+    })
   })
 
   it('persists output signal metadata for session restore', async () => {
@@ -3249,9 +4246,17 @@ describe('app helpers', () => {
 
   it('swallows composer keydown while the active tab is running', async () => {
     const acHide = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const openProjectWorkspace = vi.fn(() => Promise.resolve(true))
+    const clearTab = vi.fn()
+    const closeTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       tabs: [{ id: 'tab-1', st: 'running' }],
       acHide,
+      createTab,
+      openProjectWorkspace,
+      clearTab,
+      closeTab,
     })
 
     const ev = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true })
@@ -3259,6 +4264,18 @@ describe('app helpers', () => {
 
     expect(ev.defaultPrevented).toBe(true)
     expect(acHide).toHaveBeenCalled()
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))
+
+    expect(createTab).toHaveBeenCalledTimes(1)
+    expect(createTab).toHaveBeenCalledWith('shell 2')
+    expect(openProjectWorkspace).toHaveBeenCalledTimes(1)
+    expect(clearTab).toHaveBeenCalledTimes(1)
+    expect(clearTab).toHaveBeenCalledWith('tab-1', { preserveRunState: true })
+    expect(closeTab).not.toHaveBeenCalled()
   })
 
   it('uses Ctrl+C to jump to a new prompt line when no command is running', async () => {
@@ -3440,6 +4457,135 @@ describe('app helpers', () => {
     expect(activateTab).toHaveBeenCalledWith('tab-1')
   })
 
+  it('routes Option+Tab through open modal tab sets before terminal tabs', async () => {
+    const activateTab = vi.fn()
+    const cycleAtlasTab = vi.fn(() => true)
+    const { handleTabShortcut, cmdInput } = await loadAppFns({
+      activateTab,
+      isAtlasOverlayOpen: () => true,
+      cycleAtlasTab,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      target: cmdInput,
+      preventDefault: vi.fn(),
+    })
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: true,
+      target: cmdInput,
+      preventDefault: vi.fn(),
+    })
+
+    expect(cycleAtlasTab).toHaveBeenNthCalledWith(1, 1)
+    expect(cycleAtlasTab).toHaveBeenNthCalledWith(2, -1)
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
+  it('cycles modal tabs from non-terminal inputs', async () => {
+    const activateTab = vi.fn()
+    const cycleProjectWorkspaceTab = vi.fn(() => true)
+    const { handleTabShortcut } = await loadAppFns({
+      activateTab,
+      isProjectWorkspaceOpen: () => true,
+      cycleProjectWorkspaceTab,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+    const modalInput = document.createElement('input')
+
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      target: modalInput,
+      preventDefault: vi.fn(),
+    })
+
+    expect(cycleProjectWorkspaceTab).toHaveBeenCalledWith(1)
+    expect(activateTab).not.toHaveBeenCalled()
+
+    const activateTabForOptions = vi.fn()
+    const { handleTabShortcut: handleOptionsTabShortcut } = await loadAppFns({
+      activateTab: activateTabForOptions,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+    document.getElementById('options-overlay').classList.add('open')
+    const preventDefault = vi.fn()
+
+    handleOptionsTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: true,
+      target: modalInput,
+      preventDefault,
+    })
+
+    expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
+    expect(preventDefault).toHaveBeenCalled()
+    expect(activateTabForOptions).not.toHaveBeenCalled()
+  })
+
+  it('uses the top open modal tab set when multiple tabbed surfaces are present', async () => {
+    const activateTab = vi.fn()
+    const cycleHistoryRunOverlayTab = vi.fn(() => true)
+    const cycleAtlasTab = vi.fn(() => true)
+    const cycleProjectWorkspaceTab = vi.fn(() => true)
+    const { handleTabShortcut, cmdInput } = await loadAppFns({
+      activateTab,
+      isHistoryRunOverlayOpen: () => true,
+      cycleHistoryRunOverlayTab,
+      isAtlasOverlayOpen: () => true,
+      cycleAtlasTab,
+      isProjectWorkspaceOpen: () => true,
+      cycleProjectWorkspaceTab,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      target: cmdInput,
+      preventDefault: vi.fn(),
+    })
+
+    expect(cycleHistoryRunOverlayTab).toHaveBeenCalledWith(1)
+    expect(cycleAtlasTab).not.toHaveBeenCalled()
+    expect(cycleProjectWorkspaceTab).not.toHaveBeenCalled()
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
   it('supports Alt+digit to jump directly to a tab', async () => {
     const activateTab = vi.fn()
     const { cmdInput } = await loadAppFns({
@@ -3479,19 +4625,19 @@ describe('app helpers', () => {
     expect(activateTab).toHaveBeenCalledWith('tab-3')
   })
 
-  it('supports Alt+P to create a permalink for the active tab', async () => {
+  it('supports Alt+Shift+P to create a permalink for the active tab', async () => {
     const permalinkTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       permalinkTab,
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', altKey: true, shiftKey: true, bubbles: true }))
 
     expect(permalinkTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports macOS Option+P to create a permalink via physical key code', async () => {
+  it('supports macOS Option+Shift+P to create a permalink via physical key code', async () => {
     const permalinkTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       permalinkTab,
@@ -3503,11 +4649,44 @@ describe('app helpers', () => {
         key: 'π',
         code: 'KeyP',
         altKey: true,
+        shiftKey: true,
         bubbles: true,
+        cancelable: true,
       }),
     )
 
     expect(permalinkTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+P to toggle the projects modal from the terminal prompt', async () => {
+    const openProjectWorkspace = vi.fn(() => Promise.resolve(true))
+    const closeProjectWorkspace = vi.fn()
+    let projectWorkspaceOpen = false
+    const { cmdInput } = await loadAppFns({
+      openProjectWorkspace,
+      closeProjectWorkspace,
+      isProjectWorkspaceOpen: () => projectWorkspaceOpen,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    projectWorkspaceOpen = true
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+
+    expect(openProjectWorkspace).toHaveBeenCalledTimes(1)
+    expect(closeProjectWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('supports Alt+C to toggle the command registry from the terminal prompt', async () => {
+    const { cmdInput } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+    const overlay = document.getElementById('command-registry-overlay')
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', altKey: true, bubbles: true }))
+    expect(overlay.classList.contains('open')).toBe(true)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', altKey: true, bubbles: true }))
+    expect(overlay.classList.contains('open')).toBe(false)
   })
 
   it('supports Alt+Shift+C to copy output for the active tab', async () => {
@@ -3523,6 +4702,7 @@ describe('app helpers', () => {
         altKey: true,
         shiftKey: true,
         bubbles: true,
+        cancelable: true,
       }),
     )
 
@@ -3582,8 +4762,7 @@ describe('app helpers', () => {
 
     cmdInput.dispatchEvent(
       new KeyboardEvent('keydown', {
-        key: 'F',
-        code: 'KeyF',
+        key: 'ƒ',
         altKey: true,
         shiftKey: true,
         bubbles: true,
@@ -3604,6 +4783,70 @@ describe('app helpers', () => {
     )
 
     expect(closeWorkspace).toHaveBeenCalled()
+  })
+
+  it('supports Alt+Shift+S and Alt+Shift+W to toggle Schedules and Watchers from the terminal prompt', async () => {
+    const openSchedulesModal = vi.fn()
+    const closeSchedulesModal = vi.fn()
+    const openWatchersModal = vi.fn()
+    const closeWatchersModal = vi.fn()
+    let schedulesOpen = false
+    let watchersOpen = false
+    const { cmdInput } = await loadAppFns({
+      openSchedulesModal,
+      closeSchedulesModal,
+      isSchedulesOverlayOpen: vi.fn(() => schedulesOpen),
+      openWatchersModal,
+      closeWatchersModal,
+      isWatchersOverlayOpen: vi.fn(() => watchersOpen),
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'S',
+        code: 'KeyS',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'W',
+        code: 'KeyW',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(openSchedulesModal).toHaveBeenCalledTimes(1)
+    expect(openWatchersModal).toHaveBeenCalledTimes(1)
+
+    schedulesOpen = true
+    watchersOpen = true
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ß',
+        code: 'KeyS',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '„',
+        code: 'KeyW',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(closeSchedulesModal).toHaveBeenCalledTimes(1)
+    expect(closeWatchersModal).toHaveBeenCalledTimes(1)
   })
 
   it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {
@@ -3664,7 +4907,7 @@ describe('app helpers', () => {
     const searchInput = document.getElementById('search-input')
 
     searchInput.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }),
+      new KeyboardEvent('keydown', { key: 'P', altKey: true, shiftKey: true, bubbles: true }),
     )
     searchInput.dispatchEvent(
       new KeyboardEvent('keydown', {
@@ -4330,6 +5573,400 @@ describe('app helpers', () => {
     expect(showToast).toHaveBeenCalledWith('Session token cleared')
   })
 
+  it('loads encrypted secrets metadata in options without revealing values', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/secrets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            secrets: [{
+              name: 'SHODAN_API_KEY',
+              consumer_envs: ['SHODAN_API_KEY'],
+              updated_at: '2026-05-14T10:00:00+00:00',
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { openOptions } = await loadAppFns({ apiFetch })
+
+    openOptions()
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('SHODAN_API_KEY'))
+
+    expect(document.getElementById('options-secrets-list').textContent).not.toContain('super-secret-value')
+    expect(apiFetch).toHaveBeenCalledWith('/session/secrets', { cache: 'no-store' })
+  })
+
+  it('adds encrypted secrets through the replace-only options prompt', async () => {
+    let secrets = []
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: [{
+              root: 'vt',
+              category: 'External Intelligence',
+              description: 'VirusTotal lookups',
+              requires_secrets: [{
+                env: 'VT_API_KEY',
+                inject_env: 'VTCLI_APIKEY',
+                fallback_envs: ['VTCLI_APIKEY'],
+                optional: false,
+              }],
+            }],
+            groups: [],
+          }),
+        })
+      }
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        secrets = [{
+          name: body.name,
+          consumer_envs: body.consumer_envs,
+          updated_at: '2026-05-14T10:00:00+00:00',
+        }]
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(secrets[0]) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const select = opts.content[0].querySelector('select')
+      const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      expect(opts.content.map(node => node.querySelector('.options-secret-field-label')?.textContent).filter(Boolean)).toEqual([
+        'Secret',
+        'Custom secret name',
+        'API key or token',
+        'Consumer envs',
+      ])
+      expect([...select.options].map(option => option.value)).toContain('VT_API_KEY')
+      expect([...select.options].map(option => option.value)).not.toContain('VTCLI_APIKEY')
+      select.value = 'VT_API_KEY'
+      select.dispatchEvent(new Event('change'))
+      expect(inputs[0].getAttribute('data-bwignore')).toBe('true')
+      expect(inputs[1].autocomplete).toBe('off')
+      expect(inputs[1].placeholder).toBe('Paste API key or token')
+      expect(inputs[1].getAttribute('data-bwignore')).toBe('true')
+      expect(inputs[2].getAttribute('data-bwignore')).toBe('true')
+      inputs[1].value = 'value-that-must-not-render'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    const showToast = vi.fn()
+    await loadAppFns({ apiFetch, showConfirm, showToast })
+
+    document.getElementById('options-secret-new-btn').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
+      method: 'POST',
+    })))
+
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'VT_API_KEY',
+      value: 'value-that-must-not-render',
+      consumer_envs: undefined,
+    })
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('VT_API_KEY'))
+    expect(document.getElementById('options-secrets-list').textContent).not.toContain('value-that-must-not-render')
+  })
+
+  it('keeps a custom secret escape hatch with an unused-secret warning', async () => {
+    let secrets = []
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ restricted: true, commands: [], groups: [] }),
+        })
+      }
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        secrets = [{ name: body.name, consumer_envs: body.consumer_envs, updated_at: '2026-05-14T10:00:00+00:00' }]
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(secrets[0]) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const select = opts.content[0].querySelector('select')
+      const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      expect(opts.content.map(node => node.textContent).join(' ')).toContain('Custom secrets are stored')
+      select.value = '__custom__'
+      select.dispatchEvent(new Event('change'))
+      inputs[0].value = 'future_api_key'
+      inputs[1].value = 'custom-secret-value'
+      inputs[2].value = 'FUTURE_API_KEY'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    const showToast = vi.fn()
+    await loadAppFns({ apiFetch, showConfirm, showToast })
+
+    document.getElementById('options-secret-new-btn').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
+      method: 'POST',
+    })))
+
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'FUTURE_API_KEY',
+      value: 'custom-secret-value',
+      consumer_envs: ['FUTURE_API_KEY'],
+    })
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('not currently used'), 'success')
+  })
+
+  it('suggests app-native intel secret consumers in the options prompt', async () => {
+    let secrets = []
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: [],
+            groups: [],
+            secret_consumers: [
+              {
+                source: 'app_native_intel',
+                consumer: 'intel Shodan',
+                provider: 'shodan',
+                env: 'SHODAN_API_KEY',
+                fallback_envs: [],
+                optional: false,
+              },
+            ],
+            intel_providers: [
+              {
+                id: 'shodan',
+                label: 'Shodan',
+                entity_types: ['ip'],
+                secret_env: 'SHODAN_API_KEY',
+                secret_env_aliases: [],
+                secret_env_names: ['SHODAN_API_KEY'],
+                requires_secret: true,
+                access_note: 'Free signup; paid tiers',
+                app_native: true,
+              },
+              {
+                id: 'teamcymru',
+                label: 'Team Cymru',
+                entity_types: ['ip'],
+                uses: ['intel ip'],
+                secret_env: '',
+                secret_env_aliases: [],
+                secret_env_names: [],
+                requires_secret: false,
+                access_note: 'Free public lookup',
+                app_native: true,
+              },
+              {
+                id: 'ipinfo',
+                label: 'IPinfo',
+                entity_types: ['ip'],
+                uses: ['intel ip', 'ipinfo CLI'],
+                secret_env: 'IPINFO_TOKEN',
+                secret_env_aliases: [],
+                secret_env_names: ['IPINFO_TOKEN'],
+                requires_secret: true,
+                optional_secret: true,
+                access_note: 'Free public basics; optional account token',
+                app_native: true,
+              },
+              {
+                id: 'virustotal',
+                label: 'VirusTotal',
+                entity_types: ['domain', 'hash'],
+                secret_env: 'VT_API_KEY',
+                secret_env_aliases: ['VTCLI_APIKEY'],
+                secret_env_names: ['VT_API_KEY', 'VTCLI_APIKEY'],
+                requires_secret: true,
+                access_note: 'Free signup; paid tiers',
+                app_native: true,
+              },
+              {
+                id: 'chaos',
+                label: 'ProjectDiscovery Chaos',
+                entity_types: ['domain'],
+                uses: ['chaos CLI'],
+                secret_env: 'PDCP_API_KEY',
+                secret_env_aliases: [],
+                secret_env_names: ['PDCP_API_KEY'],
+                requires_secret: true,
+                access_note: 'ProjectDiscovery Cloud account key',
+                app_native: false,
+              },
+            ],
+          }),
+        })
+      }
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        secrets = [{ name: body.name, consumer_envs: body.consumer_envs, updated_at: '2026-05-14T10:00:00+00:00' }]
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(secrets[0]) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const select = opts.content[0].querySelector('select')
+      const valueInput = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))[1]
+      const replacing = String(opts.body?.text || '').startsWith('Replace ')
+      expect([...select.options].map(option => option.value)).toContain('SHODAN_API_KEY')
+      expect(select.value).toBe('SHODAN_API_KEY')
+      expect(select.disabled).toBe(replacing)
+      select.value = 'SHODAN_API_KEY'
+      select.dispatchEvent(new Event('change'))
+      expect(opts.content.map(node => node.textContent).join(' ')).toContain('Used by intel Shodan')
+      expect(valueInput.placeholder).toBe(replacing ? 'Paste replacement API key or token' : 'Paste API key or token')
+      valueInput.value = replacing ? 'replacement-shodan-secret-value' : 'shodan-secret-value'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    await loadAppFns({ apiFetch, showConfirm })
+
+    document.getElementById('options-provider-status-btn').click()
+    const providerOverlay = document.getElementById('provider-status-overlay')
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
+    const providerText = document.getElementById('provider-status-body').textContent
+    expect(providerText).toContain('2 usable · 3 not configured')
+    expect(providerText).toContain('Team Cymru')
+    expect(providerText).toContain('No secret needed')
+    expect(providerText).toContain('IPinfo')
+    expect(providerText).toContain('ipinfo CLI')
+    expect(providerText).toContain('Shodan')
+    expect(providerText).toContain('Not configured')
+    expect(providerText).toContain('SHODAN_API_KEY')
+    expect(providerText).toContain('VirusTotal')
+    expect(providerText).toContain('VT_API_KEY')
+    expect(providerText).toContain('ProjectDiscovery Chaos')
+    expect(providerText).toContain('PDCP_API_KEY')
+    expect(providerText).not.toContain('VTCLI_APIKEY')
+
+    document.querySelector('.provider-status-close').click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))
+    document.getElementById('options-provider-status-btn').click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
+
+    const shodanLink = Array.from(document.querySelectorAll('.options-secret-link'))
+      .find((button) => button.textContent === 'SHODAN_API_KEY')
+    expect(shodanLink.classList.contains('chip')).toBe(true)
+    shodanLink.click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
+      method: 'POST',
+    })))
+
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'SHODAN_API_KEY',
+      value: 'shodan-secret-value',
+      consumer_envs: undefined,
+    })
+
+    document.getElementById('options-provider-status-btn').click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
+    const configuredShodanLink = Array.from(document.querySelectorAll('.options-secret-link'))
+      .find((button) => button.textContent === 'SHODAN_API_KEY')
+    expect(configuredShodanLink.classList.contains('chip')).toBe(true)
+    expect(configuredShodanLink.title).toBe('Replace SHODAN_API_KEY')
+    configuredShodanLink.click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ text: 'Replace SHODAN_API_KEY?' }),
+    })))
+    await vi.waitFor(() => expect(apiFetch.mock.calls.filter(([url, opts]) => (
+      url === '/session/secrets' && opts?.method === 'POST'
+    ))).toHaveLength(2))
+
+    const replaceBody = JSON.parse(apiFetch.mock.calls.filter(([url, opts]) => (
+      url === '/session/secrets' && opts?.method === 'POST'
+    ))[1][1].body)
+    expect(replaceBody).toEqual({
+      name: 'SHODAN_API_KEY',
+      value: 'replacement-shodan-secret-value',
+      consumer_envs: undefined,
+    })
+  })
+
+  it('opens the encrypted secret prompt for terminal secret set without echoing the value', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ name: 'SHODAN_API_KEY', consumer_envs: ['SHODAN_API_KEY'] }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            secrets: [{ name: 'SHODAN_API_KEY', consumer_envs: ['SHODAN_API_KEY'], updated_at: '2026-05-14T10:00:00+00:00' }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      expect(inputs[0].value).toBe('SHODAN_API_KEY')
+      inputs[1].value = 'terminal-secret-value'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    const { handleSecretCommand, setStatus } = await loadAppFns({ apiFetch, showConfirm })
+
+    await handleSecretCommand('secret set shodan_api_key', 'tab-1')
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        note: expect.stringContaining('never shown here again'),
+      }),
+    }))
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'SHODAN_API_KEY',
+      value: 'terminal-secret-value',
+      consumer_envs: undefined,
+    })
+    expect(JSON.stringify(apiFetch.mock.calls)).toContain('terminal-secret-value')
+    expect(document.body.textContent).not.toContain('terminal-secret-value')
+    expect(setStatus).toHaveBeenCalledWith('ok')
+  })
+
+  it('deletes encrypted secrets from the options panel only after confirming', async () => {
+    let secrets = [{ name: 'VT_API_KEY', consumer_envs: ['VT_API_KEY'], updated_at: '2026-05-14T10:00:00+00:00' }]
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/secrets/VT_API_KEY' && opts.method === 'DELETE') {
+        secrets = []
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ removed: true }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockResolvedValue('delete')
+    const { openOptions } = await loadAppFns({ apiFetch, showConfirm })
+    openOptions()
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('VT_API_KEY'))
+
+    document.querySelector('#options-secrets-list .options-secret-actions button:last-child').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets/VT_API_KEY', {
+      method: 'DELETE',
+    }))
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      tone: 'danger',
+    }))
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('No secrets stored'))
+  })
+
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/config') {
@@ -4363,9 +6000,29 @@ describe('app helpers', () => {
       if (url === '/session/preferences' && opts.method === 'POST') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
       }
+      if (url === '/session/tour-seen') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            tour_version: 4,
+            preferences: { pref_tour_seen_version: 4 },
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { getWelcomeIntroPreference, getShareRedactionDefaultPreference, getHudClockPreference } = await loadAppFns({
+    const {
+      getWelcomeIntroPreference,
+      getShareRedactionDefaultPreference,
+      getProjectAutoLinkExternalRunsPreference,
+      getProjectAutoLinkRunEntitiesPreference,
+      getHudClockPreference,
+      getCompareViewModePreference,
+      getCompareContextPreference,
+      getTourSeenVersionPreference,
+      recordTourOpened,
+    } = await loadAppFns({
       apiFetch,
       themeRegistry: {
         current: {
@@ -4420,6 +6077,22 @@ describe('app helpers', () => {
     document
       .getElementById('options-hud-clock-select')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-compare-view-mode-select').value = 'side_by_side'
+    document
+      .getElementById('options-compare-view-mode-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-compare-context-select').value = '10'
+    document
+      .getElementById('options-compare-context-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-project-auto-link-external-runs-toggle').checked = false
+    document
+      .getElementById('options-project-auto-link-external-runs-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-project-auto-link-run-entities-toggle').checked = false
+    document
+      .getElementById('options-project-auto-link-run-entities-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -4430,20 +6103,37 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
+    expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
+    expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
     expect(document.cookie).toContain('pref_hud_clock=local')
+    expect(document.cookie).toContain('pref_compare_view_mode=side_by_side')
+    expect(document.cookie).toContain('pref_compare_context=10')
     expect(getWelcomeIntroPreference()).toBe('disable_animation')
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
+    expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
+    expect(getProjectAutoLinkRunEntitiesPreference()).toBe('off')
     expect(getHudClockPreference()).toBe('local')
-    const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
-    expect(postCalls.length).toBeGreaterThan(0)
-    const lastPayload = JSON.parse(postCalls.at(-1)[1].body)
-    expect(lastPayload.preferences).toMatchObject({
-      pref_theme_name: 'theme_light_olive',
-      pref_timestamps: 'elapsed',
-      pref_line_numbers: 'on',
-      pref_welcome_intro: 'disable_animation',
-      pref_share_redaction_default: 'redacted',
-      pref_hud_clock: 'local',
+    expect(getCompareViewModePreference()).toBe('side_by_side')
+    expect(getCompareContextPreference()).toBe('10')
+    await recordTourOpened()
+    expect(getTourSeenVersionPreference()).toBe(4)
+    expect(document.cookie).toContain('pref_tour_seen_version=4')
+    await vi.waitFor(() => {
+      const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
+      expect(postCalls.length).toBeGreaterThan(0)
+      const lastPayload = JSON.parse(postCalls.at(-1)[1].body)
+      expect(lastPayload.preferences).toMatchObject({
+        pref_theme_name: 'theme_light_olive',
+        pref_timestamps: 'elapsed',
+        pref_line_numbers: 'on',
+        pref_welcome_intro: 'disable_animation',
+        pref_share_redaction_default: 'redacted',
+        pref_project_auto_link_external_runs: 'off',
+        pref_project_auto_link_run_entities: 'off',
+        pref_hud_clock: 'local',
+        pref_compare_view_mode: 'side_by_side',
+        pref_compare_context: '10',
+      })
     })
   })
 
@@ -4482,11 +6172,13 @@ describe('app helpers', () => {
               items: [
                 {
                   question: 'What is this?',
+                  category: 'Getting started',
                   answer: 'plain',
                   answer_html: 'Rich <strong>HTML</strong>',
                 },
-                { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
-                { question: 'Limits?', answer: 'limits', ui_kind: 'limits' },
+                { question: 'Allowed?', category: 'Getting started', answer: 'allowlist', ui_kind: 'allowed_commands' },
+                { question: 'Limits?', category: 'Limits & retention', answer: 'limits', ui_kind: 'limits' },
+                { question: 'Custom?', category: 'Mystery bucket', answer: 'Other answer' },
               ],
             }),
         })
@@ -4494,15 +6186,127 @@ describe('app helpers', () => {
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({ apiFetch })
+    const { openFaq } = await loadAppFns({ apiFetch })
     await new Promise((resolve) => setImmediate(resolve))
 
     const questions = [...document.querySelectorAll('.faq-q')].map((el) => el.textContent)
     expect(questions).toContain('What is this?')
+    expect([...document.querySelectorAll('.faq-section-header')].map((el) => el.textContent)).toEqual([
+      'Getting started',
+      'Limits & retention',
+      'Other',
+    ])
+    expect([...document.querySelectorAll('.faq-section')].map((section) => (
+      [...section.querySelectorAll('.faq-q')].map((el) => el.textContent)
+    ))).toEqual([
+      ['What is this?', 'Allowed?'],
+      ['Limits?'],
+      ['Custom?'],
+    ])
     expect(document.querySelector('.faq-a strong')?.textContent).toBe('HTML')
     expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Open the Command Registry')
     expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
     expect(document.querySelectorAll('#faq-allowed-text .allowed-chip')).toHaveLength(0)
+    window.history.replaceState(null, '', '/#faq=limits')
+    openFaq()
+    expect(document.querySelector('[data-faq-question="limits"]')?.classList.contains('faq-open')).toBe(true)
+    document.querySelector('[data-faq-question="custom"] .faq-q')?.click()
+    expect(window.location.hash).toBe('#faq=custom')
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('renders the FAQ visual tour re-entry link and opens the tour modal', async () => {
+    const openTourModal = vi.fn(() => true)
+    const { openFaq } = await loadAppFns({
+      openTourModal,
+      mobileViewport: { height: 700, offsetTop: 0 },
+      mobileTouch: false,
+      appConfig: {
+        tour_enabled: true,
+        tour_version: 1,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      apiFetch: vi.fn((url) => {
+        if (url === '/config') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                app_name: 'darklab_shell',
+                prompt_username: 'anon',
+                prompt_domain: 'darklab.sh',
+                version: '9.9',
+                default_theme: 'darklab_obsidian.yaml',
+                motd: '',
+                tour_enabled: true,
+                tour_version: 1,
+                tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+              }),
+          })
+        }
+        if (url === '/allowed-commands') {
+          return Promise.resolve({ json: () => Promise.resolve({ commands: [], groups: [] }) })
+        }
+        if (url === '/faq') {
+          return Promise.resolve({
+            json: () => Promise.resolve({ items: [{ question: 'What is this?', answer: 'plain' }] }),
+          })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const faqOverlay = document.getElementById('faq-overlay')
+    openFaq()
+    expect(faqOverlay.classList.contains('open')).toBe(true)
+    const button = document.querySelector('.faq-tour-open')
+    expect(button).not.toBeNull()
+    button.click()
+
+    expect(openTourModal).toHaveBeenCalledWith({
+      source: 'faq',
+    })
+    expect(faqOverlay.classList.contains('open')).toBe(false)
+  })
+
+  it('suppresses the FAQ visual tour re-entry link when the tour is disabled', async () => {
+    await loadAppFns({
+      mobileViewport: { height: 700, offsetTop: 0 },
+      mobileTouch: false,
+      appConfig: {
+        tour_enabled: false,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      apiFetch: vi.fn((url) => {
+        if (url === '/config') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                app_name: 'darklab_shell',
+                prompt_username: 'anon',
+                prompt_domain: 'darklab.sh',
+                version: '9.9',
+                default_theme: 'darklab_obsidian.yaml',
+                motd: '',
+                tour_enabled: false,
+                tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+              }),
+          })
+        }
+        if (url === '/allowed-commands') {
+          return Promise.resolve({ json: () => Promise.resolve({ commands: [], groups: [] }) })
+        }
+        if (url === '/faq') {
+          return Promise.resolve({
+            json: () => Promise.resolve({ items: [{ question: 'What is this?', answer: 'plain' }] }),
+          })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelector('.faq-tour-open')).toBeNull()
   })
 
   it('opens command catalog details from the command registry browser', async () => {
@@ -4544,7 +6348,7 @@ describe('app helpers', () => {
                   category: 'Network',
                   description: 'Transfer data from URLs.',
                   example_count: 1,
-                  subcommand_count: 0,
+                  subcommand_count: 1,
                   flag_count: 1,
                 },
               ],
@@ -4557,7 +6361,7 @@ describe('app helpers', () => {
                       category: 'Network',
                       description: 'Transfer data from URLs.',
                       example_count: 1,
-                      subcommand_count: 0,
+                      subcommand_count: 1,
                       flag_count: 1,
                     },
                   ],
@@ -4583,7 +6387,23 @@ describe('app helpers', () => {
               category: 'Network',
               description: 'Transfer data from URLs.',
               examples: [{ value: 'curl https://darklab.sh', description: 'Fetch a URL' }],
-              subcommands: [],
+              arguments: [{ value: '<url>', description: 'Target URL', value_type: 'url' }],
+              subcommands: [
+                {
+                  name: 'trace',
+                  description: 'Show request timing details.',
+                  examples: [{ value: 'curl trace https://darklab.sh', description: 'Trace a URL' }],
+                  arguments: [{ value: '<url>', description: 'URL to trace', value_type: 'url' }],
+                  flags: [
+                    {
+                      value: '--format',
+                      description: 'Output format',
+                      takes_value: true,
+                      value_hints: [{ value: 'json' }, { value: 'text' }],
+                    },
+                  ],
+                },
+              ],
               flags: [{ value: '-L', description: 'Follow redirects' }],
               workspace_flags: [],
               runtime_notes: [],
@@ -4610,6 +6430,12 @@ describe('app helpers', () => {
 
     expect(document.getElementById('command-catalog-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('command-catalog-body').textContent).toContain('Transfer data from URLs.')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Arguments')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('<url>')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Subcommand: curl trace')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Show request timing details.')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('curl trace https://darklab.sh')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('--format json, text')
     expect(document.getElementById('command-catalog-body').textContent).not.toContain('App Handling')
     expect(mobileCmdInput.value).toBe('')
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()

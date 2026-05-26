@@ -1,19 +1,19 @@
-FROM python:3.14.4-slim
+FROM python:3.14.5-slim
 
 ARG TARGETARCH
-ARG GO_VERSION=1.26.2
-ARG GO_LINUX_AMD64_SHA256=990e6b4bbba816dc3ee129eaeaf4b42f17c2800b88a2166c265ac1a200262282
-ARG GO_LINUX_ARM64_SHA256=c958a1fe1b361391db163a485e21f5f228142d6f8b584f6bef89b26f66dc5b23
+ARG GO_VERSION=1.26.3
+ARG GO_LINUX_AMD64_SHA256=2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556
+ARG GO_LINUX_ARM64_SHA256=9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565
 ARG GO_BUILD_PARALLELISM=2
-ARG OPENSSL_VERSION=3.5.6
-ARG OPENSSL_SHA256=deae7c80cba99c4b4f940ecadb3c3338b13cb77418409238e57d7f31f2a3b736
-ARG SSLSCAN_VERSION=2.2.0
+ARG OPENSSL_VERSION=3.6.2
+ARG OPENSSL_SHA256=aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f
+ARG SSLSCAN_VERSION=2.2.2
 ARG NUCLEI_VERSION=v3.8.0
-ARG SUBFINDER_VERSION=v2.13.0
-ARG PD_HTTPX_VERSION=v1.9.0
+ARG SUBFINDER_VERSION=v2.14.0
+ARG HTTPX_VERSION=v1.9.0
 ARG DNSX_VERSION=v1.2.3
-ARG NAABU_VERSION=v2.6.0
-ARG KATANA_VERSION=v1.6.0
+ARG NAABU_VERSION=v2.6.1
+ARG KATANA_VERSION=v1.6.1
 ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
@@ -22,7 +22,12 @@ ARG TESTSSL_VERSION=v3.2.3
 ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
-ARG WPSCAN_VERSION=3.8.28
+ARG WPSCAN_VERSION=4.0.0
+ARG VT_CLI_VERSION=latest
+ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
+ARG URLSCAN_CLI_VERSION=v2026.03.26
+ARG CHAOS_CLIENT_VERSION=v0.5.2
+ARG SETUPTOOLS_VERSION=81.0.0
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -31,11 +36,12 @@ RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
 RUN apt-get update
 RUN apt-get upgrade -y
 
-RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
+RUN apt-get install -y --no-install-recommends \
+                        man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
-                        ca-certificates perl zlib1g-dev unzip
+                        ca-certificates perl zlib1g-dev unzip inetutils-telnet
 
 # Update the man page database
 RUN mandb -c
@@ -60,7 +66,7 @@ ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 
-# Install OpenSSL 3.5 LTS from source for current TLS tooling.
+# Install OpenSSL from source for current TLS tooling.
 WORKDIR /tmp
 RUN wget -O openssl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" && \
     printf "%s  openssl.tar.gz\n" "${OPENSSL_SHA256}" > openssl.tar.gz.sha256 && \
@@ -68,10 +74,15 @@ RUN wget -O openssl.tar.gz "https://github.com/openssl/openssl/releases/download
     tar xzf openssl.tar.gz && \
     rm openssl.tar.gz openssl.tar.gz.sha256
 WORKDIR /tmp/openssl-${OPENSSL_VERSION}
-RUN ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir=lib shared zlib && \
+RUN multiarch="$(gcc -print-multiarch)" && \
+    ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir="lib/${multiarch}" shared zlib && \
     make -j"$(nproc)" && \
-    make install_sw && \
+    make install_sw install_ssldirs && \
+    ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
+    ln -sfn /etc/ssl/certs /usr/local/ssl/certs && \
     ldconfig
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /tmp
 RUN rm -rf "openssl-${OPENSSL_VERSION}"
 
@@ -86,10 +97,8 @@ RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" https://github.com/rbsec/s
 RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}
 
 # Install the ProjectDiscovery suite via Go.
-# Rename httpx to pd-httpx to avoid colliding with the Python httpx package.
 RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@${PD_HTTPX_VERSION} && \
-    mv /usr/local/bin/httpx /usr/local/bin/pd-httpx
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}
 RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}
 RUN go install -v github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}
@@ -123,8 +132,9 @@ RUN ln -s /opt/Nikto/program/nikto.pl /usr/local/bin/nikto
 # Upgrade pip to ensure latest versions of dependencies can be installed
 RUN pip install --upgrade pip
 
-# Install sslyze via pip.
-RUN pip install --upgrade setuptools wheel
+# Install sslyze via pip. Shodan's CLI still imports pkg_resources, so keep a
+# setuptools release that includes that compatibility module.
+RUN pip install --upgrade setuptools==${SETUPTOOLS_VERSION} wheel
 RUN pip install --upgrade sslyze==${SSLYZE_VERSION}
 RUN pip install --upgrade wafw00f==${WAFW00F_VERSION}
 
@@ -146,6 +156,14 @@ ENV PYTHONPATH=/app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+# Install external-intel CLIs. These are launched through the same command
+# allowlist and vault-backed environment injection path as other scanner tools.
+RUN pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise
+RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}
+RUN go install -v github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION}
+RUN go install -v github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION}
+RUN go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}
+
 
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)
@@ -161,11 +179,13 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 
 # Keep both sudoers forms: the first permits appuser to run as scanner,
 # while the second also permits the appuser run group for shared workspace files.
+# SETENV lets the app preserve only declared encrypted-secret env vars through
+# sudo without putting values in command arguments.
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
     setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan && \
     setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu && \
-    echo "appuser ALL=(scanner) NOPASSWD: ALL" >> /etc/sudoers && \
-    echo "appuser ALL=(scanner:appuser) NOPASSWD: ALL" >> /etc/sudoers
+    echo "appuser ALL=(scanner) NOPASSWD: SETENV: ALL" >> /etc/sudoers && \
+    echo "appuser ALL=(scanner:appuser) NOPASSWD: SETENV: ALL" >> /etc/sudoers
 
 # Pre-create /data owned by appuser with 700 permissions.
 # scanner user cannot write here. The entrypoint re-applies ownership

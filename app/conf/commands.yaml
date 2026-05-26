@@ -8,6 +8,10 @@ commands:
   - root: ping
     description: Sends ICMP echo probes to check host reachability and latency.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - ping
@@ -49,11 +53,15 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP address to probe
   - root: fping
     description: Sends fast ICMP echo probes to one or more hosts with summary results.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - fping
@@ -90,11 +98,14 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to probe
   - root: traceroute
     description: Maps the network path to a host by showing each hop and round-trip timing.
     category: Network Diagnostics
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - traceroute
@@ -144,11 +155,15 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to trace
   - root: tcptraceroute
     description: Traces the network path to a TCP service by probing a specific destination port.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - tcptraceroute
@@ -177,22 +192,42 @@ commands:
               description: Two-second per-hop timeout
       arguments:
         - placeholder: <host>
+          position: 1
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to trace
         - placeholder: <port>
+          position: 2
           hint_only: true
+          value_type: port_set
           description: TCP port to probe
   - root: nc
-    description: Tests TCP port reachability and basic socket connectivity.
+    description: Tests TCP port reachability and basic interactive socket connectivity.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - nc -z
         - nc -h
+        - nc --interactive
       deny:
         - nc -e
         - nc -c
+        - nc -l
+        - nc --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 24
+      default_cols: 100
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: true
+      transcript_mode: all_sanitized
     autocomplete:
       examples:
         - value: nc -h
@@ -201,10 +236,15 @@ commands:
           description: Check if port 80 is open
         - value: nc -zv ip.darklab.sh 443 80
           description: Check multiple ports at once
+        - value: nc --interactive ip.darklab.sh 80
+          description: Open an interactive TCP troubleshooting session
+          interactive: true
       flags:
         - value: -h
           description: Show help and usage
           closes: true
+        - value: --interactive
+          description: Open the interactive terminal view
         - value: -z
           description: Zero-I/O mode for port scanning
           allow_grouping: true
@@ -223,15 +263,70 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP followed by one or more ports
-  - root: mtr
-    description: Combines traceroute and ping to show live hop-by-hop reachability and loss.
+  - root: telnet
+    description: Opens an interactive Telnet-style TCP session for protocol and banner troubleshooting.
     category: Network Diagnostics
     policy:
       allow:
+        - telnet --interactive
+      deny:
+        - telnet --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 24
+      default_cols: 100
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: false
+      transcript_mode: all_sanitized
+    autocomplete:
+      examples:
+        - value: telnet --interactive ip.darklab.sh 80
+          description: Open an interactive TCP troubleshooting session
+          interactive: true
+        - value: telnet --interactive darklab.sh 443
+          description: Connect to a service port through the PTY view
+          interactive: true
+      flags:
+        - value: --interactive
+          description: Open the interactive terminal view
+      arguments:
+        - placeholder: <host>
+          position: 1
+          hint_only: true
+          value_type: host
+          description: Hostname or IP to connect to
+        - placeholder: <port>
+          position: 2
+          hint_only: true
+          value_type: port_set
+          description: TCP port to connect to
+  - root: mtr
+    description: Combines traceroute and ping to show live hop-by-hop reachability and loss.
+    category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
+    policy:
+      allow:
         - mtr
-      deny: []
+      deny:
+        - mtr --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 24
+      default_cols: 100
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: navigation_only
+      requires_args: true
+      transcript_mode: final_frame
     runtime_adaptations:
       inject_flags:
         - flags:
@@ -241,7 +336,7 @@ commands:
             - --report
             - --report-wide
             - -r
-          notice: "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
+          notice: "Note: mtr has been run in --report-wide mode. Use mtr --interactive when Interactive PTY is enabled for the live view."
     autocomplete:
       examples:
         - value: mtr -h
@@ -252,6 +347,9 @@ commands:
           description: Stop after 20 probes
         - value: mtr -n -c 20 ip.darklab.sh
           description: 20 probes, no DNS resolution
+        - value: mtr --interactive ip.darklab.sh
+          description: Open an interactive hop-by-hop trace
+          interactive: true
       flags:
         - value: -h
           description: Show help and usage
@@ -268,14 +366,19 @@ commands:
           description: Report mode summary
         - value: -w
           description: Wide report output
+        - value: --interactive
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to trace
   - root: dig
     description: Queries DNS records and resolver behavior with detailed response output.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
     policy:
       allow:
         - dig
@@ -384,6 +487,9 @@ commands:
   - root: whois
     description: Retrieves domain, IP, and network registration records from WHOIS services.
     category: Network Diagnostics
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - whois
@@ -423,11 +529,15 @@ commands:
       arguments:
         - placeholder: <domain-or-ip>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Domain name, IP address, or ASN to query
   - root: curl
     description: Sends HTTP(S) requests and displays or saves the response.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - curl
@@ -519,12 +629,18 @@ commands:
   - root: wget
     description: Downloads HTTP(S) resources and can save responses into session files.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - wget
       deny:
         - wget -O
         - wget --output-document
+        - wget -P
+        - wget --directory-prefix
         - wget --input-file
         - wget -i
         - wget localhost
@@ -539,6 +655,14 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+      - flag: -P
+        mode: write
+        value: separate
+        kind: directory
+      - flag: --directory-prefix
+        mode: write
+        value: separate_or_attached
+        kind: directory
       - flag: -i
         mode: read
         value: separate
@@ -582,6 +706,20 @@ commands:
           suggest:
             - value: response.html
               description: Save response body for later viewing
+        - value: -P
+          description: Save downloads under a session folder
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: downloads
+              description: Save downloaded files under downloads/
+        - value: --directory-prefix
+          description: Save downloads under a session folder
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: downloads
+              description: Save downloaded files under downloads/
         - value: -i
           description: Read URLs from a session file
           takes_value: true
@@ -630,6 +768,9 @@ commands:
   - root: openssl
     description: Inspects TLS connections, certificates, and cryptographic details through OpenSSL subcommands.
     category: TLS / Certificates
+    help:
+      flags:
+        - -help
     policy:
       allow:
         - openssl s_client
@@ -650,10 +791,6 @@ commands:
           description: Show s_client help and usage
         - value: openssl ciphers -help
           description: Show ciphers help and usage
-      flags:
-        - value: -help
-          description: Show top-level help and usage
-          closes: true
       subcommands:
         s_client:
           description: Connect to a TLS service for diagnostics
@@ -750,6 +887,10 @@ commands:
   - root: sslscan
     description: Scans TLS services for supported protocols, cipher suites, and certificate details.
     category: TLS / Certificates
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - sslscan
@@ -801,11 +942,14 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or host:port to scan
   - root: sslyze
     description: Analyzes TLS server configuration and common SSL/TLS weaknesses.
     category: TLS / Certificates
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - sslyze
@@ -876,11 +1020,15 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or host:port to scan
   - root: dnsrecon
     description: Performs DNS reconnaissance including record enumeration and zone transfer checks.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - dnsrecon
@@ -993,14 +1141,13 @@ commands:
           suggest:
             - value: dnsrecon-results.xml
               description: Save XML DNS results
-      arguments:
-        - placeholder: <domain>
-          hint_only: true
-          value_type: domain
-          description: Usually provided through -d
   - root: subfinder
     description: Discovers subdomains from passive sources and optional provider configuration.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - subfinder
@@ -1065,7 +1212,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -1193,6 +1340,11 @@ commands:
   - root: amass
     description: Enumerates and manages attack-surface intelligence such as subdomains and related assets.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - -help
+        - --help
     policy:
       allow:
         - amass
@@ -1254,7 +1406,7 @@ commands:
     runtime_adaptations:
       managed_workspace_directory:
         flag: -dir
-        directory: amass
+        directory: tools/amass
         subcommands:
           - enum
           - subs
@@ -1265,7 +1417,7 @@ commands:
           - -help
           - --help
         reject_alternate: true
-        reject_message: Amass database commands use the managed amass session directory.
+        reject_message: Amass database commands use the managed tools/amass session directory.
       environment:
         - name: XDG_CONFIG_HOME
           value: "{managed_workspace_parent}"
@@ -1504,6 +1656,10 @@ commands:
   - root: dnsx
     description: Performs fast DNS lookups and filtering across domains or target lists.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - dnsx
@@ -1532,7 +1688,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -1612,22 +1768,26 @@ commands:
           hint_only: true
           value_type: domain
           description: Usually provided through -d
-  - root: pd-httpx
+  - root: httpx
     description: Probes HTTP(S) services and reports web metadata such as status, title, and technology signals.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
-        - pd-httpx
+        - httpx
       deny:
-        - pd-httpx -l
-        - pd-httpx -list
-        - pd-httpx -o
-        - pd-httpx --output
-        - pd-httpx -rr
-        - pd-httpx -request
-        - pd-httpx -srd
-        - pd-httpx -store-response-dir
-        - pd-httpx -config
+        - httpx -l
+        - httpx -list
+        - httpx -o
+        - httpx --output
+        - httpx -rr
+        - httpx -request
+        - httpx -srd
+        - httpx -store-response-dir
+        - httpx -config
     workspace_flags:
       - flag: -l
         mode: read
@@ -1669,32 +1829,32 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
       examples:
-        - value: pd-httpx -h
+        - value: httpx -h
           description: Show help and usage
-        - value: pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect
+        - value: httpx -u https://ip.darklab.sh -title -status-code -tech-detect
           description: "Full recon \u2014 title, status code, and tech fingerprint"
-        - value: pd-httpx -u https://ip.darklab.sh -status-code
+        - value: httpx -u https://ip.darklab.sh -status-code
           description: Check HTTP status code
-        - value: pd-httpx -u https://ip.darklab.sh -follow-redirects
+        - value: httpx -u https://ip.darklab.sh -follow-redirects
           description: Follow and report redirects
-        - value: pd-httpx -l urls.txt -status-code -title -o httpx-results.txt
+        - value: httpx -l urls.txt -status-code -title -o httpx-results.txt
           description: Probe URLs from a session file and save results
           feature_required: workspace
-        - value: pd-httpx -l subdomains.txt -silent -o live-urls.txt
+        - value: httpx -l subdomains.txt -silent -o live-urls.txt
           description: Probe subdomains from a session file and save live URLs
           feature_required: workspace
-        - value: pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt
+        - value: httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt
           description: Summarize live URLs from a session file
           feature_required: workspace
-        - value: pd-httpx -l urls.txt -status-code -sr -srd httpx-responses
+        - value: httpx -l urls.txt -status-code -sr -srd httpx-responses
           description: Store HTTP responses in a session directory
           feature_required: workspace
-        - value: pd-httpx -l urls.txt -screenshot -srd httpx-screenshots
+        - value: httpx -l urls.txt -screenshot -srd httpx-screenshots
           description: Save screenshots in a session directory
           feature_required: workspace
       flags:
@@ -1789,6 +1949,10 @@ commands:
   - root: assetfinder
     description: Finds related domains and subdomains from public asset sources.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - assetfinder
@@ -1811,6 +1975,10 @@ commands:
   - root: fierce
     description: Finds DNS records, nearby hosts, and possible zone-transfer exposure for a domain.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - fierce
@@ -1854,6 +2022,10 @@ commands:
   - root: dnsenum
     description: Enumerates DNS records, nameservers, mail exchangers, and subdomains for a domain.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - dnsenum
@@ -1898,6 +2070,10 @@ commands:
   - root: gobuster
     description: Brute-forces web paths, DNS names, and virtual hosts using wordlists.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - gobuster
@@ -2211,12 +2387,27 @@ commands:
   - root: ffuf
     description: Fuzzes web requests with wordlists to discover paths, parameters, hosts, or other inputs.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - ffuf
       deny:
         - ffuf -o
         - ffuf --output
+        - ffuf --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 30
+      default_cols: 120
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: true
+      transcript_mode: scrollback_findings
     workspace_flags:
       - flag: -w
         mode: read
@@ -2236,6 +2427,9 @@ commands:
           description: Show help and usage
         - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
           description: Directory brute force with common wordlist
+        - value: ffuf --interactive -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+          description: Run ffuf in the interactive PTY view
+          interactive: true
         - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
             -mc 200,301,302
           description: Filter for successful and redirect responses
@@ -2289,6 +2483,8 @@ commands:
           suggest:
             - value: ffuf-results.json
               description: Save machine-readable fuzzing results
+        - value: --interactive
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <target-url>
           hint_only: true
@@ -2297,6 +2493,11 @@ commands:
   - root: naabu
     description: Performs fast port discovery against hosts or target lists.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - -help
+        - --help
     policy:
       allow:
         - naabu
@@ -2358,7 +2559,7 @@ commands:
             - -st
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -2385,7 +2586,7 @@ commands:
           value_hint:
             placeholder: <host>
             hint_only: true
-            value_type: domain
+            value_type: host
             description: Target hostname or IP address
         - value: -p
           description: Ports or port ranges to scan
@@ -2462,11 +2663,16 @@ commands:
       arguments:
         - placeholder: <target>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Usually provided through -host
   - root: katana
     description: Crawls web targets to discover URLs, forms, and linked resources.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - -help
+        - --help
     policy:
       allow:
         - katana
@@ -2531,7 +2737,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -2680,14 +2886,12 @@ commands:
           suggest:
             - value: katana-urls.txt
               description: Save crawled URLs
-      arguments:
-        - placeholder: <target>
-          hint_only: true
-          value_type: url
-          description: Usually provided through -u
   - root: wafw00f
     description: Detects whether a web target is protected by a web application firewall.
     category: Network Reconnaissance
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - wafw00f
@@ -2788,6 +2992,9 @@ commands:
   - root: masscan
     description: Runs high-speed port scans across hosts or networks.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - masscan
@@ -2800,9 +3007,20 @@ commands:
         - masscan -iL
         - masscan --output-format
         - masscan --output-filename
+        - masscan --interactive
         - masscan localhost
         - masscan 127.0.0.1
         - masscan 0.0.0.0
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 30
+      default_cols: 120
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: true
+      transcript_mode: scrollback_findings
     workspace_flags:
       - flag: -iL
         mode: read
@@ -2838,6 +3056,9 @@ commands:
           description: Show help and usage
         - value: masscan -p 80,443 8.8.8.8
           description: Fast scan of web ports
+        - value: masscan --interactive -p 80,443 --rate 500 8.8.8.8
+          description: Run a controlled interactive scan of web ports
+          interactive: true
         - value: masscan -p 80,443 -iL targets.txt -oL masscan-results.txt
           description: Scan targets from a session file and save list output
           feature_required: workspace
@@ -2908,6 +3129,8 @@ commands:
           suggest:
             - value: masscan-results.txt
               description: Save scan results
+        - value: --interactive
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <target>
           hint_only: true
@@ -2916,6 +3139,9 @@ commands:
   - root: rustscan
     description: Performs fast port discovery and can hand results to deeper scanners.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - rustscan
@@ -2939,7 +3165,7 @@ commands:
           value_hint:
             placeholder: <host>
             hint_only: true
-            value_type: domain
+            value_type: host
             description: Target hostname or IP address
         - value: -p
           description: Specific ports to scan
@@ -2973,11 +3199,15 @@ commands:
       arguments:
         - placeholder: <target>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Usually provided through -a
   - root: nmap
     description: Scans hosts for open ports, services, versions, and network characteristics.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - nmap
@@ -2985,6 +3215,7 @@ commands:
         - nmap -sS
         - nmap -O
         - nmap --privileged
+        - nmap -o
         - nmap -oN
         - nmap -oX
         - nmap -oG
@@ -3007,6 +3238,10 @@ commands:
         value: separate_or_attached
         format: xml
       - flag: -oG
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -o
         mode: write
         value: separate_or_attached
         format: text
@@ -3055,6 +3290,7 @@ commands:
         - value: -p
           description: Ports to scan
           takes_value: true
+          value_type: port_set
           suggest:
             - placeholder: <ports>
               hint_only: true
@@ -3108,6 +3344,13 @@ commands:
           suggest:
             - value: targets.txt
               description: Session file containing one target per line
+        - value: -o
+          description: Write normal output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-web.txt
+              description: Save scan output for the Files panel
         - value: -oN
           description: Write normal output to a session file
           takes_value: true
@@ -3132,11 +3375,510 @@ commands:
       arguments:
         - placeholder: <target>
           hint_only: true
-          value_type: domain
+          value_type: target
           description: Hostname, IP, or CIDR
+  - root: shodan
+    description: Queries Shodan for internet-exposed host and service intelligence.
+    category: External Intelligence
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - shodan --help
+        - shodan version
+        - shodan info
+        - shodan host
+        - shodan honeyscore
+        - shodan domain
+        - shodan search
+        - shodan stats
+        - shodan count
+        - shodan download
+        - shodan scan
+        - shodan myip
+      deny:
+        - shodan init
+        - shodan download
+        - shodan parse
+        - shodan convert
+        - shodan data
+        - shodan alert
+        - shodan --api-key
+        - shodan -k
+        - shodan host 127.0.0.1
+        - shodan host 0.0.0.0
+        - shodan host localhost
+        - shodan host ::1
+        - shodan honeyscore 127.0.0.1
+        - shodan honeyscore 0.0.0.0
+        - shodan honeyscore localhost
+        - shodan honeyscore ::1
+        - shodan scan 127.0.0.1
+        - shodan scan 0.0.0.0
+        - shodan scan localhost
+        - shodan scan ::1
+    requires_secrets:
+      - env: SHODAN_API_KEY
+    workspace_flags:
+      - flag: download
+        mode: write
+        value: separate
+        format: gzip-json
+        subcommands:
+          - download
+    autocomplete:
+      examples:
+        - value: shodan --help
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: shodan version
+          description: Show the Shodan CLI version
+        - value: shodan info
+          description: Show account plan and usage information
+        - value: shodan host 8.8.8.8
+          description: Look up exposed services for a public IP
+        - value: shodan honeyscore 8.8.8.8
+          description: Check whether a public IP looks like a honeypot
+        - value: shodan domain darklab.sh
+          description: Show Shodan domain intelligence
+        - value: shodan count apache
+          description: Count matching internet-exposed services
+        - value: shodan stats apache
+          description: Summarize matches for a Shodan search query
+        - value: shodan download shodan-apache apache
+          description: Save Shodan search results into a session file
+          feature_required: workspace
+        - value: shodan scan 8.8.8.8
+          description: Ask Shodan to scan a public IP
+        - value: shodan myip
+          description: Show the scanner container's public IP according to Shodan
+      subcommands:
+        version:
+          description: Print the Shodan CLI version
+          examples:
+            - value: shodan version
+              description: Show the installed CLI version
+        info:
+          description: Show Shodan account information
+          examples:
+            - value: shodan info
+              description: Show account plan and usage details
+        host:
+          description: Look up one public IP
+          examples:
+            - value: shodan host 8.8.8.8
+              description: Look up exposed services for a public IP
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+        honeyscore:
+          description: Check whether a public IP looks like a honeypot
+          examples:
+            - value: shodan honeyscore 8.8.8.8
+              description: Check Shodan's honeypot score
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to score
+        domain:
+          description: Show Shodan domain intelligence
+          examples:
+            - value: shodan domain darklab.sh
+              description: Show available domain details
+          arguments:
+            - placeholder: <domain>
+              hint_only: true
+              value_type: domain
+              description: Domain to query
+        search:
+          description: Search Shodan query syntax
+          examples:
+            - value: shodan search apache
+              description: Search exposed service banners
+          flags:
+            - value: --fields
+              description: Restrict returned fields
+              takes_value: true
+              suggest:
+                - value: ip_str,port,hostnames,org
+                  description: Compact host summary fields
+            - value: --limit
+              description: Limit returned matches
+              takes_value: true
+              suggest:
+                - value: '10'
+                  description: Keep output short
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        stats:
+          description: Summarize matches for a Shodan query
+          examples:
+            - value: shodan stats apache
+              description: Show top-level summary statistics
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        count:
+          description: Count matches for a Shodan query
+          examples:
+            - value: shodan count apache
+              description: Count matching internet-exposed services
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        download:
+          description: Save Shodan search results into a session file
+          examples:
+            - value: shodan download shodan-apache apache
+              description: Save search results into the session workspace
+              feature_required: workspace
+          arguments:
+            - placeholder: <filename>
+              hint_only: true
+              description: Session output filename
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        scan:
+          description: Ask Shodan to scan a public IP or netblock
+          examples:
+            - value: shodan scan 8.8.8.8
+              description: Request a Shodan scan
+          arguments:
+            - placeholder: <ip-or-cidr>
+              hint_only: true
+              value_type: target
+              description: Public IP address or CIDR to scan
+        myip:
+          description: Show the scanner container's public IP
+          examples:
+            - value: shodan myip
+              description: Show the public source IP
+  - root: vt
+    description: Queries VirusTotal for IP, domain, URL, and file-hash reputation.
+    category: External Intelligence
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - vt --help
+        - vt ip
+        - vt domain
+        - vt file
+        - vt url
+      deny:
+        - vt search
+        - vt download
+        - vt monitor
+        - vt analyze
+        - vt analysis
+        - vt scan
+        - vt init
+        - vt --apikey
+        - vt --api-key
+        - vt -k
+        - vt ip 127.0.0.1
+        - vt ip 0.0.0.0
+        - vt ip localhost
+        - vt ip ::1
+    requires_secrets:
+      - env: VT_API_KEY
+        inject_env: VTCLI_APIKEY
+        fallback_envs:
+          - VTCLI_APIKEY
+    autocomplete:
+      examples:
+        - value: vt --help
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: vt ip 8.8.8.8
+          description: Look up an IP address
+        - value: vt domain darklab.sh
+          description: Look up a domain
+        - value: vt file d41d8cd98f00b204e9800998ecf8427e
+          description: Look up a file hash
+      subcommands:
+        ip:
+          description: Look up an IP address
+          examples:
+            - value: vt ip 8.8.8.8
+              description: Look up an IP address
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+        domain:
+          description: Look up a domain
+          examples:
+            - value: vt domain darklab.sh
+              description: Look up a domain
+          arguments:
+            - placeholder: <domain>
+              hint_only: true
+              value_type: domain
+              description: Domain to query
+        file:
+          description: Look up a file hash
+          examples:
+            - value: vt file d41d8cd98f00b204e9800998ecf8427e
+              description: Look up a file hash
+          arguments:
+            - placeholder: <hash>
+              hint_only: true
+              description: MD5, SHA1, or SHA256 hash
+        url:
+          description: Look up a URL
+          examples:
+            - value: vt url https://darklab.sh/
+              description: Look up a URL
+          arguments:
+            - placeholder: <url>
+              hint_only: true
+              value_type: url
+              description: URL to query
+  - root: greynoise
+    description: Queries GreyNoise for internet scanner classification on public IPs.
+    category: External Intelligence
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - greynoise --help
+        - greynoise ip
+        - greynoise quick
+      deny:
+        - greynoise setup
+        - greynoise query
+        - greynoise --api-key
+        - greynoise -k
+        - greynoise ip 127.0.0.1
+        - greynoise ip 0.0.0.0
+        - greynoise ip localhost
+        - greynoise ip ::1
+        - greynoise quick 127.0.0.1
+        - greynoise quick 0.0.0.0
+        - greynoise quick localhost
+        - greynoise quick ::1
+    requires_secrets:
+      - env: GREYNOISE_API_KEY
+    autocomplete:
+      examples:
+        - value: greynoise --help
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: greynoise ip 8.8.8.8
+          description: Look up full GreyNoise context for a public IP
+        - value: greynoise quick 8.8.8.8
+          description: Quick GreyNoise classification for a public IP
+      subcommands:
+        ip:
+          description: Look up full IP context
+          examples:
+            - value: greynoise ip 8.8.8.8
+              description: Look up full GreyNoise context for a public IP
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+        quick:
+          description: Quick IP classification
+          examples:
+            - value: greynoise quick 8.8.8.8
+              description: Quick GreyNoise classification for a public IP
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+  - root: ipinfo
+    description: Queries IPinfo for IP geolocation, ASN, and ownership context.
+    category: External Intelligence
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - ipinfo
+      deny:
+        - ipinfo init
+        - ipinfo config
+        - ipinfo completion install
+        - ipinfo download
+        - ipinfo signup
+        - ipinfo login
+        - ipinfo logout
+        - ipinfo --token
+        - ipinfo -t
+        - ipinfo 127.0.0.1
+        - ipinfo 0.0.0.0
+        - ipinfo localhost
+        - ipinfo ::1
+    requires_secrets:
+      - env: IPINFO_TOKEN
+        optional: true
+    autocomplete:
+      examples:
+        - value: ipinfo --help
+          description: Show help and usage
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --nocolor
+          description: Disable ANSI color output
+        - value: -j
+          description: Print JSON output
+      subcommands:
+        myip:
+          description: Show the scanner container's public IP details
+        asn:
+          description: Look up ASN details
+          arguments:
+            - placeholder: <asn>
+              hint_only: true
+              description: Autonomous system number, such as 15169
+      arguments:
+        - placeholder: <ip>
+          hint_only: true
+          value_type: ip
+          description: Public IP address to query
+  - root: urlscan-cli
+    description: Submits URLs to urlscan.io, retrieves scan results, and searches urlscan data.
+    category: External Intelligence
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - urlscan-cli --help
+        - urlscan-cli scan submit
+        - urlscan-cli scan result
+        - urlscan-cli search
+      deny:
+        - urlscan-cli key
+        - urlscan-cli config
+        - urlscan-cli completion
+        - urlscan-cli --api-key
+        - urlscan-cli --apikey
+        - urlscan-cli --token
+        - urlscan-cli -k
+        - urlscan-cli scan submit -
+        - urlscan-cli scan result -
+    requires_secrets:
+      - env: URLSCAN_API_KEY
+    autocomplete:
+      examples:
+        - value: urlscan-cli --help
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: urlscan-cli scan submit https://darklab.sh/
+          description: Submit a URL for scanning
+        - value: urlscan-cli search domain:darklab.sh
+          description: Search urlscan results
+      subcommands:
+        scan:
+          description: Submit URLs and retrieve scan results
+          subcommands:
+            submit:
+              description: Submit a URL for scanning
+              examples:
+                - value: urlscan-cli scan submit https://darklab.sh/
+                  description: Submit a URL for scanning
+              arguments:
+                - placeholder: <url>
+                  hint_only: true
+                  value_type: url
+                  description: URL to submit
+            result:
+              description: Retrieve a scan result by UUID
+              examples:
+                - value: urlscan-cli scan result 00000000-0000-0000-0000-000000000000
+                  description: Retrieve a scan result by UUID
+              arguments:
+                - placeholder: <uuid>
+                  hint_only: true
+                  description: urlscan result UUID
+        search:
+          description: Search urlscan indexed results
+          examples:
+            - value: urlscan-cli search domain:darklab.sh
+              description: Search urlscan results
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: urlscan search query
+  - root: chaos
+    description: Queries ProjectDiscovery Chaos for known subdomains of a domain.
+    category: External Intelligence
+    help:
+      flags:
+        - -h
+        - --help
+    policy:
+      allow:
+        - chaos -h
+        - chaos -d
+      deny:
+        - chaos -key
+        - chaos -o
+        - chaos -dL
+        - chaos -up
+        - chaos -update
+    requires_secrets:
+      - env: PDCP_API_KEY
+    autocomplete:
+      examples:
+        - value: chaos -h
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: chaos -d darklab.sh -silent
+          description: List known subdomains for a domain
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -d
+          description: Domain to search
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            hint_only: true
+            value_type: domain
+            description: Domain to query
+          suggest:
+            - value: darklab.sh
+              description: Query this domain
+        - value: -count
+          description: Show statistics for the domain
+        - value: -silent
+          description: Print compact output
+        - value: -json
+          description: Print JSON output
+        - value: -duc
+          description: Disable update checks
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - testssl
@@ -3257,6 +3999,10 @@ commands:
   - root: nikto
     description: Scans web servers for common misconfigurations, risky files, and known issues.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -help
+        - --help
     policy:
       allow:
         - nikto
@@ -3296,7 +4042,7 @@ commands:
           value_hint:
             placeholder: <host>
             hint_only: true
-            value_type: domain
+            value_type: target
             description: Target host, hostname, or URL
         - value: -p
           description: Target port
@@ -3336,6 +4082,10 @@ commands:
   - root: wpscan
     description: Scans WordPress sites for exposed versions, plugins, themes, and known vulnerabilities.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - wpscan
@@ -3418,6 +4168,10 @@ commands:
   - root: nuclei
     description: Runs template-based checks to detect known exposures, misconfigurations, and vulnerabilities.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - nuclei
@@ -3549,7 +4303,7 @@ commands:
             - -ud
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:

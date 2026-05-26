@@ -10,13 +10,26 @@ describe('workspace UI helpers', () => {
     const { renderWorkspaceFiles } = setupWorkspace()
 
     renderWorkspaceFiles({
-      files: [{ path: 'targets.txt', size: 11, mtime: '2026-01-01T00:00:00Z' }],
+      files: [{
+        path: 'targets.txt',
+        size: 11,
+        mtime: '2026-01-01T00:00:00Z',
+        artifact_count: 1,
+        artifact_run_count: 1,
+        project_names: ['Signal Case'],
+        labels: [{ label: 'important' }],
+        note: { body: 'Retest after scanner update.' },
+      }],
       usage: { bytes_used: 11, file_count: 1 },
       limits: { quota_bytes: 1024, max_files: 10 },
     })
 
     expect(document.getElementById('workspace-summary').textContent).toBe('1 / 10 files · 11 B / 1 KB')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('targets.txt')
+    expect(document.querySelector('.workspace-file-details').textContent)
+      .toContain('1 artifact · 1 run · Signal Case')
+    expect([...document.querySelectorAll('.workspace-metadata-chip')].map(node => node.textContent))
+      .toEqual(['important', 'note'])
     expect([...document.querySelectorAll('[data-workspace-action]')].map(btn => btn.textContent)).toEqual([
       'View',
       'Edit',
@@ -92,8 +105,19 @@ describe('workspace UI helpers', () => {
     ])
   })
 
-  it('renders explicit empty directories from the workspace payload', () => {
-    const { renderWorkspaceFiles } = setupWorkspace()
+  it('renders explicit empty directories from the workspace payload', async () => {
+    const apiFetch = vi.fn(() => responseJson({
+      directories: [{ path: 'reports' }, { path: 'reports/empty' }],
+      files: [{ path: 'targets.txt', size: 11 }],
+      usage: { bytes_used: 11, file_count: 1 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    }))
+    const { getWorkspaceAutocompleteDirectoryHints, renderWorkspaceFiles } = setupWorkspace(apiFetch)
+
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(getWorkspaceAutocompleteDirectoryHints().map(item => item.value)).toEqual(['reports', 'reports/empty'])
 
     renderWorkspaceFiles({
       directories: [{ path: 'reports' }, { path: 'reports/empty' }],
@@ -153,7 +177,7 @@ describe('workspace UI helpers', () => {
       },
     }))
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=reports', { method: 'DELETE' })
-    expect(document.getElementById('workspace-message').textContent).toBe('Deleted folder reports')
+    expect(globals.showToast).toHaveBeenCalledWith('Deleted folder reports', 'success')
   })
 
   it('moves files from the row action through the app-native prompt', async () => {
@@ -183,7 +207,7 @@ describe('workspace UI helpers', () => {
       expect(opts.body.text).toBe('Move file targets.txt?')
       return (await opts.actions.find(action => action.id === 'move').onActivate()) ? 'move' : null
     })
-    const { renderWorkspaceFiles } = setupWorkspace(apiFetch, { showConfirm })
+    const { renderWorkspaceFiles, globals } = setupWorkspace(apiFetch, { showConfirm })
 
     renderWorkspaceFiles({
       directories: [{ path: 'reports' }],
@@ -199,7 +223,7 @@ describe('workspace UI helpers', () => {
       method: 'POST',
       body: JSON.stringify({ source: 'targets.txt', destination: 'reports' }),
     }))
-    expect(document.getElementById('workspace-message').textContent).toBe('Moved targets.txt to reports/targets.txt')
+    expect(globals.showToast).toHaveBeenCalledWith('Moved targets.txt to reports/targets.txt', 'success')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('reports')
   })
 
@@ -369,6 +393,84 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-path-input').readOnly).toBe(true)
     expect(document.getElementById('workspace-path-input').value).toBe('response.html')
     expect(document.getElementById('workspace-text-input').value).toBe('<html></html>\n')
+  })
+
+  it('prefills and saves workspace file labels and notes from the editor', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (String(url) === '/workspace/files/read?path=targets.txt') {
+        return Promise.resolve(responseJson({
+          path: 'targets.txt',
+          text: 'darklab.sh\n',
+          labels: [{ label: 'scope' }],
+          note: { body: 'seed note' },
+        }))
+      }
+      if (String(url) === '/workspace/files' && opts.method === 'POST') {
+        return Promise.resolve(responseJson({
+          file: { path: 'targets.txt', size: 14 },
+          workspace: {
+            files: [{ path: 'targets.txt', size: 14 }],
+            usage: { bytes_used: 14, file_count: 1 },
+            limits: { quota_bytes: 4096, max_files: 10 },
+          },
+        }))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/labels' && !opts.method) {
+        return Promise.resolve(responseJson({ labels: [{ label: 'scope' }] }))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/labels' && opts.method === 'DELETE') {
+        return Promise.resolve(responseJson({ deleted: true }))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/labels' && opts.method === 'POST') {
+        return Promise.resolve(responseJson({ label: { label: 'review' } }, 201))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/note' && opts.method === 'PUT') {
+        return Promise.resolve(responseJson({ note: { body: 'updated note' } }))
+      }
+      if (String(url) === '/workspace/files' && !opts.method) {
+        return Promise.resolve(responseJson({
+          files: [{
+            path: 'targets.txt',
+            size: 14,
+            labels: [{ label: 'review' }],
+            note: { body: 'updated note' },
+          }],
+          usage: { bytes_used: 14, file_count: 1 },
+          limits: { quota_bytes: 4096, max_files: 10 },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { openWorkspaceEditorFromCommand } = setupWorkspace(apiFetch)
+
+    await openWorkspaceEditorFromCommand('edit', 'targets.txt')
+
+    expect(document.getElementById('workspace-labels-input').value).toBe('scope')
+    expect(document.getElementById('workspace-notes-input').value).toBe('seed note')
+
+    document.getElementById('workspace-labels-input').value = 'review'
+    document.getElementById('workspace-notes-input').value = 'updated note'
+    document.getElementById('workspace-editor').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    for (let i = 0; i < 4; i += 1) await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/workspace_file/targets.txt/labels', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ label: 'scope' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/workspace_file/targets.txt/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'review' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/workspace_file/targets.txt/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'updated note' }),
+    }))
+    expect([...document.querySelectorAll('.workspace-metadata-chip')].map(node => node.textContent))
+      .toEqual(['review', 'note'])
   })
 
   it('shows file contents in a read-only viewer and keeps edit mode separate', async () => {
@@ -1055,7 +1157,7 @@ describe('workspace UI helpers', () => {
         limits: { quota_bytes: 1024, max_files: 10 },
       },
     })))
-    const { saveWorkspaceFile } = setupWorkspace(apiFetch)
+    const { saveWorkspaceFile, globals } = setupWorkspace(apiFetch)
 
     await saveWorkspaceFile('targets.txt', 'darklab.sh\n')
 
@@ -1063,7 +1165,7 @@ describe('workspace UI helpers', () => {
       method: 'POST',
       body: JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }),
     }))
-    expect(document.getElementById('workspace-message').textContent).toBe('Saved targets.txt')
+    expect(globals.showToast).toHaveBeenCalledWith('Saved targets.txt', 'success')
   })
 
   it('creates folders through the workspace directory route', async () => {
@@ -1076,7 +1178,7 @@ describe('workspace UI helpers', () => {
         limits: { quota_bytes: 1024, max_files: 10 },
       },
     })))
-    const { createWorkspaceDirectory } = setupWorkspace(apiFetch)
+    const { createWorkspaceDirectory, globals } = setupWorkspace(apiFetch)
 
     await createWorkspaceDirectory('reports')
 
@@ -1084,7 +1186,7 @@ describe('workspace UI helpers', () => {
       method: 'POST',
       body: JSON.stringify({ path: 'reports' }),
     }))
-    expect(document.getElementById('workspace-message').textContent).toBe('Created folder reports')
+    expect(globals.showToast).toHaveBeenCalledWith('Created folder reports', 'success')
     expect(document.querySelector('#workspace-breadcrumbs').textContent).toContain('reports')
     expect(document.querySelector('.workspace-empty').textContent).toBe('This folder is empty.')
   })

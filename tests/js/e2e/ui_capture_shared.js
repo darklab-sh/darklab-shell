@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
-import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
+import { CAPTURE_SESSION_TOKEN } from '../../../.tooling/playwright.visual.contracts.js'
 
 import { ensurePromptReady } from './helpers.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
@@ -18,6 +18,303 @@ export const CAPTURE_ROOT = process.env.CAPTURE_OUT_DIR
 
 export const LONG_RUN_CMD = 'capture-long-run'
 export const FAST_RUN_CMD = 'capture-fast-run'
+export const INTERACTIVE_CAPTURE_CMD = 'mtr --interactive darklab.sh'
+export const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+export const COMPARE_CAPTURE_LEFT_ID = 'capture-compare-left'
+export const COMPARE_CAPTURE_RIGHT_ID = 'capture-compare-right'
+
+export const CAPTURE_ATLAS_DATA = {
+  summary: {
+    total: 5,
+    counts: { ip: 2, domain: 2, hash: 0, cve: 1, url: 0 },
+    findings: 2,
+  },
+  findingCounts: { new: 1, reviewed: 1, important: 0, false_positive: 0, needs_followup: 0 },
+  findings: [
+    {
+      id: 'capture-finding-443',
+      title: '443/tcp open https',
+      raw_line: '443/tcp open https nginx',
+      review_state: 'new',
+      status: 'new',
+      severity: 'medium',
+      tool_root: 'nmap',
+      entity_id: 'capture-ent-ip',
+      entity_type: 'ip',
+      entity_value: '107.178.109.44',
+      run_id: 'capture-run-nmap',
+      run_command: 'nmap -sV 107.178.109.44',
+      occurrence_count: 2,
+      last_seen_at: '2026-05-15T00:01:00Z',
+    },
+    {
+      id: 'capture-finding-cve',
+      title: 'CVE-2026-0001 mentioned in service banner',
+      raw_line: 'nginx banner references CVE-2026-0001',
+      review_state: 'reviewed',
+      status: 'reviewed',
+      severity: 'low',
+      tool_root: 'nuclei',
+      entity_id: 'capture-ent-cve',
+      entity_type: 'cve',
+      entity_value: 'CVE-2026-0001',
+      run_id: 'capture-run-nuclei',
+      run_command: 'nuclei -u https://darklab.sh',
+      occurrence_count: 1,
+      last_seen_at: '2026-05-15T00:03:00Z',
+    },
+  ],
+  entities: [
+    {
+      id: 'capture-ent-ip',
+      type: 'ip',
+      canonical_value: '107.178.109.44',
+      occurrence_count: 4,
+      run_count: 2,
+      project_link_count: 1,
+      project_links: [{ project_id: 'capture-project', project_name: 'Capture Investigation' }],
+      labels: [{ label: 'edge' }],
+      note: { body: 'Public edge host gathered during capture setup.' },
+      first_seen_at: '2026-05-15T00:00:00Z',
+      last_seen_at: '2026-05-15T00:04:00Z',
+    },
+    {
+      id: 'capture-ent-ip-v6',
+      type: 'ip',
+      canonical_value: '2606:4700:3033::6815:423',
+      occurrence_count: 2,
+      run_count: 1,
+      project_link_count: 0,
+      project_links: [],
+      labels: [],
+      note: null,
+      first_seen_at: '2026-05-15T00:02:00Z',
+      last_seen_at: '2026-05-15T00:04:00Z',
+    },
+    {
+      id: 'capture-ent-domain',
+      type: 'domain',
+      canonical_value: 'darklab.sh',
+      occurrence_count: 5,
+      run_count: 3,
+      project_link_count: 1,
+      project_links: [{ project_id: 'capture-project', project_name: 'Capture Investigation' }],
+      labels: [{ label: 'primary' }],
+      note: null,
+      first_seen_at: '2026-05-15T00:00:00Z',
+      last_seen_at: '2026-05-15T00:05:00Z',
+    },
+    {
+      id: 'capture-ent-domain-noc',
+      type: 'domain',
+      canonical_value: 'noc.darklab.sh',
+      occurrence_count: 3,
+      run_count: 2,
+      project_link_count: 1,
+      project_links: [{ project_id: 'capture-project', project_name: 'Capture Investigation' }],
+      labels: [],
+      note: null,
+      first_seen_at: '2026-05-15T00:01:00Z',
+      last_seen_at: '2026-05-15T00:05:00Z',
+    },
+    {
+      id: 'capture-ent-cve',
+      type: 'cve',
+      canonical_value: 'CVE-2026-0001',
+      occurrence_count: 1,
+      run_count: 1,
+      project_link_count: 0,
+      project_links: [],
+      labels: [],
+      note: null,
+      first_seen_at: '2026-05-15T00:03:00Z',
+      last_seen_at: '2026-05-15T00:03:00Z',
+    },
+  ],
+}
+
+export const CAPTURE_COMPARE_DATA = {
+  left_run_id: COMPARE_CAPTURE_LEFT_ID,
+  right_run_id: COMPARE_CAPTURE_RIGHT_ID,
+  left: {
+    id: COMPARE_CAPTURE_LEFT_ID,
+    command: 'nmap -sV darklab.sh',
+    started: '2026-05-12T18:20:00Z',
+    finished: '2026-05-12T18:20:04Z',
+    exit_code: 0,
+    duration_seconds: 4,
+    output_line_count: 5,
+  },
+  right: {
+    id: COMPARE_CAPTURE_RIGHT_ID,
+    command: 'nmap -sV darklab.sh',
+    started: '2026-05-12T18:26:00Z',
+    finished: '2026-05-12T18:26:05Z',
+    exit_code: 0,
+    duration_seconds: 5,
+    output_line_count: 5,
+  },
+  deltas: {
+    exit_code_changed: false,
+    exit_code: { left: 0, right: 0 },
+    duration_seconds: { delta: 1 },
+    output_lines: { delta: 0 },
+    findings: { delta: 0 },
+  },
+  totals: {
+    left_total_lines: 4,
+    right_total_lines: 4,
+    equal_line_count: 2,
+    changed_line_count: 1,
+    added_line_count: 1,
+    removed_line_count: 1,
+  },
+  limits: {
+    line_display_truncate: 4000,
+    lazy_equal_page_limit: 5000,
+    lazy_equal_byte_limit: 512000,
+    minimap_buckets: 256,
+  },
+  truncated: {
+    hunks_omitted: 0,
+    lines_omitted: { left: 0, right: 0, total: 0 },
+  },
+  hunks: [
+    {
+      op: 'equal',
+      left: {
+        start: 0,
+        end: 2,
+        lines: [
+          { text: 'Starting Nmap 7.95 ( https://nmap.org ) at 2026-05-12 18:20 UTC', line_index: 0 },
+          { text: '80/tcp open http', line_index: 1 },
+        ],
+      },
+      right: {
+        start: 0,
+        end: 2,
+        lines: [
+          { text: 'Starting Nmap 7.95 ( https://nmap.org ) at 2026-05-12 18:26 UTC', line_index: 0 },
+          { text: '80/tcp open http', line_index: 1 },
+        ],
+      },
+      changed_pairs: [{
+        left_index: 0,
+        right_index: 0,
+        segments: {
+          left: [
+            { text: 'Starting Nmap 7.95 ( https://nmap.org ) at 2026-05-12 18:' },
+            { text: '20', changed: true },
+            { text: ' UTC' },
+          ],
+          right: [
+            { text: 'Starting Nmap 7.95 ( https://nmap.org ) at 2026-05-12 18:' },
+            { text: '26', changed: true },
+            { text: ' UTC' },
+          ],
+        },
+      }],
+      left_unpaired: [],
+      right_unpaired: [],
+    },
+    {
+      op: 'replace',
+      left: {
+        start: 2,
+        end: 3,
+        lines: [{ text: '8080/tcp open http-proxy', line_index: 2 }],
+      },
+      right: {
+        start: 2,
+        end: 3,
+        lines: [{ text: '443/tcp open https', line_index: 2 }],
+      },
+      changed_pairs: [{
+        left_index: 0,
+        right_index: 0,
+        segments: {
+          left: [
+            { text: '8080/tcp open ' },
+            { text: 'http-proxy', changed: true },
+          ],
+          right: [
+            { text: '443/tcp open ' },
+            { text: 'https', changed: true },
+          ],
+        },
+      }],
+      left_unpaired: [],
+      right_unpaired: [],
+    },
+    {
+      op: 'insert',
+      left: { start: 3, end: 3 },
+      right: {
+        start: 3,
+        end: 4,
+        lines: [{ text: '8443/tcp open ssl/https-alt', line_index: 3 }],
+      },
+    },
+    {
+      op: 'delete',
+      left: {
+        start: 3,
+        end: 4,
+        lines: [{ text: 'Nmap done: 1 IP address (1 host up) scanned in 0.41 seconds', line_index: 3 }],
+      },
+      right: { start: 4, end: 4 },
+    },
+  ],
+  density_buckets: [
+    { start: 0, end: 1, equal: 0, changed: 1, added: 0, removed: 0 },
+    { start: 1, end: 2, equal: 1, changed: 0, added: 0, removed: 0 },
+    { start: 2, end: 3, equal: 0, changed: 1, added: 0, removed: 0 },
+    { start: 3, end: 4, equal: 0, changed: 0, added: 1, removed: 1 },
+  ],
+  objects: {
+    findings: {
+      added: [{
+        id: 'capture-finding-right',
+        title: 'open port 443',
+        raw_line: '443/tcp open https',
+        severity: 'medium',
+        review_state: 'new',
+        line_number: 2,
+        compare_line_index: 2,
+      }],
+      removed: [{
+        id: 'capture-finding-left',
+        title: 'open port 8080',
+        raw_line: '8080/tcp open http-proxy',
+        severity: 'low',
+        review_state: 'new',
+        line_number: 2,
+        compare_line_index: 2,
+      }],
+      unchanged_count: 1,
+    },
+    artifacts: {
+      added: [{
+        id: 'capture-artifact-right',
+        workspace_path: 'reports/right-nmap.txt',
+        display_name: 'right-nmap.txt',
+        kind: 'output',
+        byte_size: 128,
+        detected_by: 'workspace_flag',
+      }],
+      removed: [{
+        id: 'capture-artifact-left',
+        workspace_path: 'reports/left-nmap.txt',
+        display_name: 'left-nmap.txt',
+        kind: 'output',
+        byte_size: 112,
+        detected_by: 'workspace_flag',
+      }],
+      unchanged_count: 0,
+    },
+  },
+}
+
 const CAPTURE_MOCK_RUNS = {
   hostname: {
     output: ['darklab_shell'],
@@ -38,6 +335,14 @@ const CAPTURE_MOCK_RUNS = {
       '4 packets transmitted, 4 packets received, 0.0% packet loss',
     ],
     elapsed: 0.4,
+  },
+  [WORKSPACE_CAPTURE_CMD]: {
+    output: [
+      '[workspace] writing response.html',
+      'HTTP/2 200',
+      'saved response.html',
+    ],
+    elapsed: 0.2,
   },
 }
 
@@ -556,13 +861,27 @@ export async function saveCapture(page, manifest, {
 
 export async function installCommonCaptureMocks(page) {
   await page.addInitScript(
-    ({ longCmd, fastCmd, mockRuns }) => {
+    ({
+      longCmd,
+      fastCmd,
+      interactiveCmd,
+      mockRuns,
+      compareData,
+      compareLeftId,
+      compareRightId,
+      atlasData,
+    }) => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()
       let mockRunIndex = 0
+      let ptyController = null
       const mockStreams = new Map()
 
       const sseEvent = (payload) => `data: ${JSON.stringify(payload)}\n\n`
+      const jsonResponse = (payload) => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
       const mockRunResponse = (mock) => {
         mockRunIndex += 1
         const runId = `capture-mock-run-${mockRunIndex}`
@@ -593,6 +912,184 @@ export async function installCommonCaptureMocks(page) {
         const url = typeof input === 'string' ? input : input?.url || ''
         const method = String(init?.method || 'GET').toUpperCase()
         const rawBody = typeof init?.body === 'string' ? init.body : ''
+        const parsedUrl = (() => {
+          try {
+            return new URL(url, window.location.href)
+          } catch (_) {
+            return null
+          }
+        })()
+        const path = parsedUrl?.pathname || url.split('?')[0]
+
+        if (method === 'GET' && path === '/atlas') {
+          return jsonResponse(atlasData.summary)
+        }
+
+        if (method === 'GET' && path === '/atlas/findings') {
+          return jsonResponse({
+            findings: atlasData.findings,
+            total: atlasData.findings.length,
+            limit: 50,
+            offset: 0,
+            counts: atlasData.findingCounts,
+          })
+        }
+
+        if (method === 'GET' && path === '/atlas/entities') {
+          const entityType = String(parsedUrl?.searchParams.get('type') || '')
+          const entities = atlasData.entities.filter(entity => !entityType || entity.type === entityType)
+          return jsonResponse({
+            entities,
+            total: entities.length,
+            limit: 50,
+            offset: 0,
+          })
+        }
+
+        if (method === 'GET' && path.startsWith('/atlas/entities/')) {
+          const entityId = decodeURIComponent(path.replace('/atlas/entities/', '').split('/')[0])
+          const entity = atlasData.entities.find(item => item.id === entityId)
+          if (!entity) {
+            return new Response(JSON.stringify({ error: 'entity not found' }), {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          return jsonResponse({
+            entity,
+            intel_snapshots: entity.type === 'ip'
+              ? [{
+                  provider: 'Shodan',
+                  status: 'ok',
+                  summary: '2 open ports and 1 hostname',
+                  data: {
+                    providers: {
+                      shodan: {
+                        ports: [80, 443],
+                        hostnames: ['edge.darklab.sh'],
+                        cves: ['CVE-2026-0001'],
+                        services: [
+                          { port: 443, transport: 'tcp', product: 'nginx' },
+                        ],
+                      },
+                    },
+                  },
+                  fetched_at: '2026-05-15T00:06:00Z',
+                }]
+              : [],
+            intel_summary: entity.type === 'ip'
+              ? {
+                  status: 'available',
+                  providers_with_data: ['shodan', 'censys'],
+                  highlight_count: 3,
+                  highlights: [
+                    {
+                      label: 'Open ports',
+                      value: '80, 443',
+                      provider: 'shodan',
+                      provider_label: 'Shodan',
+                      tone: 'neutral',
+                    },
+                    {
+                      label: 'Hostname',
+                      value: 'edge.darklab.sh',
+                      provider: 'shodan',
+                      provider_label: 'Shodan',
+                      tone: 'neutral',
+                    },
+                    {
+                      label: 'CVEs',
+                      value: 'CVE-2026-0001',
+                      provider: 'shodan',
+                      provider_label: 'Shodan',
+                      tone: 'warning',
+                    },
+                  ],
+                  updated_at: '2026-05-15T00:06:00Z',
+                }
+              : { status: 'none', providers_with_data: [], highlight_count: 0, highlights: [] },
+            runs: [
+              {
+                run_id: 'capture-run-nmap',
+                command: 'nmap -sV 107.178.109.44',
+                occurrence_count: 2,
+                last_seen_at: '2026-05-15T00:04:00Z',
+              },
+            ],
+            findings: atlasData.findings.filter(finding => finding.entity_id === entity.id),
+          })
+        }
+
+        if (url.endsWith('/config')) {
+          const original = await originalFetch(input, init)
+          const cfg = await original.clone().json()
+          return new Response(JSON.stringify({
+            ...cfg,
+            interactive_pty_enabled: true,
+            interactive_pty_commands: [{
+              root: 'mtr',
+              trigger_flag: '--interactive',
+              default_rows: 12,
+              default_cols: 80,
+              requires_args: true,
+              allow_input: true,
+            }],
+          }), {
+            status: original.status,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.includes('/history/compare?') && method === 'GET') {
+          return new Response(JSON.stringify(compareData), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.endsWith('/workspace/files') && method === 'GET') {
+          return new Response(JSON.stringify({
+            files: [{
+              name: 'response.html',
+              path: 'response.html',
+              size: 164,
+              mtime: '2026-05-12 18:24',
+              artifact_count: 1,
+              artifact_run_count: 1,
+              project_names: ['Capture Project'],
+            }],
+            directories: [],
+            usage: { file_count: 1, bytes_used: 164 },
+            limits: { max_files: 100, quota_bytes: 1048576 },
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.includes('/workspace/files/read') && method === 'GET') {
+          return new Response(JSON.stringify({
+            path: 'response.html',
+            size: 164,
+            text: '<!doctype html>\n<title>darklab_shell capture</title>\n<body>captured response file</body>\n',
+            rawText: '<!doctype html>\n<title>darklab_shell capture</title>\n<body>captured response file</body>\n',
+            format: 'html',
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.endsWith(`/history/${compareLeftId}/compare-candidates`) && method === 'GET') {
+          return new Response(JSON.stringify({
+            source: compareData.left,
+            suggested: { ...compareData.right, confidence: 'exact_command', confidence_label: 'Exact command' },
+            candidates: [{ ...compareData.right, confidence: 'exact_command', confidence_label: 'Exact command' }],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
 
         if (url.endsWith('/runs') && method === 'POST') {
           const payload = JSON.parse(rawBody || '{}')
@@ -628,6 +1125,98 @@ export async function installCommonCaptureMocks(page) {
           }
         }
 
+        if (url.endsWith('/pty/runs') && method === 'POST') {
+          const payload = JSON.parse(rawBody || '{}')
+          if (String(payload.command || '') !== interactiveCmd) return originalFetch(input, init)
+          return new Response(JSON.stringify({
+            run_id: 'capture-pty-run',
+            stream: '/pty/runs/capture-pty-run/stream',
+            command: 'mtr darklab.sh',
+            interactive: true,
+            rows: 12,
+            cols: 80,
+          }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.endsWith('/pty/runs/capture-pty-run/snapshot')) {
+          return new Response(JSON.stringify({
+            run_id: 'capture-pty-run',
+            command: interactiveCmd,
+            started: '2026-05-12T18:30:00Z',
+            rows: 12,
+            cols: 80,
+            after_event_id: '1770000000000-2',
+            entries: [{ text: 'capture hop darklab.sh', cls: '' }],
+            snapshot_format: 'ansi',
+            ansi_snapshot: '\u001b[0m\u001b[2J\u001b[Hcapture hop darklab.sh\u001b[2;1Hpress q to quit\u001b[1;1H',
+            snapshot_truncated: false,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.includes('/pty/runs/capture-pty-run/stream')) {
+          const body = new ReadableStream({
+            start(controller) {
+              ptyController = controller
+              controller.enqueue(encoder.encode(sseEvent({ type: 'started', run_id: 'capture-pty-run' })))
+              controller.enqueue(encoder.encode(sseEvent({ type: 'output', text: 'capture hop darklab.sh\r\n' })))
+              controller.enqueue(encoder.encode(sseEvent({ type: 'output', text: ' 1  192.0.2.1    0.4 ms\r\n' })))
+              controller.enqueue(encoder.encode(sseEvent({ type: 'output', text: ' 2  darklab.sh   12.7 ms\r\n' })))
+            },
+          })
+          return new Response(body, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }
+
+        if (url.endsWith('/pty/runs/capture-pty-run/resize') && method === 'POST') {
+          return new Response('{}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.endsWith('/pty/runs/capture-pty-run/input') && method === 'POST') {
+          return new Response('{}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.includes('/history/capture-pty-run')) {
+          return new Response(JSON.stringify({
+            id: 'capture-pty-run',
+            command: interactiveCmd,
+            exit_code: 143,
+            output_entries: [
+              { text: 'capture hop darklab.sh', cls: '' },
+              { text: ' 1  192.0.2.1    0.4 ms', cls: '' },
+              { text: ' 2  darklab.sh   12.7 ms', cls: '' },
+            ],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.endsWith('/kill') && method === 'POST' && rawBody.includes('capture-pty-run')) {
+          if (ptyController) {
+            ptyController.enqueue(encoder.encode(sseEvent({ type: 'exit', code: 143, elapsed: 0.1 })))
+            ptyController.close()
+            ptyController = null
+          }
+          return new Response('{}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
         if (url.includes('/runs/capture-long-run/stream')) {
           const body = new ReadableStream({
             start(controller) {
@@ -656,8 +1245,112 @@ export async function installCommonCaptureMocks(page) {
         return originalFetch(input, init)
       }
     },
-    { longCmd: LONG_RUN_CMD, fastCmd: FAST_RUN_CMD, mockRuns: CAPTURE_MOCK_RUNS },
+    {
+      longCmd: LONG_RUN_CMD,
+      fastCmd: FAST_RUN_CMD,
+      interactiveCmd: INTERACTIVE_CAPTURE_CMD,
+      mockRuns: CAPTURE_MOCK_RUNS,
+      compareData: CAPTURE_COMPARE_DATA,
+      compareLeftId: COMPARE_CAPTURE_LEFT_ID,
+      compareRightId: COMPARE_CAPTURE_RIGHT_ID,
+      atlasData: CAPTURE_ATLAS_DATA,
+    },
   )
+}
+
+export async function activeHistoryRunId(page, expectedCommand = '') {
+  return page.waitForFunction(
+    (command) => {
+      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      if (!tab) return ''
+      if (command && tab.command !== command) return ''
+      return tab.historyRunId || tab.runId || ''
+    },
+    expectedCommand,
+    { timeout: 15_000 },
+  ).then(handle => handle.jsonValue())
+}
+
+export async function createCaptureProjectFixture(page, {
+  name = 'Capture Investigation',
+  runIds = [],
+  target = 'capture.darklab.sh',
+  note = 'Capture project notes show how investigations stay organized.',
+} = {}) {
+  return page.evaluate(async ({ projectName, linkedRunIds, targetValue, noteBody }) => {
+    const requestJson = async (url, options = {}) => {
+      const resp = await apiFetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) throw new Error(data.error || `Request failed: ${url}`)
+      return data
+    }
+
+    const created = await requestJson('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name: projectName }),
+    })
+    const project = created.project
+    await requestJson('/projects/active', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: project.id }),
+    })
+    await requestJson(`/entities/project/${encodeURIComponent(project.id)}/labels`, {
+      method: 'POST',
+      body: JSON.stringify({ label: 'capture' }),
+    })
+    await requestJson(`/entities/project/${encodeURIComponent(project.id)}/note`, {
+      method: 'PUT',
+      body: JSON.stringify({ body: noteBody }),
+    })
+    const linked = []
+    for (const runId of linkedRunIds.filter(Boolean)) {
+      try {
+        await requestJson(`/projects/${encodeURIComponent(project.id)}/links`, {
+          method: 'POST',
+          body: JSON.stringify({ entity_type: 'run', entity_id: runId, source: 'manual' }),
+        })
+        linked.push(runId)
+      } catch (_) {
+        // Capture runs are often mocked in-browser and may not exist in the
+        // server history table. Keep the project scene useful by showing the
+        // active project, labels, notes, and target even without a linked run.
+      }
+    }
+    const targetBody = { type: 'domain', value: targetValue }
+    if (linked[0]) targetBody.source_run_id = linked[0]
+    const targetResp = await requestJson(`/projects/${encodeURIComponent(project.id)}/targets`, {
+      method: 'POST',
+      body: JSON.stringify(targetBody),
+    })
+    await requestJson(`/entities/target/${encodeURIComponent(targetResp.target.id)}/labels`, {
+      method: 'POST',
+      body: JSON.stringify({ label: 'external' }),
+    })
+    return project
+  }, {
+    projectName: name,
+    linkedRunIds: runIds,
+    targetValue: target,
+    noteBody: note,
+  })
+}
+
+export async function openCaptureRunComparison(page) {
+  await page.evaluate(({ leftId, rightId }) => {
+    if (typeof fetchAndRenderHistoryComparison !== 'function') {
+      throw new Error('Run comparison UI is not loaded')
+    }
+    fetchAndRenderHistoryComparison(leftId, rightId)
+  }, {
+    leftId: COMPARE_CAPTURE_LEFT_ID,
+    rightId: COMPARE_CAPTURE_RIGHT_ID,
+  })
 }
 
 async function hydrateCaptureRecents(page) {

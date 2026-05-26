@@ -16,23 +16,27 @@ import unittest.mock as mock
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import app as shell_app
 import blueprints.run as run_routes
-import database as shell_db
-import workspace as shell_workspace
+import core.database as shell_db
+import services.secrets.storage as secrets_storage
+import services.secrets.vault as secrets_vault
+import services.workspace.files as shell_workspace
 from config import PROJECT_README
-from database import db_connect
-from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+from core.database import db_connect
+from services.runs.output_model import line_event_from_legacy, to_wire
+from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 
 # These tests lean toward end-to-end backend behavior and intentionally exercise
 # the real SQLite/artifact flow rather than heavy mocking.
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
         token = uuid.uuid4().hex
@@ -132,12 +136,13 @@ def _post_run(client, *, json=None, headers=None, **kwargs):
     if start_resp.status_code != 202:
         return start_resp
     data = json_module.loads(start_resp.data)
-    stream_resp = client.get(data["stream"], headers=headers)
-    for _ in range(10):
+    stream_resp = None
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        stream_resp = client.get(data["stream"], headers=headers)
         if stream_resp.status_code != 404:
             return _BrokerRunResponse(stream_resp)
-        time.sleep(0.01)
-        stream_resp = client.get(data["stream"], headers=headers)
+        time.sleep(0.025)
     return _BrokerRunResponse(stream_resp)
 
 
@@ -158,6 +163,434 @@ def _sse_events(body: str) -> list[dict[str, object]]:
             event["event_id"] = event_id
         events.append(event)
     return events
+
+
+class TestInteractivePtyRuns:
+    def test_start_interactive_pty_rejects_when_disabled(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pty_enabled", return_value=False):
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive darklab.sh"},
+                headers={"X-Session-ID": "sess-pty-disabled"},
+            )
+
+        assert resp.status_code == 403
+        assert "disabled" in resp.get_json()["error"]
+
+    def test_start_interactive_pty_requires_broker_or_single_worker(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=False), \
+             mock.patch("blueprints.run.pty_broker_unavailable_reason", return_value="needs broker"):
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive darklab.sh"},
+                headers={"X-Session-ID": "sess-pty-workers"},
+            )
+
+        assert resp.status_code == 503
+        assert "needs broker" in resp.get_json()["error"]
+
+    def test_start_interactive_pty_strips_trigger_before_validation(self):
+        client = get_client()
+        started = datetime.now(timezone.utc).isoformat()
+        fake_run = SimpleNamespace(
+            run_id="pty-run-1",
+            rows=24,
+            cols=100,
+            session_id="sess-pty-start",
+            command="mtr --interactive darklab.sh",
+            started=started,
+        )
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
+            assert command == "mtr darklab.sh"
+            assert extra_allowed_prefixes == ["mtr"]
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive darklab.sh", "rows": 30, "cols": 120},
+                headers={
+                    "X-Session-ID": "sess-pty-start",
+                    "X-Client-ID": "client-1",
+                },
+            )
+
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert data["run_id"] == "pty-run-1"
+        assert data["stream"] == "/pty/runs/pty-run-1/stream"
+        kwargs = start_pty.call_args.kwargs
+        assert kwargs["command"] == "mtr --interactive darklab.sh"
+        assert kwargs["argv"] == ["mtr", "darklab.sh"]
+        assert kwargs["owner_client_id"] == "client-1"
+        summary = kwargs["completion_callback"](
+            fake_run,
+            datetime.now(timezone.utc).isoformat(),
+            0,
+            [
+                {"text": "hop 1 ip.darklab.sh", "cls": ""},
+                {"text": "Discovered open port 80/tcp on 192.0.2.1", "cls": ""},
+            ],
+        )
+        assert summary["output_line_count"] == 2
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT command, exit_code, output_search_text, output_preview FROM runs WHERE id = ?",
+                ("pty-run-1",),
+            ).fetchone()
+        assert row["command"] == "mtr --interactive darklab.sh"
+        assert row["exit_code"] == 0
+        assert "hop 1 ip.darklab.sh" in row["output_search_text"]
+        assert "Discovered open port 80/tcp on 192.0.2.1" in row["output_search_text"]
+        preview_lines = json.loads(row["output_preview"])
+        finding_line = next(
+            (line for line in preview_lines if "open port 80/tcp" in str(line.get("text", ""))),
+            None,
+        )
+        assert finding_line is not None, "expected the synthesized finding line in output_preview"
+        assert "findings" in (finding_line.get("signals") or []), (
+            "OutputSignalClassifier should tag the synthesized finding line as a finding"
+        )
+
+    def test_start_interactive_pty_uses_workspace_cwd_and_validated_exec_command(self):
+        client = get_client()
+        fake_run = SimpleNamespace(run_id="pty-run-cwd", rows=30, cols=120)
+        seen = {}
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
+            seen["command"] = command
+            seen["workspace_cwd"] = workspace_cwd
+            seen["extra_allowed_prefixes"] = extra_allowed_prefixes
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command="ffuf -w /workspaces/sess-pty-cwd/darklab/targets.txt -u https://example.test/FUZZ",
+            )
+
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={
+                    "command": "ffuf --interactive -w targets.txt -u https://example.test/FUZZ",
+                    "workspace_cwd": "darklab",
+                },
+                headers={"X-Session-ID": "sess-pty-cwd"},
+            )
+
+        assert resp.status_code == 202
+        assert seen == {
+            "command": "ffuf -w targets.txt -u https://example.test/FUZZ",
+            "workspace_cwd": "darklab",
+            "extra_allowed_prefixes": ["ffuf"],
+        }
+        assert start_pty.call_args.kwargs["argv"] == [
+            "ffuf",
+            "-w",
+            "/workspaces/sess-pty-cwd/darklab/targets.txt",
+            "-u",
+            "https://example.test/FUZZ",
+        ]
+
+    def test_start_interactive_pty_uses_registry_spec(self):
+        client = get_client()
+        fake_run = SimpleNamespace(run_id="pty-run-custom", rows=35, cols=120)
+        spec = {
+            "root": "watcher",
+            "trigger_flag": "--live",
+            "default_rows": 35,
+            "default_cols": 120,
+            "max_runtime_seconds": 180,
+            "allow_input": False,
+            "input_safety": "no_input",
+            "requires_args": False,
+            "transcript_mode": "scrollback_findings",
+        }
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
+            assert command == "watcher"
+            assert extra_allowed_prefixes == ["watcher"]
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.interactive_pty_spec_for_command", return_value=spec), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "watcher --live"},
+                headers={"X-Session-ID": "sess-pty-custom"},
+            )
+
+        assert resp.status_code == 202
+        kwargs = start_pty.call_args.kwargs
+        assert kwargs["argv"] == ["watcher"]
+        assert kwargs["default_rows"] == 35
+        assert kwargs["default_cols"] == 120
+        assert kwargs["allow_input"] is False
+        assert kwargs["max_runtime_seconds"] == 180
+        fake_completed = SimpleNamespace(
+            run_id="pty-run-custom",
+            session_id="sess-pty-custom",
+            command="watcher --live",
+            started="2026-05-06T00:00:00Z",
+        )
+        with mock.patch("blueprints.run._persist_completed_pty_run", return_value={}) as persist_pty:
+            kwargs["completion_callback"](fake_completed, "2026-05-06T00:00:01Z", 0, [])
+        assert persist_pty.call_args.kwargs["transcript_mode"] == "scrollback_findings"
+
+    def test_completed_pty_transcript_modes_shape_saved_output(self):
+        entries = [
+            {"text": "anon@darklab:/ $ ffuf -u https://darklab.sh/FUZZ", "role": "prompt-echo"},
+            {"text": "scrolled finding", "cls": ""},
+            {"text": "rate:  0.00-kpps, 100.00% done, found=1", "cls": ""},
+            {"text": "", "role": "pty-marker"},
+            {"text": "final frame", "cls": ""},
+        ]
+
+        assert run_routes._shape_completed_pty_entries(entries, "final_frame") == [
+            {"text": "final frame", "cls": ""},
+        ]
+        assert run_routes._shape_completed_pty_entries(entries, "scrollback_findings") == [
+            {"text": "scrolled finding", "cls": ""},
+        ]
+
+    def test_start_interactive_pty_allows_multiple_active_pty_runs_for_session(self):
+        client = get_client()
+        fake_run = SimpleNamespace(run_id="pty-run-second", rows=24, cols=100)
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
+            assert command == "mtr example.com"
+            assert extra_allowed_prefixes == ["mtr"]
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.active_runs_for_session", return_value=[{
+                 "run_id": "active-pty",
+                 "command": "mtr --interactive darklab.sh",
+                 "run_type": "pty",
+             }]), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive example.com"},
+                headers={"X-Session-ID": "sess-pty-active"},
+            )
+
+        assert resp.status_code == 202
+        assert resp.get_json()["run_id"] == "pty-run-second"
+        start_pty.assert_called_once()
+
+    def test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit(self):
+        client = get_client()
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
+            assert command == "mtr example.com"
+            assert extra_allowed_prefixes == ["mtr"]
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        active_runs = [
+            {
+                "run_id": f"active-pty-{index}",
+                "command": f"mtr --interactive host-{index}.example",
+                "run_type": "pty",
+            }
+            for index in range(4)
+        ]
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.active_runs_for_session", return_value=active_runs), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run") as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive example.com"},
+                headers={"X-Session-ID": "sess-pty-active"},
+            )
+
+        assert resp.status_code == 429
+        assert "Interactive PTY limit reached" in resp.get_json()["error"]
+        start_pty.assert_not_called()
+
+    def test_stream_interactive_pty_touches_active_run_owner(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run.stream_pty_events", return_value=iter(['data: {"type":"heartbeat"}\n\n'])), \
+             mock.patch("blueprints.run.claim_pty_stream_owner") as claim_owner, \
+             mock.patch("blueprints.run.active_run_touch_owner") as touch_owner:
+            resp = client.get(
+                "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
+                headers={
+                    "X-Session-ID": "sess-pty-owner",
+                    "X-Client-ID": "client-1",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert b"heartbeat" in resp.data
+        claim_owner.assert_called_once_with("pty-run-owner", "sess-pty-owner", "client-1", "tab-1")
+        touch_owner.assert_called_once_with("pty-run-owner", "client-1", "tab-1")
+
+        with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=False), \
+             mock.patch("blueprints.run.stream_pty_events", return_value=iter(['data: {"type":"error"}\n\n'])), \
+             mock.patch("blueprints.run.claim_pty_stream_owner") as rejected_claim_owner:
+            resp = client.get(
+                "/pty/runs/pty-run-other/stream?tab_id=tab-1",
+                headers={
+                    "X-Session-ID": "sess-pty-owner",
+                    "X-Client-ID": "client-1",
+                },
+            )
+
+        assert resp.status_code == 404
+        rejected_claim_owner.assert_not_called()
+
+    def test_snapshot_interactive_pty_returns_terminal_resume_state(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pty_run_snapshot", return_value=(True, "", {
+            "run_id": "pty-run-snapshot",
+            "command": "mtr --interactive darklab.sh",
+            "started": "2026-05-06T00:00:00+00:00",
+            "rows": 24,
+            "cols": 100,
+            "after_event_id": "1770000000000-1",
+            "entries": [{"text": "hop 1 darklab.sh", "cls": ""}],
+            "snapshot_format": "ansi",
+            "ansi_snapshot": "\x1b[0m\x1b[2J\x1b[Hhop 1 darklab.sh\x1b[1;1H",
+            "snapshot_truncated": False,
+        })) as snapshot:
+            resp = client.get(
+                "/pty/runs/pty-run-snapshot/snapshot",
+                headers={"X-Session-ID": "sess-pty-snapshot"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["run_id"] == "pty-run-snapshot"
+        assert data["after_event_id"] == "1770000000000-1"
+        assert data["entries"] == [{"text": "hop 1 darklab.sh", "cls": ""}]
+        assert data["snapshot_format"] == "ansi"
+        assert data["ansi_snapshot"].startswith("\x1b[0m\x1b[2J\x1b[H")
+        assert data["snapshot_truncated"] is False
+        snapshot.assert_called_once_with("pty-run-snapshot", "sess-pty-snapshot")
+
+    def test_snapshot_interactive_pty_reports_worker_local_limit(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pty_run_snapshot", return_value=(
+            False,
+            "PTY snapshot is not available from this worker",
+            None,
+        )):
+            resp = client.get(
+                "/pty/runs/pty-run-other-worker/snapshot",
+                headers={"X-Session-ID": "sess-pty-snapshot-limit"},
+            )
+
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "1"
+        assert "not available from this worker" in resp.get_json()["error"]
+
+    def test_snapshot_interactive_pty_uses_specific_failure_statuses(self):
+        client = get_client()
+
+        cases = [
+            ("Run not found", 404, False),
+            ("Run is closed", 410, False),
+            ("PTY run is no longer active", 410, False),
+            ("PTY snapshot is not available yet", 503, True),
+        ]
+        for message, expected_status, expect_retry in cases:
+            with mock.patch("blueprints.run.pty_run_snapshot", return_value=(False, message, None)):
+                resp = client.get(
+                    "/pty/runs/pty-run-status/snapshot",
+                    headers={"X-Session-ID": "sess-pty-snapshot-status"},
+                )
+
+            assert resp.status_code == expected_status
+            assert resp.get_json()["error"] == message
+            assert ("Retry-After" in resp.headers) is expect_retry
+
+    def test_kill_routes_pty_killed_event_to_pty_stream(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{
+                 "run_id": "pty-run-kill",
+                 "run_type": "pty",
+             }]), \
+             mock.patch("blueprints.run.pid_for_session", return_value=4242), \
+             mock.patch("blueprints.run.notify_pty_killed_event") as notify_pty, \
+             mock.patch("blueprints.run.publish_run_event") as publish_run, \
+             mock.patch("blueprints.run.os.killpg"):
+            resp = client.post(
+                "/kill",
+                json={"run_id": "pty-run-kill", "tab_id": "tab-1"},
+                headers={
+                    "X-Session-ID": "sess-pty-kill",
+                    "X-Client-ID": "client-1",
+                },
+            )
+
+        assert resp.status_code == 200
+        notify_pty.assert_called_once_with(
+            "pty-run-kill",
+            "sess-pty-kill",
+            {"killer_client_id": "client-1", "killer_tab_id": "tab-1"},
+        )
+        publish_run.assert_not_called()
+
+    def test_interactive_pty_control_routes_are_rate_limited(self):
+        assert hasattr(run_routes.send_interactive_pty_input, "__wrapped__")
+        assert hasattr(run_routes.resize_interactive_pty_run, "__wrapped__")
+        assert "__wrapper-limiter-instance" in run_routes.send_interactive_pty_input.__dict__
+        assert "__wrapper-limiter-instance" in run_routes.resize_interactive_pty_run.__dict__
+
+    def test_interactive_pty_input_route_uses_dedicated_rate_limit(self):
+        with mock.patch.dict(run_routes.CFG, {
+            "interactive_pty_input_rate_limit_per_minute": 500,
+            "interactive_pty_input_rate_limit_per_second": 10,
+        }):
+            assert run_routes._interactive_pty_input_limit() == "500 per minute; 10 per second"
 
 
 # ── /runs streaming ───────────────────────────────────────────────────────────
@@ -224,7 +657,10 @@ class TestRunStreaming:
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
              mock.patch("blueprints.run.pid_pop") as pid_pop, \
              mock.patch("blueprints.run.active_run_remove") as active_remove, \
-             mock.patch("blueprints.run._finalize_completed_run", return_value=0.2) as finalize:
+             mock.patch(
+                 "blueprints.run._finalize_completed_run",
+                 return_value={"elapsed": 0.2, "active_project_link": None},
+             ) as finalize:
             run_routes._brokered_real_run_worker(
                 run_id="run-broker-worker",
                 proc=fake_proc,
@@ -239,6 +675,8 @@ class TestRunStreaming:
                 variable_notice="[var] HOST=darklab.sh",
                 rewrite_notice="rewritten for safety",
                 workspace_notices=["[workspace] writing scan.txt"],
+                workspace_artifacts=[],
+                owner_tab_id="tab-worker",
             )
         capture.finalize()
 
@@ -272,7 +710,10 @@ class TestRunStreaming:
              mock.patch("blueprints.run._terminate_process_group") as terminate, \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run.active_run_remove"), \
-             mock.patch("blueprints.run._finalize_completed_run", return_value=1.0):
+             mock.patch(
+                 "blueprints.run._finalize_completed_run",
+                 return_value={"elapsed": 1.0, "active_project_link": None},
+             ):
             run_routes._brokered_real_run_worker(
                 run_id="run-broker-timeout",
                 proc=fake_proc,
@@ -287,6 +728,8 @@ class TestRunStreaming:
                 variable_notice="",
                 rewrite_notice="",
                 workspace_notices=[],
+                workspace_artifacts=[],
+                owner_tab_id="",
             )
         capture.finalize()
 
@@ -325,6 +768,8 @@ class TestRunStreaming:
                 variable_notice="",
                 rewrite_notice="",
                 workspace_notices=[],
+                workspace_artifacts=[],
+                owner_tab_id="",
             )
 
         assert published == [("run-broker-error", "error", {"text": "Process stdout pipe was not created"})]
@@ -356,6 +801,64 @@ class TestRunStreaming:
         assert "hello\\n" in body
         assert "world\\n" in body
 
+    def test_completed_external_run_queues_run_complete_notification(self):
+        client = get_client()
+        session_id = "tok_run_complete_notification"
+        channel_id = "ntc_run_complete_notification"
+        now = datetime.now(timezone.utc).isoformat()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (session_id, now, ""),
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    channel_id,
+                    session_id,
+                    "webhook",
+                    "Run complete hook",
+                    "{}",
+                    "{}",
+                    json.dumps(["run_complete"]),
+                    0,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        fake_proc = _FakeProc(lines=["finished\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "echo notify"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT trigger, payload_json, status, attempts, run_id FROM notification_events WHERE channel_id = ?",
+                (channel_id,),
+            ).fetchone()
+        assert row is not None
+        payload = json.loads(row["payload_json"])
+        assert row["trigger"] == "run_complete"
+        assert row["status"] == "pending"
+        assert row["attempts"] == 0
+        assert row["run_id"] == payload["run_id"]
+        assert payload["command_root"] == "echo"
+        assert payload["exit_code"] == 0
+        assert payload["summary_fields"]["finding_count"] == 0
+
     def test_run_output_events_include_signal_metadata(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
@@ -386,6 +889,24 @@ class TestRunStreaming:
 
     def test_history_restore_json_preserves_signal_metadata(self):
         client = get_client()
+        session_id = "sess-signal-history"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Signal Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(target_resp.data)["target"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
 
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
@@ -400,23 +921,355 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "host darklab.sh"},
-                headers={"X-Session-ID": "sess-signal-history"},
+                headers={"X-Session-ID": session_id},
             )
             resp.get_data(as_text=True)
 
         assert resp.status_code == 200
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-signal-history"})
+        hist = client.get("/history", headers={"X-Session-ID": session_id})
         run_id = json.loads(hist.data)["runs"][0]["id"]
-        restored = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-signal-history"})
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT id, run_id, target_id, scope, title, raw_line, line_number, review_state "
+                "FROM findings WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        restored = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": session_id})
         data = json.loads(restored.data)
         entry = data["output_entries"][0]
 
+        assert finding is not None
+        assert finding["run_id"] == run_id
+        assert finding["target_id"] == target["id"]
+        assert finding["scope"] == "finding"
+        assert finding["title"] == "darklab.sh has address 104.21.4.35"
+        assert finding["raw_line"] == "darklab.sh has address 104.21.4.35"
+        assert finding["line_number"] == 0
+        assert finding["review_state"] == "new"
+        findings_resp = client.get(
+            f"/entities/run/{run_id}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        findings_data = json.loads(findings_resp.data)
+        assert findings_resp.status_code == 200
+        assert [item["id"] for item in findings_data["findings"]] == [finding["id"]]
+        review_resp = client.put(
+            f"/findings/{finding['id']}/review",
+            json={"review_state": "reviewed"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert review_resp.status_code == 200
+        assert json.loads(review_resp.data)["finding"]["review_state"] == "reviewed"
+        hidden_review = client.put(
+            f"/findings/{finding['id']}/review",
+            json={"review_state": "important"},
+            headers={"X-Session-ID": "other-session"},
+        )
+        assert hidden_review.status_code == 404
+        assert data["findings"][0]["id"] == finding["id"]
+        assert data["findings"][0]["target_id"] == target["id"]
+        assert data["labels"] == []
+        assert data["note"] is None
         assert entry["text"] == "darklab.sh has address 104.21.4.35"
         assert entry["signals"] == ["findings"]
         assert entry["line_index"] == 0
         assert entry["command_root"] == "host"
         assert entry["target"] == "darklab.sh"
+
+    def test_project_findings_strip_ansi_codes_before_storage(self):
+        client = get_client()
+        session_id = "sess-project-finding-ansi"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "ANSI Findings"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "url", "value": "https://ip.darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        ansi_line = (
+            "[\x1b[92mhttp-missing-security-headers\x1b[0m] "
+            "[\x1b[94mhttp\x1b[0m] [\x1b[34minfo\x1b[0m] https://ip.darklab.sh\n"
+        )
+        clean_line = "[http-missing-security-headers] [http] [info] https://ip.darklab.sh"
+        fake_proc = _FakeProc(lines=[ansi_line, ""])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nuclei -u https://ip.darklab.sh -t http/"},
+                headers={"X-Session-ID": session_id},
+            )
+            resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        run_id = json.loads(hist.data)["runs"][0]["id"]
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT title, raw_line, severity FROM findings WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+
+        assert finding is not None
+        assert finding["title"] == clean_line
+        assert finding["raw_line"] == clean_line
+        assert finding["severity"] == "info"
+
+    def test_project_findings_prefer_classifier_target_metadata(self):
+        client = get_client()
+        session_id = "sess-project-finding-target-metadata"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Nmap File Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(target_resp.data)["target"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -iL targets.txt"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        output_events = [event for event in _sse_events(body) if event.get("type") == "output"]
+        open_port_event = next(event for event in output_events if str(event.get("text") or "").strip() == "80/tcp open http")
+        assert open_port_event["target"] == "darklab.sh"
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT target_id, raw_line FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        assert finding is not None
+        assert finding["raw_line"] == "80/tcp open http"
+        assert finding["target_id"] == target["id"]
+
+    def test_project_targets_reject_cidr_targets(self):
+        client = get_client()
+        session_id = "sess-project-finding-cidr-target"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "CIDR Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "cidr", "value": "10.0.0.0/24"},
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(target_resp.data)
+        assert target_resp.status_code == 400
+        assert data["error"] == "target type must be domain, url, host, or ip"
+
+    def test_project_targets_reject_port_set_targets(self):
+        client = get_client()
+        session_id = "sess-project-finding-port-set-target"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Port Set Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        domain_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert domain_resp.status_code == 201
+        ports_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "port_set", "value": "80,443,6788"},
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(ports_resp.data)
+        assert ports_resp.status_code == 400
+        assert data["error"] == "target type must be domain, url, host, or ip"
+
+    def test_active_project_auto_discovers_typed_command_targets(self):
+        client = get_client()
+        session_id = "sess-project-auto-targets"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Auto Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            first_body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "[project] discovered 1 target" in first_body
+        targets_resp = client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        )
+        targets = json.loads(targets_resp.data)["targets"]
+        by_value = {item["value"]: item for item in targets}
+        assert by_value["darklab.sh"]["review_state"] == "pending"
+        assert by_value["darklab.sh"]["source"] == "auto_command"
+        assert by_value["darklab.sh"]["source_detail"]["kind"] == "positional"
+        assert "80" not in by_value
+
+        findings_resp = client.get(
+            f"/projects/{project['id']}/findings?target_id={by_value['darklab.sh']['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        findings = json.loads(findings_resp.data)["findings"]
+        assert [item["raw_line"] for item in findings] == ["80/tcp open http"]
+        assert by_value["darklab.sh"]["id"] in findings[0]["target_ids"]
+
+        second_proc = _FakeProc(lines=["Nmap scan report for darklab.sh\n", "80/tcp open http\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=second_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            rerun = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            rerun_body = rerun.get_data(as_text=True)
+        assert rerun.status_code == 200
+        assert "[project] discovered" not in rerun_body
+
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
+            target_file = shell_workspace.resolve_workspace_path(
+                session_id,
+                "targets.txt",
+                shell_app.CFG,
+                ensure_parent=True,
+            )
+            target_file.write_text("ip.darklab.sh\n# ignored.example\n", encoding="utf-8")
+            file_proc = _FakeProc(lines=["Nmap scan report for ip.darklab.sh\n", "443/tcp open https\n", ""])
+            with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+                 mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+                 mock.patch("blueprints.run.subprocess.Popen", return_value=file_proc), \
+                 mock.patch("blueprints.run.pid_register"), \
+                 mock.patch("blueprints.run.pid_pop"), \
+                 mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+                file_run = _post_run(
+                    client,
+                    json={"command": "nmap -iL targets.txt"},
+                    headers={"X-Session-ID": session_id},
+                )
+                file_run.get_data(as_text=True)
+        assert file_run.status_code == 200
+        refreshed_targets = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)["targets"]
+        file_target = next(item for item in refreshed_targets if item["value"] == "ip.darklab.sh")
+        assert file_target["review_state"] == "pending"
+        assert file_target["source"] == "auto_input_file"
+        assert file_target["confidence"] == 0.85
+        assert file_target["source_detail"]["path"] == "targets.txt"
+
+    def test_active_project_target_quota_skip_does_not_log_server_error(self):
+        client = get_client()
+        session_id = "sess-project-target-quota-skip"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Target Quota Skip"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
+             mock.patch.object(run_routes.log, "warning") as log_warning, \
+             mock.patch(
+                 "blueprints.run.record_project_target_discoveries",
+                 side_effect=ProjectWorkspaceQuotaExceeded("project target quota exceeded for this project"),
+             ):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "[project] linked run" in body
+        assert "[project] discovered" not in body
+        log_warning.assert_called_once()
+        assert log_warning.call_args.args == ("PROJECT_TARGET_DISCOVERY_SKIPPED",)
+        assert "exc_info" not in log_warning.call_args.kwargs
 
     def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
         read_fd, write_fd = os.pipe()
@@ -493,6 +1346,203 @@ class TestRunStreaming:
         data = json.loads(hist.data)
         cmds = [r["command"] for r in data["runs"]]
         assert "echo saved" in cmds
+
+    def test_completed_run_links_to_active_project(self):
+        client = get_client()
+        session_id = "sess-active-project-run"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Run Context"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        active_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert active_resp.status_code == 200
+
+        fake_proc = _FakeProc(lines=["project line https://darklab.sh/admin\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+             ]):
+            resp = _post_run(client, json={"command": "echo https://darklab.sh/admin"}, headers={"X-Session-ID": session_id})
+            _ = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            run_link_row = conn.execute(
+                "SELECT l.entity_type, l.entity_id, l.source, r.command "
+                "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "WHERE l.project_id = ? AND l.entity_type = 'run'",
+                (project["id"],),
+            ).fetchone()
+            entity_link_row = conn.execute(
+                "SELECT l.entity_type, l.entity_id, l.source, e.canonical_value "
+                "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+                "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+                "ORDER BY e.canonical_value",
+                (project["id"],),
+            ).fetchone()
+        assert run_link_row is not None
+        assert run_link_row["entity_type"] == "run"
+        assert run_link_row["source"] == "active_project"
+        assert run_link_row["command"] == "echo https://darklab.sh/admin"
+        assert entity_link_row is not None
+        assert entity_link_row["entity_type"] == "atlas_entity"
+        assert entity_link_row["source"] == "active_project"
+        assert entity_link_row["canonical_value"] in {"darklab.sh", "https://darklab.sh/admin"}
+
+    def test_active_project_entity_link_failure_keeps_run_finalization(self):
+        client = get_client()
+        session_id = "sess-active-project-entity-link-fails"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Run Entity Link Failure"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        active_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert active_resp.status_code == 200
+
+        def failing_entity_link(conn, _session_id, project_id, run_id):
+            row = conn.execute(
+                "SELECT entity_id FROM entity_run_links WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            assert row is not None
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'active_project', datetime('now'))",
+                (f"pl_test_{uuid.uuid4().hex[:16]}", project_id, row["entity_id"]),
+            )
+            raise RuntimeError("entity link boom")
+
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
+             mock.patch("blueprints.run.command_project_target_inputs", return_value=[]), \
+             mock.patch("blueprints.run.link_active_project_run_entities", side_effect=failing_entity_link):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert any(
+            event.get("type") == "exit" and event.get("code") == 0
+            for event in _sse_events(body)
+        )
+        with db_connect() as conn:
+            run_row = conn.execute(
+                "SELECT id, output_preview FROM runs WHERE session_id = ? AND command = ?",
+                (session_id, "nmap -p 80 darklab.sh"),
+            ).fetchone()
+            assert run_row is not None
+            run_id = run_row["id"]
+            preview_lines = json.loads(run_row["output_preview"])
+            finding_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM findings_occurrences WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()["count"]
+            entity_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM entity_run_links WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()["count"]
+            run_project_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                (project["id"], run_id),
+            ).fetchone()["count"]
+            entity_project_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                (project["id"],),
+            ).fetchone()["count"]
+
+        assert any(entry["text"] == "80/tcp open http" for entry in preview_lines)
+        assert finding_count >= 1
+        assert entity_count >= 1
+        assert run_project_link_count == 1
+        assert entity_project_link_count == 0
+
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1",
+            headers={"X-Session-ID": session_id},
+        )
+        preview = json.loads(preview_resp.data)
+        assert preview_resp.status_code == 200
+        assert preview["atlas_entity_count"] >= 1
+        assert preview["atlas_finding_count"] >= 1
+        assert any(entry["text"] == "80/tcp open http" for entry in preview["output_entries"])
+
+        history_resp = client.get("/history", headers={"X-Session-ID": session_id})
+        history = json.loads(history_resp.data)
+        history_run = next(item for item in history["runs"] if item["id"] == run_id)
+        assert history_run["atlas_entity_count"] >= 1
+        assert history_run["atlas_finding_count"] >= 1
+
+    def test_completed_run_skips_active_project_when_auto_link_disabled(self):
+        client = get_client()
+        session_id = "sess-active-project-auto-link-off"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Manual Run Context"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/session/preferences",
+            json={
+                "preferences": {
+                    "pref_active_project_id": project["id"],
+                    "pref_project_auto_link_external_runs": "off",
+                }
+            },
+            headers={"X-Session-ID": session_id},
+        )
+
+        fake_proc = _FakeProc(lines=["project line\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+             ]):
+            resp = _post_run(client, json={"command": "echo project"}, headers={"X-Session-ID": session_id})
+            _ = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT l.entity_type, l.entity_id, l.source, r.command "
+                "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "WHERE l.project_id = ?",
+                (project["id"],),
+            ).fetchone()
+        assert row is None
 
     def test_run_filters_output_through_synthetic_grep(self):
         client = get_client()
@@ -779,7 +1829,7 @@ class TestRunStreaming:
     def test_builtin_commands_streams_grouped_catalog_and_persists_history(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value={
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value={
             "commands": [
                 {
                     "root": "ping",
@@ -861,7 +1911,7 @@ class TestRunStreaming:
     def test_builtin_commands_lists_built_in_and_external_catalogs(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value={
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value={
             "commands": [
                 {
                     "root": "ping",
@@ -909,7 +1959,7 @@ class TestRunStreaming:
     def test_builtin_commands_supports_external_only_filter(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value={
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value={
             "commands": [
                 {
                     "root": "ping",
@@ -955,7 +2005,7 @@ class TestRunStreaming:
             ],
             "all_items": None,
         }
-        with mock.patch("builtin_commands.load_wordlist_catalog", return_value=catalog):
+        with mock.patch("services.commands.builtins.load_wordlist_catalog", return_value=catalog):
             listed = _post_run(
                 client,
                 json={"command": "wordlist list dns"},
@@ -978,7 +2028,7 @@ class TestRunStreaming:
 
     def test_builtin_wordlist_reports_missing_catalog(self):
         client = get_client()
-        with mock.patch("builtin_commands.load_wordlist_catalog", return_value={
+        with mock.patch("services.commands.builtins.load_wordlist_catalog", return_value={
             "root": "/usr/share/wordlists/seclists",
             "categories": [],
             "items": [],
@@ -1199,6 +2249,9 @@ class TestRunStreaming:
         assert "UI:\\n" in body
         # Default (non-Mac) User-Agent renders Alt-prefixed chords.
         assert "Alt+T" in body
+        assert "Alt+C" in body
+        assert "Alt+P" in body
+        assert "Alt+Shift+P" in body
         assert "Alt+Shift+C" in body
         assert "Ctrl+D" in body
         assert "Ctrl+U" in body
@@ -1217,6 +2270,9 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert "Option+T" in body
+        assert "Option+C" in body
+        assert "Option+P" in body
+        assert "Option+Shift+P" in body
         assert "Option+Shift+C" in body
         assert "Ctrl+D" in body
         assert "Ctrl+U" in body
@@ -1225,7 +2281,7 @@ class TestRunStreaming:
     def test_builtin_banner_renders_ascii_art(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_ascii_art", return_value="line one\nline two"):
+        with mock.patch("services.commands.builtins.load_ascii_art", return_value="line one\nline two"):
             resp = _post_run(client, json={"command": "banner"})
             body = resp.get_data(as_text=True)
 
@@ -1237,7 +2293,7 @@ class TestRunStreaming:
     def test_builtin_which_and_type_describe_commands(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+        with mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/curl"):
             which_resp = _post_run(client, json={"command": "which curl"})
             which_body = which_resp.get_data(as_text=True)
             type_resp = _post_run(client, json={"command": "type history"})
@@ -1361,6 +2417,8 @@ class TestRunStreaming:
         ) in body
 
     def test_builtin_who_tty_groups_and_version_render_shell_identity(self):
+        from services.commands import builtins_system
+
         client = get_client()
 
         who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
@@ -1383,11 +2441,17 @@ class TestRunStreaming:
         assert f"App {shell_app.APP_VERSION}\\n" in version_body
         assert "Flask " in version_body
         assert "Python " in version_body
+        builtins_system._flask_version.cache_clear()
+        with mock.patch("services.commands.builtins_system.package_version", return_value="9.9.9") as version_mock:
+            assert builtins_system.run_builtin_version()[3]["text"] == "Flask 9.9.9"
+            assert builtins_system.run_builtin_version()[3]["text"] == "Flask 9.9.9"
+        version_mock.assert_called_once_with("flask")
+        builtins_system._flask_version.cache_clear()
 
     def test_builtin_faq_renders_builtin_and_configured_entries(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_all_faq", return_value=[
+        with mock.patch("services.commands.builtins.load_all_faq", return_value=[
             {"question": "Built-in question?", "answer": "Built-in answer."},
             {"question": "What is this?", "answer": "A browser-based shell."},
             {"question": "How do I stop a command?", "answer": "Use Kill."},
@@ -1407,7 +2471,7 @@ class TestRunStreaming:
     def test_builtin_retention_reports_preview_and_full_output_policy(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.CFG", {
+        with mock.patch("services.commands.builtins.CFG", {
             **shell_app.CFG,
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
@@ -1428,7 +2492,7 @@ class TestRunStreaming:
     def test_builtin_fortune_returns_configured_line(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.random.choice", return_value="Trust the output, not the hunch."):
+        with mock.patch("services.commands.builtins.random.choice", return_value="Trust the output, not the hunch."):
             resp = _post_run(client, json={"command": "fortune"})
             body = resp.get_data(as_text=True)
 
@@ -1600,7 +2664,7 @@ class TestRunStreaming:
     def test_builtin_jobs_aliases_runs_metadata(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[
             {
                 "run_id": "run-abcdef123456",
                 "pid": 4242,
@@ -1632,7 +2696,7 @@ class TestRunStreaming:
     def test_builtin_jobs_alias_reports_when_no_active_runs_exist(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[]):
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
             resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
             body = resp.get_data(as_text=True)
 
@@ -1642,7 +2706,7 @@ class TestRunStreaming:
     def test_builtin_runs_lists_active_run_metadata(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[
             {
                 "run_id": "run-abcdef123456",
                 "pid": 4242,
@@ -1700,7 +2764,7 @@ class TestRunStreaming:
     def test_builtin_runs_reports_when_no_active_runs_exist(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[]):
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
             resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
             body = resp.get_data(as_text=True)
 
@@ -1711,9 +2775,9 @@ class TestRunStreaming:
         client = get_client()
 
         fake_proc = mock.Mock(returncode=0, stdout="NAME\ncurl - transfer a URL\n", stderr="")
-        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, None]), \
-             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("builtin_commands.subprocess.run", return_value=fake_proc):
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1726,10 +2790,10 @@ class TestRunStreaming:
         client = get_client()
         man_text = "\n".join(f"line {index}" for index in range(1, 6)) + "\n"
         fake_proc = mock.Mock(returncode=0, stdout=man_text, stderr="")
-        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, None]), \
-             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("builtin_commands.subprocess.run", return_value=fake_proc), \
-             mock.patch("builtin_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc), \
+             mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "max_output_lines": 2}):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1741,7 +2805,7 @@ class TestRunStreaming:
     def test_builtin_man_reports_when_helper_binary_is_unavailable(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.runtime_missing_command_name", return_value="man"):
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", return_value="man"):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1752,9 +2816,9 @@ class TestRunStreaming:
     def test_builtin_man_reports_when_allowlisted_topic_is_missing(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
-             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("builtin_commands.subprocess.run") as run_cmd:
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, "curl"]), \
+             mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("services.commands.builtins.subprocess.run") as run_cmd:
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1782,7 +2846,7 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Built-in command:\\n" not in body
         assert "Built-in commands:\\n" in body
-        assert "history    List recent commands from this session.\\n" in body
+        assert "history    List command history from this session.\\n" in body
 
     def test_builtin_man_for_shortcuts_topic_returns_web_shell_help(self):
         client = get_client()
@@ -1795,7 +2859,7 @@ class TestRunStreaming:
         assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert '"type": "exit"' in body
 
-    def test_builtin_history_lists_recent_session_commands(self):
+    def test_builtin_history_lists_session_commands(self):
         client = get_client()
         with db_connect() as conn:
             conn.execute(
@@ -1814,12 +2878,12 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "Recent commands:\\n" in body
+        assert "Command history:\\n" in body
         assert "1  ping darklab.sh\\n" in body
         assert "2  dig darklab.sh A\\n" in body
         assert '"type": "exit"' in body
 
-    def test_builtin_history_honors_recent_commands_limit(self):
+    def test_builtin_history_ignores_recent_commands_limit(self):
         client = get_client()
         with db_connect() as conn:
             for index in range(1, 6):
@@ -1838,7 +2902,7 @@ class TestRunStreaming:
                 )
             conn.commit()
 
-        with mock.patch.dict("builtin_commands.CFG", {"recent_commands_limit": 3}):
+        with mock.patch.dict("services.commands.builtins.CFG", {"recent_commands_limit": 3}):
             resp = _post_run(
                 client,
                 json={"command": "history"},
@@ -1847,17 +2911,37 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "1  cmd 3\\n" in body
-        assert "2  cmd 4\\n" in body
-        assert "3  cmd 5\\n" in body
-        assert "cmd 1\\n" not in body
-        assert "cmd 2\\n" not in body
+        assert "1  cmd 1\\n" in body
+        assert "2  cmd 2\\n" in body
+        assert "3  cmd 3\\n" in body
+        assert "4  cmd 4\\n" in body
+        assert "5  cmd 5\\n" in body
         assert '"type": "exit"' in body
+
+    def test_secret_set_with_accidental_value_persists_sanitized_command(self):
+        client = get_client()
+        secret_value = "plain-secret-value"
+
+        resp = _post_run(
+            client,
+            json={"command": f"secret set SHODAN_API_KEY {secret_value}"},
+            headers={"X-Session-ID": "sess-secret-sanitized"},
+        )
+        body = resp.get_data(as_text=True)
+        hist = client.get("/history", headers={"X-Session-ID": "sess-secret-sanitized"})
+        data = json.loads(hist.data)
+
+        assert resp.status_code == 200
+        assert "Do not put the value on the command line." in body
+        assert secret_value not in body
+        assert hist.status_code == 200
+        assert data["runs"][0]["command"] == "secret set SHODAN_API_KEY"
+        assert secret_value not in hist.get_data(as_text=True)
 
     def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.CFG", {**shell_app.CFG, "workspace_enabled": False}):
+        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "workspace_enabled": False}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -1868,7 +2952,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_workspace_root_when_workspace_enabled(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.CFG", {**shell_app.CFG, "workspace_enabled": True}):
+        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "workspace_enabled": True}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -2025,13 +3109,24 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }
-        from workspace import session_workspace_name, write_workspace_text_file
+        from services.workspace.files import session_workspace_name, write_workspace_text_file
         write_workspace_text_file(session_id, "targets.txt", "ip.darklab.sh\n", cfg)
         workspace_dir = tmp_path / session_workspace_name(session_id)
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Workspace Artifacts"},
+            headers={"X-Session-ID": session_id},
+        )
+        project_id = json.loads(project_resp.data)["project"]["id"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project_id},
+            headers={"X-Session-ID": session_id},
+        )
 
         with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
              mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("commands.load_commands_registry", return_value=registry), \
+             mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register"), \
@@ -2057,7 +3152,34 @@ class TestRunStreaming:
         assert "scan complete\\n" in body
         hist = client.get("/history", headers={"X-Session-ID": session_id})
         data = json.loads(hist.data)
+        run_id = data["runs"][0]["id"]
         assert data["runs"][0]["command"] == "nmap -iL targets.txt -oN scan.txt"
+        with db_connect() as conn:
+            artifact_rows = conn.execute(
+                "SELECT workspace_path, display_name, kind, byte_size, detected_by "
+                "FROM run_file_artifacts WHERE run_id = ? ORDER BY workspace_path",
+                (run_id,),
+            ).fetchall()
+        assert [row["workspace_path"] for row in artifact_rows] == ["scan.txt", "targets.txt"]
+        assert {row["display_name"] for row in artifact_rows} == {"scan.txt", "targets.txt"}
+        assert {row["workspace_path"]: row["kind"] for row in artifact_rows} == {
+            "scan.txt": "output",
+            "targets.txt": "input",
+        }
+        assert {row["workspace_path"]: row["detected_by"] for row in artifact_rows} == {
+            "scan.txt": "workspace_flag",
+            "targets.txt": "workspace_flag",
+        }
+        assert {row["workspace_path"]: row["byte_size"] for row in artifact_rows}["targets.txt"] > 0
+        with db_connect() as conn:
+            project_links = conn.execute(
+                "SELECT entity_type, entity_id, source FROM project_links "
+                "WHERE project_id = ? ORDER BY entity_type, entity_id",
+                (project_id,),
+            ).fetchall()
+        assert [(row["entity_type"], row["entity_id"], row["source"]) for row in project_links] == [
+            ("run", run_id, "active_project"),
+        ]
 
     def test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths(self, tmp_path):
         client = get_client()
@@ -2071,9 +3193,9 @@ class TestRunStreaming:
             "workspace_max_files": 10,
             "workspace_inactivity_ttl_hours": 1,
         }
-        from workspace import session_workspace_name
+        from services.workspace.files import session_workspace_name
         workspace_dir = tmp_path / session_workspace_name(session_id)
-        resume_path = workspace_dir / "katana" / "resume-abcd.cfg"
+        resume_path = workspace_dir / "tools" / "katana" / "resume-abcd.cfg"
         fake_proc = _FakeProc(lines=[f"Creating resume file: {resume_path}\n", ""])
         registry = {
             "commands": [
@@ -2084,7 +3206,7 @@ class TestRunStreaming:
                     "runtime_adaptations": {
                         "inject_flags": [
                             {
-                                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}"],
+                                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}/tools"],
                                 "position": "command_prefix",
                                 "requires_workspace": True,
                             },
@@ -2097,7 +3219,7 @@ class TestRunStreaming:
 
         with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
              mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("commands.load_commands_registry", return_value=registry), \
+             mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register"), \
@@ -2113,10 +3235,410 @@ class TestRunStreaming:
         assert resp.status_code == 200
         launched = popen.call_args.args[0]
         shell_command = launched[-1]
-        assert f"XDG_CONFIG_HOME={workspace_dir}" in shell_command
+        assert f"XDG_CONFIG_HOME={workspace_dir / 'tools'}" in shell_command
         assert "katana -u https://ip.darklab.sh -d 1" in shell_command
         assert str(workspace_dir) not in body
-        assert "Creating resume file: /katana/resume-abcd.cfg" in body
+        assert "Creating resume file: /tools/katana/resume-abcd.cfg" in body
+
+    def test_run_injects_required_secrets_through_process_environment(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-run"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "shodan_api_key", "shodan-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen) as popen, \
+             mock.patch("blueprints.run.emit_secret_event") as secret_event, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert captured_env["SHODAN_API_KEY"] == "shodan-secret"
+        launched_command = popen.call_args.args[0][-1]
+        assert ".shodan/api_key" in launched_command
+        assert '"$SHODAN_API_KEY"' in launched_command
+        assert 'HOME="$__darklab_shodan_home"' in launched_command
+        assert "pkg_resources is deprecated" in launched_command
+        assert "shodan host ip.darklab.sh" in launched_command
+        assert "shodan-secret" not in launched_command
+        assert "shodan-secret" not in body
+        assert popen.call_args.kwargs["env"]["SHODAN_API_KEY"] == ""
+        secret_event.assert_called_once()
+        assert secret_event.call_args.args[0] == "SECRET_INJECTED"
+        assert secret_event.call_args.kwargs["consumer_envs"] == ["SHODAN_API_KEY"]
+
+    def test_run_preserves_secret_environment_through_scanner_sudo_prefix(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-scanner"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "shodan_api_key", "shodan-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured["argv"] = list(args[0])
+            captured["env_before_cleanup"] = dict(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "-g", "appuser"]), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert captured["argv"][:2] == ["sudo", "--preserve-env=SHODAN_API_KEY"]
+        assert captured["env_before_cleanup"]["SHODAN_API_KEY"] == "shodan-secret"
+        assert "shodan-secret" not in " ".join(captured["argv"])
+        assert "shodan-secret" not in body
+        assert popen.call_args.kwargs["env"]["SHODAN_API_KEY"] == ""
+
+    def test_run_injects_secret_under_vendor_env_name(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-alias"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "VT_API_KEY", "vt-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "vt",
+                    "category": "External Intel",
+                    "policy": {"allow": ["vt ip"], "deny": []},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen) as popen, \
+             mock.patch("blueprints.run.emit_secret_event") as secret_event, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "vt ip 8.8.8.8"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert captured_env["VTCLI_APIKEY"] == "vt-secret"
+        assert "VT_API_KEY" not in captured_env
+        assert "vt-secret" not in popen.call_args.args[0][-1]
+        assert "vt-secret" not in body
+        assert popen.call_args.kwargs["env"]["VTCLI_APIKEY"] == ""
+        secret_event.assert_called_once()
+        assert secret_event.call_args.kwargs["consumer_envs"] == ["VTCLI_APIKEY"]
+
+    def test_run_accepts_vendor_native_fallback_secret_name(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-native-alias"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "VTCLI_APIKEY", "vtcli-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "vt",
+                    "category": "External Intel",
+                    "policy": {"allow": ["vt ip"], "deny": []},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "vt ip 8.8.8.8"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        assert captured_env["VTCLI_APIKEY"] == "vtcli-secret"
+        assert "VT_API_KEY" not in captured_env
+
+    def test_run_missing_alias_secret_message_lists_supported_names(self):
+        client = get_client()
+        registry = {
+            "commands": [
+                {
+                    "root": "vt",
+                    "category": "External Intel",
+                    "policy": {"allow": ["vt ip"], "deny": []},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = _post_run(
+                client,
+                json={"command": "vt ip 8.8.8.8"},
+                headers={"X-Session-ID": "sess-missing-vt-secret"},
+            )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == (
+            "Run requires secret VT_API_KEY or VTCLI_APIKEY which is not set. "
+            "Set it via \"secret set NAME\" or the Options > Secrets panel."
+        )
+        popen.assert_not_called()
+
+    def test_run_resolves_required_secrets_before_runtime_command_rewrites(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-rewrite"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "shodan_api_key", "shodan-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        def _rewrite_validation(command, session_id, workspace_cwd=""):  # noqa: ARG001
+            assert command == "shodan host ip.darklab.sh"
+            return run_routes.CommandValidationResult(
+                True,
+                display_command=command,
+                exec_command="env XDG_CONFIG_HOME=/tmp/tools shodan host ip.darklab.sh",
+            )
+
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run._validate_command_for_run", side_effect=_rewrite_validation), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen), \
+             mock.patch("blueprints.run.emit_secret_event") as secret_event, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        assert captured_env["SHODAN_API_KEY"] == "shodan-secret"
+        secret_event.assert_called_once()
+        assert secret_event.call_args.kwargs["command_root"] == "shodan"
+
+    def test_run_requires_valid_session_before_secret_injection(self):
+        client = get_client()
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": ""},
+            )
+
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "A valid session is required before commands can use encrypted secrets."
+        popen.assert_not_called()
+
+    def test_run_blocks_when_required_secret_is_missing(self):
+        client = get_client()
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "help": {"flags": ["--help"], "subcommands": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        fake_proc = _FakeProc(lines=["Usage: shodan [OPTIONS]\n", ""])
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.get_secret_value_for_env") as get_secret, \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            help_resp = _post_run(
+                client,
+                json={"command": "shodan --help"},
+                headers={"X-Session-ID": "sess-missing-secret"},
+            )
+
+        assert help_resp.status_code == 200
+        popen.assert_called_once()
+        get_secret.assert_not_called()
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": "sess-missing-secret"},
+            )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == (
+            "Run requires secret SHODAN_API_KEY which is not set. "
+            "Set it via \"secret set NAME\" or the Options > Secrets panel."
+        )
+        popen.assert_not_called()
+
+    def test_run_allows_missing_optional_secret_and_logs_warning(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": True}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.log.warning") as warning_log, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": "sess-optional-secret"},
+            )
+
+        assert resp.status_code == 200
+        assert any(call.args[0] == "SECRET_OPTIONAL_MISSING" for call in warning_log.call_args_list)
 
     def test_session_variables_expand_before_validation_and_preserve_typed_history(self):
         client = get_client()
@@ -2172,8 +3694,9 @@ class TestRunStreaming:
             headers={"X-Session-ID": session_id},
         )
 
-        def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             assert command == "curl https://blocked.darklab.sh"
+            assert extra_allowed_prefixes is None
             return run_routes.CommandValidationResult(
                 False,
                 "blocked after expansion",
@@ -2195,6 +3718,63 @@ class TestRunStreaming:
 
 
 class TestRunOutputArtifacts:
+    def test_history_search_finds_entity_canonical_values_indexed_from_run_output(self):
+        client = get_client()
+        session_id = "sess-output-search-entity"
+        run_id = "run-output-search-entity"
+
+        class FakeCapture:
+            preview_lines = [{
+                "text": "resolved alias target",
+                "cls": "",
+                "tsC": "",
+                "tsE": "",
+                "entities": [{
+                    "type": "domain",
+                    "value": "alias target",
+                    "canonical_value": "canonical-only.example",
+                    "confidence": "high",
+                }],
+            }]
+            preview_truncated = False
+            output_line_count = 1
+            full_output_available = False
+            full_output_truncated = False
+            full_output_bytes = 0
+            artifact_rel_path = None
+
+            def finalize(self):
+                return None
+
+        run_routes._save_completed_run(
+            run_id,
+            session_id,
+            "lookup alias-target",
+            "2026-05-21T00:00:00Z",
+            "2026-05-21T00:00:01Z",
+            0,
+            FakeCapture(),
+            link_active_project=False,
+        )
+
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT output_search_text FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        assert "canonical-only.example" in row["output_search_text"]
+
+        resp = client.get(
+            "/history?q=canonical-only.example&include_total=1",
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["total_count"] == 1
+        assert data["runs"][0]["id"] == run_id
+
     def _insert_run_with_artifact(self, run_id, session_id="sess-artifact"):
         ensure_run_output_dir()
         artifact_path = Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz"
@@ -2213,15 +3793,81 @@ class TestRunOutputArtifacts:
                 "VALUES (?, ?, 'gzip', 14, 2, 0, datetime('now'))",
                 (run_id, f"{run_id}.txt.gz"),
             )
+            project_id = f"prj_{uuid.uuid4().hex[:16]}"
+            file_artifact_id = f"rfa_{uuid.uuid4().hex[:16]}"
+            finding_id = f"fnd_{run_id}"
+            conn.execute(
+                "INSERT INTO projects "
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, 'Artifacts', ?, '', 'active', '', datetime('now'), datetime('now'))",
+                (project_id, session_id, f"artifacts-{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/output.txt', 'output.txt', 'output', 14, 'workspace_flag', datetime('now'))",
+                (file_artifact_id, session_id, run_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 443', '443/tcp open https', 0, ?, datetime('now'))",
+                (finding_id, session_id, run_id, f"fp-{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'finding', ?, 'important', datetime('now'))",
+                (f"lbl_{run_id}", session_id, finding_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run_file_artifact', ?, 'review evidence', datetime('now'), datetime('now'))",
+                (f"note_{run_id}", session_id, file_artifact_id),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'run', ?, 'active_project', datetime('now'))",
+                (f"pln_{uuid.uuid4().hex[:16]}", project_id, run_id),
+            )
             conn.commit()
         return artifact_path
 
     def test_delete_run_removes_output_artifact(self):
         client = get_client()
-        artifact_path = self._insert_run_with_artifact("artifact-delete-run", session_id="sess-delete-artifact")
+        run_id = "artifact-delete-run"
+        retained_run_id = "artifact-delete-retained"
+        session_id = "sess-delete-artifact"
+        artifact_path = self._insert_run_with_artifact(run_id, session_id=session_id)
+        shared_finding_id = f"fnd_shared_{run_id}"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES (?, ?, 'nmap -sV 10.0.0.2', datetime('now'), '[]')",
+                (retained_run_id, session_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'shared issue', 'shared issue', 0, ?, datetime('now'))",
+                (shared_finding_id, session_id, run_id, f"fp-{shared_finding_id}"),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 1, 'shared issue', datetime('now', '+1 second'))",
+                (shared_finding_id, retained_run_id),
+            )
+            conn.execute(
+                "UPDATE findings SET occurrence_count = 2, first_run_id = ?, last_run_id = ?, "
+                "first_seen_at = datetime('now'), last_seen_at = datetime('now', '+1 second') "
+                "WHERE id = ?",
+                (run_id, retained_run_id, shared_finding_id),
+            )
+            conn.commit()
         assert os.path.exists(artifact_path)
 
-        resp = client.delete("/history/artifact-delete-run", headers={"X-Session-ID": "sess-delete-artifact"})
+        resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session_id})
 
         assert resp.status_code == 200
         assert not os.path.exists(artifact_path)
@@ -2229,10 +3875,50 @@ class TestRunOutputArtifacts:
             assert (
                 conn.execute(
                     "SELECT 1 FROM run_output_artifacts WHERE run_id = ?",
-                    ("artifact-delete-run",),
+                    (run_id,),
                 ).fetchone()
                 is None
             )
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM run_file_artifacts WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                is None
+            )
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE id = ?",
+                (f"fnd_{run_id}",),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings_occurrences WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()[0] == 0
+            finding = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id FROM findings WHERE id = ?",
+                (f"fnd_{run_id}",),
+            ).fetchone()
+            assert finding["occurrence_count"] == 0
+            assert finding["run_id"] == ""
+            assert finding["first_run_id"] == ""
+            assert finding["last_run_id"] == ""
+            shared_finding = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id FROM findings WHERE id = ?",
+                (shared_finding_id,),
+            ).fetchone()
+            assert shared_finding["occurrence_count"] == 1
+            assert shared_finding["run_id"] == retained_run_id
+            assert shared_finding["first_run_id"] == retained_run_id
+            assert shared_finding["last_run_id"] == retained_run_id
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE id = ?",
+                (f"lbl_{run_id}",),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE id = ?",
+                (f"note_{run_id}",),
+            ).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 
     def test_clear_history_removes_output_artifacts_for_session(self):
         client = get_client()
@@ -2248,6 +3934,25 @@ class TestRunOutputArtifacts:
         assert not os.path.exists(artifact_b)
         with db_connect() as conn:
             assert conn.execute("SELECT COUNT(*) FROM run_output_artifacts").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM run_file_artifacts").fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE id IN (?, ?)",
+                ("fnd_artifact-clear-a", "fnd_artifact-clear-b"),
+            ).fetchone()[0] == 2
+            assert conn.execute("SELECT COUNT(*) FROM findings_occurrences").fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE id IN (?, ?) AND occurrence_count = 0",
+                ("fnd_artifact-clear-a", "fnd_artifact-clear-b"),
+            ).fetchone()[0] == 2
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE id IN (?, ?)",
+                ("lbl_artifact-clear-a", "lbl_artifact-clear-b"),
+            ).fetchone()[0] == 2
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE id IN (?, ?)",
+                ("note_artifact-clear-a", "note_artifact-clear-b"),
+            ).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 
 
 # ── /history isolation ────────────────────────────────────────────────────────
@@ -2316,6 +4021,124 @@ class TestHistoryIsolation:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
                 conn.commit()
 
+    def test_public_run_permalink_omits_intel_output_for_non_owner(self):
+        client = get_client()
+        run_id = f"intel-run-{uuid.uuid4()}"
+        output_entries = [
+            {"text": "Shodan", "cls": "", "command_root": "intel"},
+            {"text": "ports: 53, 443", "cls": "", "command_root": "intel"},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ]
+
+        try:
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output, output_preview, output_line_count) "
+                    "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        "owner-session",
+                        "intel ip 8.8.8.8",
+                        0,
+                        json.dumps(output_entries),
+                        json.dumps(output_entries),
+                        len(output_entries),
+                    ),
+                )
+                conn.commit()
+
+            owner_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "owner-session"})
+            owner_data = json.loads(owner_resp.data)
+            assert [entry["text"] for entry in owner_data["output_entries"]] == [
+                "Shodan",
+                "ports: 53, 443",
+                "[process exited with code 0]",
+            ]
+
+            public_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "other-session"})
+            public_data = json.loads(public_resp.data)
+            assert [entry["text"] for entry in public_data["output_entries"]] == [
+                "Intel data omitted from share",
+                "[process exited with code 0]",
+            ]
+            assert "ports: 53, 443" not in json.dumps(public_data)
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_public_run_permalink_omits_full_artifact_intel_output_for_non_owner(self):
+        client = get_client()
+        run_id = f"intel-full-run-{uuid.uuid4()}"
+        artifact_rel_path = f"{run_id}.txt.gz"
+        artifact_path = Path(RUN_OUTPUT_DIR) / artifact_rel_path
+        full_events = [
+            line_event_from_legacy("Shodan", command_root="intel"),
+            line_event_from_legacy("ports: 53, 443", command_root="intel"),
+            line_event_from_legacy("[process exited with code 0]", "exit-ok"),
+        ]
+
+        try:
+            ensure_run_output_dir()
+            with gzip.open(artifact_path, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"v": 1, "created": "2026-05-21T00:00:00Z", "run_id": run_id}) + "\n")
+                for event in full_events:
+                    handle.write(json.dumps(to_wire(event), separators=(",", ":")) + "\n")
+
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output_preview, "
+                    "output_line_count, full_output_available, full_output_truncated) "
+                    "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, 1, 0)",
+                    (
+                        run_id,
+                        "owner-session",
+                        "intel ip 8.8.8.8",
+                        0,
+                        json.dumps([{"text": "preview only", "cls": ""}]),
+                        len(full_events),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO run_output_artifacts "
+                    "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                    "VALUES (?, ?, 'gzip', ?, ?, 0, datetime('now'))",
+                    (run_id, artifact_rel_path, artifact_path.stat().st_size, len(full_events)),
+                )
+                conn.commit()
+
+            owner_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": "owner-session"})
+            owner_data = json.loads(owner_resp.data)
+            assert [entry["text"] for entry in owner_data["output_entries"]] == [
+                "Shodan",
+                "ports: 53, 443",
+                "[process exited with code 0]",
+            ]
+
+            public_json_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": "other-session"})
+            public_json = json.loads(public_json_resp.data)
+            assert public_json_resp.status_code == 200
+            assert [entry["text"] for entry in public_json["output_entries"]] == [
+                "Intel data omitted from share",
+                "[process exited with code 0]",
+            ]
+            assert "ports: 53, 443" not in json.dumps(public_json)
+
+            public_html = client.get(f"/history/{run_id}", headers={"X-Session-ID": "other-session"}).get_data(as_text=True)
+            assert "Intel data omitted from share" in public_html
+            assert "ports: 53, 443" not in public_html
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (run_id,))
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+            try:
+                artifact_path.unlink()
+            except FileNotFoundError:
+                pass
+
 
 # ── /share ────────────────────────────────────────────────────────────────────
 
@@ -2338,7 +4161,11 @@ class TestShareRoundTrip:
             ],
         }
 
-        resp = client.post("/share", json=payload, headers={"X-Session-ID": "share-session"})
+        resp = client.post(
+            "/share",
+            json={**payload, "apply_redaction": False},
+            headers={"X-Session-ID": "share-session"},
+        )
         assert resp.status_code == 200
         created = json.loads(resp.data)
         assert "id" in created
@@ -2350,3 +4177,35 @@ class TestShareRoundTrip:
         assert data["label"] == "test snapshot"
         assert data["content"] == payload["content"]
         assert data["session_id"] == "share-session"
+
+    def test_share_omits_intel_output_even_when_raw_requested(self):
+        client = get_client()
+        payload = {
+            "label": "intel snapshot",
+            "apply_redaction": False,
+            "content": [
+                {"text": "anon@darklab.sh:/ $ intel ip 8.8.8.8", "cls": "prompt-echo"},
+                {"text": "Shodan", "cls": "", "command_root": "intel", "tsC": "10:00:01", "tsE": "+0.1s"},
+                {"text": "ports: 53, 443", "cls": "", "command_root": "intel", "tsC": "10:00:02", "tsE": "+0.2s"},
+                {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            ],
+        }
+
+        resp = client.post("/share", json=payload, headers={"X-Session-ID": "share-session"})
+        assert resp.status_code == 200
+        created = json.loads(resp.data)
+
+        fetch = client.get(f"/share/{created['id']}?json")
+        assert fetch.status_code == 200
+        data = json.loads(fetch.data)
+
+        content = data["content"]
+        assert content[0]["cls"] == "prompt-echo"
+        assert content[1]["text"] == "Intel data omitted from share"
+        assert content[1]["raw_only"] is True
+        assert content[2]["cls"] == "exit-ok"
+        assert "ports: 53, 443" not in json.dumps(content)
+
+        html = client.get(f"/share/{created['id']}").get_data(as_text=True)
+        assert "Intel data omitted from share" in html
+        assert "ports: 53, 443" not in html

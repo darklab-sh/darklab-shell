@@ -32,13 +32,69 @@
     '--terminal-font-size',
     '--terminal-line-height',
   ];
-  const PLAIN_CLASSES = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
+  function runOutputModel() {
+    return window.DarklabRunOutputModel || null;
+  }
+
+  function fallbackLineEvent(line) {
+    const cls = String(line && line.cls || '');
+    return {
+      text: String(line && line.text || ''),
+      cls,
+      kind: String(line && line.kind || (cls === 'notice' ? 'notice' : 'info')),
+      role: String(line && line.role || (['prompt-echo', 'denied', 'exit-ok', 'exit-fail'].includes(cls) ? cls : 'body')),
+      tsC: String(line && line.tsC || ''),
+      tsE: String(line && line.tsE || ''),
+      signals: Array.isArray(line && line.signals) ? line.signals.map(signal => String(signal || '')).filter(Boolean) : [],
+      entities: Array.isArray(line && line.entities) ? line.entities : [],
+      line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
+    };
+  }
+
+  function lineEventFromWire(line) {
+    const model = runOutputModel();
+    if (model && typeof model.fromWireLineEvent === 'function') {
+      const event = model.fromWireLineEvent(line || {});
+      event.cls = lineLegacyClass(event);
+      event.tsC = event.ts_clock || '';
+      event.tsE = event.ts_elapsed || '';
+      event.signals = Array.isArray(event.signals) ? event.signals : [];
+      event.entities = Array.isArray(event.entities) ? event.entities : [];
+      if (Number.isInteger(line && line.line_number)) event.line_number = line.line_number;
+      return event;
+    }
+    return fallbackLineEvent(line || {});
+  }
+
+  function lineLegacyClass(event) {
+    const model = runOutputModel();
+    if (model && typeof model.toLegacyWireLineEvent === 'function') {
+      return String(model.toLegacyWireLineEvent(event || {}).cls || '');
+    }
+    return String(event && (event.legacy_cls || event.cls || (event.role !== 'body' ? event.role : event.kind !== 'info' ? event.kind : '')) || '');
+  }
+
+  function isPromptEchoEvent(event) {
+    return String(event && event.role || '') === 'prompt-echo';
+  }
+
+  function isPlainEvent(event) {
+    const role = String(event && event.role || 'body');
+    const kind = String(event && event.kind || 'info');
+    return ['exit-ok', 'exit-fail', 'denied'].includes(role) || kind === 'notice';
+  }
 
   function escapeExportHtml(text) {
     return String(text ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  function escapeExportAttr(text) {
+    return escapeExportHtml(text)
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function renderExportPromptEcho(text) {
@@ -48,6 +104,110 @@
     const remainder = firstSpace === -1 ? '' : raw.slice(firstSpace + 1);
     return '<span class="prompt-prefix">' + escapeExportHtml(prefix) + '</span>'
       + (remainder ? escapeExportHtml(' ' + remainder) : '');
+  }
+
+  function exportEntityRanges(text, entities) {
+    const length = String(text || '').length;
+    return (Array.isArray(entities) ? entities : [])
+      .map((entity) => {
+        const start = Number(entity && entity.start);
+        const end = Number(entity && entity.end);
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > length) {
+          return null;
+        }
+        return { start, end, entity };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.start - b.start || a.end - b.end)
+      .reduce((ranges, range) => {
+        const previous = ranges[ranges.length - 1];
+        if (previous && range.start < previous.end) return ranges;
+        ranges.push(range);
+        return ranges;
+      }, []);
+  }
+
+  function renderExportEntityContent(text, entities, ansiToHtml) {
+    const raw = String(text || '');
+    const ranges = exportEntityRanges(raw, entities);
+    if (!ranges.length) return ansiToHtml(raw);
+    let cursor = 0;
+    let html = '';
+    ranges.forEach((range) => {
+      if (range.start > cursor) html += ansiToHtml(raw.slice(cursor, range.start));
+      const entity = range.entity || {};
+      const entityType = String(entity.type || '');
+      const entityValue = String(entity.canonical_value || entity.value || raw.slice(range.start, range.end));
+      const tokenText = raw.slice(range.start, range.end);
+      html += '<span class="export-entity-token"'
+        + ' data-entity-type="' + escapeExportAttr(entityType) + '"'
+        + ' data-entity-value="' + escapeExportAttr(entityValue) + '"'
+        + ' title="Entity: ' + escapeExportAttr(entityValue) + '">'
+        + ansiToHtml(tokenText)
+        + '</span>';
+      cursor = range.end;
+    });
+    if (cursor < raw.length) html += ansiToHtml(raw.slice(cursor));
+    return html;
+  }
+
+  function exportLineBadgeHtml(line) {
+    const kind = String(line && line.kind || 'info');
+    const signals = Array.isArray(line && line.signals) ? line.signals.map(String) : [];
+    if (kind === 'error') return '<span class="line-severity-badge line-severity-error">error</span>';
+    if (kind === 'warn') return '<span class="line-severity-badge line-severity-warn">warn</span>';
+    if (signals.includes('findings')) return '<span class="line-severity-badge line-severity-finding">finding</span>';
+    return '';
+  }
+
+  function buildExportLineSummary(rawLines) {
+    const summary = {
+      findings: 0,
+      warnings: 0,
+      errors: 0,
+      entityTypes: {},
+    };
+    rawLines.forEach((rawLine) => {
+      const line = lineEventFromWire(rawLine);
+      const signals = Array.isArray(line.signals) ? line.signals.map(String) : [];
+      if (signals.includes('findings')) summary.findings += 1;
+      if (line.kind === 'warn') summary.warnings += 1;
+      if (line.kind === 'error') summary.errors += 1;
+      (Array.isArray(line.entities) ? line.entities : []).forEach((entity) => {
+        const type = String(entity && entity.type || '').trim();
+        if (type) summary.entityTypes[type] = (summary.entityTypes[type] || 0) + 1;
+      });
+    });
+    return summary;
+  }
+
+  function buildExportSummaryHtml(summary) {
+    const chips = [];
+    if (summary.findings) chips.push(`findings ${summary.findings}`);
+    if (summary.errors) chips.push(`errors ${summary.errors}`);
+    if (summary.warnings) chips.push(`warnings ${summary.warnings}`);
+    Object.entries(summary.entityTypes || {})
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(0, 8)
+      .forEach(([type, count]) => chips.push(`${type} ${count}`));
+    if (!chips.length) return '';
+    return '<section class="export-findings-summary">'
+      + chips.map(chip => `<span>${escapeExportHtml(chip)}</span>`).join('')
+      + '</section>';
+  }
+
+  function renderExportLineContent(line, ansiToHtml) {
+    const lineEvent = lineEventFromWire(line);
+    const text = String(lineEvent.text || '');
+    let content;
+    if (isPromptEchoEvent(lineEvent)) {
+      content = renderExportPromptEcho(text);
+    } else if (isPlainEvent(lineEvent)) {
+      content = escapeExportHtml(text);
+    } else {
+      content = renderExportEntityContent(text, lineEvent.entities, ansiToHtml);
+    }
+    return exportLineBadgeHtml(lineEvent) + content;
   }
 
   function exportTimestamp() {
@@ -63,16 +223,10 @@
 
   function normalizeExportTranscriptLine(line) {
     if (typeof line === 'string') {
-      return { text: line, cls: '', tsC: '', tsE: '' };
+      return lineEventFromWire({ text: line });
     }
     if (line && typeof line.text === 'string') {
-      return {
-        text: line.text,
-        cls: String(line.cls || ''),
-        tsC: String(line.tsC || ''),
-        tsE: String(line.tsE || ''),
-        line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
-      };
+      return lineEventFromWire(line);
     }
     return null;
   }
@@ -162,22 +316,18 @@
   function buildExportLinesHtml(rawLines, { getPrefix = () => '', ansiToHtml }) {
     const prefixes = rawLines.map((line, i) => getPrefix(line, i));
     const prefixWidth = Math.max(0, ...prefixes.map(p => p.length));
-    const linesHtml = rawLines.map(({ text, cls }, i) => {
+    const summary = buildExportLineSummary(rawLines);
+    const linesHtml = rawLines.map((rawLine, i) => {
+      const line = lineEventFromWire(rawLine);
+      const cls = lineLegacyClass(line);
       const prefix = prefixes[i];
       const prefixSpan = prefix
         ? `<span class="perm-prefix">${escapeExportHtml(prefix)}</span>`
         : '';
-      let content;
-      if (cls === 'prompt-echo') {
-        content = renderExportPromptEcho(text);
-      } else if (PLAIN_CLASSES.has(cls)) {
-        content = escapeExportHtml(text);
-      } else {
-        content = ansiToHtml(text);
-      }
+      const content = renderExportLineContent(line, ansiToHtml);
       return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${content}</span></span>`;
     }).join('');
-    return { linesHtml, prefixWidth };
+    return { linesHtml, prefixWidth, summary, summaryHtml: buildExportSummaryHtml(summary) };
   }
 
   // ── Header / run-meta model ───────────────────────────────────────────────
@@ -221,7 +371,7 @@
     }).join('');
   }
 
-  function buildTerminalExportHeaderHtml(headerModel) {
+  function buildTerminalExportHeaderHtml(headerModel, { includeHighlightToggle = false } = {}) {
     const titleHtml = `<h1 class="export-title">${escapeExportHtml(headerModel.appName)}</h1>`;
     const metaHtml = headerModel.metaLine
       ? `<div class="export-meta">${escapeExportHtml(headerModel.metaLine)}</div>`
@@ -229,13 +379,38 @@
     const runMetaHtml = headerModel.runMetaItems.length
       ? `<div class="export-run-meta">${buildExportRunMetaHtml(headerModel.runMetaItems)}</div>`
       : '';
+    const actionsHtml = includeHighlightToggle
+      ? `<div class="export-header-actions">
+    <button type="button" class="export-highlight-toggle" data-export-toggle-highlights aria-pressed="true">highlights: on</button>
+  </div>`
+      : '';
     return `<header class="export-header">
   <div class="export-header-copy">
     ${titleHtml}
     ${metaHtml}
     ${runMetaHtml}
   </div>
+  ${actionsHtml}
 </header>`;
+  }
+
+  function buildTerminalExportScript() {
+    return `<script>
+(function () {
+  var btn = document.querySelector('[data-export-toggle-highlights]');
+  if (!btn) return;
+  function sync() {
+    var off = document.body.classList.contains('structured-highlights-off');
+    btn.textContent = 'highlights: ' + (off ? 'off' : 'on');
+    btn.setAttribute('aria-pressed', off ? 'false' : 'true');
+  }
+  btn.addEventListener('click', function () {
+    document.body.classList.toggle('structured-highlights-off');
+    sync();
+  });
+  sync();
+}());
+</script>`;
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -280,13 +455,17 @@ ${themeDecls}
     metaLine = '',
     runMeta = null,
     linesHtml = '',
+    summaryHtml = '',
     prefixWidth = 0,
     fontFacesCss = '',
     exportCss = '',
+    includeHighlightToggle = true,
+    highlights = 'on',
   }) {
     const colorScheme = getThemeExportColorScheme();
     const headerModel = buildExportHeaderModel({ appName, metaLine, runMeta });
     const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth, exportCss);
+    const bodyClass = highlights === 'off' ? ' class="structured-highlights-off"' : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -297,11 +476,13 @@ ${themeDecls}
 ${styles}
 </style>
 </head>
-<body>
-${buildTerminalExportHeaderHtml(headerModel)}
+<body${bodyClass}>
+${buildTerminalExportHeaderHtml(headerModel, { includeHighlightToggle })}
+${summaryHtml || ''}
 <main class="export-output nice-scroll">
 ${linesHtml}
 </main>
+${includeHighlightToggle ? buildTerminalExportScript() : ''}
 </body>
 </html>`;
   }
@@ -351,10 +532,18 @@ ${linesHtml}
     normalizeExportTranscriptLine,
     normalizeExportTranscriptLines,
     normalizeExportRunMeta,
+    lineEventFromWire,
+    lineLegacyClass,
+    isPromptEchoEvent,
+    isPlainEvent,
     buildExportDocumentModel,
     escapeExportHtml,
+    escapeExportAttr,
     renderExportPromptEcho,
+    renderExportEntityContent,
+    renderExportLineContent,
     buildExportLinesHtml,
+    buildExportLineSummary,
     buildExportRunMetaItems,
     buildExportHeaderModel,
     buildExportRunMetaHtml,

@@ -5,30 +5,81 @@ History and share routes: run history, single-run permalinks, snapshot permalink
 import json
 import logging
 import math
-import re
-import sqlite3
+import time
 import uuid
-from collections import Counter
 from datetime import date, datetime, timedelta, timezone
-from difflib import SequenceMatcher
 from typing import Any
 
 from flask import Blueprint, jsonify, request
 
 import config as _config
-from database import db_connect, delete_run_artifacts
-from helpers import (
+import services.runs.comparison as run_comparison
+from core.database import DB_BACKEND, db_connect, delete_run_artifacts, delete_snapshot_metadata
+from core.database_backend import (
+    DatabaseBackend,
+    SQLiteOperationalError,
+    dialect_for_backend,
+)
+from core.helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
     get_client_ip,
     get_log_session_id,
     get_session_id,
     is_failed_exit_code,
 )
-from output_signals import classify_line, command_root as output_command_root, extract_target
-from permalinks import _format_duration, _permalink_error_page, _permalink_page
-from process import active_runs_for_session
-from redaction import redact_line_entries
-from run_output_store import load_full_output_entries
+from core.output_signals import command_root as output_command_root
+from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
+from services.history.run_metadata import (
+    history_add_filters as _history_add_filters,
+    history_column_exists as _history_column_exists,
+    history_cutoff_for_range as _history_cutoff_for_range,
+    history_offloaded_search_run_ids as _history_offloaded_search_run_ids,
+    history_run_kind_sql as _history_run_kind_sql,
+    history_table_exists as _history_table_exists,
+    normalize_history_filter_text as _normalize_history_filter_text,
+    run_atlas_counts_by_run as _run_atlas_counts_by_run,
+    run_file_artifacts_by_run as _run_file_artifacts_by_run,
+    run_metadata_counts_by_run as _run_metadata_counts_by_run,
+)
+from services.history.search import run_search_clause, sqlite_fts_query
+from core.process import active_runs_for_session
+from services.atlas.cleanup import (
+    atlas_run_cleanup_preview,
+    delete_atlas_cleanup_preview,
+    public_cleanup_preview,
+)
+from services.ai.assists import (
+    AIAssistRouteError,
+    enqueue_next_commands_assist,
+    enqueue_summary_assist,
+    list_run_assists,
+)
+from services.projects.comparisons import compare_project_runs
+from services.projects.contracts import (
+    BULK_AUDIT_FAILURE_LIMIT,
+    MAX_BULK_RUN_ACTION_ITEMS,
+    MAX_ENTITY_ID_LEN,
+    ProjectWorkspaceError,
+)
+from core.redaction import line_entries_from_events, omit_raw_only_line_entries, redact_line_entries
+from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
+from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
+from services.runs.output_store import (
+    load_run_output_entries_for_run,
+    load_run_output_events_for_run,
+    preview_output_entries_from_run,
+)
+from services.runs.structured_filters import (
+    entity_run_exists_clause,
+    filters_have_summary_selectors,
+    filters_need_line_event_scan,
+    run_output_summary_exists_clause,
+    run_matches_structured_filters,
+    structured_filters_from_params,
+)
+from services.scheduler.service import schedule_ids_by_run
+from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body
+from services import metrics as app_metrics
 
 APP_VERSION = _config.APP_VERSION
 CFG = _config.CFG
@@ -37,94 +88,57 @@ log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
 
-COMPARE_MAX_LINES = 20_000
-COMPARE_MAX_BYTES = 3 * 1024 * 1024
-COMPARE_MAX_CHANGED_LINES = 500
-COMPARE_CHANGED_LINE_SIMILARITY = 0.72
-COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH = 4_000
-COMPARE_CHANGED_LINE_INDEX_WINDOW = 40
-COMPARE_CHANGED_LINE_QUICK_RATIO = 0.6
-COMPARE_CHANGED_LINE_CANDIDATES_PER_LINE = 5
-COMPARE_CHANGED_LINE_MAX_CANDIDATES = 5_000
 
-
-def _normalize_history_filter_text(value):
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def _history_cutoff_for_range(date_range):
-    # Relative ranges avoid local-time/calendar ambiguity while still giving the
-    # history drawer an easy way to narrow recent activity.
-    now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-    if date_range == "24h":
-        return (now - timedelta(hours=24)).isoformat()
-    if date_range == "7d":
-        return (now - timedelta(days=7)).isoformat()
-    if date_range == "30d":
-        return (now - timedelta(days=30)).isoformat()
+@history_bp.before_request
+def _require_history_write_session():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not get_session_id():
+        return jsonify({"error": "session_required"}), 401
     return None
 
 
 def _build_fts_query(raw):
-    # Strip FTS5 special chars and split into quoted terms for AND-search.
-    terms = re.split(r'\s+', re.sub(r'["\'\(\)\*\^\\]', ' ', raw).strip())
-    terms = [t for t in terms if t]
-    if not terms:
-        return None
-    # The trigram tokenizer indexes 3-char windows, so any term shorter than
-    # 3 chars produces zero trigrams and would silently match nothing. Signal
-    # the caller to use the LIKE fallback instead — that path handles
-    # substring matching on the command column.
-    if any(len(t) < 3 for t in terms):
-        return None
-    return ' '.join(f'"{t}"' for t in terms)
-
-
-def _history_add_filters(sql, params, command_root, exit_code_filter, date_range):
-    if command_root:
-        sql += " AND (LOWER(r.command) = ? OR LOWER(r.command) LIKE ?)"
-        params.extend([command_root, f"{command_root} %"])
-    if exit_code_filter == "0":
-        sql += " AND r.exit_code = 0"
-    elif exit_code_filter == "nonzero":
-        sql += " AND r.exit_code IS NOT NULL AND r.exit_code != 0 AND r.exit_code != ?"
-        params.append(GRACEFUL_TERMINATION_EXIT_CODE)
-    elif exit_code_filter == str(GRACEFUL_TERMINATION_EXIT_CODE):
-        sql += " AND r.exit_code = ?"
-        params.append(GRACEFUL_TERMINATION_EXIT_CODE)
-    elif exit_code_filter == "incomplete":
-        sql += " AND r.exit_code IS NULL"
-    cutoff = _history_cutoff_for_range(date_range)
-    if cutoff:
-        sql += " AND r.started >= ?"
-        params.append(cutoff)
-    return sql, params
+    return sqlite_fts_query(raw)
 
 
 def _history_command_roots(conn, session_id):
     rows = conn.execute(
-        """
-        SELECT
-          CASE
-            WHEN instr(trim(command), ' ') > 0 THEN substr(trim(command), 1, instr(trim(command), ' ') - 1)
-            ELSE trim(command)
-          END AS root,
-          MAX(started) AS latest_started
-        FROM runs
-        WHERE session_id = ? AND trim(command) != ''
-        GROUP BY root
-        ORDER BY latest_started DESC
-        LIMIT 50
-        """,
+        "SELECT command, "
+        "MAX(started) AS latest_started "
+        "FROM runs "
+        "WHERE session_id = ? AND trim(command) != '' "
+        "GROUP BY command "
+        "ORDER BY latest_started DESC "
+        "LIMIT 1000",
         (session_id,),
     ).fetchall()
-    return [str(row["root"]) for row in rows if row["root"]]
+    return [row["root"] for row in _history_root_rows_from_command_rows(rows)]
+
+
+def _history_root_rows_from_command_rows(rows):
+    latest_by_root: dict[str, str] = {}
+    for row in rows:
+        root = _history_run_root(str(row["command"] or ""))
+        if not root:
+            continue
+        latest_started = str(row["latest_started"] or "")
+        if root not in latest_by_root or latest_started > latest_by_root[root]:
+            latest_by_root[root] = latest_started
+    return [
+        {"root": root, "latest_started": latest_started}
+        for root, latest_started in sorted(
+            latest_by_root.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:50]
+    ]
 
 
 def _parse_history_bool(value):
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ai_route_error(exc: AIAssistRouteError):
+    return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
 
 
 def _parse_history_int(value, default, *, minimum=1, maximum=None):
@@ -139,32 +153,16 @@ def _parse_history_int(value, default, *, minimum=1, maximum=None):
     return parsed
 
 
-def _history_table_exists(conn, table_name):
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-        (table_name,),
-    ).fetchone()
-    return bool(row)
-
-
 def _history_match_clause(query, scope, force_like=False):
-    if not query:
-        return "", [], None
-    fts_q = _build_fts_query(query) if scope != "command" and not force_like else None
-    if fts_q:
-        return (
-            " AND r.rowid IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)",
-            [fts_q],
-            fts_q,
-        )
-    like_query = f"%{query.lower()}%"
-    if scope == "command":
-        return " AND LOWER(r.command) LIKE ?", [like_query], None
-    return (
-        " AND (LOWER(r.command) LIKE ? OR LOWER(COALESCE(r.output_search_text, '')) LIKE ?)",
-        [like_query, like_query],
-        None,
+    clause = run_search_clause(
+        DB_BACKEND,
+        query,
+        scope,
+        alias="r",
+        prefer_sqlite_fts=DB_BACKEND != DatabaseBackend.POSTGRES and not force_like,
+        postgres_placeholder="?",
     )
+    return clause.sql, clause.params, clause.fts_query
 
 
 def _history_base_clause(
@@ -174,30 +172,87 @@ def _history_base_clause(
     exit_code_filter,
     date_range,
     scope,
+    project_id,
     *,
     starred_only=False,
+    run_kind="all",
+    has_run_kind_column=True,
     force_like=False,
+    offloaded_match_run_ids=None,
 ):
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
+    if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
+        run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command", DB_BACKEND)
+        sql += f" AND {run_kind_expr} = ?"
+        params.append(run_kind)
+    if project_id:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM project_links pl "  # nosec
+            "JOIN projects p ON p.id = pl.project_id "
+            "WHERE p.session_id = ? AND p.id = ? "
+            "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
+        )
+        params.extend([session_id, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
             "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
         )
     match_sql, match_params, fts_q = _history_match_clause(query, scope, force_like=force_like)
-    sql += match_sql
-    params.extend(match_params)
+    offloaded_ids = [str(run_id) for run_id in (offloaded_match_run_ids or [])]
+    if match_sql and offloaded_ids:
+        match_predicate = match_sql[5:] if match_sql.startswith(" AND ") else match_sql
+        placeholders = ", ".join("?" for _ in offloaded_ids)
+        sql += f" AND (({match_predicate}) OR r.id IN ({placeholders}))"
+        params.extend(match_params)
+        params.extend(offloaded_ids)
+    else:
+        sql += match_sql
+        params.extend(match_params)
     sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
     return sql, params, fts_q
 
 
-def _history_snapshot_base_clause(session_id, query, date_range):
+def _history_structured_filter_run_ids(conn, run_sql, run_params, structured_filters):
+    summary_sql, _summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+    summary_available = bool(summary_sql) and _history_table_exists(conn, "run_output_summary")
+    needs_summary_fallback = filters_have_summary_selectors(structured_filters) and not summary_available
+    if not filters_need_line_event_scan(structured_filters) and not needs_summary_fallback:
+        return None
+    rows = conn.execute(
+        "SELECT r.*, ("  # nosec
+        "SELECT art.rel_path FROM run_output_artifacts art "
+        "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
+        ") AS rel_path "
+        + run_sql
+        + " ORDER BY r.started DESC, r.id DESC LIMIT 2000",
+        run_params,
+    ).fetchall()
+    run_ids: list[str] = []
+    for row in rows:
+        run = dict(row)
+        result = load_run_output_events_for_run(
+            run,
+            log_event="HISTORY_STRUCTURED_OUTPUT_LOAD_FAILED",
+        )
+        if run_matches_structured_filters(result.events, structured_filters):
+            run_ids.append(str(run.get("id") or ""))
+    return run_ids
+
+
+def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     sql = " FROM snapshots s WHERE s.session_id = ?"
     params: list[Any] = [session_id]
+    if project_id:
+        sql += " AND 1 = 0"
     if query:
-        sql += " AND LOWER(s.label) LIKE ?"
-        params.append(f"%{query.lower()}%")
+        if DB_BACKEND == DatabaseBackend.POSTGRES:
+            sql += " AND s.label ILIKE ?"
+            params.append(f"%{query}%")
+        else:
+            sql += " AND LOWER(s.label) LIKE ?"
+            params.append(f"%{query.lower()}%")
     cutoff = _history_cutoff_for_range(date_range)
     if cutoff:
         sql += " AND s.created >= ?"
@@ -206,8 +261,8 @@ def _history_snapshot_base_clause(session_id, query, date_range):
 
 
 def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
-    run_row = conn.execute(
-        """
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        run_stats_sql = """
         SELECT COUNT(*) AS total,
                SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
                SUM(
@@ -220,14 +275,42 @@ def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
                SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
                AVG(
                    CASE
-                       WHEN started IS NOT NULL AND finished IS NOT NULL
+                       WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
+                       THEN EXTRACT(
+                           EPOCH FROM (
+                               NULLIF(finished, '')::timestamptz - NULLIF(started, '')::timestamptz
+                           )
+                       )
+                       ELSE NULL
+                   END
+               ) AS average_elapsed_seconds
+          FROM runs
+         WHERE session_id = ?
+        """
+    else:
+        run_stats_sql = """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
+               SUM(
+                   CASE
+                       WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
+                       THEN 1
+                       ELSE 0
+                   END
+               ) AS failed,
+               SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
+               AVG(
+                   CASE
+                       WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
                        THEN (julianday(finished) - julianday(started)) * 86400.0
                        ELSE NULL
                    END
                ) AS average_elapsed_seconds
           FROM runs
          WHERE session_id = ?
-        """,
+        """
+    run_row = conn.execute(
+        run_stats_sql,
         (GRACEFUL_TERMINATION_EXIT_CODE, session_id),
     ).fetchone()
     snapshots = 0
@@ -262,7 +345,7 @@ def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
 
 def _command_category_map() -> dict[str, str]:
     try:
-        from commands import load_commands_registry
+        from services.commands.registry import load_commands_registry
 
         registry = load_commands_registry()
     except Exception:  # noqa: BLE001
@@ -284,7 +367,7 @@ def _app_builtin_command_roots() -> frozenset[str]:
     # treemap. Filter them out at the source so all Status Monitor widgets see
     # the same recon-only view.
     try:
-        from builtin_commands import get_builtin_command_roots
+        from services.commands.builtins import get_builtin_command_roots
     except Exception:  # noqa: BLE001
         return frozenset()
     return frozenset(get_builtin_command_roots())
@@ -294,12 +377,46 @@ def _history_run_root(command: str) -> str:
     return output_command_root(command) or str(command or "").strip().split(maxsplit=1)[0].lower() or "unknown"
 
 
+def _parse_iso_datetime(value):
+    return run_comparison.parse_iso_datetime(value)
+
+
 def _history_run_elapsed_seconds(row) -> float | None:
     started = _parse_iso_datetime(row["started"])
     finished = _parse_iso_datetime(row["finished"])
     if not started or not finished:
         return None
     return max(0.0, (finished - started).total_seconds())
+
+
+_HISTORY_OUTPUT_KIND_ORDER = {"error": 3, "warn": 2, "notice": 1, "info": 0}
+
+
+def _row_value(row, key: str, default=None):
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (IndexError, KeyError, TypeError):
+        return default
+
+
+def _history_run_max_output_kind(row) -> str:
+    summary_kind = str(_row_value(row, "max_output_kind", "") or "").strip()
+    if summary_kind in _HISTORY_OUTPUT_KIND_ORDER:
+        return summary_kind
+    best = "info"
+    try:
+        entries = json.loads(str(_row_value(row, "output_preview", "[]") or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return best
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("kind") or "").strip()
+        if _HISTORY_OUTPUT_KIND_ORDER.get(kind, -1) > _HISTORY_OUTPUT_KIND_ORDER.get(best, -1):
+            best = kind
+    return best
 
 
 def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict[str, Any]:
@@ -321,19 +438,33 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
     cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
     rows = conn.execute(
         """
-        SELECT id, command, started, finished, exit_code, output_line_count
+        SELECT id, run_kind, command, started, finished, exit_code, output_line_count,
+               COALESCE((
+                 SELECT CASE MAX(CASE s.value
+                   WHEN 'error' THEN 3
+                   WHEN 'warn' THEN 2
+                   WHEN 'notice' THEN 1
+                   WHEN 'info' THEN 0
+                   ELSE 0 END)
+                   WHEN 3 THEN 'error'
+                   WHEN 2 THEN 'warn'
+                   WHEN 1 THEN 'notice'
+                   ELSE 'info'
+                 END
+                   FROM run_output_summary s
+                  WHERE s.run_id = runs.id AND s.family = 'kind'
+               ), 'info') AS max_output_kind,
+               (
+                 SELECT COUNT(*) FROM findings_occurrences fo
+                  WHERE fo.run_id = runs.id
+               ) AS finding_count
           FROM runs
          WHERE session_id = ? AND started >= ?
          ORDER BY started ASC, id ASC
         """,
         (session_id, cutoff),
     ).fetchall()
-    builtin_roots = _app_builtin_command_roots()
-    if builtin_roots:
-        rows = [
-            row for row in rows
-            if _history_run_root(str(row["command"] or "")) not in builtin_roots
-        ]
+    rows = [row for row in rows if str(row["run_kind"] or RUN_KIND_EXTERNAL) == RUN_KIND_EXTERNAL]
     categories = _command_category_map()
     activity: dict[str, dict[str, Any]] = {
         (start_date + timedelta(days=offset)).isoformat(): {
@@ -360,6 +491,8 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
             "category": category,
             "elapsed": elapsed,
             "exit_code": exit_code,
+            "finding_count": int(row["finding_count"] or 0),
+            "max_kind": _history_run_max_output_kind(row),
             "started_dt": started_dt,
             "started_date": started_dt.date() if started_dt else None,
         })
@@ -440,6 +573,8 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
             "elapsed_seconds": record["elapsed"],
             "exit_code": record["exit_code"],
             "output_line_count": int(row["output_line_count"] or 0),
+            "finding_count": int(record.get("finding_count") or 0),
+            "max_kind": str(record.get("max_kind") or "info"),
         })
 
     command_mix = []
@@ -511,35 +646,7 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
 # ── Preview output helpers ────────────────────────────────────────────────────
 
 def _preview_output_entries_from_run(run):
-    # Prefer the saved full-output artifact when present, otherwise reconstruct a
-    # preview from the inline DB columns used by older rows.
-    raw = run.get("output_preview")
-    if raw is None:
-        raw = run.get("output")
-    loaded = json.loads(raw) if raw else []
-    if loaded and isinstance(loaded[0], str):
-        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in loaded]
-    entries = []
-    for item in loaded:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            entry = {
-                "text": item["text"],
-                "cls": str(item.get("cls", "")),
-                "tsC": str(item.get("tsC", "")),
-                "tsE": str(item.get("tsE", "")),
-            }
-            if isinstance(item.get("signals"), list):
-                entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
-            if isinstance(item.get("line_index"), int):
-                entry["line_index"] = item["line_index"]
-            if isinstance(item.get("command_root"), str):
-                entry["command_root"] = item["command_root"]
-            if isinstance(item.get("target"), str):
-                entry["target"] = item["target"]
-            entries.append(entry)
-        elif isinstance(item, str):
-            entries.append({"text": item, "cls": "", "tsC": "", "tsE": ""})
-    return entries
+    return preview_output_entries_from_run(run)
 
 
 def _preview_output_from_run(run):
@@ -566,316 +673,224 @@ def _preview_notice(run):
     )
 
 
-# ── Run comparison helpers ────────────────────────────────────────────────────
+def _run_output_structured_summary(events):
+    summary = {
+        "kinds": {},
+        "signals": {},
+        "entity_types": {},
+        "outline": [],
+        "signal_toc": [],
+    }
+    seen_signal_lines = set()
+    for fallback_index, event in enumerate(events):
+        line_number = event.line_index if isinstance(event.line_index, int) else fallback_index
+        summary["kinds"][event.kind.value] = summary["kinds"].get(event.kind.value, 0) + 1
+        for signal in event.signals:
+            summary["signals"][signal.value] = summary["signals"].get(signal.value, 0) + 1
+            signal_key = (signal.value, line_number)
+            if signal_key not in seen_signal_lines and len(summary["signal_toc"]) < 25:
+                seen_signal_lines.add(signal_key)
+                summary["signal_toc"].append({
+                    "line_number": line_number + 1,
+                    "signal": signal.value,
+                    "text": event.text[:160],
+                })
+        for entity in event.entities:
+            summary["entity_types"][entity.type] = summary["entity_types"].get(entity.type, 0) + 1
+        if event.role.value in {"section-header", "kv"} and len(summary["outline"]) < 25:
+            summary["outline"].append({
+                "line_number": line_number + 1,
+                "role": event.role.value,
+                "text": event.text[:160],
+            })
+    return summary
 
-def _normalize_compare_command(command):
-    return re.sub(r"\s+", " ", str(command or "").strip())
+
+def _project_links_by_run(conn, session_id, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    if not (
+        _history_table_exists(conn, "project_links")
+        and _history_table_exists(conn, "projects")
+    ):
+        return {run_id: [] for run_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT l.id, l.project_id, l.entity_id AS run_id, l.source, l.created, "  # nosec
+        "p.name AS project_name, p.slug AS project_slug, p.status AS project_status "
+        "FROM project_links l "
+        "JOIN projects p ON p.id = l.project_id "
+        "JOIN runs r ON r.id = l.entity_id "
+        "WHERE p.session_id = ? "
+        "AND l.entity_type = 'run' "
+        "AND r.session_id = ? AND r.run_kind = ? "
+        f"AND l.entity_id IN ({placeholders}) "
+        "ORDER BY LOWER(p.name) ASC, l.created ASC",
+        [session_id, session_id, RUN_KIND_EXTERNAL, *ids],
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "entity_type": "run",
+            "entity_id": row["run_id"],
+            "source": row["source"],
+            "created": row["created"],
+            "project": {
+                "id": row["project_id"],
+                "name": row["project_name"],
+                "slug": row["project_slug"],
+                "status": row["project_status"],
+            },
+        })
+    return grouped
 
 
-def _parse_iso_datetime(value):
-    if not value:
+def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
+    ids = [str(entity_id) for entity_id in entity_ids if entity_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "entity_labels"):
+        return {entity_id: [] for entity_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
+        "WHERE entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "
+        "ORDER BY " + dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC",
+        [entity_type, *ids],
+    ).fetchall()
+    grouped = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "label": row["label"],
+            "source": row["source"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _entity_notes_by_entity_ids(conn, entity_type, entity_ids):
+    ids = [str(entity_id) for entity_id in entity_ids if entity_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "entity_notes"):
+        return {entity_id: [] for entity_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, body, created, updated FROM entity_notes "  # nosec
+        "WHERE entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "
+        "ORDER BY updated ASC, id ASC",
+        [entity_type, *ids],
+    ).fetchall()
+    grouped = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "body": row["body"],
+            "created": row["created"],
+            "updated": row["updated"],
+        })
+    return grouped
+
+
+def _run_labels_by_run(conn, run_ids):
+    return _entity_labels_by_entity_ids(conn, "run", run_ids)
+
+
+def _run_notes_by_run(conn, run_ids):
+    return _entity_notes_by_entity_ids(conn, "run", run_ids)
+
+
+def _run_findings_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT f.id, f.session_id, fo.run_id, COALESCE(f.entity_id, f.target_id) AS target_id, f.kind AS scope, "
+        "f.title, COALESCE(fo.snippet, f.raw_line) AS raw_line, fo.line_number, "
+        "f.severity, f.fingerprint, f.status AS review_state, f.created "
+        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+        f"WHERE fo.run_id IN ({placeholders}) "  # nosec
+        "ORDER BY fo.line_number ASC, f.created ASC, f.id ASC",
+        ids,
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        primary_target_id = str(row["target_id"] or "")
+        target_ids = [primary_target_id] if primary_target_id else []
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "target_id": primary_target_id,
+            "target_ids": target_ids,
+            "scope": row["scope"],
+            "title": row["title"],
+            "raw_line": row["raw_line"],
+            "line_number": int(row["line_number"] or 0),
+            "severity": row["severity"] or "",
+            "fingerprint": row["fingerprint"],
+            "review_state": row["review_state"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _resolve_compare_request(session_id, left_id, right_id, project_id="", baseline_label=""):
+    project_comparison = None
+    if project_id:
+        try:
+            project_comparison = compare_project_runs(session_id, project_id, {
+                "left_run_id": left_id,
+                "right_run_id": right_id,
+                "baseline_label": baseline_label,
+            })
+        except ProjectWorkspaceError as exc:
+            return "", "", None, (jsonify({"error": str(exc)}), 400)
+        if project_comparison is None:
+            return "", "", None, (jsonify({"error": "project not found"}), 404)
+        left_id = str(project_comparison.get("left_run_id") or "")
+        right_id = str(project_comparison.get("right_run_id") or "")
+    if not left_id or not right_id:
+        return "", "", None, (jsonify({"error": "left and right run ids are required"}), 400)
+    if left_id == right_id:
+        return "", "", None, (jsonify({"error": "Choose two different runs to compare"}), 400)
+    return left_id, right_id, project_comparison, None
+
+
+def _compare_run_rows(session_id, left_id, right_id):
+    query_started = time.perf_counter()
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT runs.*, art.rel_path "
+            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+            "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
+            (session_id, left_id, right_id),
+        ).fetchall()
+    app_metrics.record_db_query("history_compare_run_rows", time.perf_counter() - query_started)
+    by_id = {str(row["id"]): dict(row) for row in rows}
+    return by_id.get(left_id), by_id.get(right_id)
+
+
+def _parse_compare_range_value(name):
+    raw = request.args.get(name)
+    if raw is None:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return int(raw)
     except ValueError:
         return None
-
-
-def _run_duration_seconds(run):
-    started = _parse_iso_datetime(run.get("started"))
-    finished = _parse_iso_datetime(run.get("finished"))
-    if not started or not finished:
-        return None
-    return max(0.0, (finished - started).total_seconds())
-
-
-def _compare_run_root(run):
-    return output_command_root(str(run.get("command") or ""))
-
-
-def _compare_run_target(run):
-    target = extract_target(str(run.get("command") or ""))
-    return target or ""
-
-
-def _compare_run_summary(run):
-    duration = _run_duration_seconds(run)
-    command = str(run.get("command") or "")
-    root = _compare_run_root(run)
-    target = _compare_run_target(run)
-    return {
-        "id": run.get("id"),
-        "command": command,
-        "command_root": root,
-        "target": target,
-        "started": run.get("started"),
-        "finished": run.get("finished"),
-        "exit_code": run.get("exit_code"),
-        "duration_seconds": duration,
-        "output_line_count": int(run.get("output_line_count") or 0),
-        "preview_truncated": bool(run.get("preview_truncated")),
-        "full_output_available": bool(run.get("full_output_available")),
-        "full_output_truncated": bool(run.get("full_output_truncated")),
-    }
-
-
-def _candidate_confidence(source, candidate):
-    source_command = _normalize_compare_command(source.get("command")).lower()
-    candidate_command = _normalize_compare_command(candidate.get("command")).lower()
-    if source_command and source_command == candidate_command:
-        return 3, "exact_command", "Exact command"
-    source_root = _compare_run_root(source)
-    candidate_root = _compare_run_root(candidate)
-    source_target = _compare_run_target(source)
-    candidate_target = _compare_run_target(candidate)
-    if source_root and source_root == candidate_root and source_target and source_target == candidate_target:
-        return 2, "same_target", "Same target"
-    if source_root and source_root == candidate_root:
-        return 1, "same_command", "Same command only"
-    return 0, "", ""
-
-
-def _run_candidate_payload(row, source):
-    run = dict(row)
-    score, confidence, label = _candidate_confidence(source, run)
-    payload = _compare_run_summary(run)
-    payload.update({
-        "confidence": confidence,
-        "confidence_label": label,
-        "score": score,
-    })
-    return payload
-
-
-def _compare_full_output_entries(run):
-    if run.get("full_output_available") and run.get("rel_path"):
-        return load_full_output_entries(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
-    return _preview_output_entries_from_run(run), "preview", bool(run.get("preview_truncated"))
-
-
-def _is_compare_chrome_line(entry, text):
-    cls = str(entry.get("cls", "")) if isinstance(entry, dict) else ""
-    stripped = str(text or "").strip()
-    if not stripped:
-        return True
-    if cls == "prompt-echo":
-        return True
-    if re.match(r"^\[(?:process exited with code|history\s+—\s+exit)\b", stripped, re.I):
-        return True
-    return False
-
-
-def _line_entry_text(entry):
-    if isinstance(entry, dict):
-        return str(entry.get("text", ""))
-    return str(entry or "")
-
-
-def _compare_entries_for_diff(run):
-    entries, source, partial = _compare_full_output_entries(run)
-    compared = []
-    byte_count = 0
-    truncated_by_limit = False
-    for entry in entries:
-        text = _line_entry_text(entry).rstrip("\n")
-        if _is_compare_chrome_line(entry, text):
-            continue
-        encoded_len = len(text.encode("utf-8", errors="replace"))
-        if len(compared) >= COMPARE_MAX_LINES or byte_count + encoded_len > COMPARE_MAX_BYTES:
-            truncated_by_limit = True
-            break
-        compared.append({
-            "text": text,
-            "line_index": entry.get("line_index") if isinstance(entry, dict) else None,
-            "signals": entry.get("signals", []) if isinstance(entry, dict) else [],
-        })
-        byte_count += encoded_len
-    return compared, {
-        "source": source,
-        "partial": partial or truncated_by_limit,
-        "truncated_by_limit": truncated_by_limit,
-        "compared_lines": len(compared),
-        "max_lines": COMPARE_MAX_LINES,
-        "max_bytes": COMPARE_MAX_BYTES,
-    }
-
-
-def _finding_count_for_entries(run, entries):
-    root = _compare_run_root(run)
-    command = str(run.get("command") or "")
-    count = 0
-    previous_text = ""
-    for entry in entries:
-        text = str(entry.get("text") or "")
-        signals = entry.get("signals")
-        if isinstance(signals, list):
-            scopes = [str(signal) for signal in signals]
-        else:
-            scopes = classify_line(text, command=command, root=root, previous_text=previous_text)
-        if "findings" in scopes:
-            count += 1
-        previous_text = text.strip()
-    return count
-
-
-def _bounded_multiset_line_diff(left_entries, right_entries):
-    left_counts = Counter(entry["text"] for entry in left_entries)
-    right_counts = Counter(entry["text"] for entry in right_entries)
-    added_remaining = right_counts - left_counts
-    removed_remaining = left_counts - right_counts
-
-    def _collect(source_entries, remaining):
-        rows = []
-        omitted = 0
-        seen = Counter()
-        for entry in source_entries:
-            text = entry["text"]
-            if remaining[text] <= seen[text]:
-                continue
-            seen[text] += 1
-            if len(rows) >= COMPARE_MAX_CHANGED_LINES:
-                omitted += 1
-                continue
-            rows.append({
-                "text": text,
-                "line_index": entry.get("line_index"),
-                "count": 1,
-            })
-        return rows, omitted
-
-    added, added_omitted = _collect(right_entries, added_remaining)
-    removed, removed_omitted = _collect(left_entries, removed_remaining)
-    changed, added, removed = _pair_similar_changed_lines(added, removed)
-    return {
-        "changed": changed,
-        "added": added,
-        "removed": removed,
-        "added_omitted": added_omitted,
-        "removed_omitted": removed_omitted,
-        "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
-    }
-
-
-def _changed_line_segments(left_text, right_text):
-    matcher = SequenceMatcher(None, left_text, right_text, autojunk=False)
-    left_segments = []
-    right_segments = []
-    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
-        left_chunk = left_text[left_start:left_end]
-        right_chunk = right_text[right_start:right_end]
-        changed = tag != "equal"
-        if left_chunk:
-            left_segments.append({"text": left_chunk, "changed": changed})
-        if right_chunk:
-            right_segments.append({"text": right_chunk, "changed": changed})
-    return left_segments, right_segments
-
-
-def _paired_line_similarity(added_text, removed_text):
-    if not added_text or not removed_text:
-        return 0
-    if added_text == removed_text:
-        return 1
-    return SequenceMatcher(None, added_text, removed_text, autojunk=False).ratio()
-
-
-def _changed_line_pair_prefilter(added_text, removed_text, added_index, removed_index):
-    if abs(added_index - removed_index) > COMPARE_CHANGED_LINE_INDEX_WINDOW:
-        return False
-    longest = max(len(added_text), len(removed_text))
-    shortest = min(len(added_text), len(removed_text))
-    if longest > COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH:
-        return False
-    if longest and shortest / longest < 0.5:
-        return False
-    if added_text == removed_text:
-        return True
-    return SequenceMatcher(None, added_text, removed_text, autojunk=False).quick_ratio() >= COMPARE_CHANGED_LINE_QUICK_RATIO
-
-
-def _pair_similar_changed_lines(added, removed):
-    if not added or not removed:
-        return [], added, removed
-
-    unmatched_added = set(range(len(added)))
-    unmatched_removed = set(range(len(removed)))
-    candidates = []
-    for removed_index, removed_line in enumerate(removed):
-        removed_text = str(removed_line.get("text") or "")
-        line_candidates = []
-        for added_index, added_line in enumerate(added):
-            added_text = str(added_line.get("text") or "")
-            if not _changed_line_pair_prefilter(added_text, removed_text, added_index, removed_index):
-                continue
-            similarity = _paired_line_similarity(added_text, removed_text)
-            if similarity < COMPARE_CHANGED_LINE_SIMILARITY:
-                continue
-            distance_penalty = abs(added_index - removed_index) * 0.001
-            line_candidates.append((similarity - distance_penalty, similarity, removed_index, added_index))
-        candidates.extend(sorted(line_candidates, reverse=True)[:COMPARE_CHANGED_LINE_CANDIDATES_PER_LINE])
-        if len(candidates) >= COMPARE_CHANGED_LINE_MAX_CANDIDATES:
-            candidates = candidates[:COMPARE_CHANGED_LINE_MAX_CANDIDATES]
-            break
-
-    changed = []
-    for _, similarity, removed_index, added_index in sorted(candidates, reverse=True):
-        if removed_index not in unmatched_removed or added_index not in unmatched_added:
-            continue
-        unmatched_removed.remove(removed_index)
-        unmatched_added.remove(added_index)
-        removed_line = removed[removed_index]
-        added_line = added[added_index]
-        removed_segments, added_segments = _changed_line_segments(
-            str(removed_line.get("text") or ""),
-            str(added_line.get("text") or ""),
-        )
-        changed.append({
-            "removed": {
-                **removed_line,
-                "segments": removed_segments,
-            },
-            "added": {
-                **added_line,
-                "segments": added_segments,
-            },
-            "similarity": round(similarity, 3),
-        })
-
-    changed.sort(key=lambda item: (
-        item["removed"].get("line_index") is None,
-        item["removed"].get("line_index") if item["removed"].get("line_index") is not None else 0,
-    ))
-    return (
-        changed,
-        [line for index, line in enumerate(added) if index in unmatched_added],
-        [line for index, line in enumerate(removed) if index in unmatched_removed],
-    )
-
-
-def _compare_deltas(left_run, right_run, left_finding_count, right_finding_count):
-    left_duration = _run_duration_seconds(left_run)
-    right_duration = _run_duration_seconds(right_run)
-    left_lines = int(left_run.get("output_line_count") or 0)
-    right_lines = int(right_run.get("output_line_count") or 0)
-    return {
-        "exit_code_changed": left_run.get("exit_code") != right_run.get("exit_code"),
-        "exit_code": {"left": left_run.get("exit_code"), "right": right_run.get("exit_code")},
-        "duration_seconds": {
-            "left": left_duration,
-            "right": right_duration,
-            "delta": None if left_duration is None or right_duration is None else right_duration - left_duration,
-        },
-        "output_lines": {
-            "left": left_lines,
-            "right": right_lines,
-            "delta": right_lines - left_lines,
-        },
-        "findings": {
-            "left": left_finding_count,
-            "right": right_finding_count,
-            "delta": right_finding_count - left_finding_count,
-        },
-    }
 
 
 # Routes
@@ -885,11 +900,15 @@ def get_history():
     """Return the most recent completed runs for this session."""
     # History is isolated per anonymous browser session, not shared globally.
     session_id = get_session_id()
-    query = _normalize_history_filter_text(request.args.get("q"))
+    query, structured_filters = structured_filters_from_params(
+        request.args,
+        query=_normalize_history_filter_text(request.args.get("q")),
+    )
     command_root = _normalize_history_filter_text(request.args.get("command_root")).lower()
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
     type_filter = _normalize_history_filter_text(request.args.get("type")).lower() or "all"
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
     starred_only = _parse_history_bool(request.args.get("starred_only"))
     include_total = _parse_history_bool(request.args.get("include_total"))
     page = _parse_history_int(request.args.get("page"), 1)
@@ -898,16 +917,35 @@ def get_history():
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
-    if type_filter not in {"all", "runs", "snapshots"}:
+    if type_filter not in {"all", "runs", "runs_builtin", "runs_external", "snapshots"}:
         type_filter = "all"
+    run_kind = {
+        "runs_builtin": "builtin",
+        "runs_external": "external",
+    }.get(type_filter, "all")
 
     def _query_history(conn, *, force_like=False):
         roots_rows = []
         fts_q = None
         run_sql = ""
         run_params: list[Any] = []
+        has_run_kind_column = _history_column_exists(conn, "runs", "run_kind")
         snapshots_available = _history_table_exists(conn, "snapshots")
-        if type_filter in {"all", "runs"}:
+        if type_filter in {"all", "runs", "runs_builtin", "runs_external"}:
+            offloaded_match_run_ids = []
+            if query and scope != "command":
+                offloaded_match_run_ids = _history_offloaded_search_run_ids(
+                    conn,
+                    session_id,
+                    query,
+                    command_root,
+                    exit_code_filter,
+                    date_range,
+                    project_id,
+                    starred_only=starred_only,
+                    run_kind=run_kind,
+                    has_run_kind_column=has_run_kind_column,
+                )
             run_sql, run_params, fts_q = _history_base_clause(
                 session_id,
                 query,
@@ -915,22 +953,39 @@ def get_history():
                 exit_code_filter,
                 date_range,
                 scope,
+                project_id,
                 starred_only=starred_only,
+                run_kind=run_kind,
+                has_run_kind_column=has_run_kind_column,
                 force_like=force_like,
+                offloaded_match_run_ids=offloaded_match_run_ids,
             )
-            roots_rows = conn.execute(
-                "SELECT "
-                "CASE "
-                "WHEN instr(trim(r.command), ' ') > 0 THEN substr(trim(r.command), 1, instr(trim(r.command), ' ') - 1) "
-                "ELSE trim(r.command) "
-                "END AS root, "
-                "MAX(r.started) AS latest_started"
+            if structured_filters.active:
+                entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
+                if entity_sql:
+                    run_sql += entity_sql
+                    run_params = [*run_params, *entity_params]
+                summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+                if summary_sql and _history_table_exists(conn, "run_output_summary"):
+                    run_sql += summary_sql
+                    run_params = [*run_params, *summary_params]
+                structured_ids = _history_structured_filter_run_ids(conn, run_sql, run_params, structured_filters)
+                if structured_ids is not None:
+                    if structured_ids:
+                        placeholders = ", ".join("?" for _ in structured_ids)
+                        run_sql += f" AND r.id IN ({placeholders})"
+                        run_params = [*run_params, *structured_ids]
+                    else:
+                        run_sql += " AND 1 = 0"
+            root_command_rows = conn.execute(
+                "SELECT r.command, MAX(r.started) AS latest_started"
                 + run_sql
-                + " GROUP BY root "
+                + " GROUP BY r.command "
                 + " ORDER BY latest_started DESC "
-                + " LIMIT 50",
+                + " LIMIT 1000",
                 run_params,
             ).fetchall()
+            roots_rows = _history_root_rows_from_command_rows(root_command_rows)
 
         snap_sql = ""
         snap_params: list[Any] = []
@@ -939,13 +994,14 @@ def get_history():
             or exit_code_filter not in {"", "all"}
             or starred_only
             or scope == "command"
+            or structured_filters.active
         )
         if (
             snapshots_available
             and type_filter in {"all", "snapshots"}
             and not snapshot_filters_active
         ):
-            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range)
+            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range, project_id)
 
         total_count = None
         if include_total:
@@ -961,13 +1017,16 @@ def get_history():
         offset = (current_page - 1) * page_size
 
         run_select = (
-            "SELECT 'run' AS type, r.id, r.command, r.started, r.finished, r.exit_code, "
+            "SELECT 'run' AS type, r.id, "
+            + ("r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command", DB_BACKEND))
+            + " AS run_kind, r.command, r.started, r.finished, r.exit_code, "
             "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated, "
             "r.command AS label, r.started AS created, r.started AS sort_created"
             + run_sql
         ) if run_sql else ""
         snap_select = (
-            "SELECT 'snapshot' AS type, s.id, NULL AS command, NULL AS started, NULL AS finished, NULL AS exit_code, "
+            "SELECT 'snapshot' AS type, s.id, NULL AS run_kind, NULL AS command, NULL AS started, "
+            "NULL AS finished, NULL AS exit_code, "
             "NULL AS preview_truncated, NULL AS output_line_count, NULL AS full_output_available, "
             "NULL AS full_output_truncated, s.label AS label, s.created AS created, s.created AS sort_created"
             + snap_sql
@@ -995,20 +1054,64 @@ def get_history():
                 item["full_output_truncated"] = bool(item.get("full_output_truncated"))
             paged_items.append(item)
         paged_runs = [item for item in paged_items if item.get("type") == "run"]
+        paged_snapshots = [item for item in paged_items if item.get("type") == "snapshot"]
+        artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
+        project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        atlas_counts = _run_atlas_counts_by_run(conn, session_id, [item["id"] for item in paged_runs])
+        scheduled_by_run = schedule_ids_by_run(conn, [item["id"] for item in paged_runs])
+        labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
+        notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
+        labels_by_snapshot = _entity_labels_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
+        notes_by_snapshot = _entity_notes_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
+        for item in paged_runs:
+            item["artifacts"] = artifacts_by_run.get(str(item["id"]), [])
+            item["artifact_count"] = len(item["artifacts"])
+            item["project_links"] = project_links_by_run.get(str(item["id"]), [])
+            item["project_link_count"] = len(item["project_links"])
+            item["labels"] = labels_by_run.get(str(item["id"]), [])
+            item["note"] = (notes_by_run.get(str(item["id"]), []) or [None])[0]
+            item.update(metadata_counts_by_run.get(str(item["id"]), {
+                "finding_count": 0,
+                "label_count": 0,
+                "note_count": 0,
+            }))
+            item.update(atlas_counts.get(str(item["id"]), {
+                "atlas_entity_count": 0,
+                "atlas_finding_count": 0,
+            }))
+            schedule_id = scheduled_by_run.get(str(item["id"]), "")
+            item["schedule_id"] = schedule_id
+            item["scheduled"] = bool(schedule_id)
+        for item in paged_snapshots:
+            item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
+            item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
+            item["label_count"] = len(item["labels"])
+            item["note_count"] = 1 if item["note"] else 0
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
     with db_connect() as conn:
         try:
+            query_started = time.perf_counter()
             items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(conn)
-        except sqlite3.OperationalError as exc:
+            app_metrics.record_db_query(
+                "history_list_fts" if fts_q else "history_list",
+                time.perf_counter() - query_started,
+            )
+        except SQLiteOperationalError as exc:
             if query and _build_fts_query(query):
+                app_metrics.record_history_search_fallback(
+                    "missing_fts" if "runs_fts" in str(exc).lower() else "fts_error"
+                )
                 log.warning("FTS_SEARCH_FALLBACK", extra={
                     "session": get_log_session_id(session_id), "q": query, "error": str(exc),
                 })
+                query_started = time.perf_counter()
                 items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(
                     conn,
                     force_like=True,
                 )
+                app_metrics.record_db_query("history_list_like_fallback", time.perf_counter() - query_started)
             else:
                 raise
     for item in items:
@@ -1024,6 +1127,7 @@ def get_history():
         "exit_code_filter": exit_code_filter or None,
         "date_range": date_range or None,
         "type_filter": type_filter,
+        "project_id": project_id or None,
         "starred_only": starred_only or None,
         "page": current_page,
         "page_size": page_size,
@@ -1150,13 +1254,13 @@ def get_run_compare_candidates(run_id):
 
     candidates = []
     for row in rows:
-        payload = _run_candidate_payload(row, source)
+        payload = run_comparison.run_candidate_payload(row, source)
         if payload["score"] > 0:
             candidates.append(payload)
     candidates.sort(key=lambda item: (int(item["score"]), str(item.get("started") or "")), reverse=True)
     candidates = candidates[:limit]
     return jsonify({
-        "source": _compare_run_summary(source),
+        "source": run_comparison.compare_run_summary(source),
         "candidates": candidates,
         "suggested": candidates[0] if candidates else None,
     })
@@ -1166,58 +1270,279 @@ def get_run_compare_candidates(run_id):
 def compare_history_runs():
     """Compare two completed runs from the current session."""
     session_id = get_session_id()
-    left_id = _normalize_history_filter_text(request.args.get("left"))
-    right_id = _normalize_history_filter_text(request.args.get("right"))
-    if not left_id or not right_id:
-        return jsonify({"error": "left and right run ids are required"}), 400
-    if left_id == right_id:
-        return jsonify({"error": "Choose two different runs to compare"}), 400
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
+    baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
+    left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
+    right_id = _normalize_history_filter_text(request.args.get("right") or request.args.get("right_run_id"))
+    left_id, right_id, project_comparison, error = _resolve_compare_request(
+        session_id,
+        left_id,
+        right_id,
+        project_id,
+        baseline_label,
+    )
+    if error:
+        return error
 
-    with db_connect() as conn:
-        rows = conn.execute(
-            "SELECT runs.*, art.rel_path "
-            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
-            (session_id, left_id, right_id),
-        ).fetchall()
-    by_id = {str(row["id"]): dict(row) for row in rows}
-    left_run = by_id.get(left_id)
-    right_run = by_id.get(right_id)
+    left_run, right_run = _compare_run_rows(session_id, left_id, right_id)
     if not left_run or not right_run:
         return jsonify({"error": "Run not found"}), 404
 
-    left_entries, left_output = _compare_entries_for_diff(left_run)
-    right_entries, right_output = _compare_entries_for_diff(right_run)
-    left_finding_count = _finding_count_for_entries(left_run, left_entries)
-    right_finding_count = _finding_count_for_entries(right_run, right_entries)
-    diff = _bounded_multiset_line_diff(left_entries, right_entries)
+    left_entries, left_output = run_comparison.compare_entries_for_diff(left_run)
+    right_entries, right_output = run_comparison.compare_entries_for_diff(right_run)
+    left_finding_count = run_comparison.finding_count_for_entries(left_run, left_entries)
+    right_finding_count = run_comparison.finding_count_for_entries(right_run, right_entries)
+    diff = run_comparison.hunk_line_diff(
+        left_entries,
+        right_entries,
+        max_changed_lines=run_comparison.COMPARE_MAX_CHANGED_LINES,
+        max_hunks=run_comparison.COMPARE_MAX_HUNKS,
+        inline_context=run_comparison.COMPARE_INLINE_EQUAL_CONTEXT,
+    )
+    project_truncated = project_comparison.get("truncated", {}) if project_comparison else {}
+    if project_comparison:
+        finding_objects = project_comparison.get("objects", {}).get("findings", {})
+        artifact_objects = project_comparison.get("objects", {}).get("artifacts", {})
+        left_persisted_finding_count = int(project_comparison.get("left", {}).get("persisted_finding_count") or 0)
+        right_persisted_finding_count = int(project_comparison.get("right", {}).get("persisted_finding_count") or 0)
+        left_artifact_count = int(project_comparison.get("left", {}).get("artifact_count") or 0)
+        right_artifact_count = int(project_comparison.get("right", {}).get("artifact_count") or 0)
+    else:
+        query_started = time.perf_counter()
+        with db_connect() as conn:
+            left_findings, left_persisted_finding_count, left_findings_truncated = (
+                run_comparison.run_finding_compare_items(
+                    conn,
+                    session_id,
+                    left_id,
+                    include_line_number=True,
+                    include_created=True,
+                )
+            )
+            right_findings, right_persisted_finding_count, right_findings_truncated = (
+                run_comparison.run_finding_compare_items(
+                    conn,
+                    session_id,
+                    right_id,
+                    include_line_number=True,
+                    include_created=True,
+                )
+            )
+            left_artifacts, left_artifact_count, left_artifacts_truncated = (
+                run_comparison.run_artifact_compare_items(
+                    conn,
+                    session_id,
+                    left_id,
+                    include_display_name=True,
+                    include_created=True,
+                )
+            )
+            right_artifacts, right_artifact_count, right_artifacts_truncated = (
+                run_comparison.run_artifact_compare_items(
+                    conn,
+                    session_id,
+                    right_id,
+                    include_display_name=True,
+                    include_created=True,
+                )
+            )
+        app_metrics.record_db_query("history_compare_objects", time.perf_counter() - query_started)
+        finding_objects = run_comparison.compare_items(left_findings, right_findings)
+        artifact_objects = run_comparison.compare_items(left_artifacts, right_artifacts)
+        if any((
+            left_findings_truncated,
+            right_findings_truncated,
+            left_artifacts_truncated,
+            right_artifacts_truncated,
+        )):
+            project_truncated = {
+                "left": bool(left_findings_truncated or left_artifacts_truncated),
+                "right": bool(right_findings_truncated or right_artifacts_truncated),
+                "findings": {
+                    "left": bool(left_findings_truncated),
+                    "right": bool(right_findings_truncated),
+                },
+                "artifacts": {
+                    "left": bool(left_artifacts_truncated),
+                    "right": bool(right_artifacts_truncated),
+                },
+                "item_limit": run_comparison.compare_item_limit(),
+            }
+    finding_objects = run_comparison.add_compare_line_indexes(finding_objects, left_entries, right_entries)
+    density_buckets = run_comparison.density_buckets_for_hunks(diff["hunks"])
 
-    return jsonify({
+    truncated = {
+        "left": bool(left_output["partial"] or project_truncated.get("left")),
+        "right": bool(right_output["partial"] or project_truncated.get("right")),
+        "changed_lines": bool(
+            diff["truncated"]["hunks_omitted"]
+            or diff["truncated"]["lines_omitted"]["total"]
+        ),
+        "hunks_omitted": diff["truncated"]["hunks_omitted"],
+        "lines_omitted": diff["truncated"]["lines_omitted"],
+    }
+    for key in ("findings", "artifacts", "item_limit"):
+        if key in project_truncated:
+            truncated[key] = project_truncated[key]
+    payload = {
+        "left_run_id": left_id,
+        "right_run_id": right_id,
         "left": {
-            **_compare_run_summary(left_run),
+            **run_comparison.compare_run_summary(left_run),
             "finding_count": left_finding_count,
+            "persisted_finding_count": left_persisted_finding_count,
+            "artifact_count": left_artifact_count,
             "output_source": left_output,
         },
         "right": {
-            **_compare_run_summary(right_run),
+            **run_comparison.compare_run_summary(right_run),
             "finding_count": right_finding_count,
+            "persisted_finding_count": right_persisted_finding_count,
+            "artifact_count": right_artifact_count,
             "output_source": right_output,
         },
-        "deltas": _compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
-        "sections": {
-            "changed": diff["changed"],
-            "added": diff["added"],
-            "removed": diff["removed"],
-            "added_omitted": diff["added_omitted"],
-            "removed_omitted": diff["removed_omitted"],
-            "max_changed_lines": diff["max_changed_lines"],
+        "deltas": run_comparison.compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
+        "objects": {
+            "findings": finding_objects,
+            "artifacts": artifact_objects,
+            "entities": run_comparison.compare_entity_sets(left_entries, right_entries),
         },
-        "truncated": {
-            "left": bool(left_output["partial"]),
-            "right": bool(right_output["partial"]),
-            "changed_lines": bool(diff["added_omitted"] or diff["removed_omitted"]),
+        "hunks": diff["hunks"],
+        "density_buckets": density_buckets,
+        "totals": diff["totals"],
+        "truncated": truncated,
+        "limits": {
+            "max_changed_lines": run_comparison.COMPARE_MAX_CHANGED_LINES,
+            "max_hunks": run_comparison.COMPARE_MAX_HUNKS,
+            "inline_equal_context": run_comparison.COMPARE_INLINE_EQUAL_CONTEXT,
+            "line_display_truncate": run_comparison.COMPARE_LINE_DISPLAY_TRUNCATE,
+            "lazy_equal_page_limit": run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT,
+            "lazy_equal_byte_limit": run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+            "minimap_buckets": run_comparison.COMPARE_MINIMAP_BUCKETS,
         },
+    }
+    if project_comparison:
+        payload["project_id"] = project_id
+        payload["baseline_label"] = project_comparison.get("baseline_label", baseline_label)
+    return jsonify(payload)
+
+
+@history_bp.route("/history/compare/lines")
+def compare_history_lines():
+    """Return a bounded filtered-output slice for lazy compare hunk expansion."""
+    session_id = get_session_id()
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
+    baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
+    left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
+    right_id = _normalize_history_filter_text(request.args.get("right") or request.args.get("right_run_id"))
+    side = _normalize_history_filter_text(request.args.get("side")).lower()
+    start = _parse_compare_range_value("start")
+    end = _parse_compare_range_value("end")
+    if side not in {"a", "b"}:
+        return jsonify({"error": "side must be a or b"}), 400
+    if start is None or end is None or start < 0 or end < start:
+        return jsonify({"error": "start and end must define a valid range"}), 400
+
+    left_id, right_id, _, error = _resolve_compare_request(
+        session_id,
+        left_id,
+        right_id,
+        project_id,
+        baseline_label,
+    )
+    if error:
+        return error
+    left_run, right_run = _compare_run_rows(session_id, left_id, right_id)
+    if not left_run or not right_run:
+        return jsonify({"error": "Run not found"}), 404
+    selected_run = left_run if side == "a" else right_run
+    entries, _ = run_comparison.compare_entries_for_diff(selected_run)
+    available_end = len(entries)
+    range_clamped = end > available_end
+    if start > available_end:
+        start = available_end
+    if range_clamped:
+        end = available_end
+
+    lines = []
+    byte_count = 0
+    cursor = start
+    while cursor < end and len(lines) < run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT:
+        entry = entries[cursor]
+        payload = run_comparison.compare_line_payload(entry)
+        encoded_len = len(payload["text"].encode("utf-8", errors="replace"))
+        next_byte_count = byte_count + encoded_len
+        would_exceed_byte_limit = next_byte_count > run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT
+        if lines and would_exceed_byte_limit:
+            break
+        lines.append(payload)
+        byte_count = next_byte_count
+        cursor += 1
+        # Always return at least one line, even when that single line exceeds the
+        # byte cap, then stop before appending more.
+        if byte_count >= run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT:
+            break
+
+    return jsonify({
+        "lines": lines,
+        "start": start,
+        "end": cursor,
+        "truncated": bool(cursor < end or range_clamped),
+        "range_clamped": range_clamped,
+        "page_limit": run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT,
+        "byte_limit": run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+        **({"note": "requested range exceeded available compared output"} if range_clamped else {}),
     })
+
+
+@history_bp.route("/runs/<run_id>/ai-assists")
+def history_run_ai_assists(run_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    try:
+        assists = list_run_assists(session_id, run_id)
+    except AIAssistRouteError as exc:
+        return _ai_route_error(exc)
+    return jsonify({"assists": assists})
+
+
+@history_bp.route("/runs/<run_id>/ai-summary", methods=["POST"])
+def history_run_ai_summary(run_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    data = request.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object"}), 400
+    try:
+        assist, status_code = enqueue_summary_assist(
+            session_id,
+            run_id,
+            force=_parse_history_bool((data or {}).get("force")),
+        )
+    except AIAssistRouteError as exc:
+        return _ai_route_error(exc)
+    return jsonify({"assist": assist}), status_code
+
+
+@history_bp.route("/runs/<run_id>/ai-next-commands", methods=["POST"])
+def history_run_ai_next_commands(run_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    data = request.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object"}), 400
+    try:
+        assist, status_code = enqueue_next_commands_assist(
+            session_id,
+            run_id,
+            force=_parse_history_bool((data or {}).get("force")),
+        )
+    except AIAssistRouteError as exc:
+        return _ai_route_error(exc)
+    return jsonify({"assist": assist}), status_code
 
 
 @history_bp.route("/history/<run_id>")
@@ -1243,24 +1568,60 @@ def get_run(run_id):
     run["full_output_available"] = bool(run.get("full_output_available"))
     run["full_output_truncated"] = bool(run.get("full_output_truncated"))
     preview_requested = request.args.get("preview") == "1"
-    is_full_view = (not preview_requested) and run["full_output_available"] and bool(run.get("rel_path"))
+    output_result = load_run_output_entries_for_run(
+        run,
+        prefer_full=not preview_requested,
+        log_event="HISTORY_FULL_OUTPUT_LOAD_FAILED",
+    )
+    is_full_view = output_result.source == "full"
+    run["full_output_fallback"] = output_result.fallback
+    run["output_entries"] = output_result.entries
+    run["output"] = [entry["text"] for entry in run["output_entries"]]
+    run["output_summary"] = _run_output_structured_summary(output_result.events)
     if is_full_view:
-        run["output_entries"] = load_full_output_entries(run["rel_path"])
-        run["output"] = [entry["text"] for entry in run["output_entries"]]
         if run["full_output_truncated"]:
             truncated_mb = CFG.get("full_output_max_mb", 0)
             run["output"].append(
                 f"[full output truncated after {truncated_mb} MB]"
             )
-            run["output_entries"].append({
-                "text": f"[full output truncated after {truncated_mb} MB]",
-                "cls": "notice",
-                "tsC": "",
-                "tsE": "",
-            })
-    else:
-        run["output_entries"] = _preview_output_entries_from_run(run)
-        run["output"] = _preview_output_from_run(run)
+            run["output_entries"].append(to_legacy_entry(line_event_from_legacy(
+                f"[full output truncated after {truncated_mb} MB]",
+                kind=LineKind.notice,
+            )))
+    with db_connect() as conn:
+        artifacts_by_run = _run_file_artifacts_by_run(conn, [run_id])
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id])
+        include_private_metadata = str(run.get("session_id") or "") == str(session_id or "")
+        atlas_counts = _run_atlas_counts_by_run(conn, session_id, [run_id]) if include_private_metadata else {}
+        findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
+        labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
+        notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
+        scheduled_by_run = schedule_ids_by_run(conn, [run_id]) if include_private_metadata else {}
+    if not include_private_metadata:
+        run["output_entries"] = line_entries_from_events(omit_raw_only_line_entries(run["output_entries"]))
+        run["output"] = [
+            str(entry.get("text", "")) if isinstance(entry, dict) else str(entry)
+            for entry in run["output_entries"]
+        ]
+        run["output_preview"] = json.dumps(run["output_entries"])
+        run["output_search_text"] = "\n".join(run["output"])
+    run["artifacts"] = artifacts_by_run.get(str(run_id), [])
+    run["artifact_count"] = len(run["artifacts"])
+    run["findings"] = findings_by_run.get(str(run_id), [])
+    run["labels"] = labels_by_run.get(str(run_id), [])
+    run["note"] = (notes_by_run.get(str(run_id), []) or [None])[0]
+    run.update(metadata_counts_by_run.get(str(run_id), {
+        "finding_count": 0,
+        "label_count": 0,
+        "note_count": 0,
+    }))
+    run.update(atlas_counts.get(str(run_id), {
+        "atlas_entity_count": 0,
+        "atlas_finding_count": 0,
+    }))
+    schedule_id = scheduled_by_run.get(str(run_id), "")
+    run["schedule_id"] = schedule_id
+    run["scheduled"] = bool(schedule_id)
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,
@@ -1275,7 +1636,7 @@ def get_run(run_id):
     content_lines = list(run["output_entries"])
     preview_notice = run["preview_notice"]
     if preview_notice:
-        content_lines.append({"text": preview_notice, "cls": "notice", "tsC": "", "tsE": ""})
+        content_lines.append(to_legacy_entry(line_event_from_legacy(preview_notice, kind=LineKind.notice)))
 
     line_count = len(content_lines)
     if is_full_view:
@@ -1292,6 +1653,12 @@ def get_run(run_id):
         "exit_code": run.get("exit_code"),
         "duration": _format_duration(run["started"], run["finished"]) if run.get("finished") else None,
         "lines": lines_label,
+        "artifact_count": run["artifact_count"],
+        "finding_count": run["finding_count"],
+        "atlas_entity_count": run["atlas_entity_count"],
+        "atlas_finding_count": run["atlas_finding_count"],
+        "label_count": run["label_count"],
+        "note_count": run["note_count"],
         "version": APP_VERSION,
     }
 
@@ -1309,13 +1676,23 @@ def get_run(run_id):
 def delete_run(run_id):
     """Delete a specific run from history for this session."""
     session_id = get_session_id()
+    prune_atlas = str(request.args.get("prune_atlas") or "").strip().lower() in {"1", "true", "yes"}
+    prune_curated_atlas = str(request.args.get("prune_curated_atlas") or "").strip().lower() in {"1", "true", "yes"}
+    atlas_cleanup = {"entities": 0, "findings": 0}
     with db_connect() as conn:
         owned = conn.execute(
             "SELECT id FROM runs WHERE id = ? AND session_id = ?",
             (run_id, session_id),
         ).fetchone()
         if owned:
+            cleanup_preview = (
+                atlas_run_cleanup_preview(conn, session_id, [run_id], include_curated=prune_curated_atlas)
+                if prune_atlas
+                else None
+            )
             delete_run_artifacts(conn, [run_id])
+            if cleanup_preview:
+                atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
         cur = conn.execute(
             "DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id)
         )
@@ -1328,7 +1705,134 @@ def delete_run(run_id):
         log.debug("HISTORY_DELETE_MISS", extra={
             "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
         })
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "atlas_cleanup": atlas_cleanup})
+
+
+@history_bp.route("/history/<run_id>/atlas-cleanup-preview")
+def history_run_atlas_cleanup_preview(run_id):
+    """Preview non-curated Atlas rows that can be removed with a run."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        owned = conn.execute(
+            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
+            (run_id, session_id),
+        ).fetchone()
+        if not owned:
+            return jsonify({"error": "run not found"}), 404
+        preview = atlas_run_cleanup_preview(conn, session_id, [run_id])
+    return jsonify({"ok": True, "cleanup": public_cleanup_preview(preview)})
+
+
+def _normalize_bulk_ids_payload(data, key):
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+    raw_ids = data.get(key)
+    if not isinstance(raw_ids, list):
+        return None, (jsonify({"error": f"{key} must be a list"}), 400)
+    if len(raw_ids) > MAX_BULK_RUN_ACTION_ITEMS:
+        return None, (jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400)
+    ids = []
+    seen = set()
+    for raw_id in raw_ids:
+        if not isinstance(raw_id, str):
+            return None, (jsonify({"error": f"{key} entries must be strings"}), 400)
+        item_id = raw_id.strip()
+        if len(item_id) > MAX_ENTITY_ID_LEN:
+            return None, (jsonify({"error": f"{key} entries are too long", "limit": MAX_ENTITY_ID_LEN}), 400)
+        if not item_id or item_id in seen:
+            continue
+        seen.add(item_id)
+        ids.append(item_id)
+    if not ids:
+        return None, (jsonify({"error": f"{key} is required"}), 400)
+    return ids, None
+
+
+def _normalize_bulk_run_ids_payload(data):
+    return _normalize_bulk_ids_payload(data, "run_ids")
+
+
+def _normalize_bulk_snapshot_ids_payload(data):
+    return _normalize_bulk_ids_payload(data, "snapshot_ids")
+
+
+def _bulk_delete_result(counts, item_id, status, *, key="run_id", reason=None):
+    counts[status] = counts.get(status, 0) + 1
+    item = {key: item_id, "status": status}
+    if reason:
+        item["reason"] = reason
+    return item
+
+
+def _bulk_delete_failures(results, *, key="run_id"):
+    failures = []
+    for item in results:
+        if item.get("status") not in {"not_found", "rejected"}:
+            continue
+        failure = {
+            key: item.get(key) or "",
+            "status": item.get("status") or "",
+        }
+        if item.get("reason"):
+            failure["reason"] = item.get("reason")
+        failures.append(failure)
+        if len(failures) >= BULK_AUDIT_FAILURE_LIMIT:
+            break
+    return failures
+
+
+@history_bp.route("/history/bulk-delete", methods=["POST"])
+def bulk_delete_history():
+    """Delete selected completed runs for this session."""
+    session_id = get_session_id()
+    run_ids, error_response = _normalize_bulk_run_ids_payload(request.get_json(silent=True) or {})
+    if error_response is not None:
+        return error_response
+    active_ids = {
+        str(item.get("run_id") or "")
+        for item in active_runs_for_session(session_id)
+        if item.get("run_id")
+    }
+    counts = {"deleted": 0, "not_found": 0, "rejected": 0}
+    results = []
+    deletable_ids = []
+    assert run_ids is not None
+    with db_connect() as conn:
+        placeholders = ",".join("?" for _ in run_ids)
+        rows = conn.execute(
+            f"SELECT id, finished, exit_code FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec
+            [session_id, *run_ids],
+        ).fetchall()
+        owned_by_id = {str(row["id"]): row for row in rows}
+        for run_id in run_ids:
+            if run_id in active_ids:
+                results.append(_bulk_delete_result(counts, run_id, "rejected", reason="running"))
+                continue
+            row = owned_by_id.get(run_id)
+            if row is None:
+                results.append(_bulk_delete_result(counts, run_id, "not_found"))
+                continue
+            if row["finished"] is None and row["exit_code"] is None:
+                results.append(_bulk_delete_result(counts, run_id, "rejected", reason="incomplete"))
+                continue
+            deletable_ids.append(run_id)
+            results.append(_bulk_delete_result(counts, run_id, "deleted"))
+        if deletable_ids:
+            delete_run_artifacts(conn, deletable_ids)
+            delete_placeholders = ",".join("?" for _ in deletable_ids)
+            conn.execute(
+                f"DELETE FROM runs WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
+                [session_id, *deletable_ids],
+            )
+        conn.commit()
+    log.info("HISTORY_BULK_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": counts["deleted"],
+        "counts": counts,
+        "failures": _bulk_delete_failures(results),
+    })
+    return jsonify({"ok": True, "counts": counts, "results": results})
 
 
 @history_bp.route("/history", methods=["DELETE"])
@@ -1379,21 +1883,76 @@ def save_share():
         if "cls" in item and not isinstance(item["cls"], str):
             return jsonify({"error": "Content objects must use string cls values"}), 400
     label = label.strip()
+    content_events = omit_raw_only_line_entries(content)
     if CFG.get("share_redaction_enabled") and apply_redaction:
-        content = redact_line_entries(content, _config.get_share_redaction_rules(CFG))
+        content_events = redact_line_entries(content_events, _config.get_share_redaction_rules(CFG))
+    content = line_entries_from_events(content_events, compact=True, preserve_plain_strings=True)
     share_id = str(uuid.uuid4())
     created  = datetime.now(timezone.utc).isoformat()
+    content_json = json.dumps(content)
+    stored_content = maybe_store_text_body(
+        "snapshot",
+        share_id,
+        content_json,
+        inline_threshold_bytes(CFG.get("snapshots_inline_max_bytes")),
+    )
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
-            (share_id, session_id, label, created, json.dumps(content))
+            (share_id, session_id, label, created, stored_content)
         )
         conn.commit()
     log.info("SHARE_CREATED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
         "label": label, "redacted": apply_redaction,
+        "run_id": str(data.get("run_id") or ""),
+        "included_artifacts": len(data.get("artifacts") or []) if isinstance(data.get("artifacts"), list) else 0,
+        "redaction_mode": "configured" if apply_redaction else "none",
     })
+    app_metrics.record_snapshot_created("manual")
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
+
+
+@history_bp.route("/share/bulk-delete", methods=["POST"])
+def bulk_delete_shares():
+    """Delete selected snapshots for this session."""
+    session_id = get_session_id()
+    snapshot_ids, error_response = _normalize_bulk_snapshot_ids_payload(request.get_json(silent=True) or {})
+    if error_response is not None:
+        return error_response
+    counts = {"deleted": 0, "not_found": 0, "rejected": 0}
+    results = []
+    deletable_ids = []
+    assert snapshot_ids is not None
+    with db_connect() as conn:
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        rows = conn.execute(
+            f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
+            [session_id, *snapshot_ids],
+        ).fetchall()
+        owned_ids = {str(row["id"]) for row in rows}
+        for snapshot_id in snapshot_ids:
+            if snapshot_id not in owned_ids:
+                results.append(_bulk_delete_result(counts, snapshot_id, "not_found", key="snapshot_id"))
+                continue
+            deletable_ids.append(snapshot_id)
+            results.append(_bulk_delete_result(counts, snapshot_id, "deleted", key="snapshot_id"))
+        if deletable_ids:
+            delete_snapshot_metadata(conn, deletable_ids)
+            delete_placeholders = ",".join("?" for _ in deletable_ids)
+            conn.execute(
+                f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
+                [session_id, *deletable_ids],
+            )
+        conn.commit()
+    log.info("SHARES_BULK_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": counts["deleted"],
+        "counts": counts,
+        "failures": _bulk_delete_failures(results, key="snapshot_id"),
+    })
+    return jsonify({"ok": True, "counts": counts, "results": results})
 
 
 @history_bp.route("/share/<share_id>")
@@ -1405,11 +1964,15 @@ def get_share(share_id):
         log.warning("SHARE_NOT_FOUND", extra={"ip": get_client_ip(), "share_id": share_id})
         return _permalink_error_page("snapshot")
     snap = dict(row)
-    content_lines = json.loads(snap["content"]) if snap["content"] else []
+    try:
+        content_lines = json.loads(load_text_body(snap["content"]) or "[]")
+    except (TypeError, json.JSONDecodeError, ValueError):
+        content_lines = []
     log.info("SHARE_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(), "share_id": share_id,
         "label": snap["label"],
     })
+    app_metrics.record_snapshot_view(bool(snap.get("redacted", False)))
 
     if "json" in request.args:
         snap["content"] = content_lines
@@ -1437,6 +2000,11 @@ def delete_share(share_id):
     """Delete a snapshot owned by the current session."""
     session_id = get_session_id()
     with db_connect() as conn:
+        snapshot_rows = conn.execute(
+            "SELECT id FROM snapshots WHERE id = ? AND session_id = ?",
+            (share_id, session_id),
+        ).fetchall()
+        delete_snapshot_metadata(conn, [row["id"] for row in snapshot_rows])
         cur = conn.execute(
             "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),

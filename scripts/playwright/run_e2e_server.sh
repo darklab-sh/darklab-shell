@@ -33,12 +33,16 @@ workspace_enabled: true
 workspace_backend: tmpfs
 workspace_root: "$WORKSPACE_DIR"
 workspace_inactivity_ttl_hours: 1
+rate_limit_per_minute: 10000
+rate_limit_per_second: 25
+evidence_package_download_rate_limit_per_minute: 10000
+evidence_package_download_rate_limit_per_second: 100
 run_broker_require_redis: false
 EOF
 
 cd "$APP_DIR"
 if [[ "$SLOT" == capture-* ]]; then
-  APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" -c "import database" >/dev/null
+  APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" -c "import app" >/dev/null
   APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" "$REPO_ROOT/scripts/seed_history.py" \
     --fixture visual-flows \
     --token "$CAPTURE_SESSION_TOKEN" \
@@ -70,12 +74,24 @@ export REDIS_URL=""
 export APP_FAKE_REDIS="$APP_FAKE_REDIS"
 export FLASK_APP=app.py
 
+server_cmd=(
+  "$PYTHON_BIN" -m gunicorn
+  --bind "127.0.0.1:$PORT"
+  --workers 1
+  --worker-class gthread
+  --threads 8
+  --timeout 60
+  --graceful-timeout 5
+  --keep-alive 30
+  app:app
+)
+
 if [[ -n "$SERVER_LOG" ]]; then
   if [[ "${PW_WEBSERVER_LOGS:-}" == "1" ]]; then
-    "$PYTHON_BIN" -m flask run --port "$PORT" 2>&1 | tee -a "$SERVER_LOG"
+    "${server_cmd[@]}" 2>&1 | tee -a "$SERVER_LOG"
     exit "${PIPESTATUS[0]}"
   fi
-  exec "$PYTHON_BIN" -m flask run --port "$PORT" >> "$SERVER_LOG" 2>&1
+  exec "${server_cmd[@]}" >> "$SERVER_LOG" 2>&1
 fi
 
-exec "$PYTHON_BIN" -m flask run --port "$PORT"
+exec "${server_cmd[@]}"

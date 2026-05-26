@@ -1,9 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, makeTestIp } from './helpers.js'
+import { ensurePromptReady } from './helpers.js'
 
 // A long-running command that is in the allowlist and won't exit on its own.
 const LONG_CMD = 'ping -c 1000 127.0.0.1'
-const TEST_IP = makeTestIp(63)
 
 // Selectors for the shared confirmation-dialog primitive (ui_confirm.js).
 // The kill flow builds the modal via showConfirm(), so the DOM is the same
@@ -17,7 +16,6 @@ const CLOSE_KILL_BTN = '#confirm-host [data-confirm-action-id="kill"]'
 
 test.describe('kill running command', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()

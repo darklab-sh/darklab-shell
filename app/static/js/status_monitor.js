@@ -3,6 +3,9 @@
 // on mobile. Active-run attach/kill remains the bottom section.
 
 (function () {
+  const _statusMonitorCore = typeof DarklabStatusMonitorCore !== 'undefined' ? DarklabStatusMonitorCore : null;
+  if (!_statusMonitorCore) throw new Error('DarklabStatusMonitorCore is unavailable');
+
   let monitorEl = null;
   let scrimEl = null;
   let listEl = null;
@@ -29,8 +32,8 @@
   const POLL_MS = 3000;
   const CLOSED_POLL_MS = 8000;
   const CPU_SAMPLE_WARMUP_MS = 900;
-  const resourceStateByRunId = new Map();
-  const resourceTrendByRunId = new Map();
+  let statusMonitorResources = null;
+  let statusMonitorData = null;
   const pulseStateByStrip = new WeakMap();
   const pulseNodeCacheByStrip = new WeakMap();
   const activeRunByRow = new WeakMap();
@@ -52,30 +55,22 @@
   const CONSTELLATION_Y_BASELINE = 260;
   const CONSTELLATION_Y_RANGE = 205;
   const DAY_MS = 86400000;
-  const GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
-
-  function _normalizedExitCode(exitCode) {
-    if (exitCode === null || exitCode === undefined || exitCode === '') return null;
-    const number = Number(exitCode);
-    return Number.isFinite(number) ? number : null;
-  }
-
-  function _isGracefulTerminationExitCode(exitCode) {
-    const code = _normalizedExitCode(exitCode);
-    return code !== null && GRACEFUL_TERMINATION_EXIT_CODES.has(code);
-  }
-
-  function _isFailedExitCode(exitCode) {
-    const code = _normalizedExitCode(exitCode);
-    return code !== null && code !== 0 && !GRACEFUL_TERMINATION_EXIT_CODES.has(code);
-  }
-
-  function _exitCodeLabel(exitCode) {
-    const code = _normalizedExitCode(exitCode);
-    if (code === null) return 'active';
-    if (_isGracefulTerminationExitCode(code)) return 'terminated';
-    return `exit ${code}`;
-  }
+  const _normalizedExitCode = _statusMonitorCore.normalizedExitCode;
+  const _isGracefulTerminationExitCode = _statusMonitorCore.isGracefulTerminationExitCode;
+  const _isFailedExitCode = _statusMonitorCore.isFailedExitCode;
+  const _exitCodeLabel = _statusMonitorCore.exitCodeLabel;
+  const _formatElapsed = _statusMonitorCore.formatElapsed;
+  const _shortRunId = _statusMonitorCore.shortRunId;
+  const _formatCpuPercent = _statusMonitorCore.formatCpuPercent;
+  const _isTelemetryNumber = _statusMonitorCore.isTelemetryNumber;
+  const _formatMemoryBytes = _statusMonitorCore.formatMemoryBytes;
+  const _formatDurationSeconds = _statusMonitorCore.formatDurationSeconds;
+  const _formatCount = _statusMonitorCore.formatCount;
+  const _truncateText = _statusMonitorCore.truncateText;
+  const _normalizedHash = _statusMonitorCore.normalizedHash;
+  const _parseIsoDateOnly = _statusMonitorCore.parseIsoDateOnly;
+  const _formatIsoDateOnly = _statusMonitorCore.formatIsoDateOnly;
+  const _isoWeekdayRow = _statusMonitorCore.isoWeekdayRow;
 
   function _isMobileStatusMonitor() {
     return !!(
@@ -84,107 +79,40 @@
     );
   }
 
-  function _formatElapsed(started) {
-    const start = Date.parse(String(started || ''));
-    if (!Number.isFinite(start)) return '-';
-    const total = Math.max(0, Math.floor((Date.now() - start) / 1000));
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const seconds = total % 60;
-    return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
+  function _statusMonitorResources() {
+    if (!statusMonitorResources) {
+      if (typeof DarklabStatusMonitorResources === 'undefined' || !DarklabStatusMonitorResources?.create) {
+        throw new Error('DarklabStatusMonitorResources is unavailable');
+      }
+      statusMonitorResources = DarklabStatusMonitorResources.create({
+        core: _statusMonitorCore,
+        svgEl: _svgEl,
+        pathFromPoints: _pathFromPoints,
+      });
+    }
+    return statusMonitorResources;
   }
 
-  function _shortRunId(run) {
-    return String(run?.run_id || run?.id || '').slice(0, 8) || '-';
-  }
-
-  function _formatCpuPercent(value) {
-    if (value === null || value === undefined) return 'n/a';
-    if (!Number.isFinite(Number(value))) return 'collecting';
-    const cpu = Math.min(100, Math.max(0, Number(value)));
-    return `${cpu.toFixed(cpu >= 10 ? 0 : 1)}%`;
-  }
-
-  function _isTelemetryNumber(value) {
-    return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+  function _statusMonitorData() {
+    if (!statusMonitorData) {
+      if (typeof DarklabStatusMonitorData === 'undefined' || !DarklabStatusMonitorData?.create) {
+        throw new Error('DarklabStatusMonitorData is unavailable');
+      }
+      statusMonitorData = DarklabStatusMonitorData.create({ apiFetch });
+    }
+    return statusMonitorData;
   }
 
   function _runResourceUsage(run) {
-    const runId = String(run?.run_id || run?.id || '');
-    const usage = run?.resource_usage && typeof run.resource_usage === 'object'
-      ? run.resource_usage
-      : {};
-    const previous = runId ? resourceStateByRunId.get(runId) : null;
-    const now = Date.now();
-    const cpuSeconds = _isTelemetryNumber(usage.cpu_seconds)
-      ? Number(usage.cpu_seconds)
-      : null;
-    let cpuPercent = previous?.cpu_percent;
-    if (cpuSeconds !== null && previous && _isTelemetryNumber(previous.cpu_seconds)) {
-      const elapsedSeconds = Math.max(0, (now - Number(previous.sampled_at || now)) / 1000);
-      const deltaCpu = cpuSeconds - Number(previous.cpu_seconds);
-      if (elapsedSeconds >= 0.25 && deltaCpu >= 0) {
-        cpuPercent = (deltaCpu / elapsedSeconds) * 100;
-      }
-    }
-    if (cpuSeconds !== null && !_isTelemetryNumber(cpuPercent)) {
-      cpuPercent = Number.NaN;
-    }
-    const memoryBytes = _isTelemetryNumber(usage.memory_bytes)
-      ? Number(usage.memory_bytes)
-      : previous?.memory_bytes;
-    const resolved = {
-      cpu_percent: cpuPercent,
-      cpu_seconds: cpuSeconds ?? previous?.cpu_seconds,
-      memory_bytes: memoryBytes,
-      sampled_at: cpuSeconds !== null ? now : previous?.sampled_at,
-    };
-    if (runId && (
-      _isTelemetryNumber(resolved.cpu_percent)
-      || _isTelemetryNumber(resolved.cpu_seconds)
-      || _isTelemetryNumber(resolved.memory_bytes)
-    )) {
-      resourceStateByRunId.set(runId, resolved);
-    }
-    return resolved;
+    return _statusMonitorResources().runResourceUsage(run);
   }
 
   function _recordResourceTrend(run, usage) {
-    const runId = String(run?.run_id || run?.id || '');
-    if (!runId) return [];
-    const samples = resourceTrendByRunId.get(runId) || [];
-    const now = Date.now();
-    const previous = samples[samples.length - 1];
-    if (!previous || now - previous.t >= 750) {
-      samples.push({
-        t: now,
-        cpu: _isTelemetryNumber(usage.cpu_percent) ? Number(usage.cpu_percent) : null,
-        mem: _isTelemetryNumber(usage.memory_bytes) ? Number(usage.memory_bytes) : null,
-      });
-      while (samples.length > 60) samples.shift();
-      resourceTrendByRunId.set(runId, samples);
-    }
-    return samples;
+    return _statusMonitorResources().recordResourceTrend(run, usage);
   }
 
   function _trendPath(samples, key, width = 160, height = 34) {
-    const values = samples.map(sample => sample[key]).filter(value => _isTelemetryNumber(value));
-    if (!values.length) {
-      const y = height / 2;
-      return `M0 ${y} L${width} ${y}`;
-    }
-    const max = key === 'cpu'
-      ? Math.max(100, ...values)
-      : Math.max(...values, 1);
-    const min = key === 'cpu' ? 0 : Math.min(...values, 0);
-    const spread = Math.max(1, max - min);
-    const points = samples.map((sample, index) => {
-      const value = _isTelemetryNumber(sample[key]) ? Number(sample[key]) : min;
-      const x = samples.length <= 1 ? width : (index / (samples.length - 1)) * width;
-      const y = height - (((value - min) / spread) * (height - 6)) - 3;
-      return [x, y];
-    });
-    return _pathFromPoints(points);
+    return _statusMonitorResources().trendPath(samples, key, width, height);
   }
 
   function _runMetaChip(text, className = '') {
@@ -195,75 +123,11 @@
   }
 
   function _runSparklinePanel(run, usage) {
-    const samples = _recordResourceTrend(run, usage);
-    const panel = document.createElement('div');
-    panel.className = 'status-monitor-spark-panel';
-
-    const header = document.createElement('div');
-    header.className = 'status-monitor-spark-header';
-    const title = document.createElement('span');
-    title.className = 'status-monitor-spark-title';
-    title.textContent = 'CPU/MEM 60s';
-    header.append(title);
-
-    const svg = _svgEl('svg', {
-      class: 'status-monitor-sparkline',
-      viewBox: '0 0 160 34',
-      role: 'img',
-      'aria-label': 'CPU and memory trend',
-      preserveAspectRatio: 'none',
-    });
-    svg.append(
-      _svgEl('path', {
-        class: 'status-monitor-sparkline-grid',
-        d: 'M0 17 L160 17 M40 0 L40 34 M80 0 L80 34 M120 0 L120 34',
-      }),
-      _svgEl('path', { class: 'status-monitor-sparkline-cpu', d: _trendPath(samples, 'cpu') }),
-      _svgEl('path', { class: 'status-monitor-sparkline-mem', d: _trendPath(samples, 'mem') }),
-    );
-
-    panel.append(header, svg);
-    return panel;
+    return _statusMonitorResources().runSparklinePanel(run, usage);
   }
 
   function _runsNeedCpuFollowup(runs) {
-    return (Array.isArray(runs) ? runs : []).some((run) => {
-      const runId = String(run?.run_id || run?.id || '');
-      if (!runId) return false;
-      const state = resourceStateByRunId.get(runId);
-      return state && _isTelemetryNumber(state.cpu_seconds) && !_isTelemetryNumber(state.cpu_percent);
-    });
-  }
-
-  function _formatMemoryBytes(value) {
-    if (value === null || value === undefined) return 'n/a';
-    const bytes = Number(value);
-    if (!Number.isFinite(bytes) || bytes < 0) return '-';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex += 1;
-    }
-    const precision = unitIndex === 0 || size >= 10 ? 0 : 1;
-    return `${size.toFixed(precision)} ${units[unitIndex]}`;
-  }
-
-  function _formatDurationSeconds(value) {
-    if (!_isTelemetryNumber(value)) return 'n/a';
-    const total = Math.max(0, Number(value));
-    if (total >= 3600) {
-      const hours = Math.floor(total / 3600);
-      const minutes = Math.floor((total % 3600) / 60);
-      return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
-    }
-    if (total >= 60) {
-      const minutes = Math.floor(total / 60);
-      const seconds = Math.round(total % 60);
-      return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
-    }
-    return `${total.toFixed(total >= 10 ? 0 : 1)}s`;
+    return _statusMonitorResources().runsNeedCpuFollowup(runs);
   }
 
   function _currentStatusUptimeSeconds(status = cachedStatus) {
@@ -277,12 +141,6 @@
   function _statusMonitorUptimeText(status = cachedStatus) {
     const uptime = _currentStatusUptimeSeconds(status);
     return uptime === null ? 'n/a' : _formatDurationSeconds(uptime);
-  }
-
-  function _formatCount(value) {
-    const count = Number(value);
-    if (!Number.isFinite(count)) return '0';
-    return new Intl.NumberFormat().format(count);
   }
 
   function _insightWindowInfo(key, fallbackDays = 30) {
@@ -301,26 +159,6 @@
     return _insightWindowInfo(key, fallbackDays).label;
   }
 
-  function _truncateText(value, maxLength = 64) {
-    const text = String(value || '').trim();
-    if (text.length <= maxLength) return text;
-    return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-  }
-
-  function _hashString(value) {
-    let hash = 0;
-    const text = String(value || '');
-    for (let index = 0; index < text.length; index += 1) {
-      hash = ((hash << 5) - hash) + text.charCodeAt(index);
-      hash |= 0;
-    }
-    return Math.abs(hash);
-  }
-
-  function _normalizedHash(value) {
-    return _hashString(String(value || '').trim().toLowerCase());
-  }
-
   function _categoryTone(category) {
     const normalized = String(category || '').trim().toLowerCase();
     const cached = categoryToneCache.get(normalized);
@@ -333,6 +171,26 @@
     else if (normalized.includes('utility')) tone = { hue: 258, saturation: 88 };
     categoryToneCache.set(normalized, tone);
     return tone;
+  }
+
+  function _constellationToneStyle(tone, extraVars = {}) {
+    const style = [];
+    const hue = Number(tone?.hue);
+    const saturation = Number(tone?.saturation);
+    if (Number.isFinite(hue)) style.push(`--star-hue:${hue}`);
+    if (Number.isFinite(saturation)) style.push(`--star-saturation:${saturation}%`);
+    Object.entries(extraVars).forEach(([key, value]) => {
+      if (!key || value === undefined || value === null) return;
+      style.push(`${key}:${value}`);
+    });
+    return style.join(';');
+  }
+
+  function _constellationKindClass(kind, prefix) {
+    const normalized = String(kind || '').trim().toLowerCase();
+    if (normalized === 'error') return `${prefix}-kind-error`;
+    if (normalized === 'warn') return `${prefix}-kind-warn`;
+    return '';
   }
 
   function _categoryLegendLabel(category) {
@@ -420,46 +278,299 @@
     return item;
   }
 
-  function _seededUnit(seed) {
-    const value = Math.sin(Number(seed) || 1) * 10000;
-    return value - Math.floor(value);
+  // Default "full day" window: every minute mapper falls back to this when the
+  // caller doesn't pass an explicit window, which keeps Phase 0 behavior
+  // identical to the previous inline math.
+  const CONSTELLATION_FULL_DAY_WINDOW = Object.freeze({ startMin: 0, endMin: 1440 });
+
+  function _constellationStarMinutes(star) {
+    const started = Date.parse(String(star?.started || ''));
+    if (!Number.isFinite(started)) return null;
+    const date = new Date(started);
+    return (date.getHours() * 60) + date.getMinutes();
   }
 
-  function _ambientConstellationSeed() {
-    if (typeof CLIENT_ID !== 'undefined' && CLIENT_ID) return _normalizedHash(`ambient:${CLIENT_ID}`);
-    return _normalizedHash('ambient:darklab');
+  function _constellationHourDensity(stars) {
+    const bins = new Array(24).fill(0);
+    if (!Array.isArray(stars)) return bins;
+    for (const star of stars) {
+      const minutes = _constellationStarMinutes(star);
+      if (minutes === null) continue;
+      const hour = Math.min(23, Math.max(0, Math.floor(minutes / 60)));
+      bins[hour] += 1;
+    }
+    const peak = bins.reduce((max, value) => (value > max ? value : max), 0);
+    if (peak <= 0) return bins.map(() => 0);
+    return bins.map(value => value / peak);
   }
 
-  function _ambientConstellationStars() {
-    const seed = _ambientConstellationSeed();
-    const columns = 18;
-    const rows = 8;
-    const stars = [];
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < columns; column += 1) {
-        const index = (row * columns) + column;
-        const jitterX = _seededUnit(seed + (index * 37) + 11);
-        const jitterY = _seededUnit(seed + (index * 53) + 19);
-        const scale = _seededUnit(seed + (index * 71) + 23);
-        const tone = _seededUnit(seed + (index * 89) + 31);
-        const depth = _seededUnit(seed + (index * 113) + 59);
-        const bright = depth > 0.88;
-        const baseRadius = 0.85 + (scale * 1.25);
-        const baseOpacity = 0.42 + (_seededUnit(seed + (index * 97) + 43) * 0.34);
-        stars.push({
-          x: 12 + ((column + (jitterX * 0.88) + 0.06) / columns) * 616,
-          y: 12 + ((row + (jitterY * 0.86) + 0.07) / rows) * 276,
-          radius: baseRadius + (bright ? 0.45 + (depth * 0.35) : 0),
-          opacity: Math.min(0.92, baseOpacity + (bright ? 0.16 + ((depth - 0.88) * 0.75) : 0)),
-          hue: tone > 0.86 ? 48 : 92 + (tone * 55),
-          saturation: bright ? 92 : 72 + (tone * 16),
-          lightness: bright ? 82 + ((depth - 0.88) * 32) : 68 + (scale * 8),
-          glow: 2.5 + (scale * 3.5) + (bright ? 3.4 : 0),
-          glowAlpha: bright ? 0.54 : 0.3,
-        });
+  function _constellationPercentileMinute(sortedMinutes, fraction) {
+    if (!sortedMinutes.length) return 0;
+    if (sortedMinutes.length === 1) return sortedMinutes[0];
+    const clamped = Math.min(1, Math.max(0, fraction));
+    const position = clamped * (sortedMinutes.length - 1);
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return sortedMinutes[lower];
+    const weight = position - lower;
+    return (sortedMinutes[lower] * (1 - weight)) + (sortedMinutes[upper] * weight);
+  }
+
+  function _constellationActiveWindow(stars, { paddingMinutes = 60 } = {}) {
+    const minutes = [];
+    if (Array.isArray(stars)) {
+      for (const star of stars) {
+        const value = _constellationStarMinutes(star);
+        if (value !== null) minutes.push(value);
       }
     }
-    return stars;
+    if (minutes.length < 6) return { startMin: 0, endMin: 1440 };
+    minutes.sort((left, right) => left - right);
+    const lower = _constellationPercentileMinute(minutes, 0.05);
+    const upper = _constellationPercentileMinute(minutes, 0.95);
+    const pad = Math.max(0, Number(paddingMinutes) || 0);
+    const startMin = Math.max(0, Math.floor(lower - pad));
+    const endMin = Math.min(1440, Math.ceil(upper + pad));
+    if (endMin <= startMin) return { startMin: 0, endMin: 1440 };
+    return { startMin, endMin };
+  }
+
+  // Dead-band defaults. The active-window heuristic already trims low-density
+  // edges; dead-band detection complements it by finding INTERIOR low-density
+  // hours (operators whose runs span the whole clock but sleep through a
+  // mid-day window). Relative density ≤ 0.15 vs the busiest hour, runs of at
+  // least 2 hours qualify, and the cropped band is pulled inward by 30 min
+  // on each side so we don't clip stars near the boundary. Sessions with
+  // fewer than 30 plotted stars stay in single-window mode.
+  const CONSTELLATION_DEAD_BAND_DENSITY = 0.15;
+  const CONSTELLATION_DEAD_BAND_MIN_HOURS = 2;
+  const CONSTELLATION_DEAD_BAND_EDGE_PAD_MIN = 30;
+  const CONSTELLATION_DEAD_BAND_MIN_STARS = 30;
+
+  function _constellationDeadBands(stars, {
+    densityThreshold = CONSTELLATION_DEAD_BAND_DENSITY,
+    minBandHours = CONSTELLATION_DEAD_BAND_MIN_HOURS,
+    edgePaddingMinutes = CONSTELLATION_DEAD_BAND_EDGE_PAD_MIN,
+    minStars = CONSTELLATION_DEAD_BAND_MIN_STARS,
+  } = {}) {
+    if (!Array.isArray(stars) || stars.length < minStars) return [];
+    const density = _constellationHourDensity(stars);
+    const hourRuns = [];
+    let runStart = null;
+    for (let h = 0; h < 24; h += 1) {
+      const isDead = density[h] <= densityThreshold;
+      if (isDead && runStart === null) runStart = h;
+      if (!isDead && runStart !== null) {
+        if (h - runStart >= minBandHours) hourRuns.push({ startHour: runStart, endHour: h });
+        runStart = null;
+      }
+    }
+    if (runStart !== null && 24 - runStart >= minBandHours) {
+      hourRuns.push({ startHour: runStart, endHour: 24 });
+    }
+    return hourRuns
+      .map(({ startHour, endHour }) => ({
+        startMin: Math.min(1440, (startHour * 60) + edgePaddingMinutes),
+        endMin: Math.max(0, (endHour * 60) - edgePaddingMinutes),
+      }))
+      .filter((band) => band.endMin - band.startMin >= 60);
+  }
+
+  function _constellationVisibleSegments(window, deadBands) {
+    const safeWindow = {
+      startMin: Math.max(0, Number(window?.startMin) || 0),
+      endMin: Math.min(1440, Number(window?.endMin) || 1440),
+    };
+    if (safeWindow.endMin <= safeWindow.startMin) {
+      return [{ startMin: 0, endMin: 1440 }];
+    }
+    const bands = (Array.isArray(deadBands) ? deadBands : [])
+      .map((band) => ({
+        startMin: Math.max(safeWindow.startMin, Number(band?.startMin) || 0),
+        endMin: Math.min(safeWindow.endMin, Number(band?.endMin) || 0),
+      }))
+      .filter((band) => band.endMin > band.startMin)
+      .sort((left, right) => left.startMin - right.startMin);
+    if (!bands.length) return [{ startMin: safeWindow.startMin, endMin: safeWindow.endMin }];
+    const segments = [];
+    let cursor = safeWindow.startMin;
+    for (const band of bands) {
+      if (band.endMin <= cursor) continue;
+      if (band.startMin > cursor) segments.push({ startMin: cursor, endMin: band.startMin });
+      cursor = Math.max(cursor, band.endMin);
+    }
+    if (cursor < safeWindow.endMin) segments.push({ startMin: cursor, endMin: safeWindow.endMin });
+    return segments.length ? segments : [{ startMin: safeWindow.startMin, endMin: safeWindow.endMin }];
+  }
+
+  function _constellationMinuteToX(window, segments) {
+    // When called with a single contiguous window (no segments, or one
+    // segment covering the whole window) the mapper is linear. When the
+    // caller passes multiple segments, the mapper is piecewise: each
+    // segment maps proportionally to its share of the combined visible
+    // minute mass, and minutes that fall inside a dead band between
+    // segments are clamped to the seam between adjacent segments.
+    const rawWindowStart = Number(window?.startMin);
+    const rawWindowEnd = Number(window?.endMin);
+    const windowStart = Number.isFinite(rawWindowStart) ? rawWindowStart : 0;
+    const windowEnd = Number.isFinite(rawWindowEnd) && rawWindowEnd > windowStart ? rawWindowEnd : 1440;
+    const spans = Array.isArray(segments) && segments.length
+      ? segments.slice().sort((left, right) => left.startMin - right.startMin)
+      : [{ startMin: windowStart, endMin: windowEnd }];
+    let totalVisible = 0;
+    const meta = spans.map((s) => {
+      const startMin = Math.max(windowStart, Number(s.startMin) || 0);
+      const endMin = Math.min(windowEnd, Number(s.endMin) || 0);
+      const span = Math.max(0, endMin - startMin);
+      const cumulStart = totalVisible;
+      totalVisible += span;
+      return { startMin, endMin, span, cumulStart };
+    });
+    if (totalVisible <= 0) {
+      const fallbackSpan = Math.max(1, windowEnd - windowStart);
+      return function constellationMinuteToXFallback(minute) {
+        const value = Number(minute);
+        const offset = Number.isFinite(value) ? value - windowStart : 0;
+        return CONSTELLATION_PLOT_LEFT + ((offset / fallbackSpan) * CONSTELLATION_PLOT_WIDTH);
+      };
+    }
+    return function constellationMinuteToX(minute) {
+      const value = Number(minute);
+      const m = Number.isFinite(value) ? value : windowStart;
+      for (let i = 0; i < meta.length; i += 1) {
+        const seg = meta[i];
+        if (m < seg.startMin) {
+          return CONSTELLATION_PLOT_LEFT + ((seg.cumulStart / totalVisible) * CONSTELLATION_PLOT_WIDTH);
+        }
+        if (m <= seg.endMin) {
+          const offset = seg.cumulStart + (m - seg.startMin);
+          return CONSTELLATION_PLOT_LEFT + ((offset / totalVisible) * CONSTELLATION_PLOT_WIDTH);
+        }
+      }
+      return CONSTELLATION_PLOT_LEFT + CONSTELLATION_PLOT_WIDTH;
+    };
+  }
+
+  // Ambient stars are decorative chrome — they exist to keep the canvas
+  // feeling like a continuous sky even when an operator only runs commands
+  // during a narrow band of the day. The palette is locked to a desaturated
+  // twilight blue so ambient never collides with the category tone palette
+  // real stars use; radius/opacity/glow bounds keep ambient subordinate so
+  // hover and keyboard focus only reach real stars.
+  const AMBIENT_HUE = 218;
+  const AMBIENT_SAT_MIN = 12;
+  const AMBIENT_SAT_MAX = 24;
+  const AMBIENT_LIGHT_MIN = 56;
+  const AMBIENT_LIGHT_MAX = 68;
+  const AMBIENT_OPACITY_MIN = 0.26;
+  const AMBIENT_OPACITY_MAX = 0.45;
+  const AMBIENT_RADIUS_MIN = 0.7;
+  const AMBIENT_RADIUS_MAX = 1.7;
+  const AMBIENT_COUNT_MIN = 120;
+  const AMBIENT_COUNT_MAX = 160;
+  // Density thresholds for the inverse-density curve. Hours with real-star
+  // density at or below `low` get full ambient weight; hours at or above
+  // `high` get only a residual sprinkle. Between the two we smooth-step
+  // down so the dead-zone fill reads as a distinct cluster instead of
+  // melting into the mid-density hours.
+  const AMBIENT_DENSITY_LOW = 0.2;
+  const AMBIENT_DENSITY_HIGH = 0.6;
+  const AMBIENT_PEAK_FLOOR = 0.03;
+
+  function _ambientInverseWeight(density) {
+    const value = Number(density) || 0;
+    if (value <= AMBIENT_DENSITY_LOW) return 1;
+    if (value >= AMBIENT_DENSITY_HIGH) return AMBIENT_PEAK_FLOOR;
+    const t = (value - AMBIENT_DENSITY_LOW) / (AMBIENT_DENSITY_HIGH - AMBIENT_DENSITY_LOW);
+    const smooth = t * t * (3 - (2 * t));
+    return 1 - (smooth * (1 - AMBIENT_PEAK_FLOOR));
+  }
+
+  function _ambientHourWeights(stars, displayWindow, segments) {
+    // Inside the active window ambient sample weight is *inverse* to
+    // real-star density so the chrome concentrates in lulls. Outside the
+    // active window we want uniform fill — those hours have no real-star
+    // density to invert, but the chrome there should still read as a
+    // lived-in sky. Hours that fall fully outside the visible display
+    // window — or fully inside a collapsed dead band — get zero weight so
+    // we don't waste samples on off-canvas minutes.
+    //
+    // The threshold-smooth curve in `_ambientInverseWeight` makes the
+    // bias sharp enough to be perceptible: with ~5 quiet hours getting
+    // weight 1 and ~10 peak hours getting weight 0.03, ambient
+    // concentrates in the dead-zone band even when the active window
+    // spans almost the entire day.
+    const density = _constellationHourDensity(stars);
+    const active = _constellationActiveWindow(stars);
+    const activeStartH = active.startMin / 60;
+    const activeEndH = active.endMin / 60;
+    const windowStartH = (Number(displayWindow?.startMin) || 0) / 60;
+    const windowEndH = (Number(displayWindow?.endMin) || 1440) / 60;
+    const visibleSpans = Array.isArray(segments) && segments.length ? segments : null;
+    const hourOverlapsVisible = (hour) => {
+      if (!visibleSpans) return true;
+      const hourStartMin = hour * 60;
+      const hourEndMin = (hour + 1) * 60;
+      return visibleSpans.some((s) => s.startMin < hourEndMin && s.endMin > hourStartMin);
+    };
+    const weights = new Array(24).fill(0);
+    for (let h = 0; h < 24; h += 1) {
+      if (h + 1 <= windowStartH || h >= windowEndH) continue;
+      if (!hourOverlapsVisible(h)) continue;
+      if (h >= activeStartH && h < activeEndH) {
+        weights[h] = _ambientInverseWeight(density[h]);
+      } else {
+        weights[h] = 1;
+      }
+    }
+    return weights;
+  }
+
+  function _ambientSampleHour(cdf, total) {
+    const target = Math.random() * total;
+    for (let h = 0; h < cdf.length; h += 1) {
+      if (target <= cdf[h]) return h;
+    }
+    return cdf.length - 1;
+  }
+
+  function _ambientConstellationStars({
+    stars = [],
+    window: displayWindow = CONSTELLATION_FULL_DAY_WINDOW,
+    segments,
+  } = {}) {
+    const weights = _ambientHourWeights(stars, displayWindow, segments);
+    let total = 0;
+    const cdf = weights.map((value) => { total += value; return total; });
+    if (total <= 0) return [];
+    const totalCount = AMBIENT_COUNT_MIN
+      + Math.floor(Math.random() * (AMBIENT_COUNT_MAX - AMBIENT_COUNT_MIN + 1));
+    const minuteToX = _constellationMinuteToX(displayWindow, segments);
+    const visibleSpans = Array.isArray(segments) && segments.length ? segments : null;
+    const minuteInVisible = (minute) => {
+      if (!visibleSpans) return true;
+      return visibleSpans.some((s) => minute >= s.startMin && minute <= s.endMin);
+    };
+    const placed = [];
+    const attemptCap = totalCount * 4;
+    for (let attempt = 0; attempt < attemptCap && placed.length < totalCount; attempt += 1) {
+      const hour = _ambientSampleHour(cdf, total);
+      const minute = (hour * 60) + (Math.random() * 60);
+      if (!minuteInVisible(minute)) continue;
+      const x = minuteToX(minute);
+      if (x < CONSTELLATION_PLOT_LEFT - 1 || x > CONSTELLATION_PLOT_RIGHT + 1) continue;
+      const y = 14 + (Math.random() * 268);
+      placed.push({
+        x,
+        y,
+        radius: AMBIENT_RADIUS_MIN + (Math.random() * (AMBIENT_RADIUS_MAX - AMBIENT_RADIUS_MIN)),
+        opacity: AMBIENT_OPACITY_MIN + (Math.random() * (AMBIENT_OPACITY_MAX - AMBIENT_OPACITY_MIN)),
+        hue: AMBIENT_HUE,
+        saturation: AMBIENT_SAT_MIN + (Math.random() * (AMBIENT_SAT_MAX - AMBIENT_SAT_MIN)),
+        lightness: AMBIENT_LIGHT_MIN + (Math.random() * (AMBIENT_LIGHT_MAX - AMBIENT_LIGHT_MIN)),
+      });
+    }
+    return placed;
   }
 
   function _svgEl(tag, attrs = {}) {
@@ -585,25 +696,6 @@
       hour: 'numeric',
       minute: '2-digit',
     });
-  }
-
-  function _parseIsoDateOnly(value) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
-    if (!match) return null;
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const timestamp = Date.UTC(year, month - 1, day);
-    return Number.isFinite(timestamp) ? timestamp : null;
-  }
-
-  function _formatIsoDateOnly(timestamp) {
-    return new Date(timestamp).toISOString().slice(0, 10);
-  }
-
-  function _isoWeekdayRow(timestamp) {
-    const day = new Date(timestamp).getUTCDay();
-    return day === 0 ? 7 : day;
   }
 
   function _heatmapCalendarDays(activityDays, firstRunDate) {
@@ -802,6 +894,16 @@
     )) || null;
   }
 
+  function _isPtyRun(run) {
+    return String(run?.run_type || '').toLowerCase() === 'pty';
+  }
+
+  function _ptyAttachUnavailableMessage(run) {
+    if (!_isPtyRun(run) || _tabForRun(run)) return '';
+    if (typeof attachInteractivePtyCommand === 'function') return '';
+    return 'Interactive PTY is still running, but this browser cannot attach to the live terminal. Use Status Monitor to track or kill it.';
+  }
+
   function _tabLabelForRun(run) {
     const tab = _tabForRun(run);
     if (!tab) return '';
@@ -897,73 +999,39 @@
   }
 
   async function _loadActiveRuns() {
-    const resp = await apiFetch('/history/active');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    return Array.isArray(data?.runs) ? data.runs : [];
+    return _statusMonitorData().loadActiveRuns();
   }
 
   async function _loadSystemStatus() {
-    const startedAt = Date.now();
-    const resp = await apiFetch('/status');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    const payload = data && typeof data === 'object' ? data : {};
-    payload.latency_ms = Date.now() - startedAt;
-    payload.uptime_received_at_ms = Date.now();
-    return payload;
+    return _statusMonitorData().loadSystemStatus();
   }
 
   async function _loadWorkspaceStatus() {
-    const resp = await apiFetch('/workspace/files');
-    const data = await resp.json();
-    if (!resp.ok) return { enabled: false, error: data?.error || `HTTP ${resp.status}` };
-    return data && typeof data === 'object' ? data : {};
+    return _statusMonitorData().loadWorkspaceStatus();
   }
 
   async function _loadSessionStats() {
-    const resp = await apiFetch('/history/stats');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    return data && typeof data === 'object' ? data : {};
+    return _statusMonitorData().loadSessionStats();
   }
 
   async function _loadHistoryInsights() {
-    const resp = await apiFetch('/history/insights');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    return data && typeof data === 'object' ? data : {};
+    return _statusMonitorData().loadHistoryInsights();
   }
 
   async function _refreshHistoryInsights() {
-    try {
-      cachedInsights = await _loadHistoryInsights();
-    } catch (err) {
-      cachedInsights = { error: err?.message || 'Unavailable' };
-    }
+    cachedInsights = await _statusMonitorData().refreshHistoryInsights();
     return cachedInsights;
   }
 
   async function _refreshDashboardData({ includeInsights = false } = {}) {
-    const shouldLoadInsights = includeInsights || !cachedInsights;
-    const [status, workspace, stats, insights] = await Promise.allSettled([
-      _loadSystemStatus(),
-      _loadWorkspaceStatus(),
-      _loadSessionStats(),
-      shouldLoadInsights ? _loadHistoryInsights() : Promise.resolve(cachedInsights),
-    ]);
-    cachedStatus = status.status === 'fulfilled'
-      ? status.value
-      : { error: status.reason?.message || 'Unavailable' };
-    cachedWorkspace = workspace.status === 'fulfilled'
-      ? workspace.value
-      : { enabled: false, error: workspace.reason?.message || 'Unavailable' };
-    cachedStats = stats.status === 'fulfilled'
-      ? stats.value
-      : { error: stats.reason?.message || 'Unavailable' };
-    if (shouldLoadInsights) cachedInsights = insights.status === 'fulfilled'
-      ? insights.value
-      : { error: insights.reason?.message || 'Unavailable' };
+    const data = await _statusMonitorData().refreshDashboardData({
+      cachedInsights,
+      includeInsights,
+    });
+    cachedStatus = data.status;
+    cachedWorkspace = data.workspace;
+    cachedStats = data.stats;
+    if (data.loadedInsights) cachedInsights = data.insights;
   }
 
   async function _refreshActiveRunCache({ render = false, renderWhileOpen = true } = {}) {
@@ -972,7 +1040,7 @@
     runs.forEach(run => _runResourceUsage(run));
     if (render || (renderWhileOpen && isOpen)) _renderDashboard(runs);
     if (!runs.length) {
-      resourceStateByRunId.clear();
+      _statusMonitorResources().clear();
       _stopClosedPolling();
     }
     return runs;
@@ -1114,7 +1182,7 @@
     const activeRuns = Array.isArray(runs) ? runs : [];
     const cpuValues = [];
     activeRuns.forEach((run) => {
-      const state = resourceStateByRunId.get(String(run?.run_id || run?.id || ''));
+      const state = _statusMonitorResources().getState(String(run?.run_id || run?.id || ''));
       if (_isTelemetryNumber(state?.cpu_percent)) {
         cpuValues.push(Math.max(0, Number(state.cpu_percent)));
       }
@@ -1832,8 +1900,236 @@
     return commands.join(' ');
   }
 
-  function _constellationTimeGuideX(hour) {
-    return CONSTELLATION_PLOT_LEFT + ((hour * 60) / 1440) * CONSTELLATION_PLOT_WIDTH;
+  // Major-tick step candidates in hours. Powers-of-2 and clean factors of 24
+  // keep half-intervals on whole or half hours, which reads cleanly as a clock
+  // and makes minor ticks land at sensible positions between majors.
+  const CONSTELLATION_TICK_STEP_CANDIDATES = [1, 2, 3, 4, 6, 8, 12];
+
+  function _constellationTickSpec(window, segments) {
+    // Tick step is sized against the COMBINED visible minute mass, not the
+    // bounding window. For a piecewise axis (e.g. 00:15–04:00 + 11:00–23:41)
+    // the operator effectively sees ~16 visible hours rather than 24, so the
+    // step picks 2h instead of 4h and labels feel proportionate.
+    const startMin = Number(window?.startMin) || 0;
+    const endMin = Number(window?.endMin) || 1440;
+    const spans = Array.isArray(segments) && segments.length
+      ? segments
+      : [{ startMin, endMin }];
+    const totalVisibleMin = spans.reduce(
+      (sum, s) => sum + Math.max(0, (Number(s.endMin) || 0) - (Number(s.startMin) || 0)),
+      0,
+    );
+    const spanH = totalVisibleMin / 60;
+    const target = spanH <= 6 ? 4 : spanH <= 12 ? 5 : 6;
+    let bestStep = CONSTELLATION_TICK_STEP_CANDIDATES[0];
+    let bestScore = Infinity;
+    CONSTELLATION_TICK_STEP_CANDIDATES.forEach((step) => {
+      let count = 0;
+      spans.forEach((s) => {
+        const firstHour = Math.ceil(((Number(s.startMin) || 0) / 60) / step) * step;
+        const endHour = (Number(s.endMin) || 0) / 60;
+        for (let hour = firstHour; hour <= endHour + 1e-9; hour += step) count += 1;
+      });
+      const undershoot = count < target ? (target - count) * 100 : 0;
+      const distance = Math.abs(count - target);
+      const score = undershoot + distance - (step * 0.001);
+      if (score < bestScore) {
+        bestScore = score;
+        bestStep = step;
+      }
+    });
+    const majors = [];
+    const minors = [];
+    const half = bestStep / 2;
+    spans.forEach((s) => {
+      const segStartMin = Number(s.startMin) || 0;
+      const segEndMin = Number(s.endMin) || 0;
+      const segStartH = segStartMin / 60;
+      const segEndH = segEndMin / 60;
+      const firstHour = Math.ceil(segStartH / bestStep) * bestStep;
+      const segMajors = [];
+      for (let hour = firstHour; hour <= segEndH + 1e-9; hour += bestStep) {
+        segMajors.push(hour);
+        majors.push(hour);
+      }
+      if (half > 0) {
+        segMajors.forEach((hour, index) => {
+          const next = segMajors[index + 1];
+          if (typeof next === 'number' && next - hour > half * 1.5) return;
+          const candidate = hour + half;
+          if (candidate > segStartH + 1e-9 && candidate < segEndH - 1e-9) {
+            minors.push(candidate);
+          }
+        });
+        const leading = firstHour - half;
+        if (leading > segStartH + 1e-9 && leading < segEndH - 1e-9) minors.push(leading);
+      }
+    });
+    return { stepHours: bestStep, majors, minors };
+  }
+
+  function _formatConstellationSpanLabel(span) {
+    const pad = (value) => String(Math.floor(value)).padStart(2, '0');
+    const startMin = Math.max(0, Math.min(1440, Number(span?.startMin) || 0));
+    const endMin = Math.max(0, Math.min(1440, Number(span?.endMin) || 1440));
+    return `${pad(startMin / 60)}:${pad(startMin % 60)}–${pad(endMin / 60)}:${pad(endMin % 60)}`;
+  }
+
+  function _formatConstellationWindowLabel(window, segments) {
+    if (Array.isArray(segments) && segments.length > 1) {
+      return segments.map(_formatConstellationSpanLabel).join(', ');
+    }
+    return _formatConstellationSpanLabel(window);
+  }
+
+  function _isConstellationFullDay() {
+    return typeof getConstellationFullDayPreference === 'function'
+      && getConstellationFullDayPreference() === 'on';
+  }
+
+  // Daylight gradient backdrop. Stops are anchored to clock hours so the
+  // atmospheric progression reads the same in any theme and in any mode:
+  //   00:00–05:00 deep navy, 07:00 pre-dawn lift, 08:00–17:00 daytime wash,
+  //   19:00 dusk warmth, 20:00 fade back, 24:00 deep navy.
+  // All colors are color-mix() patterns over `--theme-panel-bg` and
+  // `--theme-panel-shadow` so light, dark, and high-contrast themes all
+  // produce a coherent gradient — no hard-coded hex values.
+  const CONSTELLATION_SKY_GRADIENT_ID = 'constellation-sky';
+  const CONSTELLATION_SKY_STOPS = [
+    { hour: 0,  bg: 28, shadow: 72 },
+    { hour: 5,  bg: 28, shadow: 72 },
+    { hour: 7,  bg: 44, shadow: 56 },
+    { hour: 8,  bg: 62, shadow: 38 },
+    { hour: 17, bg: 62, shadow: 38 },
+    { hour: 19, bg: 44, shadow: 56 },
+    { hour: 20, bg: 32, shadow: 68 },
+    { hour: 24, bg: 28, shadow: 72 },
+  ];
+  const CONSTELLATION_SKY_TOP = 12;
+  const CONSTELLATION_SKY_BOTTOM = 286;
+
+  function _appendConstellationSkyBackdrop(svg, window, segments) {
+    const minuteToX = _constellationMinuteToX(window, segments);
+    // The rect is anchored to true clock-time coordinates: x at 00:00 and
+    // width spanning to 24:00. In auto-fit mode the rect extends past the
+    // visible viewBox on either side and SVG's overflow clipping hides the
+    // off-canvas portion, leaving only the visible-segment slice visible.
+    // With piecewise mapping, gradient stops whose clock hour falls inside
+    // a dead band collapse onto the seam x-position, producing a sharp
+    // atmospheric transition exactly where the seam marker lives.
+    const x = minuteToX(0);
+    const width = minuteToX(1440) - x;
+    const defs = _svgEl('defs');
+    const gradient = _svgEl('linearGradient', {
+      id: CONSTELLATION_SKY_GRADIENT_ID,
+      x1: '0%',
+      y1: '0%',
+      x2: '100%',
+      y2: '0%',
+    });
+    const span = Math.max(1, width);
+    CONSTELLATION_SKY_STOPS.forEach(({ hour, bg, shadow }) => {
+      const stopX = minuteToX(hour * 60);
+      const offsetPercent = Math.max(0, Math.min(100, ((stopX - x) / span) * 100));
+      gradient.appendChild(_svgEl('stop', {
+        offset: `${offsetPercent}%`,
+        'stop-color': `color-mix(in srgb, var(--theme-panel-bg) ${bg}%, var(--theme-panel-shadow) ${shadow}%)`,
+      }));
+    });
+    defs.appendChild(gradient);
+    svg.appendChild(defs);
+    svg.appendChild(_svgEl('rect', {
+      class: 'status-monitor-constellation-sky',
+      x,
+      y: CONSTELLATION_SKY_TOP,
+      width,
+      height: CONSTELLATION_SKY_BOTTOM - CONSTELLATION_SKY_TOP,
+      fill: `url(#${CONSTELLATION_SKY_GRADIENT_ID})`,
+    }));
+  }
+
+  function _appendConstellationSeamMarkers(svg, window, segments) {
+    if (!Array.isArray(segments) || segments.length < 2) return;
+    const minuteToX = _constellationMinuteToX(window, segments);
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      const seamX = minuteToX(segments[i].endMin);
+      svg.appendChild(_svgEl('line', {
+        class: 'status-monitor-constellation-seam',
+        x1: seamX,
+        y1: CONSTELLATION_SKY_TOP,
+        x2: seamX,
+        y2: CONSTELLATION_SKY_BOTTOM,
+      }));
+      const label = _svgEl('text', {
+        class: 'status-monitor-constellation-seam-label',
+        x: seamX,
+        y: 289,
+        'text-anchor': 'middle',
+      });
+      label.textContent = '//';
+      svg.appendChild(label);
+    }
+  }
+
+  function _rerenderConstellationPanelInPlace() {
+    const existing = document.querySelector('.status-monitor-constellation-card');
+    if (!existing) return;
+    const fresh = _renderConstellationPanel();
+    existing.replaceWith(fresh);
+  }
+
+  function _constellationMetaText(stars, fullDay, window, segments) {
+    const count = Array.isArray(stars) ? stars.length : 0;
+    const windowLabel = _insightWindowLabel('constellation', 30);
+    if (!count) return `awaiting run history · ${windowLabel}`;
+    // When auto-fit falls back to the full 24h (sparse session, <6 stars),
+    // the X axis spans the same range as full-day mode — so the operator
+    // gets the same `N plotted · last X days` reading they're used to,
+    // instead of a redundant `00:00–24:00`. Only show the window label
+    // when auto-fit has actually narrowed the axis OR cropped interior
+    // dead bands into a multi-segment view.
+    const hasDeadBands = Array.isArray(segments) && segments.length > 1;
+    const isFullDayWindow = Number(window?.startMin) <= 0 && Number(window?.endMin) >= 1440;
+    if ((fullDay || isFullDayWindow) && !hasDeadBands) {
+      return `${_formatCount(count)} plotted · ${windowLabel}`;
+    }
+    return `${_formatConstellationWindowLabel(window, segments)} · ${_formatCount(count)} plotted`;
+  }
+
+  function _toggleConstellationFullDay() {
+    const next = _isConstellationFullDay() ? 'off' : 'on';
+    if (typeof applyConstellationFullDayPreference === 'function') {
+      applyConstellationFullDayPreference(next, true);
+    }
+    _rerenderConstellationPanelInPlace();
+  }
+
+  function _buildConstellationFullDayToggle(fullDay) {
+    // `.toggle-btn` is the allowlisted primitive for on/off toggles per the
+    // Design System Primitive contract in ARCHITECTURE.md. The button label
+    // names the current mode; `aria-pressed` flags whether the strict-24h
+    // override is engaged. Click + Enter/Space all route through
+    // `bindPressable` so activation, focus, and refocus stay consistent.
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toggle-btn status-monitor-constellation-toggle';
+    btn.setAttribute('aria-pressed', fullDay ? 'true' : 'false');
+    btn.title = fullDay
+      ? 'Switch to active-hours layout'
+      : 'Switch to full-day layout';
+    btn.setAttribute('aria-label', fullDay
+      ? 'Constellation showing full 24-hour day. Activate to switch to active-hours layout.'
+      : 'Constellation showing active hours. Activate to switch to full 24-hour layout.');
+    btn.textContent = fullDay ? 'Full day' : 'Active hours';
+    if (typeof bindPressable === 'function') {
+      bindPressable(btn, {
+        onActivate: _toggleConstellationFullDay,
+        refocusComposer: false,
+      });
+    } else {
+      btn.addEventListener('click', _toggleConstellationFullDay);
+    }
+    return btn;
   }
 
   function _formatConstellationAxisDuration(seconds) {
@@ -1880,10 +2176,26 @@
     }
   }
 
-  function _appendConstellationTimeGuides(svg) {
-    for (let hour = 0; hour <= 24; hour += 2) {
-      if (hour % 4 === 0) continue;
-      const x = _constellationTimeGuideX(hour);
+  function _appendConstellationTimeGuides(svg, window = CONSTELLATION_FULL_DAY_WINDOW, segments) {
+    const { majors, minors } = _constellationTickSpec(window, segments);
+    const minuteToX = _constellationMinuteToX(window, segments);
+    const endMin = Number(window?.endMin) || 1440;
+    const endHour = endMin / 60;
+    // Labels at segment boundaries are suppressed: the seam already carries
+    // a `//` glyph, so doubling up with hour labels at the boundary minute
+    // would look cluttered. Hours that fall inside a dead band would also
+    // collapse onto the seam, so we drop them too. This logic only kicks
+    // in when there are actually multiple segments — a single segment
+    // (full-day or contiguous active window) keeps the boundary labels.
+    const segmentSpans = Array.isArray(segments) && segments.length > 1 ? segments : null;
+    const hourIsVisible = (hour) => {
+      if (!segmentSpans) return true;
+      const minute = hour * 60;
+      return segmentSpans.some((s) => minute > s.startMin + 1e-6 && minute < s.endMin - 1e-6);
+    };
+    minors.forEach((hour) => {
+      if (!hourIsVisible(hour)) return;
+      const x = minuteToX(hour * 60);
       svg.appendChild(_svgEl('line', {
         class: 'status-monitor-constellation-guide status-monitor-constellation-guide-minor',
         x1: x,
@@ -1891,9 +2203,9 @@
         x2: x,
         y2: 286,
       }));
-    }
-    for (let hour = 0; hour <= 24; hour += 4) {
-      const x = _constellationTimeGuideX(hour);
+    });
+    majors.forEach((hour) => {
+      const x = minuteToX(hour * 60);
       svg.appendChild(_svgEl('line', {
         class: 'status-monitor-constellation-guide status-monitor-constellation-guide-major',
         x1: x,
@@ -1901,19 +2213,28 @@
         x2: x,
         y2: 286,
       }));
-      // Stars max out at minute 1439 (23:59), so the `24` tick can never
-      // carry data — drop the label so the rightmost cluster reads as
-      // 20:00–midnight rather than as overflow at the next-day boundary.
-      if (hour === 24) continue;
+      // Suppress the rightmost-edge label when it sits at the window
+      // boundary — for the full-day window that's the `24` tick (stars
+      // max out at minute 1439, so `24` can never carry data); for narrow
+      // windows it avoids visually overlapping the plot frame. The tick
+      // itself stays so the right gutter still reads as gridded.
+      if (hour >= endHour - 1e-6) return;
+      // Inside a segmented axis, drop hour labels that coincide with seam
+      // positions so the `//` glyph reads as the only marker there.
+      if (!hourIsVisible(hour)) return;
+      // Wrap-around defensively for any future window crossing midnight
+      // (current `_constellationActiveWindow` returns clamped [0,1440],
+      // so this is a no-op today).
+      const displayHour = ((Math.round(hour) % 24) + 24) % 24;
       const label = _svgEl('text', {
         class: 'status-monitor-constellation-guide-label',
         x: Math.max(CONSTELLATION_PLOT_LEFT, Math.min(CONSTELLATION_PLOT_RIGHT + 4, x)),
         y: 289,
         'text-anchor': 'middle',
       });
-      label.textContent = String(hour).padStart(2, '0');
+      label.textContent = String(displayHour).padStart(2, '0');
       svg.appendChild(label);
-    }
+    });
   }
 
   function _syncConstellationAspect(svg) {
@@ -1966,6 +2287,24 @@
     const panel = document.createElement('section');
     panel.className = 'status-monitor-visual-card status-monitor-constellation-card';
 
+    // Resolve the window and visible segments once per render. Star
+    // positions, time guides, meta text, and the toggle's pressed state
+    // all key off the same values. In full-day mode the segments collapse
+    // to a single span covering 00:00–24:00. In auto-fit mode interior
+    // dead bands (sleep-window low-density runs of ≥ 2 hours) get cropped
+    // out — the X axis becomes piecewise and the dead minutes collapse
+    // onto a seam marker so the canvas reads as a continuous sky even
+    // when an operator's active hours stretch across both ends of the day.
+    const fullDayConstellation = _isConstellationFullDay();
+    const constellationWindow = fullDayConstellation
+      ? CONSTELLATION_FULL_DAY_WINDOW
+      : _constellationActiveWindow(stars);
+    const constellationDeadBands = fullDayConstellation
+      ? []
+      : _constellationDeadBands(stars);
+    const constellationSegments = _constellationVisibleSegments(constellationWindow, constellationDeadBands);
+    const constellationHasDeadBands = constellationSegments.length > 1;
+
     const header = document.createElement('div');
     header.className = 'status-monitor-visual-header';
     const title = document.createElement('div');
@@ -1973,9 +2312,7 @@
     title.textContent = 'Command Constellation';
     const meta = document.createElement('div');
     meta.className = 'status-monitor-visual-meta';
-    meta.textContent = stars.length
-      ? `${_formatCount(stars.length)} plotted · ${_insightWindowLabel('constellation', 30)}`
-      : `awaiting run history · ${_insightWindowLabel('constellation', 30)}`;
+    meta.textContent = _constellationMetaText(stars, fullDayConstellation, constellationWindow, constellationSegments);
     const legend = _categoryLegend(stars);
     if (legend && stars.length) {
       const hasFailed = stars.some(star => _isFailedExitCode(star?.exit_code));
@@ -1992,8 +2329,13 @@
         label: 'Output',
       }));
     }
+    const fullDayToggle = _buildConstellationFullDayToggle(fullDayConstellation);
+    if (legend) {
+      legend.appendChild(fullDayToggle);
+    }
     header.append(title);
     if (legend) header.appendChild(legend);
+    else header.appendChild(fullDayToggle);
     header.appendChild(meta);
 
     const plot = document.createElement('div');
@@ -2051,9 +2393,16 @@
     const ceilingElapsed = _computeConstellationCeiling(
       stars.map(star => star.elapsed_seconds),
     );
-    _appendConstellationTimeGuides(svg);
+    // `constellationWindow` was resolved above so the header meta line and
+    // the SVG share one source of truth. Recomputing on every render keeps
+    // the X axis adaptive as new runs land.
+    const constellationMinuteToX = _constellationMinuteToX(constellationWindow, constellationSegments);
+    // Sky backdrop paints first so guides, ambient, and real stars all
+    // render on top of the atmospheric gradient.
+    _appendConstellationSkyBackdrop(svg, constellationWindow, constellationSegments);
+    _appendConstellationTimeGuides(svg, constellationWindow, constellationSegments);
     _appendConstellationElapsedGuides(svg, ceilingElapsed);
-    _ambientConstellationStars().forEach(star => {
+    _ambientConstellationStars({ stars, window: constellationWindow, segments: constellationSegments }).forEach(star => {
       svg.appendChild(_svgEl('circle', {
         class: 'status-monitor-star-ambient',
         cx: star.x,
@@ -2064,18 +2413,29 @@
           `--ambient-saturation:${star.saturation.toFixed(1)}%`,
           `--ambient-lightness:${star.lightness.toFixed(1)}%`,
           `--ambient-opacity:${star.opacity.toFixed(2)}`,
-          `--ambient-glow:${star.glow.toFixed(1)}px`,
-          `--ambient-glow-alpha:${star.glowAlpha.toFixed(2)}`,
         ].join(';'),
       }));
     });
     const now = Date.now();
-    const plottedStars = stars.map((star) => {
+    // When the X axis is piecewise (dead bands cropped), drop real stars
+    // whose started-minute falls inside a collapsed dead band — otherwise
+    // they would pile up at the seam x-position and read as a stack of
+    // misplaced runs. Operators who want to see those stars can flip to
+    // Full day. The threshold for dead-band detection is intentionally low
+    // (density ≤ 0.15) so the dropped count stays small.
+    const visibleStars = constellationHasDeadBands
+      ? stars.filter((star) => {
+        const minute = _constellationStarMinutes(star);
+        if (minute === null) return true;
+        return constellationSegments.some((s) => minute >= s.startMin && minute <= s.endMin);
+      })
+      : stars;
+    const plottedStars = visibleStars.map((star) => {
       const started = Date.parse(String(star.started || '')) || now;
       const date = new Date(started);
       const minutes = date.getHours() * 60 + date.getMinutes();
       const jitter = _normalizedHash(star.id || star.command || star.root);
-      const x = CONSTELLATION_PLOT_LEFT + (minutes / 1440) * CONSTELLATION_PLOT_WIDTH + ((jitter % 29) - 14) * 0.45;
+      const x = constellationMinuteToX(minutes) + ((jitter % 29) - 14) * 0.45;
       const elapsed = Number(star.elapsed_seconds || 0);
       const offScale = elapsed > ceilingElapsed;
       const yBase = CONSTELLATION_Y_BASELINE - ((Math.log1p(elapsed) / Math.log1p(ceilingElapsed)) * CONSTELLATION_Y_RANGE);
@@ -2083,9 +2443,12 @@
       const ageDays = Math.max(0, (now - started) / 86400000);
       const opacity = Math.max(0.28, 1 - (ageDays / 34));
       const ageGlow = 0.24 + (opacity * 0.56);
-      const radius = Math.max(1.8, Math.min(7, 2 + Math.sqrt(Number(star.output_line_count || 0) + 1) * 0.18));
+      const findingCount = Number(star.finding_count || 0);
+      const radiusSource = Math.max(Number(star.output_line_count || 0), findingCount * 40);
+      const radius = Math.max(1.8, Math.min(8.5, 2 + Math.sqrt(radiusSource + 1) * 0.18));
+      const maxKind = String(star.max_kind || 'info');
       const tone = _categoryTone(star.category);
-      const starStyle = `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%;--star-age-glow:${ageGlow.toFixed(2)}`;
+      const starStyle = _constellationToneStyle(tone, { '--star-age-glow': ageGlow.toFixed(2) });
       const failed = _isFailedExitCode(star.exit_code);
       return {
         star,
@@ -2095,6 +2458,8 @@
         radius,
         opacity,
         tone,
+        maxKind,
+        findingCount,
         starStyle,
         failed,
         offScale,
@@ -2116,23 +2481,30 @@
       segments.forEach((segment) => {
         const path = _constellationStreakPath(segment);
         if (!path) return;
+        const kindClass = _constellationKindClass(segment[0].maxKind, 'status-monitor-constellation-streak');
         svg.appendChild(_svgEl('path', {
-          class: 'status-monitor-constellation-streak',
+          class: [
+            'status-monitor-constellation-streak',
+            kindClass,
+          ].filter(Boolean).join(' '),
           d: path,
-          style: `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%`,
+          style: _constellationToneStyle(tone),
         }));
       });
     });
-    plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed, offScale }, index) => {
+    plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed, offScale, maxKind, findingCount }, index) => {
       const starId = String(star.id || `${star.root || 'run'}:${star.started || ''}:${index}`);
       starsByNodeId.set(starId, { star, x, y });
+      const nodeKindClass = _constellationKindClass(maxKind, 'status-monitor-star-node');
       const node = _svgEl('g', {
-        class: offScale
-          ? 'status-monitor-star-node status-monitor-star-node-offscale'
-          : 'status-monitor-star-node',
+        class: [
+          'status-monitor-star-node',
+          offScale ? 'status-monitor-star-node-offscale' : '',
+          nodeKindClass,
+        ].filter(Boolean).join(' '),
         tabindex: '0',
         role: 'button',
-        'aria-label': `${star.root || 'run'} ${_formatStarStarted(star.started)}`,
+        'aria-label': `${star.root || 'run'} ${_formatStarStarted(star.started)}${findingCount ? `, ${findingCount} findings` : ''}`,
         'data-star-id': starId,
         'data-run-id': star.id || '',
       });
@@ -2151,7 +2523,12 @@
         opacity,
       }) : null;
       const circle = _svgEl('circle', {
-        class: failed ? 'status-monitor-star status-monitor-star-failed' : 'status-monitor-star',
+        class: [
+          'status-monitor-star',
+          failed ? 'status-monitor-star-failed' : '',
+          maxKind === 'error' ? 'status-monitor-star-kind-error' : '',
+          maxKind === 'warn' ? 'status-monitor-star-kind-warn' : '',
+        ].filter(Boolean).join(' '),
         cx: x,
         cy: y,
         r: radius,
@@ -2181,6 +2558,7 @@
       node.append(circle, hit);
       svg.appendChild(node);
     });
+    _appendConstellationSeamMarkers(svg, constellationWindow, constellationSegments);
     plot.append(svg, _constellationPopover());
     const sparseMessage = _constellationSparseMessage(stars.length);
     if (sparseMessage) {
@@ -2825,15 +3203,7 @@
   }
 
   function _gcResourceStateForRuns(runs) {
-    const activeRunIds = new Set(
-      runs.map(run => String(run?.run_id || run?.id || '')).filter(Boolean),
-    );
-    for (const runId of [...resourceStateByRunId.keys()]) {
-      if (!activeRunIds.has(runId)) resourceStateByRunId.delete(runId);
-    }
-    for (const runId of [...resourceTrendByRunId.keys()]) {
-      if (!activeRunIds.has(runId)) resourceTrendByRunId.delete(runId);
-    }
+    _statusMonitorResources().gcForRuns(runs);
   }
 
   function _populateActiveRunMeta(meta, run) {
@@ -2872,12 +3242,19 @@
   }
 
   function _activeRunActionsSignature(run) {
+    const ptyUnavailable = _isPtyRun(run) && !_tabForRun(run) && typeof attachInteractivePtyCommand !== 'function';
     const hasAttach = (
       (typeof activateTab === 'function' && !!_tabForRun(run))
-      || typeof attachActiveRunFromMonitor === 'function'
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
+      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')
     );
     const hasKill = typeof killActiveRunFromMonitor === 'function';
-    return `${hasAttach ? 'A' : ''}${hasKill ? 'K' : ''}`;
+    return [
+      hasAttach ? 'A' : '',
+      ptyUnavailable ? 'P' : '',
+      ptyUnavailable ? _ptyAttachUnavailableMessage(run) : '',
+      hasKill ? 'K' : '',
+    ].join('|');
   }
 
   function _openOrAttachActiveRun(run) {
@@ -2886,7 +3263,14 @@
       activateTab(currentTab.id, { focusComposer: false });
       return Promise.resolve(true);
     }
-    if (typeof attachActiveRunFromMonitor === 'function') {
+    if (_isPtyRun(run)) {
+      if (typeof attachInteractivePtyCommand === 'function') {
+        return Promise.resolve(attachInteractivePtyCommand(run));
+      }
+      if (typeof showToast === 'function') showToast(_ptyAttachUnavailableMessage(run), 'error');
+      return Promise.resolve(false);
+    }
+    if (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function') {
       return Promise.resolve(attachActiveRunFromMonitor(run));
     }
     return Promise.resolve(false);
@@ -2896,11 +3280,23 @@
     const actions = document.createElement('div');
     actions.className = 'status-monitor-actions';
     actions.dataset.actionsSignature = _activeRunActionsSignature(run);
-    if ((typeof activateTab === 'function' && !!_tabForRun(run)) || typeof attachActiveRunFromMonitor === 'function') {
+    if ((typeof activateTab === 'function' && !!_tabForRun(run))
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
+      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')) {
       actions.append(_statusMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
         const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return _openOrAttachActiveRun(latest);
       }));
+    } else if (_isPtyRun(run)) {
+      const unavailable = _statusMonitorActionButton('Attach', _ptyAttachUnavailableMessage(run), () => {
+        const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
+        return _openOrAttachActiveRun(latest);
+      }, {
+        className: 'status-monitor-action-btn-disabled',
+        closeOnSuccess: false,
+      });
+      unavailable.setAttribute('aria-disabled', 'true');
+      actions.append(unavailable);
     }
     if (typeof killActiveRunFromMonitor === 'function') {
       actions.append(_statusMonitorActionButton('Kill', 'Kill this active run', () => {
@@ -2926,11 +3322,14 @@
     };
 
     const tab = _tabForRun(run);
-    if (tab || typeof attachActiveRunFromMonitor === 'function') {
+    if (tab
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
+      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')
+      || _isPtyRun(run)) {
       item.classList.add('status-monitor-item-clickable', 'chrome-row-clickable');
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');
-      item.setAttribute('aria-label', `${tab ? 'Open tab for' : 'Attach to'} ${String(run?.command || 'active run')}`);
+      item.setAttribute('aria-label', `${tab ? 'Open tab for' : _isPtyRun(run) ? 'Show PTY attach note for' : 'Attach to'} ${String(run?.command || 'active run')}`);
       item.addEventListener('click', event => {
         if (event.target && event.target.closest && event.target.closest('.status-monitor-action-btn')) return;
         openRun().catch(err => {
@@ -2957,6 +3356,13 @@
     const details = document.createElement('div');
     details.className = 'status-monitor-details';
     details.append(command, meta);
+    const ptyNoticeText = _ptyAttachUnavailableMessage(run);
+    if (ptyNoticeText) {
+      const ptyNotice = document.createElement('div');
+      ptyNotice.className = 'status-monitor-pty-note';
+      ptyNotice.textContent = ptyNoticeText;
+      details.appendChild(ptyNotice);
+    }
 
     const usage = _runResourceUsage(run);
     const telemetry = _runSparklinePanel(run, usage);
@@ -3007,6 +3413,22 @@
           elapsed.setAttribute('data-status-monitor-started', started);
           elapsed.textContent = _formatElapsed(run?.started);
         }
+      }
+    }
+
+    const details = row.querySelector(':scope > .status-monitor-details');
+    if (details) {
+      const expectedNotice = _ptyAttachUnavailableMessage(run);
+      let notice = details.querySelector(':scope > .status-monitor-pty-note');
+      if (expectedNotice) {
+        if (!notice) {
+          notice = document.createElement('div');
+          notice.className = 'status-monitor-pty-note';
+          details.appendChild(notice);
+        }
+        if (notice.textContent !== expectedNotice) notice.textContent = expectedNotice;
+      } else if (notice) {
+        notice.remove();
       }
     }
 
@@ -3285,6 +3707,7 @@
     monitorEl?.classList.toggle('status-monitor-modal', !mobile);
     scrimEl?.classList.remove('u-hidden');
     monitorEl?.classList.remove('u-hidden');
+    window.syncModalOverlayState?.();
     if (monitorEl) monitorEl.dataset.source = source;
     if (typeof pauseBackgroundRunStreamsForStatusMonitor === 'function') {
       pauseBackgroundRunStreamsForStatusMonitor();
@@ -3323,6 +3746,7 @@
     document.body.classList.remove('status-monitor-desktop-open');
     scrimEl?.classList.add('u-hidden');
     monitorEl?.classList.add('u-hidden');
+    window.syncModalOverlayState?.();
   }
 
   function isStatusMonitorOpen() {
@@ -3414,4 +3838,21 @@
   window.closeStatusMonitor = closeStatusMonitor;
   window.isStatusMonitorOpen = isStatusMonitorOpen;
   window.refreshStatusMonitor = refreshStatusMonitor;
+
+  // Test-only hook: lets unit tests exercise the constellation math
+  // helpers directly without rendering the full Status Monitor. These
+  // are not part of the public surface and only exist to keep the
+  // jsdom unit suite focused on the helper contracts (hour density,
+  // active-window detection, minute-to-x mapping) rather than asserting
+  // them indirectly via SVG output.
+  window.__constellationTestHelpers = {
+    hourDensity: _constellationHourDensity,
+    activeWindow: _constellationActiveWindow,
+    minuteToX: _constellationMinuteToX,
+    deadBands: _constellationDeadBands,
+    visibleSegments: _constellationVisibleSegments,
+    fullDayWindow: CONSTELLATION_FULL_DAY_WINDOW,
+    plotLeft: CONSTELLATION_PLOT_LEFT,
+    plotWidth: CONSTELLATION_PLOT_WIDTH,
+  };
 }());

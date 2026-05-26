@@ -26,6 +26,16 @@ find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -
 # (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true
 
+# prometheus_client multiprocess mode stores per-worker metric shards here.
+# The directory is on /tmp tmpfs in Compose; clear stale shards before Gunicorn
+# starts so an unclean container stop cannot double-count old workers.
+PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}"
+mkdir -p "$PROMETHEUS_MULTIPROC_DIR" 2>/dev/null || true
+find "$PROMETHEUS_MULTIPROC_DIR" -type f -name '*.db' -delete 2>/dev/null || true
+chown appuser:appuser "$PROMETHEUS_MULTIPROC_DIR" 2>/dev/null || true
+chmod 700 "$PROMETHEUS_MULTIPROC_DIR" 2>/dev/null || true
+export PROMETHEUS_MULTIPROC_DIR
+
 # Pre-create config/cache dirs owned by scanner so tools don't try to create
 # them as root. Covers nuclei, uncover, and other tools that write to ~/.config
 mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
@@ -39,4 +49,48 @@ chmod -R 755 /tmp/.config /tmp/.cache
 # kernel module is absent in unusual environments.
 iptables -A OUTPUT -m owner --uid-owner scanner -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null || true
 
-exec gosu appuser gunicorn --bind "0.0.0.0:${APP_PORT:-8888}" --workers "${WEB_CONCURRENCY:-4}" --threads "${WEB_THREADS:-4}" --timeout 3600 --control-socket /tmp/.gunicorn app:app
+WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
+WEB_THREADS="${WEB_THREADS:-4}"
+export WEB_CONCURRENCY WEB_THREADS
+
+if [ "${NOTIFICATION_WORKER_ENABLED:-1}" = "1" ]; then
+    gosu appuser sh -c "
+        while true; do
+            python -m services.notifications.worker
+            status=\$?
+            echo \"notification worker exited with status \${status}; restarting in 5s\" >&2
+            sleep 5
+        done
+    " &
+fi
+
+if [ "${SCHEDULER_ENABLED:-1}" = "1" ]; then
+    gosu appuser sh -c "
+        while true; do
+            python -m services.scheduler.worker
+            status=\$?
+            echo \"scheduler worker exited with status \${status}; restarting in 5s\" >&2
+            sleep 5
+        done
+    " &
+fi
+
+if [ "${AI_WORKER_ENABLED:-0}" = "1" ]; then
+    gosu appuser sh -c "
+        while true; do
+            python -m services.ai.worker
+            status=\$?
+            echo \"AI worker exited with status \${status}; restarting in 5s\" >&2
+            sleep 5
+        done
+    " &
+fi
+
+exec gosu appuser gunicorn \
+    --config /app/gunicorn_conf.py \
+    --bind "0.0.0.0:${APP_PORT:-8888}" \
+    --workers "$WEB_CONCURRENCY" \
+    --threads "$WEB_THREADS" \
+    --timeout 3600 \
+    --control-socket /tmp/.gunicorn \
+    app:app

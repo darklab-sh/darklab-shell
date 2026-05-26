@@ -88,11 +88,11 @@ run_capture() {
 }
 
 if [[ "$UI" == "desktop" || "$UI" == "all" ]]; then
-  run_capture config/playwright.capture.desktop.config.js
+  run_capture .tooling/playwright.capture.desktop.config.js
 fi
 
 if [[ "$UI" == "mobile" || "$UI" == "all" ]]; then
-  run_capture config/playwright.capture.mobile.config.js
+  run_capture .tooling/playwright.capture.mobile.config.js
 fi
 
 echo ""
