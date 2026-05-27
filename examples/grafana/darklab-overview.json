@@ -794,7 +794,7 @@
       "gridPos": {
         "x": 0,
         "y": 26,
-        "w": 6,
+        "w": 4,
         "h": 4
       },
       "targets": [
@@ -840,9 +840,9 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 6,
+        "x": 4,
         "y": 26,
-        "w": 12,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -898,16 +898,16 @@
     },
     {
       "id": 13,
-      "type": "stat",
-      "title": "Average run duration by tool (top 5)",
+      "type": "bargauge",
+      "title": "Average run duration by tool (top 5 in range)",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 18,
+        "x": 12,
         "y": 26,
-        "w": 6,
+        "w": 12,
         "h": 4
       },
       "targets": [
@@ -916,14 +916,25 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "topk(5, sum by (tool)(rate(darklab_run_duration_seconds_sum[5m])) / clamp_min(sum by (tool)(rate(darklab_run_duration_seconds_count[5m])), 1))",
+          "expr": "topk(5, sum by (tool)(increase(darklab_run_duration_seconds_sum[$__range])) / clamp_min(sum by (tool)(increase(darklab_run_duration_seconds_count[$__range])), 1))",
           "refId": "A",
-          "legendFormat": "{{tool}}"
+          "legendFormat": "{{tool}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "color": {
             "mode": "thresholds"
           }
@@ -931,6 +942,8 @@
         "overrides": []
       },
       "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -938,10 +951,7 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name",
-        "colorMode": "value",
-      "graphMode": "none",
-        "justifyMode": "auto"
+        "showUnfilled": false
       }
     },
     {

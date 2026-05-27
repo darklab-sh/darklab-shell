@@ -607,7 +607,8 @@
     }
     items.push(
       {
-        label: 'Refresh intel',
+        label: controller.state.intelRefreshing ? 'Refreshing intel...' : 'Refresh intel',
+        disabled: !!controller.state.intelRefreshing,
         action: () => {
           controller.state.selectedId = String(entity.id || '');
           return controller.refreshIntel();
@@ -1058,6 +1059,7 @@
         // the sticky footer below is the single source of action truth on
         // mobile so the user does not see duplicate buttons.
         hideInlineActions: true,
+        intelRefreshing: !!state.intelRefreshing,
         onRefreshIntel: () => controller.refreshIntel(),
         onAddToActiveProject: () => controller.addToActiveProject(),
         onRemoveProjectLink: (link) => controller.removeProjectLink(link),
@@ -1076,7 +1078,7 @@
 
   function renderEntityFooter(state) {
     entityFooter.replaceChildren();
-    if (!state.detail) return;
+    if (!state.detail || state.detailLoading) return;
     const entity = state.detail.entity || {};
     const activeProject = typeof global.getActiveProjectContext === 'function'
       ? global.getActiveProjectContext()
@@ -1090,7 +1092,9 @@
     const refresh = document.createElement('button');
     refresh.type = 'button';
     refresh.className = 'btn btn-secondary btn-compact';
-    refresh.textContent = 'Refresh intel';
+    refresh.disabled = !!state.intelRefreshing;
+    refresh.setAttribute('aria-busy', state.intelRefreshing ? 'true' : 'false');
+    refresh.textContent = state.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
     refresh.addEventListener('click', () => controller.refreshIntel());
     entityFooter.appendChild(refresh);
 

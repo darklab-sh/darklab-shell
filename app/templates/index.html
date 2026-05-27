@@ -222,11 +222,13 @@
           <button type="button" class="menu-item nav-item" data-menu-action="schedules">
             <span class="menu-item-icon" aria-hidden="true">↻</span>
             <span class="menu-item-label">schedules</span>
+            <span class="menu-item-hint" id="mobile-menu-schedules-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
           <button type="button" class="menu-item nav-item" data-menu-action="watchers">
             <span class="menu-item-icon" aria-hidden="true">◌</span>
             <span class="menu-item-label">watchers</span>
+            <span class="menu-item-hint" id="mobile-menu-watchers-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
           {% if workspace_enabled %}
@@ -342,13 +344,14 @@
         </div>
         <button id="tabs-scroll-right" class="tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll tabs right" title="Scroll tabs right" aria-hidden="true">▶</button>
       </div>
-      <div class="tabbar-chrome">
+      <div class="tabbar-chrome" id="tabbar-chrome">
+        <button id="tabbar-chrome-toggle" class="chrome-btn btn btn-ghost btn-icon-only btn-compact u-hidden" type="button" aria-expanded="true" title="Collapse toolbar to make room for tabs">»</button>
         <button id="search-toggle-btn" class="chrome-btn btn btn-ghost btn-compact" title="Search output (Alt+S)" data-search-label="search">⌕ search</button>
         <span id="search-signal-summary" class="search-signal-summary u-hidden" aria-live="polite"></span>
-        <button id="search-summary-btn" class="chrome-btn btn btn-ghost btn-compact" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
-        <span class="tabbar-chrome-divider" aria-hidden="true"></span>
-        <button id="ln-btn" class="chrome-btn btn btn-ghost btn-compact" title="Toggle line numbers">ln: off</button>
-        <button id="ts-btn" class="chrome-btn btn btn-ghost btn-compact" title="Toggle timestamp display">ts: off</button>
+        <button id="search-summary-btn" class="chrome-btn chrome-collapsible btn btn-ghost btn-compact" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
+        <span class="tabbar-chrome-divider chrome-collapsible" aria-hidden="true"></span>
+        <button id="ln-btn" class="chrome-btn chrome-collapsible btn btn-ghost btn-compact" title="Toggle line numbers" aria-pressed="false">line numbers</button>
+        <button id="ts-btn" class="chrome-btn chrome-collapsible btn btn-ghost btn-compact" title="Toggle timestamp display" aria-pressed="false">timestamps</button>
       </div>
     </div>
 

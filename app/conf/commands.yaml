@@ -308,6 +308,18 @@ commands:
   - root: mtr
     description: Combines traceroute and ping to show live hop-by-hop reachability and loss.
     category: Network Diagnostics
+    knowledge:
+      notes:
+        - Runs in --report-wide mode automatically unless a report flag is set; use mtr --interactive for the live hop-by-hop view when Interactive PTY is enabled.
+      gotchas:
+        - The live curses view is replaced by a batch report in non-interactive mode, so an open-ended run never returns on its own — bound it with a probe count.
+      safe_defaults:
+        - Bound the run with -c (probe count) and add -n to skip DNS resolution for faster, quieter traces.
+      common_flags:
+        - "-n — do not resolve hostnames"
+        - "-c — stop after a probe count"
+        - "-r — report-mode summary"
+      artifact_behavior: Writes nothing to the workspace; results are shown in the terminal only.
     help:
       flags:
         - -h
@@ -1025,6 +1037,20 @@ commands:
   - root: dnsrecon
     description: Performs DNS reconnaissance including record enumeration and zone transfer checks.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Pick a discovery mode with -t (std, axfr, brt, srv, zonewalk); -d sets the target domain.
+        - -D reads a brute-force dictionary and -x/--xml/-c/--csv write through the session workspace when Files are enabled.
+      gotchas:
+        - brt mode needs a dictionary via -D and can be slow and noisy; axfr only returns data from misconfigured nameservers.
+      safe_defaults:
+        - Start with -t std for a quick record sweep before brute-forcing with -t brt.
+      common_flags:
+        - "-d — target domain"
+        - "-t — discovery mode"
+        - "-D — brute-force dictionary"
+        - "-c — write CSV results"
+      artifact_behavior: With Files enabled, -x/--xml and -c/--csv write reports into the session workspace and -D reads dictionaries from it; bare output paths are denied.
     help:
       flags:
         - -h
@@ -1144,6 +1170,21 @@ commands:
   - root: subfinder
     description: Discovers subdomains from passive sources and optional provider configuration.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Passive by default; provider API keys come from -pc/-provider-config read through the session workspace when Files are enabled.
+        - -dL reads a domain list and -o/-oD write results or per-domain directories through the session workspace.
+      gotchas:
+        - Without -silent the banner and source chatter clutter output; results are only as broad as the configured passive sources.
+      safe_defaults:
+        - Run with -silent and capture to -o; add provider keys via -pc to widen passive coverage.
+      common_flags:
+        - "-d — target domain"
+        - "-dL — domain list (session file)"
+        - "-silent — minimal output"
+        - "-o — write results"
+        - "-pc — provider config"
+      artifact_behavior: With Files enabled, -o/--output and -oD/-output-dir write results into the session workspace and -dL/-config/-pc read from it; bare output paths are denied.
     help:
       flags:
         - -h
@@ -1656,6 +1697,20 @@ commands:
   - root: dnsx
     description: Performs fast DNS lookups and filtering across domains or target lists.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - -d sets a domain (with -w wordlist) or -l reads a host file; -o writes through the session workspace when Files are enabled.
+        - Add record-type flags (-a, -cname, -mx) and -resp to control which DNS data is returned.
+      gotchas:
+        - Without -resp dnsx prints only resolved names; brute force needs -w and can be slow on large wordlists.
+      safe_defaults:
+        - Resolve a known list with -l before brute-forcing with -w; add -resp to capture the answers.
+      common_flags:
+        - "-d — target domain"
+        - "-w — brute-force wordlist"
+        - "-l — host list (session file)"
+        - "-resp — show DNS responses"
+      artifact_behavior: With Files enabled, -o/--output writes resolved results into the session workspace and -l/-w read from it or packaged seclists; bare output paths are denied.
     help:
       flags:
         - -h
@@ -1771,6 +1826,21 @@ commands:
   - root: httpx
     description: Probes HTTP(S) services and reports web metadata such as status, title, and technology signals.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Probe details are opt-in; add -status-code, -title, and -tech-detect to enrich each line.
+        - -l/-list reads target files, -rr/-config read inputs, and -o/-srd write through the session workspace when Files are enabled.
+      gotchas:
+        - Banner and progress lines clutter output; add -silent to emit only result rows.
+      safe_defaults:
+        - Use -silent with -status-code/-title for clean, parseable rows, then grep to filter live hosts.
+      common_flags:
+        - "-u — single target URL"
+        - "-l — target list (session file)"
+        - "-status-code — show HTTP status"
+        - "-title — show page title"
+        - "-silent — result rows only"
+      artifact_behavior: With Files enabled, -o/--output and -srd write results and response directories into the session workspace, and -l/-rr/-config read from it; bare paths are denied.
     help:
       flags:
         - -h
@@ -2070,6 +2140,20 @@ commands:
   - root: gobuster
     description: Brute-forces web paths, DNS names, and virtual hosts using wordlists.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Requires a mode subcommand (dir, dns, or vhost) and a wordlist via -w; packaged seclists live under /usr/share/wordlists/seclists.
+        - -w reads and -o writes through the session workspace when Files are enabled.
+      gotchas:
+        - The progress counter rewrites the terminal line; capture clean results with -o (Files) or run with -q for quiet mode.
+      safe_defaults:
+        - Filter responses with -s (status allow-list) or -b (status deny-list) to cut wordlist noise.
+      common_flags:
+        - "-u — target URL"
+        - "-w — wordlist path"
+        - "-x — file extensions to append"
+        - "-s — positive status-code filter"
+      artifact_behavior: With Files enabled, -o writes the result file into the session workspace and -w reads wordlists from it or packaged seclists; bare -o paths are denied.
     help:
       flags:
         - -h
@@ -2387,6 +2471,20 @@ commands:
   - root: ffuf
     description: Fuzzes web requests with wordlists to discover paths, parameters, hosts, or other inputs.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Place the FUZZ keyword in the -u URL (or a header) to mark the injection point; -w supplies the wordlist.
+        - -w reads and -o/--output writes JSON through the session workspace when Files are enabled; use --interactive for the live PTY view.
+      gotchas:
+        - The live progress line is terminal-only and noisy; capture results with -o JSON (Files) or run --interactive.
+      safe_defaults:
+        - Scope matches with -mc (match codes) or -fc (filter codes) so the wordlist does not flood the transcript.
+      common_flags:
+        - "-u — target URL with FUZZ marker"
+        - "-w — wordlist path"
+        - "-mc — match status codes"
+        - "-fc — filter status codes"
+      artifact_behavior: With Files enabled, -o/--output writes JSON results into the session workspace and -w reads wordlists from it or packaged seclists; bare -o paths are denied.
     help:
       flags:
         - -h
@@ -2493,6 +2591,20 @@ commands:
   - root: naabu
     description: Performs fast port discovery against hosts or target lists.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Injects -scan-type c (CONNECT) when no scan type is set because the container runs unprivileged.
+        - Reads target/port/exclude lists (-l/-pf/-exclude-file) and writes -o output through the session workspace when Files are enabled.
+      gotchas:
+        - SYN scans need raw sockets and are unavailable here; a CONNECT scan is used instead.
+      safe_defaults:
+        - Add -silent to trim banner and progress noise, and -p to scope ports rather than scanning the full range.
+      common_flags:
+        - "-host — target host"
+        - "-p — ports to scan"
+        - "-silent — minimal output"
+        - "-l — target list (session file)"
+      artifact_behavior: With Files enabled, -o/--output writes results into the session workspace and -l/-pf/-exclude-file read from it; bare output paths are denied.
     help:
       flags:
         - -h
@@ -2668,6 +2780,20 @@ commands:
   - root: katana
     description: Crawls web targets to discover URLs, forms, and linked resources.
     category: Network Reconnaissance
+    knowledge:
+      notes:
+        - -u crawls a single target and -list reads a URL file; control breadth with -d (depth) and -silent for clean output.
+        - -o/-elog and -srd/-sfd directories write through the session workspace when Files are enabled.
+      gotchas:
+        - Deeper -d values and headless crawling explode output volume; status and progress lines are terminal-only.
+      safe_defaults:
+        - Start shallow with -d 1 -silent and capture to -o before increasing crawl depth.
+      common_flags:
+        - "-u — target URL"
+        - "-list — URL list (session file)"
+        - "-d — crawl depth"
+        - "-silent — discovered URLs only"
+      artifact_behavior: With Files enabled, -o/--output, -elog, and -srd/-sfd directories write into the session workspace and -list/-config read from it; bare output paths are denied.
     help:
       flags:
         - -h
@@ -3204,6 +3330,20 @@ commands:
   - root: nmap
     description: Scans hosts for open ports, services, versions, and network characteristics.
     category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - Runs unprivileged, so a TCP connect scan (-sT) is injected when no scan type is given.
+        - Output flags (-oN/-oX/-oG) and input flags (-iL/--script-args-file) are rewritten into the session workspace when Files are enabled.
+      gotchas:
+        - -sS, -O, and --privileged are denied because the container has no raw-socket access; use -sT for TCP connect scans.
+      safe_defaults:
+        - Use -sT for connect scans and add -Pn to skip host discovery on filtered hosts; scope ports with -p or --top-ports.
+      common_flags:
+        - "-sT — TCP connect scan"
+        - "-sV — service/version detection"
+        - "-Pn — skip host discovery"
+        - "-p — ports to scan"
+      artifact_behavior: With Files enabled, -oN/-oX/-oG/-o write report files into the session workspace and -iL/--script-args-file read from it; raw output paths are otherwise denied.
     help:
       flags:
         - -h
@@ -3876,6 +4016,19 @@ commands:
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.
     category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - All file-output flags (--jsonfile/--csvfile/--htmlfile/--logfile and -oJ/-oA/-oj/-oC) are rewritten into the session workspace when Files are enabled.
+      gotchas:
+        - A full scan is slow and verbose; --fast or --severity HIGH trims both runtime and output noise.
+      safe_defaults:
+        - Start with --fast and narrow findings with --severity; use --sneaky for quieter probing.
+      common_flags:
+        - "--fast — lighter scan profile"
+        - "--severity — restrict findings by severity"
+        - "--full — full test suite"
+        - "--sneaky — slower, quieter checks"
+      artifact_behavior: With Files enabled, --jsonfile/--csvfile/--htmlfile/--logfile and -oJ/-oA/-oj/-oC write reports into the session workspace; bare output paths are denied.
     help:
       flags:
         - --help
@@ -4168,6 +4321,21 @@ commands:
   - root: nuclei
     description: Runs template-based checks to detect known exposures, misconfigurations, and vulnerabilities.
     category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - Templates load from /tmp/nuclei-templates (injected via -ud); pass -ud to point elsewhere.
+        - Output, response-dir, export, and log flags are rewritten into the session workspace when Files are enabled.
+      gotchas:
+        - The progress/status bar is verbose; add -silent to keep only findings.
+      safe_defaults:
+        - Scope runs with -severity high,critical or -tags so the full template set does not run; use -rl to rate-limit.
+      common_flags:
+        - "-u — single target URL"
+        - "-l — target list (session file)"
+        - "-t — template or template directory"
+        - "-severity — filter by severity"
+        - "-silent — findings-only output"
+      artifact_behavior: With Files enabled, -o/-je/-jle/-se output, -srd/-me response directories, and trace/error logs write into the session workspace; bare output paths are denied.
     help:
       flags:
         - -h

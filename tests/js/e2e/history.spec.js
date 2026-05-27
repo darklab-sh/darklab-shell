@@ -710,17 +710,21 @@ test.describe('history drawer', () => {
     await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
 
     const output = page.locator('.tab-panel.active .output')
-    await expect(output).toContainText(
-      'Use `commands --built-in` or `commands --external` to filter that catalog.',
-    )
+    // help's last three lines (tail -n 3): commands info, commands search, autocomplete hint.
     await expect(output).toContainText(
       'Use `commands info <command>` to see examples, flags, and subcommands for a supported command.',
+    )
+    await expect(output).toContainText(
+      'Use `commands search <term>` to find commands by name, description, category, or guidance notes.',
     )
     await expect(output).toContainText(
       'Autocomplete appears as you type; press Tab to accept or cycle suggestions.',
     )
     await expect(output).not.toContainText('Help and discovery:')
     await expect(output).not.toContainText('README:')
+    await expect(output).not.toContainText(
+      'Use `commands --built-in` or `commands --external` to filter that catalog.',
+    )
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 

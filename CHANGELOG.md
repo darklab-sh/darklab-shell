@@ -10,12 +10,57 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Command knowledge schema** — `commands.yaml` (and `.local` overlays) now support five optional `knowledge:` sub-fields per command entry: `notes`, `gotchas`, `safe_defaults`, `common_flags` (each a capped list of short strings), and `artifact_behavior` (a short scalar). Fields are descriptive-only and never policy-bearing.
+  - Registry loader normalizes and caps all fields (strip, dedupe, list max 5, text max 200 chars) and merges overlays per a locked policy (scalar-replace, list-extend with dedupe). Unknown fields are silently ignored in normalization and flagged only by the registry lint helper.
+  - `command_catalog_from_registry` now includes `knowledge` and `feature_required` in its projection, flowing through to the `/commands/catalog/<root>` API route automatically.
+  - **Tests:** 38 new pytest cases covering schema constants, normalization, caps, overlay merge, unknown-field lint, catalog projection, and the new pipe-catalog helper.
+
+- **`commands info` knowledge sections** — `commands info <root>` now renders Notes, Gotchas, Safe Defaults, Common Flags, and Artifact Behavior sections below the existing "App Handling" block, shown only when the registry entry carries those fields.
+  - Reuses the existing `builtin-section` / `builtin-catalog-item` style classes; no new CSS.
+
+- **`commands info --json`** — adding `--json` (accepted in any position) collapses the output to a single `builtin-json` line containing the full catalog entry serialized as sorted, deterministic JSON; intended for browser-terminal copy and debug use.
+  - **Tests:** 5 new pytest cases covering knowledge section rendering, `--json` output, flag position flexibility, and usage errors.
+
+- **Command-registry modal knowledge sections** — the Alt+C command-registry modal now renders the same Notes, Gotchas, Safe Defaults, Common Flags, and Artifact Behavior sections as the terminal, using the existing `appendCommandCatalogSection` / `makeCommandCatalogNoteRow` helpers; no new CSS or JS primitives.
+  - **Tests:** 6 new Vitest cases (`command_registry.test.js`) covering each section variant, empty-field omission, and absence of sections when knowledge is not present.
+
+- **`commands search <term>`** — new built-in that searches the enabled command catalog by root prefix, category, description, example values, and knowledge notes/gotchas; returns results grouped by category with aligned name columns, feature-gated entries excluded when the required feature is disabled.
+  - Three-tier ranking: root prefix → category body → all other fields; within each tier, roots sort alphabetically.
+  - `help` now advertises `commands search` in its output.
+  - **Tests:** 12 new pytest cases covering usage errors, root-prefix/description/category/example/knowledge matches, category grouping, tier ranking, feature gating, and the no-matches message.
+
+- **Pipe-helpers discovery section** — `commands` (and `commands --external`) now lists the app-native pipe helpers below the external catalog, with a disclaimer that they are app-managed filters and not arbitrary shell pipelines. The command-registry modal renders the same section so terminal and modal stay in parity.
+  - Helpers are read from the registry `pipe_helpers` projection and respect `feature_required`; the registry is read once and shared between the external catalog and pipes section.
+  - The `/commands/catalog` route now returns a `pipe_helpers` array so the modal can render the section without a separate request.
+  - **Tests:** 4 new pytest cases (section header, disclaimer, catalog order, `--built-in` omission) and 4 new Vitest cases covering the modal pipe-section builder.
+
+- **Output-aware `grep` autocomplete** — inside a `| grep ` pipe stage, autocomplete now suggests tokens already visible in the active tab's output — IPv4/IPv6 addresses, hostnames, CVE identifiers, HTTP status codes, and frequently repeated words — as grep patterns, ranked by token kind then frequency.
+  - Suggestions are drawn only from the active tab and never widen the allowed shell surface: they are appended to grep's existing flag/argument completions and gated to `grep`, the only pattern-taking pipe helper.
+  - Token extraction caps results, applies per-kind minimum occurrence thresholds, excludes echoed command lines, and de-duplicates across token kinds so a CVE id is never also surfaced as a bare word and IP octets never appear as HTTP status codes.
+  - **Tests:** 21 new Vitest cases covering token extraction per type, validation, ranking, the cap, active-tab-only sourcing, prompt-echo exclusion, and the grep-only pipe wiring.
+
+- **Seeded command knowledge** — `commands.yaml` now ships `knowledge` guidance for twelve high-traffic tools: `mtr`, `nmap`, `naabu`, `nuclei`, `gobuster`, `ffuf`, `testssl`, `dnsrecon`, `httpx`, `dnsx`, `subfinder`, and `katana`.
+  - Guidance focuses on web-shell-specific behavior: injected unprivileged scan types, status-line/progress noise and the quiet flags that suppress it, and how each tool's output and input flags are rewritten into the session workspace when Files are enabled.
+  - Each `artifact_behavior` is cross-checked against the tool's actual `workspace_flags`/`runtime_adaptations` so the description matches enforced behavior; bare output paths denied by policy are called out.
+
 ### Changed
+
+- **Auto-collapsing tab-bar chrome** — when the tab strip runs low on room, the right-hand chrome (search, findings badge, summarize, line numbers, timestamps) automatically collapses to a magnifier (`⌕`, opens search) plus the findings badge, so tabs reclaim the width. A leading toggle reads as its action — `»` collapses the chrome, `«` restores it — and pins the chrome open when used; the choice persists.
+  - The collapse decision is computed from intrinsic widths (tab content + full-chrome width vs. the bar width), so it is state-independent and never oscillates between collapsed and expanded.
+  - Keyboard shortcuts and the Options/mobile menus still reach search and the line-number/timestamp toggles when the inline chrome is collapsed.
+  - **Tests:** 6 new Vitest cases covering the collapse decision — pinned-open, fits, overflow, unmeasured inputs, the fit buffer boundary, and the state-independence contract.
+
+- **Tighter toolbar labels** — the line-number and timestamp toggles drop their `: on`/`: off` suffix (the active-dot indicator already shows state), and the search button no longer repeats the findings count carried by the badge beside it. The timestamp button still shows its mode (`timestamps: elapsed`/`timestamps: clock`) when active, and both toggles now expose `aria-pressed` so state stays available to assistive tech.
 
 ### Fixed
 
 - **History bulk-select drawer stability** — clicking **Select all** or **Clear** in History bulk mode no longer bubbles into document-level outside-click handlers after the toolbar re-renders.
   - **Tests:** updated the History bulk-selection unit coverage so Select all must keep document click handlers quiet while selecting the visible completed runs.
+- **Mobile menu schedule and watcher counts** — the mobile menu now shows saved-count hints for Schedules and Watchers, matching the existing count hints for History and Workflows.
+  - **Tests:** updated the mobile menu Playwright coverage to assert Schedules and Watchers render their saved counts.
+- **Atlas intel refresh feedback** — Refresh intel now shows a blocking progress panel while configured intel providers run, disables duplicate refresh actions, and uses the same wording from Atlas detail, mobile Atlas, and transcript entity menus.
+  - **Tests:** updated the Atlas overlay unit coverage to assert the loading panel and disabled refresh state.
+- **Grafana run-duration panel readability** — the example dashboard's top-5 average run-duration panel now uses an instant horizontal bar gauge over the selected dashboard range, so it stays capped at five tools and reads clearly in the Runs section.
 
 ---
 

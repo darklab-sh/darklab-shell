@@ -5128,12 +5128,21 @@ class TestCommandCatalogRoute:
                         "flags": [{"value": "--json", "description": "Emit JSON"}],
                     },
                 },
+                {
+                    "root": "workspace-tool",
+                    "category": "Registry Group",
+                    "description": "Requires workspace.",
+                    "policy": {"allow": ["workspace-tool"]},
+                    "feature_required": "workspace",
+                },
             ],
             "pipe_helpers": [],
         }
-        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch.dict("config.CFG", {"workspace_enabled": False}):
             index_resp = client.get("/commands/catalog")
             resp = client.get("/commands/catalog/sentinel")
+            disabled_resp = client.get("/commands/catalog/workspace-tool")
 
         assert index_resp.status_code == 200
         index_data = json.loads(index_resp.data)
@@ -5146,6 +5155,7 @@ class TestCommandCatalogRoute:
             "subcommand_count": 0,
             "flag_count": 1,
         }]
+        assert "workspace-tool" not in {item["root"] for item in index_data["commands"]}
         assert index_data["groups"][0]["name"] == "Registry Group"
         assert index_data["groups"][0]["commands"] == index_data["commands"]
         assert {
@@ -5184,6 +5194,7 @@ class TestCommandCatalogRoute:
         assert data["requires_secrets"] == [{"env": "SHODAN_API_KEY", "optional": False}]
         assert data["examples"][0]["value"] == "sentinel darklab.sh"
         assert data["flags"][0]["value"] == "--json"
+        assert disabled_resp.status_code == 404
 
     def test_returns_404_for_unknown_command(self):
         client = get_client()

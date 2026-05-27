@@ -965,6 +965,20 @@ The app-native `intel` built-in uses the same encrypted-secret boundary without 
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the brokered stream applies the selected helper before lines are emitted or persisted.
 
+### Command Registry And Discovery
+
+`app/conf/commands.yaml` (plus optional `commands.local.yaml` overlays) is the single source of truth for every external-command surface: allow/deny policy, autocomplete grammar, runtime rewrites, workspace flags, `requires_secrets`, and the user-facing reference catalog. `command_catalog_from_registry()` projects each allow-listed entry into a normalized catalog — root, category, description, examples, flags, subcommands, `feature_required`, and an optional `knowledge` block — that feeds the discovery built-ins and the `/commands/catalog` route. `pipe_catalog_from_registry()` projects the `pipe_helpers` section the same way.
+
+The `knowledge` block carries operator guidance only and never affects policy. It has four capped list fields — `notes`, `gotchas`, `safe_defaults`, and `common_flags` — and one scalar field, `artifact_behavior`. The registry loader normalizes every field (strip, dedupe, drop empties, list capped at five items, text capped at 200 characters); overlays replace scalar fields and extend list fields with dedupe. Unknown keys are silently ignored during normalization and surfaced only by the registry lint helper, so a malformed `.local` overlay never hard-fails a load.
+
+The discovery built-ins all read the same projected catalog and exclude entries whose `feature_required` is disabled on the instance:
+
+- `commands` lists built-ins and allow-listed external roots, then an app-native pipe-helpers section drawn from the `pipe_helpers` projection.
+- `commands info <root> [subcommand]` renders the catalog entry, including the `knowledge` sections, and `--json` collapses the entry to one deterministic, sorted JSON line for browser-terminal copy and debug use.
+- `commands search <term>` ranks catalog matches across root, category, description, example values, and knowledge notes/gotchas, grouped by category.
+
+The command-registry modal and the `| grep` autocomplete (which suggests tokens already visible in the active tab's output) consume the same catalog data, so terminal and browser surfaces stay in parity without re-reading YAML.
+
 ### Spawn And Stream
 
 Commands flow through `POST /runs`, which validates and rewrites the request, resolves any app-native built-in commands, starts brokered execution, and returns a run id plus stream URL. The browser then subscribes to `GET /runs/<run_id>/stream`, which replays available broker events and follows live output over SSE. Production deployments require Redis for cross-worker replay; single-process local development can opt into the in-memory broker fallback.
@@ -1888,12 +1902,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,246
+- behavior tests: 3,342
 - docs/inventory meta-tests: 33
-- `pytest`: 1796 (1763 behavior + 33 meta)
-- `vitest`: 1247
+- `pytest`: 1855 (1822 behavior + 33 meta)
+- `vitest`: 1284
 - `playwright`: 253
-- total: 3,296
+- total: 3,392
 
 ### Testing Architecture
 

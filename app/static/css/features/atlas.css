@@ -12,6 +12,65 @@
   display: flex;
 }
 
+.atlas-intel-refresh-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--theme-bg) 58%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.atlas-intel-refresh-overlay.u-hidden {
+  display: none;
+}
+
+.atlas-intel-refresh-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  width: min(360px, 100%);
+  padding: 18px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 8px;
+  background: var(--theme-panel-bg);
+  box-shadow: 0 16px 42px var(--theme-chrome-shadow);
+}
+
+.atlas-intel-refresh-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid color-mix(in srgb, var(--blue) 24%, transparent);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: atlas-intel-refresh-spin 0.9s linear infinite;
+}
+
+.atlas-intel-refresh-title {
+  color: var(--theme-text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.atlas-intel-refresh-body {
+  margin-top: 4px;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@keyframes atlas-intel-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .atlas-surface {
   display: flex;
   flex-direction: column;

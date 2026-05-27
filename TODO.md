@@ -19,13 +19,10 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Multi-operator / team mode](#multi-operator--team-mode)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
-  - [Tool-specific guidance](#tool-specific-guidance)
-  - [Command catalog future-state](#command-catalog-future-state)
   - [Command outcome summaries](#command-outcome-summaries)
   - [Transcript noise classification](#transcript-noise-classification)
   - [Run comparison enhancements](#run-comparison-enhancements)
   - [Bulk history export and share](#bulk-history-export-and-share)
-  - [Autocomplete suggestions from output context](#autocomplete-suggestions-from-output-context)
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
@@ -40,8 +37,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Open TODOs
 
 No Open TODOs are currently tracked.
-
----
 
 ## Known Issues
 
@@ -138,24 +133,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
 - Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
 
-### Tool-specific guidance
-- Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `naabu`, or `nuclei`.
-- Good fit for the existing help / FAQ / welcome surfaces.
-- Merge this with onboarding and command hints into a broader user guidance layer:
-  - command-specific caveats
-  - what to expect while a tool runs
-  - examples of when to use one tool vs another
-
-### Command catalog future-state
-- Add `commands search <term>` for roots, descriptions, categories, examples, and flag text.
-- Add `commands --json` or `commands info --json <root>` for debugging, export, and future UI reuse.
-- Add optional richer registry fields such as `details`, `notes`, `common_flags`, or `gotchas` when a flag or tool needs more than a short autocomplete description.
-- Add command-specific guidance for web-shell behavior, including injected safe defaults, quiet-running tools, generated Files output, and managed session state.
-- Add autocomplete side previews later: when a root, subcommand, or flag is highlighted, show the command description or flag note in a small help pane.
-- Add hover/focus cards for FAQ chips once the command-details modal behavior has settled.
-- Consider including pipe helpers in a separate “Pipes” section once command catalog UX exists.
-- Consider linking command catalog entries to real `man` output where available, while keeping app-native allowed-subset details primary.
-
 ### Command outcome summaries
 - For selected tools, generate short app-native summaries below the raw output. Security tool output is high-volume; a clear findings layer is what separates a purpose-built tool from a raw terminal.
 - Keep raw output primary — the summary is additive, never a replacement.
@@ -196,10 +173,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### Bulk history export and share
 - The history drawer can delete all, delete non-favorites, and use visible-page multi-select for bulk project add/remove plus selected-item delete. Bulk export to JSONL/txt and bulk share would close the remaining gap when packaging selected history items after an engagement.
-
-### Autocomplete suggestions from output context
-- When a previous command's output is in the active tab, `| grep` completions could suggest patterns already present in that output — IP addresses, hostnames, status codes, CVE strings — as candidates alongside the generic flag list.
-- Narrow but would make the pipe stage feel predictive rather than generic.
 
 ### Mobile share ergonomics
 - The native share-sheet for permalink URLs is done (v1.5, `navigator.share()` with clipboard fallback). What remains is making the broader mobile save/share experience feel intentional:

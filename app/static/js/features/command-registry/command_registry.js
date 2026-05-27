@@ -258,6 +258,32 @@ function makeCommandRegistryRow(command) {
   return row;
 }
 
+function makeCommandRegistryPipeSection(pipes) {
+  if (!Array.isArray(pipes)) return null;
+  const validPipes = pipes.filter(p => commandCatalogText(p?.root));
+  if (!validPipes.length) return null;
+  const section = document.createElement('section');
+  section.className = 'command-catalog-section';
+  const heading = document.createElement('div');
+  heading.className = 'command-catalog-section-title';
+  heading.textContent = 'App-native pipe helpers';
+  const disclaimer = document.createElement('p');
+  disclaimer.className = 'command-catalog-note';
+  disclaimer.textContent = 'App-managed filters — not arbitrary shell pipelines.';
+  const list = document.createElement('div');
+  list.className = 'command-catalog-list';
+  validPipes.forEach(pipe => {
+    const row = makeCommandCatalogRow(
+      String(pipe.root || '').trim(),
+      String(pipe.description || '').trim(),
+    );
+    if (row) list.appendChild(row);
+  });
+  if (!list.childElementCount) return null;
+  section.append(heading, disclaimer, list);
+  return section;
+}
+
 function renderCommandRegistry() {
   if (!commandRegistryBody) return;
   renderCommandRegistryCategories();
@@ -283,12 +309,14 @@ function renderCommandRegistry() {
       ? 'No commands match that search.'
       : 'No command registry entries are available right now.';
     commandRegistryBody.appendChild(empty);
-    return;
+  } else {
+    commands.forEach(command => {
+      const row = makeCommandRegistryRow(command);
+      if (row) commandRegistryBody.appendChild(row);
+    });
   }
-  commands.forEach(command => {
-    const row = makeCommandRegistryRow(command);
-    if (row) commandRegistryBody.appendChild(row);
-  });
+  const pipeSection = makeCommandRegistryPipeSection(commandRegistryData?.pipe_helpers);
+  if (pipeSection) commandRegistryBody.appendChild(pipeSection);
 }
 
 function openCommandRegistry() {
@@ -551,6 +579,16 @@ function renderCommandCatalogModal(data) {
     makeCommandCatalogRow(item?.flag, [item?.mode, item?.value].map(value => commandCatalogText(value)).filter(Boolean).join(' · '))
   ));
   appendCommandCatalogSection(commandCatalogBody, 'App Handling', data?.runtime_notes || [], makeCommandCatalogNoteRow);
+
+  const knowledge = data?.knowledge || {};
+  appendCommandCatalogSection(commandCatalogBody, 'Notes', knowledge.notes || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(commandCatalogBody, 'Gotchas', knowledge.gotchas || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(commandCatalogBody, 'Safe Defaults', knowledge.safe_defaults || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(commandCatalogBody, 'Common Flags', knowledge.common_flags || [], makeCommandCatalogNoteRow);
+  if (knowledge.artifact_behavior) {
+    appendCommandCatalogSection(commandCatalogBody, 'Artifact Behavior', [knowledge.artifact_behavior], makeCommandCatalogNoteRow);
+  }
+
   wireCommandCatalogExamples(commandCatalogBody);
 }
 

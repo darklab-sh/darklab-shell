@@ -929,7 +929,7 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-clock')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
     expect(document.getElementById('options-compare-view-mode-select').value).toBe('unified')
     expect(document.getElementById('options-compare-context-select').value).toBe('10')
@@ -1198,7 +1198,7 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ts-clock')).toBe(false)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
   })
 
   it('_setLnMode updates body classes and button labels', async () => {
@@ -1207,12 +1207,12 @@ describe('app helpers', () => {
     _setLnMode('on')
 
     expect(document.body.classList.contains('ln-on')).toBe(true)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
 
     _setLnMode('off')
 
     expect(document.body.classList.contains('ln-on')).toBe(false)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
   })
 
   it('allows timestamps and line numbers to be enabled at the same time', async () => {
@@ -1223,7 +1223,7 @@ describe('app helpers', () => {
 
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
   })
 
@@ -2426,7 +2426,8 @@ describe('app helpers', () => {
     _setTsMode('off')
 
     expect(tsBtn.classList.contains('active')).toBe(false)
-    expect(tsBtn.textContent).toBe('timestamps: off')
+    expect(tsBtn.textContent).toBe('timestamps')
+    expect(tsBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
   it('bootstraps cleanly when config and allowed-commands fetches fail', async () => {
@@ -6097,7 +6098,7 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
     expect(document.cookie).toContain('pref_timestamps=elapsed')
     expect(document.cookie).toContain('pref_line_numbers=on')

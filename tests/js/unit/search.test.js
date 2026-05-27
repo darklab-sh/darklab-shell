@@ -452,7 +452,9 @@ describe('search helpers', () => {
 
     refreshSearchDiscoverabilityUi()
 
-    expect(document.getElementById('searchToggleBtn').textContent).toBe('⌕ search • 1 finding')
+    // The button label stays plain; the finding count is carried by the scope
+    // labels and the signal-summary badge instead.
+    expect(document.getElementById('searchToggleBtn').textContent).toBe('⌕ search')
     expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (1)')
     expect(document.querySelector('[data-search-scope="warnings"]').textContent).toBe('warnings (1)')
     expect(document.querySelector('[data-search-scope="errors"]').textContent).toBe('errors (1)')

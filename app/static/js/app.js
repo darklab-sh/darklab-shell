@@ -440,7 +440,9 @@ function performMobileEditAction(action) {
 
 // ── Timestamps ──
 const _tsModes  = ['off', 'elapsed', 'clock'];
-const _tsLabels = { off: 'timestamps: off', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
+// Off drops the suffix (the active-dot indicator shows on/off); the active
+// modes keep their name so elapsed and clock stay distinguishable at a glance.
+const _tsLabels = { off: 'timestamps', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
 
 function _setTsMode(mode) {
   // Timestamp mode is expressed via body classes so both active transcript
@@ -450,7 +452,11 @@ function _setTsMode(mode) {
   if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
   if (mode === 'clock')   document.body.classList.add('ts-clock');
   const label = _tsLabels[mode];
-  if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
+  if (tsBtn) {
+    tsBtn.textContent = label;
+    tsBtn.classList.toggle('active', mode !== 'off');
+    tsBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
+  }
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
 }

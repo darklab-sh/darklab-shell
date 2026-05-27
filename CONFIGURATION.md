@@ -353,7 +353,7 @@ The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry po
 
 ## Command Registry Autocomplete
 
-`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, descriptive knowledge guidance, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
 
 ```yaml
 commands:
@@ -442,6 +442,38 @@ How the keys work:
 - `pipe_helpers`
   - top-level registry entries for helpers that appear after `command |`
   - each helper has its own `autocomplete.pipe.enabled`, flags, arguments, and optional insert/display metadata
+
+### Command Knowledge
+
+A command root can carry an optional `knowledge` block — operator guidance shown in `commands info <root>`, `commands search`, and the Command Registry modal. It is a sibling of `autocomplete`, not nested inside it:
+
+```yaml
+commands:
+  - root: nmap
+    category: Port & Service Scanning
+    knowledge:
+      notes:
+        - Runs unprivileged, so a TCP connect scan (-sT) is injected when no scan type is given.
+      gotchas:
+        - -sS, -O, and --privileged are denied because the container has no raw-socket access.
+      safe_defaults:
+        - Use -sT for connect scans and add -Pn to skip host discovery on filtered hosts.
+      common_flags:
+        - "-sT — TCP connect scan"
+        - "-sV — service/version detection"
+      artifact_behavior: With Files enabled, -oN/-oX/-oG write report files into the session workspace; raw output paths are otherwise denied.
+```
+
+How the fields work:
+
+- `notes`, `gotchas`, `safe_defaults`, `common_flags`
+  - list fields, each holding short free-text strings
+  - normalized on load: stripped, de-duplicated, empties dropped, capped at five items, each truncated to 200 characters
+- `artifact_behavior`
+  - a single short scalar string describing where the tool writes output, truncated to 200 characters
+- all `knowledge` fields are descriptive only and never affect allow/deny policy, validation, or execution
+- in a `commands.local.yaml` overlay, scalar fields replace the base value and list fields extend the base list with de-duplication
+- unknown keys inside `knowledge` are ignored on load and reported only by the registry lint helper, so an overlay typo never hard-fails the registry
 
 More examples:
 

@@ -1,0 +1,178 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import { fromDomScripts } from './helpers/extract.js'
+
+function setupCatalogDom() {
+  document.body.innerHTML = `
+    <div id="command-catalog-overlay"></div>
+    <div id="command-catalog-body"></div>
+    <div class="faq-body"></div>
+    <input id="cmd" />
+  `
+}
+
+// Returns the base globals shared across both test loaders.
+// Called lazily inside each loader so `document` and `window` are available
+// (they are injected by the jsdom environment only when tests actually run,
+// not at module-load time).
+function registryGlobals(extra = {}) {
+  return {
+    document,
+    window,
+    commandCatalogOverlay: null,
+    faqBody: null,
+    commandRegistryOverlay: null,
+    commandRegistryBody: null,
+    commandRegistrySearch: null,
+    commandRegistryCategories: null,
+    apiFetch: () => {},
+    logClientError: () => {},
+    setComposerValue: () => {},
+    ...extra,
+  }
+}
+
+function loadRegistryFns() {
+  setupCatalogDom()
+  // dom.js cannot be included in relPaths: its const declarations would create a
+  // temporal dead zone conflict with ui_helpers.js's IIFE (which references searchBar
+  // at module-evaluation time, before dom.js runs). Pass the handful of DOM
+  // references needed by renderCommandCatalogModal as explicit globals instead.
+  const commandCatalogBody = document.getElementById('command-catalog-body')
+  return fromDomScripts(
+    ['app/static/js/features/command-registry/command_registry.js'],
+    registryGlobals({ commandCatalogBody }),
+    '{ renderCommandCatalogModal }',
+  )
+}
+
+function loadPipeFns() {
+  document.body.innerHTML = ''
+  return fromDomScripts(
+    ['app/static/js/features/command-registry/command_registry.js'],
+    registryGlobals({ commandCatalogBody: null }),
+    '{ makeCommandRegistryPipeSection }',
+  )
+}
+
+describe('renderCommandCatalogModal — knowledge sections', () => {
+  let renderCommandCatalogModal
+  let body
+
+  beforeEach(() => {
+    ;({ renderCommandCatalogModal } = loadRegistryFns())
+    body = document.getElementById('command-catalog-body')
+  })
+
+  function sectionTitles() {
+    return [...body.querySelectorAll('.command-catalog-section-title')].map(el => el.textContent)
+  }
+
+  function tokenTexts() {
+    return [...body.querySelectorAll('.command-catalog-token')].map(el => el.textContent)
+  }
+
+  it('renders Notes section when data.knowledge.notes is non-empty', () => {
+    renderCommandCatalogModal({ root: 'nmap', knowledge: { notes: ['Check rate limits.'] } })
+    expect(sectionTitles()).toContain('Notes')
+    expect(tokenTexts()).toContain('Check rate limits.')
+  })
+
+  it('renders all four list knowledge sections with their items', () => {
+    renderCommandCatalogModal({
+      root: 'nmap',
+      knowledge: {
+        notes: ['Note one.'],
+        gotchas: ['Gotcha one.'],
+        safe_defaults: ['Default one.'],
+        common_flags: ['Flag one.'],
+      },
+    })
+    const titles = sectionTitles()
+    expect(titles).toContain('Notes')
+    expect(titles).toContain('Gotchas')
+    expect(titles).toContain('Safe Defaults')
+    expect(titles).toContain('Common Flags')
+    const tokens = tokenTexts()
+    expect(tokens).toContain('Note one.')
+    expect(tokens).toContain('Gotcha one.')
+    expect(tokens).toContain('Default one.')
+    expect(tokens).toContain('Flag one.')
+  })
+
+  it('renders artifact_behavior as a single-item Artifact Behavior section', () => {
+    renderCommandCatalogModal({
+      root: 'nmap',
+      knowledge: { artifact_behavior: 'Creates scan.json in the workspace.' },
+    })
+    expect(sectionTitles()).toContain('Artifact Behavior')
+    expect(tokenTexts()).toContain('Creates scan.json in the workspace.')
+  })
+
+  it('omits all knowledge sections when knowledge is absent', () => {
+    renderCommandCatalogModal({ root: 'nmap' })
+    const titles = sectionTitles()
+    expect(titles).not.toContain('Notes')
+    expect(titles).not.toContain('Gotchas')
+    expect(titles).not.toContain('Safe Defaults')
+    expect(titles).not.toContain('Common Flags')
+    expect(titles).not.toContain('Artifact Behavior')
+  })
+
+  it('omits list knowledge sections when all arrays are empty', () => {
+    renderCommandCatalogModal({
+      root: 'nmap',
+      knowledge: { notes: [], gotchas: [], safe_defaults: [], common_flags: [] },
+    })
+    const titles = sectionTitles()
+    expect(titles).not.toContain('Notes')
+    expect(titles).not.toContain('Gotchas')
+    expect(titles).not.toContain('Safe Defaults')
+    expect(titles).not.toContain('Common Flags')
+  })
+
+  it('omits Artifact Behavior section when artifact_behavior is absent', () => {
+    renderCommandCatalogModal({ root: 'nmap', knowledge: {} })
+    expect(sectionTitles()).not.toContain('Artifact Behavior')
+  })
+})
+
+describe('makeCommandRegistryPipeSection', () => {
+  let makeCommandRegistryPipeSection
+
+  beforeEach(() => {
+    ;({ makeCommandRegistryPipeSection } = loadPipeFns())
+  })
+
+  it('renders pipe helpers section with title and pipe rows', () => {
+    const pipes = [
+      { root: 'grep', description: 'Filter lines by pattern' },
+      { root: 'head', description: 'Show the first lines' },
+    ]
+    const section = makeCommandRegistryPipeSection(pipes)
+    expect(section).not.toBeNull()
+    const title = section.querySelector('.command-catalog-section-title')
+    expect(title.textContent).toBe('App-native pipe helpers')
+    const tokens = [...section.querySelectorAll('.command-catalog-token')].map(el => el.textContent)
+    expect(tokens).toContain('grep')
+    expect(tokens).toContain('head')
+  })
+
+  it('renders disclaimer text', () => {
+    const section = makeCommandRegistryPipeSection([
+      { root: 'grep', description: 'Filter lines by pattern' },
+    ])
+    expect(section).not.toBeNull()
+    const disclaimer = section.querySelector('.command-catalog-note')
+    expect(disclaimer.textContent).toContain('App-managed filters')
+    expect(disclaimer.textContent).toContain('not arbitrary shell pipelines')
+  })
+
+  it('returns null when pipe_helpers is an empty array', () => {
+    expect(makeCommandRegistryPipeSection([])).toBeNull()
+  })
+
+  it('returns null when pipe_helpers is absent', () => {
+    expect(makeCommandRegistryPipeSection(null)).toBeNull()
+    expect(makeCommandRegistryPipeSection(undefined)).toBeNull()
+  })
+})

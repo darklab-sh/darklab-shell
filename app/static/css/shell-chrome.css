@@ -654,6 +654,42 @@
     flex: 0 0 auto;
   }
 
+  /* Collapsed chrome: hide the controls, keep the findings badge + toggle so the
+     tab strip reclaims the width. The badge (#search-signal-summary) is not a
+     .chrome-collapsible, so it stays visible when there are signals.
+     !important is required because the controls (#search-toggle-btn, #ln-btn, …)
+     set display via ID selectors, which a class-only rule cannot override. */
+  .terminal-bar.tabbar.chrome-collapsed .chrome-collapsible {
+    display: none !important;
+  }
+
+  /* Collapsed: keep the search button as a magnifier-only opener (drop its
+     label, keep the ⌕ glyph from ::before) and strip its button border so it
+     reads as a bare icon. Specificity (id + classes + pseudo) outranks the base
+     #search-toggle-btn rules. */
+  .terminal-bar.tabbar.chrome-collapsed #search-toggle-btn::after {
+    display: none;
+  }
+
+  .terminal-bar.tabbar.chrome-collapsed #search-toggle-btn,
+  .terminal-bar.tabbar.chrome-collapsed #search-toggle-btn:hover {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  #tabbar-chrome-toggle {
+    flex: 0 0 auto;
+    min-width: 22px;
+    margin-right: 2px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--muted);
+  }
+
+  #tabbar-chrome-toggle:hover:not(:disabled) {
+    color: var(--text);
+  }
+
   /* ---- Terminal body container — strip the outer frame ---- */
   .main-col > .terminal-wrap {
     background: var(--bg);

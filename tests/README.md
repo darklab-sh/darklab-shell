@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,246
+- behavior tests: 3,342
 - docs/inventory meta-tests: 33
-- `pytest`: 1796 (1763 behavior + 33 meta)
-- `vitest`: 1247
+- `pytest`: 1855 (1822 behavior + 33 meta)
+- `vitest`: 1284
 - `playwright`: 253
-- total: 3,296
+- total: 3,392
 
 This document is organized in two parts:
 
@@ -626,6 +626,44 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_command_policy_can_be_derived_from_commands_registry` | Verifies that command-policy allow and deny prefixes are derived from `commands.yaml` policy entries. |
 | `TestDerivedCommandRegistry.test_allow_grouping_flags_can_be_derived_from_commands_registry` | Verifies that `allow_grouping` command metadata is normalized into policy-only short-flag grouping data. |
 | `TestDerivedCommandRegistry.test_allow_grouping_flags_match_short_flag_bundles` | Verifies that grouped short flags can satisfy allow-prefix policy without treating unrelated multi-character flags as grouped aliases. |
+| `TestCommandKnowledgeSchema.test_knowledge_list_fields_are_correct` | Verifies that the knowledge list-field set contains exactly the four expected descriptive field names. |
+| `TestCommandKnowledgeSchema.test_knowledge_scalar_fields_are_correct` | Verifies that the knowledge scalar-field set contains exactly `artifact_behavior`. |
+| `TestCommandKnowledgeSchema.test_knowledge_fields_is_union_of_list_and_scalar` | Verifies that `KNOWLEDGE_FIELDS` equals the union of the list and scalar field sets. |
+| `TestCommandKnowledgeSchema.test_knowledge_list_and_scalar_fields_are_disjoint` | Verifies that no field name appears in both the list and scalar sets. |
+| `TestCommandKnowledgeSchema.test_caps_are_positive_integers` | Verifies that `KNOWLEDGE_LIST_MAX_ITEMS` and `KNOWLEDGE_TEXT_MAX_CHARS` are positive integers. |
+| `TestCommandKnowledgeSchema.test_knowledge_is_in_known_command_fields` | Verifies that the `knowledge` key is already present in the known-command-fields set so Phase 1 normalizer additions will not trip the lint. |
+| `TestCommandKnowledgeSchema.test_known_command_fields_covers_all_normalizer_inputs` | Verifies that every top-level key consumed by `normalize_commands_registry_entry` is in the known-fields set. |
+| `TestCommandKnowledgeSchema.test_pipe_helper_known_fields_are_subset_of_command_fields` | Verifies that the pipe-helper known-fields set is a strict subset of the full command known-fields set. |
+| `TestCommandKnowledgeSchema.test_clean_command_entry_returns_empty` | Verifies that `check_unknown_command_fields` returns an empty list for a fully well-formed command entry. |
+| `TestCommandKnowledgeSchema.test_unknown_fields_returned_sorted` | Verifies that `check_unknown_command_fields` returns a sorted list of unrecognised keys. |
+| `TestCommandKnowledgeSchema.test_pipe_helper_entry_clean` | Verifies that `check_unknown_command_fields` returns an empty list for a well-formed pipe-helper entry. |
+| `TestCommandKnowledgeSchema.test_pipe_helper_rejects_command_only_fields` | Verifies that `check_unknown_command_fields` flags command-only keys (such as `category`) as unknown when called with `pipe_helper=True`. |
+| `TestCommandKnowledgeSchema.test_non_dict_input_returns_empty` | Verifies that `check_unknown_command_fields` returns an empty list for non-dict input without raising. |
+| `TestCommandKnowledgeNormalization.test_list_fields_parsed_and_returned` | Verifies that list-shaped knowledge fields are parsed from raw YAML and returned in the normalized dict. |
+| `TestCommandKnowledgeNormalization.test_scalar_field_parsed_and_returned` | Verifies that scalar knowledge fields are parsed from raw YAML and returned as a single string. |
+| `TestCommandKnowledgeNormalization.test_items_stripped` | Verifies that knowledge list items are stripped of surrounding whitespace during normalization. |
+| `TestCommandKnowledgeNormalization.test_empty_items_dropped` | Verifies that empty and whitespace-only knowledge list items are dropped during normalization. |
+| `TestCommandKnowledgeNormalization.test_duplicate_items_deduped` | Verifies that duplicate knowledge list items are deduplicated while preserving insertion order. |
+| `TestCommandKnowledgeNormalization.test_list_items_truncated_at_cap` | Verifies that knowledge list items longer than `KNOWLEDGE_TEXT_MAX_CHARS` are truncated to the cap. |
+| `TestCommandKnowledgeNormalization.test_scalar_truncated_at_cap` | Verifies that scalar knowledge values longer than `KNOWLEDGE_TEXT_MAX_CHARS` are truncated to the cap. |
+| `TestCommandKnowledgeNormalization.test_list_capped_at_max_items` | Verifies that knowledge list fields are capped at `KNOWLEDGE_LIST_MAX_ITEMS` entries. |
+| `TestCommandKnowledgeNormalization.test_unknown_sub_fields_silently_ignored` | Verifies that unrecognised sub-keys inside the `knowledge` dict are silently ignored. |
+| `TestCommandKnowledgeNormalization.test_non_dict_raw_knowledge_returns_empty` | Verifies that a non-dict `knowledge` value returns an empty dict without raising. |
+| `TestCommandKnowledgeNormalization.test_empty_dict_returns_empty` | Verifies that an empty `knowledge` dict produces an empty normalized result. |
+| `TestCommandKnowledgeNormalization.test_all_empty_values_returns_empty` | Verifies that all-empty knowledge values produce an empty normalized result. |
+| `TestCommandKnowledgeNormalization.test_knowledge_present_in_normalized_entry` | Verifies that a registry entry with a `knowledge` block produces the correct normalized `knowledge` sub-dict after loading. |
+| `TestCommandKnowledgeNormalization.test_knowledge_absent_when_not_in_yaml` | Verifies that a registry entry without a `knowledge` block has no `knowledge` key in the normalized entry. |
+| `TestCommandKnowledgeNormalization.test_feature_required_projected_onto_catalog_entry` | Verifies that `feature_required` is projected onto catalog entries returned by `command_catalog_from_registry`. |
+| `TestCommandKnowledgeNormalization.test_feature_required_none_when_absent` | Verifies that `feature_required` is `None` on catalog entries when absent from the registry entry. |
+| `TestCommandKnowledgeNormalization.test_knowledge_projected_onto_catalog_entry` | Verifies that the `knowledge` sub-dict is projected onto catalog entries returned by `command_catalog_from_registry`. |
+| `TestCommandKnowledgeNormalization.test_knowledge_empty_dict_when_absent` | Verifies that the `knowledge` key on a catalog entry is an empty dict when the registry entry has no knowledge block. |
+| `TestCommandKnowledgeNormalization.test_local_overlay_extends_list_knowledge_fields` | Verifies that a `.local` overlay appends new items to list-shaped knowledge fields without replacing the base. |
+| `TestCommandKnowledgeNormalization.test_local_overlay_dedupes_list_items` | Verifies that items duplicated between the base and a `.local` overlay are deduplicated in the merged result. |
+| `TestCommandKnowledgeNormalization.test_local_overlay_replaces_scalar_knowledge_fields` | Verifies that a `.local` overlay replaces scalar knowledge fields entirely (scalar-replace merge strategy). |
+| `TestCommandKnowledgeNormalization.test_pipe_catalog_returns_pipe_helpers` | Verifies that `pipe_catalog_from_registry` returns pipe-helper entries with correct root, description, and flags. |
+| `TestCommandKnowledgeNormalization.test_pipe_catalog_real_registry_returns_app_native_helpers` | Verifies that `pipe_catalog_from_registry` returns the real app-native pipe helpers (grep, head, tail) from the live `commands.yaml`. |
+| `TestCommandKnowledgeNormalization.test_pipe_catalog_entry_has_no_feature_required_when_absent` | Verifies that `feature_required` is absent from pipe catalog entries that do not declare a feature requirement. |
+| `TestCommandKnowledgeNormalization.test_pipe_catalog_disabled_entry_excluded` | Verifies that pipe helpers with `pipe.enabled: false` are excluded from the catalog. |
 | `TestLoadFaq.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
 | `TestLoadFaq.test_valid_entries_returned` | Checks valid entries returned handling. |
 | `TestLoadFaq.test_markdown_style_markup_renders_to_answer_html` | Checks that markdown style markup renders to answer HTML. |
@@ -1297,7 +1335,28 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestBuiltinCommandResolution.test_commands_external_catalog_uses_commands_registry` | Verifies that `commands --external` renders allowed external roots from `commands.yaml` rather than a duplicated list. |
 | `TestBuiltinCommandResolution.test_commands_info_renders_registry_catalog_entry` | Verifies that `commands info <root>` renders command descriptions, examples, and value-taking flags from the registry catalog without exposing internal app-handling notes. |
 | `TestBuiltinCommandResolution.test_commands_info_unknown_root_returns_usage_hint` | Verifies that `commands info` returns a clear no-entry message for unknown roots. |
+| `TestBuiltinCommandResolution.test_commands_info_renders_knowledge_list_fields` | Verifies that `commands info` renders Notes, Gotchas, Safe Defaults, and Common Flags sections when the registry entry carries knowledge list fields. |
+| `TestBuiltinCommandResolution.test_commands_info_renders_artifact_behavior` | Verifies that `commands info` renders an Artifact Behavior section when the registry entry carries the `artifact_behavior` scalar field. |
+| `TestBuiltinCommandResolution.test_commands_info_json_flag_returns_single_builtin_json_line` | Verifies that `commands info <root> --json` returns exactly one `builtin-json` line containing parseable JSON with the entry's root and knowledge fields. |
+| `TestBuiltinCommandResolution.test_commands_info_json_flag_accepted_before_root` | Verifies that `--json` is accepted in any position relative to the root argument. |
+| `TestBuiltinCommandResolution.test_commands_info_json_only_returns_usage_error` | Verifies that `commands info --json` with no root argument returns a usage error. |
 | `TestBuiltinCommandResolution.test_rejects_non_builtin_commands` | Checks that rejects non built-in commands. |
+| `TestCommandsSearch.test_usage_error_when_no_term` | Verifies that `commands search` with no term returns a usage error. |
+| `TestCommandsSearch.test_root_prefix_match_returns_result` | Verifies that a search term matching a command root prefix returns that command. |
+| `TestCommandsSearch.test_description_match_returns_result` | Verifies that a search term matching a command description returns that command. |
+| `TestCommandsSearch.test_category_match_returns_result` | Verifies that a search term matching a category name returns all commands in that category. |
+| `TestCommandsSearch.test_example_value_match_returns_result` | Verifies that a search term matching an example value returns that command. |
+| `TestCommandsSearch.test_knowledge_notes_match_returns_result` | Verifies that a search term matching a knowledge notes entry returns that command. |
+| `TestCommandsSearch.test_knowledge_gotchas_match_returns_result` | Verifies that a search term matching a knowledge gotchas entry returns that command. |
+| `TestCommandsSearch.test_results_grouped_by_category` | Verifies that multiple matches in the same category are grouped under a shared category header. |
+| `TestCommandsSearch.test_root_prefix_ranked_above_category_match` | Verifies that a root-prefix match is ranked above a category-body match for the same term. |
+| `TestCommandsSearch.test_feature_required_excluded_when_disabled` | Verifies that commands with a disabled `feature_required` are excluded from search results. |
+| `TestCommandsSearch.test_feature_required_included_when_enabled` | Verifies that commands with an enabled `feature_required` are included in search results. |
+| `TestCommandsSearch.test_no_matches_returns_message` | Verifies that a term with no matches returns a descriptive no-matches message. |
+| `TestCommandsPipesSection.test_commands_shows_pipes_section_header` | Verifies that `commands` renders an "App-native pipe helpers" section. |
+| `TestCommandsPipesSection.test_commands_pipes_section_includes_disclaimer` | Verifies that the pipes section carries the app-managed-filters, not-arbitrary-pipelines disclaimer line. |
+| `TestCommandsPipesSection.test_commands_pipes_listed_in_catalog_order` | Verifies that pipe helpers are listed in registry catalog order. |
+| `TestCommandsPipesSection.test_commands_builtin_only_flag_omits_pipes_section` | Verifies that `commands --built-in` omits the pipe-helpers section. |
 
 #### `test_routes.py`
 
@@ -2419,6 +2478,21 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `mobile recents pagination buttons render with allowed primitives` | Verifies that the mobile recents sheet pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
 | `mobile history surface opens without forcing a run-only type filter` | Verifies that the mobile History entry point opens the shared History panel without overriding the current `type` filter. |
 
+#### `command_registry.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders Notes section when data.knowledge.notes is non-empty` | Verifies that the command catalog modal renders a Notes section with the correct item text when `knowledge.notes` is non-empty. |
+| `renders all four list knowledge sections with their items` | Verifies that Notes, Gotchas, Safe Defaults, and Common Flags sections all render with their respective item text when all four fields are present. |
+| `renders artifact_behavior as a single-item Artifact Behavior section` | Verifies that the Artifact Behavior section appears with the scalar value as the sole row when `knowledge.artifact_behavior` is set. |
+| `omits all knowledge sections when knowledge is absent` | Verifies that no knowledge section headings appear when the catalog data has no `knowledge` field. |
+| `omits list knowledge sections when all arrays are empty` | Verifies that sections with empty arrays are not rendered. |
+| `omits Artifact Behavior section when artifact_behavior is absent` | Verifies that the Artifact Behavior section is omitted when `knowledge.artifact_behavior` is not set. |
+| `renders pipe helpers section with title and pipe rows` | Verifies that the command-registry pipe-helpers section renders its title and a row per pipe helper. |
+| `renders disclaimer text` | Verifies that the pipe-helpers section renders the app-managed-filters, not-arbitrary-pipelines disclaimer. |
+| `returns null when pipe_helpers is an empty array` | Verifies that the pipe-helpers section builder returns null for an empty pipe list. |
+| `returns null when pipe_helpers is absent` | Verifies that the pipe-helpers section builder returns null for null or undefined input. |
+
 #### `config.test.js`
 
 | Test | Description |
@@ -2442,6 +2516,32 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `embeds JetBrains Mono into the PDF when font VFS hooks are available` | Verifies PDF export embeds the committed JetBrains Mono fonts when jsPDF font VFS hooks are available. |
 | `uses the dim green border color for success badges` | Verifies the success badge border uses the dim green export token rather than the brighter text green. |
 | `skips fully empty raw lines without prefixes so PDF output matches browser rendering` | Verifies PDF export skips raw lines that have neither a prefix nor renderable content so blank rows do not drift from browser rendering. |
+
+#### `grep_output_suggestions.test.js`
+
+| Test | Description |
+| --- | --- |
+| `returns an empty array for blank input` | Verifies that `extractGrepOutputTokens` returns an empty array for blank or whitespace-only input. |
+| `extracts IPv4 addresses and rejects out-of-range octets` | Verifies IPv4 extraction and that octets above 255 are rejected. |
+| `extracts compressed and full IPv6 but not clock timestamps` | Verifies compressed and full IPv6 are extracted while clock timestamps are not. |
+| `extracts hostnames` | Verifies dotted hostnames are extracted from output. |
+| `extracts CVE identifiers case-insensitively` | Verifies CVE identifiers are extracted regardless of case. |
+| `does not also surface a CVE id as a bare word` | Verifies a CVE id claimed by the CVE kind is not also surfaced as a bare word. |
+| `extracts HTTP status codes meeting the minimum occurrence` | Verifies HTTP status codes are extracted only when they meet the minimum occurrence threshold. |
+| `does not surface IP octets as HTTP status codes` | Verifies IP octets are not surfaced as HTTP status codes. |
+| `extracts frequently repeated words above the threshold and ranks by frequency` | Verifies words are extracted only above the frequency threshold and ranked by occurrence count. |
+| `orders structured tokens (IP, CVE) ahead of frequent words` | Verifies structured tokens rank ahead of frequent words. |
+| `caps the number of returned tokens` | Verifies the returned token list is capped at the requested maximum. |
+| `builds suggestions from the active tab output lines` | Verifies `getGrepOutputSuggestions` builds suggestion items from active tab output lines. |
+| `excludes echoed command (prompt-echo) lines` | Verifies echoed command lines are excluded from the token source. |
+| `reads only the active tab, not other tabs` | Verifies suggestions are drawn only from the active tab's output, never other tabs. |
+| `returns an empty array when there is no active tab output` | Verifies an empty array is returned when the active tab has no output. |
+| `returns an empty array when getOutput is unavailable` | Verifies an empty array is returned when the output accessor is unavailable. |
+| `filters suggestions by the current token prefix` | Verifies suggestions are filtered by the current token prefix. |
+| `appends output-token suggestions inside a grep pipe stage` | Verifies output-token suggestions are appended inside a grep pipe stage. |
+| `does not append output tokens for non-grep pipe helpers` | Verifies output tokens are not appended for non-grep pipe helpers such as `sort`. |
+| `never suggests command roots — only the injected output tokens and grep flags` | Verifies command roots are never suggested in the grep pipe context. |
+| `de-duplicates an output token that collides with a grep flag` | Verifies an output token that collides with a grep flag is de-duplicated. |
 
 #### `history.test.js`
 
@@ -3080,6 +3180,17 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `_constellationVisibleSegments returns a single segment when there are no dead bands` | Verifies that the constellation axis remains contiguous when no interior dead band is detected. |
 | `_constellationMinuteToX is piecewise when given multiple segments and clamps dead-band minutes to the seam` | Verifies that minutes inside a collapsed dead band map to the same seam x while minutes inside the visible segments map proportionally to the combined visible mass. |
 | `piecewise X axis renders seam markers and skips guides inside the dead band` | Verifies that the dashed seam line plus `//` glyph render between visible segments, that hour-label guides for dead-band hours are suppressed, and that the meta line shows the multi-segment label. |
+
+#### `tabbar_chrome_collapse.test.js`
+
+| Test | Description |
+| --- | --- |
+| `never collapses when the user has pinned the chrome open` | Verifies that an explicit `expanded` preference keeps the tab-bar chrome open even when tabs overflow. |
+| `does not collapse in auto mode when tabs fit alongside the full chrome` | Verifies that auto mode leaves the chrome expanded when tabs fit beside the full-width chrome. |
+| `collapses in auto mode when tabs cannot fit alongside the full chrome` | Verifies that auto mode collapses the chrome when tabs cannot fit beside the full-width chrome. |
+| `returns false when measurements are not yet available` | Verifies that the decision is safe (no collapse) when bar width or chrome width is unmeasured. |
+| `respects the fit buffer at the boundary` | Verifies the fit buffer behavior at the exact width boundary. |
+| `is state-independent — the decision does not take a current collapsed flag` | Verifies the decision depends only on widths, not the current collapsed state, which prevents collapse/expand oscillation. |
 
 #### `tabs.test.js`
 

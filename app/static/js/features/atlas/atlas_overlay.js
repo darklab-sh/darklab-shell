@@ -122,6 +122,9 @@
     addActiveProjectOnSelect: false,
     detail: null,
     detailLoading: false,
+    intelRefreshing: false,
+    intelRefreshingEntityId: '',
+    intelRefreshingLabel: '',
     detailOffsets: { runs: 0, findings: 0 },
     searchTimer: null,
     refreshSeq: 0,
@@ -167,6 +170,63 @@
 
   function showToastSafe(message, tone = 'info') {
     if (typeof global.showToast === 'function') global.showToast(message, tone);
+  }
+
+  let intelRefreshOverlay = null;
+
+  function entityLabelForId(entityId) {
+    const id = String(entityId || '');
+    const detailEntity = state.detail?.entity || null;
+    if (id && detailEntity && String(detailEntity.id || '') === id) {
+      return text(detailEntity.canonical_value, detailEntity.value || detailEntity.id);
+    }
+    const listed = (state.entities || []).find(entity => String(entity.id || '') === id);
+    if (listed) return text(listed.canonical_value, listed.value || listed.id);
+    return '';
+  }
+
+  function ensureIntelRefreshOverlay() {
+    if (intelRefreshOverlay || !overlay) return intelRefreshOverlay;
+    const host = document.createElement('div');
+    host.className = 'atlas-intel-refresh-overlay u-hidden';
+    host.setAttribute('role', 'status');
+    host.setAttribute('aria-live', 'polite');
+    host.setAttribute('aria-hidden', 'true');
+    const card = document.createElement('div');
+    card.className = 'atlas-intel-refresh-card';
+    const spinner = document.createElement('div');
+    spinner.className = 'atlas-intel-refresh-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'atlas-intel-refresh-title';
+    title.textContent = 'Refreshing intel';
+    const body = document.createElement('div');
+    body.className = 'atlas-intel-refresh-body';
+    body.dataset.atlasIntelRefreshBody = 'true';
+    body.textContent = 'Querying configured intel providers. This can take a little while.';
+    copy.append(title, body);
+    card.append(spinner, copy);
+    host.appendChild(card);
+    overlay.appendChild(host);
+    intelRefreshOverlay = host;
+    return intelRefreshOverlay;
+  }
+
+  function renderIntelRefreshOverlay() {
+    const host = ensureIntelRefreshOverlay();
+    if (!host) return;
+    surface?.setAttribute('aria-busy', state.intelRefreshing ? 'true' : 'false');
+    host.classList.toggle('u-hidden', !state.intelRefreshing);
+    host.setAttribute('aria-hidden', state.intelRefreshing ? 'false' : 'true');
+    if (!state.intelRefreshing) return;
+    const body = host.querySelector('[data-atlas-intel-refresh-body]');
+    if (body) {
+      const label = String(state.intelRefreshingLabel || '').trim();
+      body.textContent = label
+        ? `Querying configured intel providers for ${label}. This can take a little while.`
+        : 'Querying configured intel providers. This can take a little while.';
+    }
   }
 
   function broadcastProjectWorkspaceChange(reason, projectId) {
@@ -1109,6 +1169,7 @@
         return !!activeId && (Array.isArray(entity.project_links) ? entity.project_links : [])
           .some(link => String(link.project_id || '') === activeId);
       },
+      intelRefreshing: state.intelRefreshing,
       onRefreshIntel: () => refreshIntel(),
       onAddToActiveProject: () => addToActiveProject(),
       onRemoveProjectLink: (link) => removeProjectLink(link),
@@ -1144,6 +1205,7 @@
         if (typeof global.logClientError === 'function') global.logClientError('atlas mobile render failed', err);
       }
     }
+    renderIntelRefreshOverlay();
   }
 
   function renderShellMode() {
@@ -1651,19 +1713,40 @@
   }
 
   async function refreshIntel() {
-    if (!state.selectedId) return;
+    if (!state.selectedId || state.intelRefreshing) return;
+    const entityId = String(state.selectedId || '');
+    state.intelRefreshing = true;
+    state.intelRefreshingEntityId = entityId;
+    state.intelRefreshingLabel = entityLabelForId(entityId);
+    render();
     try {
-      const resp = await api()(`/atlas/entities/${encodeURIComponent(state.selectedId)}/refresh_intel`, {
+      const resp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}/refresh_intel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      showToastSafe('Intel refreshed', 'success');
-      await loadDetail(state.selectedId);
+      const payload = typeof resp.json === 'function' ? await resp.json().catch(() => ({})) : {};
+      const refresh = payload?.refresh || {};
+      const configured = Number(refresh.configured_count || 0);
+      const success = Number(refresh.success_count || 0);
+      if (configured <= 0) {
+        showToastSafe('No intel providers configured', 'warning');
+      } else if (success <= 0) {
+        showToastSafe('No intel results refreshed', 'warning');
+      } else {
+        const noun = success === 1 ? 'provider' : 'providers';
+        showToastSafe(`Intel refreshed from ${success} ${noun}`, 'success');
+      }
+      await loadDetail(entityId);
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to refresh atlas intel', err);
       showToastSafe('Failed to refresh intel', 'error');
+    } finally {
+      state.intelRefreshing = false;
+      state.intelRefreshingEntityId = '';
+      state.intelRefreshingLabel = '';
+      render();
     }
   }
 

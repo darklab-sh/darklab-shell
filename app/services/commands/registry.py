@@ -1094,7 +1094,53 @@ def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str
                 *_catalog_runtime_notes(entry.get("runtime_adaptations")),
                 *_catalog_interactive_notes(entry.get("interactive")),
             ]),
+            "knowledge": entry.get("knowledge") or {},
+            "feature_required": entry.get("feature_required"),
         })
+    return catalog
+
+
+def pipe_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
+    """Return user-facing catalog data for app-native pipe helpers.
+
+    Used by the Pipes section in command discovery and the command-registry
+    modal.  Does not include allow/deny policy — pipe helpers are always
+    available when the app is running.
+    """
+    active_registry = registry or load_commands_registry()
+    catalog: list[dict[str, object]] = []
+    for entry in active_registry.get("pipe_helpers", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if not root:
+            continue
+        # The autocomplete normalizer flattens pipe.{enabled,description} into
+        # pipe_command/pipe_description at the top level of the autocomplete dict.
+        autocomplete = entry.get("autocomplete") or {}
+        if not isinstance(autocomplete, dict):
+            autocomplete = {}
+        if not autocomplete.get("pipe_command"):
+            continue
+        description = str(autocomplete.get("pipe_description") or "").strip()
+        raw_flags = autocomplete.get("flags")
+        flags: list[dict[str, str]] = []
+        for flag in (raw_flags if isinstance(raw_flags, list) else []):
+            if not isinstance(flag, dict):
+                continue
+            value = str(flag.get("value") or "").strip()
+            flag_description = str(flag.get("description") or "").strip()
+            if value:
+                flags.append({"value": value, "description": flag_description})
+        pipe_entry: dict[str, object] = {
+            "root": root,
+            "description": description,
+            "flags": flags,
+        }
+        feature_required = entry.get("feature_required")
+        if feature_required:
+            pipe_entry["feature_required"] = feature_required
+        catalog.append(pipe_entry)
     return catalog
 
 
@@ -1352,6 +1398,21 @@ def _feature_enabled(feature, cfg=None):
     if normalized in {"interactive_pty", "pty"}:
         return bool(active_cfg.get("interactive_pty_enabled", False))
     return True
+
+
+def is_feature_required_enabled(feature_required: object, cfg=None) -> bool:
+    """Return True if all features in *feature_required* are enabled on this instance.
+
+    Accepts the normalized ``feature_required`` value from a catalog entry —
+    ``None``, a single feature-name string, or a list of feature names.
+    An entry with ``feature_required=None`` is always considered enabled.
+    Unknown feature names default to enabled so future features do not
+    accidentally suppress discovery on older app versions.
+    """
+    if not feature_required:
+        return True
+    features = list(feature_required) if isinstance(feature_required, (list, tuple)) else [feature_required]
+    return all(_feature_enabled(f, cfg) for f in features)
 
 
 def _faq_entry_enabled(item, cfg=None):

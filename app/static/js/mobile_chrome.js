@@ -34,6 +34,8 @@
   const menuLnState           = document.getElementById('mobile-menu-ln-state');
   const menuTsState           = document.getElementById('mobile-menu-ts-state');
   const menuWorkflowsCount    = document.getElementById('mobile-menu-workflows-count');
+  const menuSchedulesCount    = document.getElementById('mobile-menu-schedules-count');
+  const menuWatchersCount     = document.getElementById('mobile-menu-watchers-count');
   const menuHistoryCount      = document.getElementById('mobile-menu-history-count');
   const menuProjectHint       = document.getElementById('mobile-menu-project-hint');
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
@@ -147,6 +149,49 @@
     const list = Array.isArray(items) ? items : [];
     menuWorkflowsCount.textContent = list.length ? `${list.length} saved` : '';
   }
+  function setSavedCount(el, count) {
+    if (!el) return;
+    const total = Math.max(0, Number(count || 0));
+    el.textContent = total > 0 ? `${total} saved` : '';
+  }
+  let schedulesCountRequestSeq = 0;
+  function refreshSchedulesCount(items = null) {
+    if (!menuSchedulesCount) return;
+    if (Array.isArray(items)) {
+      setSavedCount(menuSchedulesCount, items.length);
+      return;
+    }
+    if (typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++schedulesCountRequestSeq;
+    global.apiFetch('/schedules', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== schedulesCountRequestSeq) return;
+        setSavedCount(menuSchedulesCount, Array.isArray(data?.schedules) ? data.schedules.length : 0);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load schedules count for mobile menu', err);
+      });
+  }
+  let watchersCountRequestSeq = 0;
+  function refreshWatchersCount(items = null) {
+    if (!menuWatchersCount) return;
+    if (Array.isArray(items)) {
+      setSavedCount(menuWatchersCount, items.length);
+      return;
+    }
+    if (typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++watchersCountRequestSeq;
+    global.apiFetch('/watchers', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== watchersCountRequestSeq) return;
+        setSavedCount(menuWatchersCount, Array.isArray(data?.watchers) ? data.watchers.length : 0);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load watchers count for mobile menu', err);
+      });
+  }
   let historyCountRequestSeq = 0;
   function setMenuHistoryCount(count) {
     const total = Number(count || 0);
@@ -220,6 +265,8 @@
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
+    refreshSchedulesCount();
+    refreshWatchersCount();
     refreshProjectHintFromServer();
     tsDisclosure?.close();
     show(menuSheetScrim);
@@ -1261,6 +1308,12 @@
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:workflows-rendered', (e) => {
       try { refreshWorkflowsCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:schedules-rendered', (e) => {
+      try { refreshSchedulesCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:watchers-rendered', (e) => {
+      try { refreshWatchersCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:active-project-changed', (e) => {
       try { refreshProjectHint(e.detail && e.detail.project); } catch (_) { /* non-critical */ }

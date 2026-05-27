@@ -112,9 +112,10 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - While typing a subcommand token, examples narrow to the matching subcommand once the prefix is unique. For example, `amass s` can show `amass subs ...` examples, while an ambiguous prefix such as `gobuster d` keeps showing `dir` and `dns` token choices.
 - After a known subcommand plus a trailing space, the dropdown switches to that subcommand's scoped flags and value hints.
 - After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
+- Inside a `| grep` stage, the dropdown also suggests tokens already visible in the active tab's output — IPv4/IPv6 addresses, hostnames, CVE identifiers, HTTP status codes, and frequently repeated words — ranked by token kind then frequency and offered as grep patterns alongside grep's own flags. Suggestions are drawn only from the active tab and never widen the allowed command surface.
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
-**Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the app's built-in autocomplete YAML. The app does not inspect the live shell and does not parse `--help` output.
+**Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the app's built-in autocomplete YAML. The app does not inspect the live shell and does not parse `--help` output. Output-derived grep suggestions read only the active tab's rendered lines, not other tabs or the host.
 
 **Configuration:** external-tool suggestions use `conf/commands.yaml` plus optional local overlays; see [CONFIGURATION.md#command-registry-autocomplete](CONFIGURATION.md#command-registry-autocomplete) and [docs/external-command-integrations.md](docs/external-command-integrations.md). App-owned built-ins use `app/services/commands/builtin_autocomplete.yaml`.
 
@@ -417,7 +418,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, source runs, and related findings.
 - Select mode adds checkboxes on the visible page for any Atlas tab. You can suppress or restore selected noisy rows without deleting source data, delete selected findings directly, or delete selected entities and their attached findings in one confirmed action.
 - Entity tokens in saved and live transcripts can open Atlas directly. Long-pressing or right-clicking a token opens quick actions for copying the value, refreshing intel, editing metadata in Atlas, or refocusing the transcript line.
-- **Refresh intel** fetches current app-native intel for that entity and stores normalized provider snapshots back on the entity.
+- **Refresh intel** fetches current app-native intel for that entity, shows a progress panel while slower providers run, and stores normalized provider snapshots back on the entity.
 - **Clean Atlas** on a source run removes that run's Atlas links while keeping the run transcript in History. Disposable single-source rows can be removed at the same time, while curated rows are kept by default when they have a project link, project-visible finding relationship, label, note, or review state. Cleanup confirmations include a separate opt-in when you really do want to delete those curated single-source rows too.
 - **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
 - Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
@@ -932,6 +933,11 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
 - Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags.
 - Command-specific runtime adaptations are also declared in the registry. `inject_flags` handles safe default flags such as `nmap -sT`, `nuclei -ud /tmp/nuclei-templates`, `naabu -scan-type c`, and `mtr --report-wide`; managed workspace directories and environment wrappers handle Amass' session-scoped database path.
+- The same registry feeds terminal discovery commands that share the modal's catalog data and hide entries whose `feature_required` is disabled:
+  - `commands` lists built-in and allowed external roots, followed by an app-native pipe-helpers section (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`) labeled as app-managed filters rather than arbitrary shell pipelines.
+  - `commands info <root> [subcommand]` shows the description, examples, flags, subcommands, and any authored knowledge guidance; `commands info <root> --json` prints the same entry as one deterministic JSON line for copy or debugging.
+  - `commands search <term>` matches across root, category, description, example values, and knowledge notes/gotchas, ranks root-prefix hits first, and groups results by category.
+- Each command entry can carry an optional `knowledge` block — `notes`, `gotchas`, `safe_defaults`, `common_flags`, and an `artifact_behavior` scalar — surfaced in `commands info`, `commands search`, and the registry modal. The fields are descriptive guidance only and never affect allow/deny policy; they ship seeded for high-traffic tools such as `nmap`, `nuclei`, `httpx`, `ffuf`, and `gobuster`.
 
 **Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands). Restricted command inputs only inspect literal values in metadata-known target slots; domain names are not DNS-resolved.
 
@@ -953,6 +959,7 @@ commands:
 - `policy.deny` — denied prefixes/flags that take priority over allow entries.
 - `category` — command catalog grouping.
 - `autocomplete.*.value_type` — declares target-like values for autocomplete and optional restricted-input checks.
+- `knowledge` — optional descriptive guidance (`notes`, `gotchas`, `safe_defaults`, `common_flags`, `artifact_behavior`) shown in discovery surfaces; never policy-bearing. See [CONFIGURATION.md](CONFIGURATION.md#command-knowledge).
 
 **Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/runs` entry point).
 

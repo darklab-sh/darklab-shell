@@ -541,7 +541,9 @@
       const refresh = document.createElement('button');
       refresh.type = 'button';
       refresh.className = 'btn btn-secondary btn-compact';
-      refresh.textContent = 'Refresh intel';
+      refresh.disabled = !!handlers.intelRefreshing;
+      refresh.setAttribute('aria-busy', handlers.intelRefreshing ? 'true' : 'false');
+      refresh.textContent = handlers.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
       refresh.addEventListener('click', () => handlers.onRefreshIntel?.(entity));
       actions.appendChild(refresh);
       if (handlers.activeProject && !handlers.isLinkedToActiveProject?.(entity)) {

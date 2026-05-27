@@ -381,7 +381,7 @@ test.describe('output search scopes', () => {
   })
 
   test('scoped search jumps between warnings and errors', async ({ page }) => {
-    await expect(page.locator('#search-toggle-btn')).toHaveText('⌕ search • 2 findings')
+    await expect(page.locator('#search-toggle-btn')).toHaveText('⌕ search')
     await expect(page.locator('#search-signal-summary')).toContainText('2F')
     await expect(page.locator('#search-signal-summary')).toContainText('2W')
     await expect(page.locator('#search-signal-summary')).toContainText('2E')

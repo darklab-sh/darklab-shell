@@ -575,11 +575,22 @@ test.beforeEach(async ({ page }) => {
   })
 
   test('mobile menu contains history and theme action buttons', async ({ page }) => {
+    await page.route('**/schedules', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ schedules: [{ id: 'sch_1' }, { id: 'sch_2' }] }),
+    }))
+    await page.route('**/watchers', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ watchers: [{ id: 'wat_1' }] }),
+    }))
+
     await page.locator('#hamburger-btn').click()
     const menu = page.locator('#mobile-menu-sheet')
     await expect(menu.locator('[data-menu-action="history"]')).toBeVisible()
     await expect(menu.locator('[data-menu-action="status-monitor"] .menu-item-label')).toHaveText('status')
     await expect(menu.locator('[data-menu-action="workspace"] .menu-item-label')).toHaveText('files')
+    await expect(menu.locator('#mobile-menu-schedules-count')).toHaveText('2 saved')
+    await expect(menu.locator('#mobile-menu-watchers-count')).toHaveText('1 saved')
     await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()
   })
 

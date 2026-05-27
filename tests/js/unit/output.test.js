@@ -633,11 +633,13 @@ describe('appendLine', () => {
 
     _setLnMode('on')
     expect(document.body.classList.contains('ln-on')).toBe(true)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
+    expect(document.getElementById('ln-btn').getAttribute('aria-pressed')).toBe('true')
 
     _setLnMode('off')
     expect(document.body.classList.contains('ln-on')).toBe(false)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
+    expect(document.getElementById('ln-btn').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('numbers the prompt line after the current output rows', () => {

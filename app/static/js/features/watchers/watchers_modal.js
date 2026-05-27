@@ -1190,6 +1190,9 @@ async function refreshWatchersModal({ selectId = '', baselineRun = null } = {}) 
   try {
     const data = await _watcherJson('/watchers', { cache: 'no-store' });
     _watchersState.watchers = Array.isArray(data.watchers) ? data.watchers : [];
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:watchers-rendered', { items: _watchersState.watchers.slice() });
+    }
     _watchersState.missingWatcherId = '';
     const requestedId = String(selectId || '');
     const currentId = String(selectId || _watchersState.selectedId || '');

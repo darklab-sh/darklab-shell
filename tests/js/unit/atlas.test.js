@@ -248,6 +248,12 @@ function loadAtlas({
         },
       }))
     }
+    if (target === '/atlas/entities/ent_ip/refresh_intel' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        refresh: { configured_count: 1, success_count: 1 },
+      }))
+    }
     if (target === '/atlas/entities/ent_ip/project_links' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true }))
     }
@@ -465,7 +471,7 @@ describe('Atlas overlay', () => {
   })
 
   it('opens as a first-class surface and renders entity detail', async () => {
-    const { openAtlas, isAtlasOverlayOpen, apiFetch } = loadAtlas()
+    const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast } = loadAtlas()
 
     await openAtlas({ source: 'test', tab: 'ip' })
 
@@ -504,6 +510,15 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('entity')
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.textContent).toBe('Actions')
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.textContent).toContain('Suppress entity')
+    document.querySelector('#atlas-detail .atlas-detail-actions button')?.click()
+    const refreshOverlay = document.querySelector('.atlas-intel-refresh-overlay')
+    expect(refreshOverlay?.classList.contains('u-hidden')).toBe(false)
+    expect(refreshOverlay?.textContent).toContain('Refreshing intel')
+    expect(refreshOverlay?.textContent).toContain('107.178.109.44')
+    expect(document.querySelector('#atlas-detail .atlas-detail-actions button')?.textContent).toBe('Refreshing...')
+    expect(document.querySelector('#atlas-detail .atlas-detail-actions button')?.disabled).toBe(true)
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Intel refreshed from 1 provider', 'success'))
+    expect(refreshOverlay?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-finding-status-filter')?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-finding-bulk-row')?.classList.contains('u-hidden')).toBe(false)
     expect(apiFetch).toHaveBeenCalledWith(

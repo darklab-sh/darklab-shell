@@ -680,7 +680,7 @@ function _showOutputEntityMenu(token, x, y) {
     _outputEntityMenuButton('Open in Atlas', 'open-atlas'),
     _outputEntityMenuButton('Edit labels/notes', 'edit-metadata'),
     _outputEntityMenuButton('Add to active project', 'promote'),
-    _outputEntityMenuButton('Lookup intel', 'lookup-intel'),
+    _outputEntityMenuButton('Refresh intel', 'lookup-intel'),
     _outputEntityMenuButton('Copy value', 'copy-value'),
     _outputEntityMenuButton('See in run', 'see-run'),
   );
@@ -1628,11 +1628,13 @@ function syncOutputPrefixes(scope = document) {
 function _setLnMode(mode) {
   lnMode = mode;
   document.body.classList.toggle('ln-on', mode === 'on');
-  const label = mode === 'on' ? 'line numbers: on' : 'line numbers: off';
+  // Binary toggle: the active-dot indicator carries on/off, so the label stays
+  // a plain "line numbers"; aria-pressed conveys state to assistive tech.
   const lnBtn = document.getElementById('ln-btn');
   if (lnBtn) {
-    lnBtn.textContent = label;
+    lnBtn.textContent = 'line numbers';
     lnBtn.classList.toggle('active', mode === 'on');
+    lnBtn.setAttribute('aria-pressed', mode === 'on' ? 'true' : 'false');
   }
   syncOutputPrefixes();
   try {

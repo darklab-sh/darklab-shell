@@ -1284,7 +1284,7 @@ test.describe('options modal', () => {
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
-    await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+    await expect(page.locator('#ln-btn')).toHaveText('line numbers')
     await expect(page.locator('#hud-clock')).not.toContainText('UTC')
     await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
 
@@ -1293,7 +1293,7 @@ test.describe('options modal', () => {
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
-    await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+    await expect(page.locator('#ln-btn')).toHaveText('line numbers')
     await expect(page.locator('#hud-clock')).not.toContainText('UTC')
     await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
   })

@@ -1902,6 +1902,7 @@ class TestRunStreaming:
         assert "Run `commands` to browse built-in and allowed external commands.\\n" in body
         assert "Use `commands --built-in` or `commands --external` to filter that catalog.\\n" in body
         assert "Use `commands info <command>` to see examples, flags, and subcommands for a supported command.\\n" in body
+        assert "Use `commands search <term>` to find commands by name, description, category, or guidance notes.\\n" in body
         assert "Run `faq` to browse the configured FAQ entries inside the terminal.\\n" in body
         assert "Run `shortcuts` to see the current keyboard shortcuts.\\n" in body
         assert "README:" in body

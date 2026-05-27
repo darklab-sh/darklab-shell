@@ -906,6 +906,9 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
   try {
     const data = await _scheduleJson('/schedules', { cache: 'no-store' });
     _schedulesState.schedules = Array.isArray(data.schedules) ? data.schedules : [];
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:schedules-rendered', { items: _schedulesState.schedules.slice() });
+    }
     _schedulesState.missingScheduleId = '';
     const requestedId = String(selectId || '');
     const currentId = String(selectId || _schedulesState.selectedId || '');

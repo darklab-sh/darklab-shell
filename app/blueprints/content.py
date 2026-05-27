@@ -13,7 +13,9 @@ from services.commands.registry import (
     command_catalog_from_registry,
     command_catalog_entry,
     interactive_pty_specs_from_registry,
+    is_feature_required_enabled,
     load_all_faq,
+    pipe_catalog_from_registry,
     load_all_workflows,
     load_ascii_art,
     load_ascii_mobile_art,
@@ -259,6 +261,8 @@ def command_catalog_index():
     group_map = {}
     commands = []
     for entry in catalog:
+        if not is_feature_required_enabled(entry.get("feature_required")):
+            continue
         examples = entry.get("examples")
         subcommands = entry.get("subcommands")
         flags = entry.get("flags")
@@ -285,6 +289,10 @@ def command_catalog_index():
         "restricted": bool(commands),
         "commands": commands,
         "groups": groups,
+        "pipe_helpers": [
+            entry for entry in pipe_catalog_from_registry()
+            if is_feature_required_enabled(entry.get("feature_required"))
+        ],
         "secret_consumers": [
             *command_secret_consumers(),
             *app_native_secret_consumers(),
@@ -298,7 +306,7 @@ def command_catalog_index():
 def command_catalog(root: str, subcommand: str | None = None):
     """Return app-native reference details for one allowed external command."""
     entry = command_catalog_entry(root, subcommand)
-    if not entry:
+    if not entry or not is_feature_required_enabled(entry.get("feature_required")):
         _log_content_view("/commands/catalog", root=root, subcommand=subcommand or "", found=False)
         return jsonify({"error": "Command not found"}), 404
     _log_content_view("/commands/catalog", root=root, subcommand=subcommand or "", found=True)

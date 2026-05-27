@@ -47,6 +47,7 @@ import services.projects.workspace as project_workspace
 import app as shell_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
+import services.commands.registry_loader as registry_loader_module
 import services.commands.builtins as builtin_commands
 import services.session.variables as session_variables
 import services.secrets.storage as secrets_storage
@@ -60,7 +61,8 @@ from services.commands.registry import (
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_container_smoke_test_interactive_commands, load_allow_grouping_flags, load_commands_registry, load_workflows,
     interactive_pty_specs_from_registry,
-    command_catalog_entry, command_catalog_from_registry, command_secret_consumers, is_command_allowed, rewrite_command,
+    command_catalog_entry, command_catalog_from_registry, pipe_catalog_from_registry,
+    command_secret_consumers, is_command_allowed, rewrite_command,
     FAQ_CATEGORY_ORDER,
 )
 from services.history.permalinks import (
@@ -8168,6 +8170,476 @@ class TestDerivedCommandRegistry:
                 assert not is_command_allowed("nc -w 3 -e /bin/sh -z darklab.sh 80")[0]
                 assert is_command_allowed("nmap -sV darklab.sh")[0]
                 assert not is_command_allowed("nmap -Vs darklab.sh")[0]
+
+
+# ── Command knowledge schema (Phase 0) ────────────────────────────────────────
+
+class TestCommandKnowledgeSchema:
+    """Phase 0 locked decisions: field names, caps, merge strategy, lint function."""
+
+    # ── Field set completeness ─────────────────────────────────────────────────
+
+    def test_knowledge_list_fields_are_correct(self):
+        assert registry_loader_module.KNOWLEDGE_LIST_FIELDS == {
+            "notes", "gotchas", "safe_defaults", "common_flags"
+        }
+
+    def test_knowledge_scalar_fields_are_correct(self):
+        assert registry_loader_module.KNOWLEDGE_SCALAR_FIELDS == {"artifact_behavior"}
+
+    def test_knowledge_fields_is_union_of_list_and_scalar(self):
+        assert (
+            registry_loader_module.KNOWLEDGE_FIELDS
+            == registry_loader_module.KNOWLEDGE_LIST_FIELDS | registry_loader_module.KNOWLEDGE_SCALAR_FIELDS
+        )
+
+    def test_knowledge_list_and_scalar_fields_are_disjoint(self):
+        assert not registry_loader_module.KNOWLEDGE_LIST_FIELDS & registry_loader_module.KNOWLEDGE_SCALAR_FIELDS
+
+    # ── Caps ───────────────────────────────────────────────────────────────────
+
+    def test_caps_are_positive_integers(self):
+        assert isinstance(registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS, int)
+        assert isinstance(registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS, int)
+        assert registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS > 0
+        assert registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS > 0
+
+    # ── Known field sets ───────────────────────────────────────────────────────
+
+    def test_knowledge_is_in_known_command_fields(self):
+        # Ensures that once Phase 1 adds the "knowledge" key to entries it
+        # will not trip the lint, even before the normalizer wire-up lands.
+        assert "knowledge" in registry_loader_module._KNOWN_TOP_LEVEL_COMMAND_FIELDS
+
+    def test_known_command_fields_covers_all_normalizer_inputs(self):
+        required = {
+            "root", "description", "category", "policy", "help",
+            "workspace_flags", "autocomplete", "runtime_adaptations",
+            "requires_secrets", "interactive", "allow_grouping_flags",
+            "feature_required", "requires_feature", "feature",
+        }
+        assert required.issubset(registry_loader_module._KNOWN_TOP_LEVEL_COMMAND_FIELDS)
+
+    def test_pipe_helper_known_fields_are_subset_of_command_fields(self):
+        assert (
+            registry_loader_module._KNOWN_TOP_LEVEL_PIPE_HELPER_FIELDS
+            < registry_loader_module._KNOWN_TOP_LEVEL_COMMAND_FIELDS
+        )
+
+    # ── check_unknown_command_fields ───────────────────────────────────────────
+
+    def test_clean_command_entry_returns_empty(self):
+        entry = {
+            "root": "nmap",
+            "category": "Network Reconnaissance",
+            "description": "Fast port scanner.",
+            "policy": {"allow": ["nmap"], "deny": []},
+            "autocomplete": {},
+            "help": {},
+            "workspace_flags": [],
+            "runtime_adaptations": {},
+            "requires_secrets": [],
+            "interactive": None,
+            "allow_grouping_flags": [],
+            "feature_required": None,
+            "knowledge": {},
+        }
+        assert registry_loader_module.check_unknown_command_fields(entry) == []
+
+    def test_unknown_fields_returned_sorted(self):
+        entry = {"root": "ping", "typo_field": "x", "another_unknown": 1}
+        unknown = registry_loader_module.check_unknown_command_fields(entry)
+        assert unknown == ["another_unknown", "typo_field"]
+
+    def test_pipe_helper_entry_clean(self):
+        entry = {"root": "grep", "autocomplete": {}}
+        assert registry_loader_module.check_unknown_command_fields(entry, pipe_helper=True) == []
+
+    def test_pipe_helper_rejects_command_only_fields(self):
+        # "category" is a command field, not valid on a pipe helper.
+        entry = {"root": "grep", "autocomplete": {}, "category": "Filters"}
+        unknown = registry_loader_module.check_unknown_command_fields(entry, pipe_helper=True)
+        assert "category" in unknown
+
+    def test_non_dict_input_returns_empty(self):
+        assert registry_loader_module.check_unknown_command_fields(None) == []  # type: ignore[arg-type]
+        assert registry_loader_module.check_unknown_command_fields("not a dict") == []  # type: ignore[arg-type]
+        assert registry_loader_module.check_unknown_command_fields([]) == []  # type: ignore[arg-type]
+
+
+# ── Command knowledge normalization and projection (Phase 1) ──────────────────
+
+class TestCommandKnowledgeNormalization:
+    """Phase 1: normalize_command_knowledge, catalog projection, and pipe catalog."""
+
+    # ── normalize_command_knowledge ────────────────────────────────────────────
+
+    def test_list_fields_parsed_and_returned(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": ["Web-shell specific note.", "Second note."],
+            "gotchas": ["Watch for noisy status output."],
+        })
+        assert result["notes"] == ["Web-shell specific note.", "Second note."]
+        assert result["gotchas"] == ["Watch for noisy status output."]
+        assert "safe_defaults" not in result
+
+    def test_scalar_field_parsed_and_returned(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "artifact_behavior": "Writes scan results to the managed workspace directory."
+        })
+        assert result["artifact_behavior"] == "Writes scan results to the managed workspace directory."
+
+    def test_items_stripped(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": ["  leading space  ", "\tnewline\t"],
+        })
+        assert result["notes"] == ["leading space", "newline"]
+
+    def test_empty_items_dropped(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": ["", "  ", "valid"],
+        })
+        assert result["notes"] == ["valid"]
+
+    def test_duplicate_items_deduped(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "gotchas": ["Same text.", "Different text.", "Same text."],
+        })
+        assert result["gotchas"] == ["Same text.", "Different text."]
+
+    def test_list_items_truncated_at_cap(self):
+        long_item = "x" * (registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS + 50)
+        result = registry_loader_module.normalize_command_knowledge({"notes": [long_item]})
+        assert len(cast(list[str], result["notes"])[0]) == registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS
+
+    def test_scalar_truncated_at_cap(self):
+        long_value = "y" * (registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS + 50)
+        result = registry_loader_module.normalize_command_knowledge({"artifact_behavior": long_value})
+        assert len(cast(str, result["artifact_behavior"])) == registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS
+
+    def test_list_capped_at_max_items(self):
+        many = [f"note {i}" for i in range(registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS + 5)]
+        result = registry_loader_module.normalize_command_knowledge({"notes": many})
+        assert len(cast(list, result["notes"])) == registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS
+
+    def test_unknown_sub_fields_silently_ignored(self):
+        raw = {
+            "notes": ["A valid note."],
+            "future_unknown_field": "some value",
+        }
+        result = registry_loader_module.normalize_command_knowledge(raw)
+        assert "notes" in result
+        assert "future_unknown_field" not in result
+        assert registry_loader_module.check_unknown_command_fields({"root": "nmap", "knowledge": raw}) == [
+            "knowledge.future_unknown_field"
+        ]
+
+    def test_non_dict_raw_knowledge_returns_empty(self):
+        assert registry_loader_module.normalize_command_knowledge(None) == {}
+        assert registry_loader_module.normalize_command_knowledge("string") == {}
+        assert registry_loader_module.normalize_command_knowledge([]) == {}
+
+    def test_empty_dict_returns_empty(self):
+        assert registry_loader_module.normalize_command_knowledge({}) == {}
+
+    def test_all_empty_values_returns_empty(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": [],
+            "gotchas": ["", "  "],
+            "artifact_behavior": "  ",
+        })
+        assert result == {}
+
+    # ── Registry entry normalization with knowledge field ──────────────────────
+
+    def test_knowledge_present_in_normalized_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                description: Fast port scanner.
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  notes:
+                    - Noisy status output is expected during long scans.
+                  gotchas:
+                    - Use -oN to write output to the managed workspace directory.
+                  artifact_behavior: Writes scan results to the managed workspace directory.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                registry = load_commands_registry()
+        entry = registry["commands"][0]
+        assert "knowledge" in entry
+        assert entry["knowledge"]["notes"] == ["Noisy status output is expected during long scans."]
+        assert entry["knowledge"]["gotchas"] == ["Use -oN to write output to the managed workspace directory."]
+        assert entry["knowledge"]["artifact_behavior"] == "Writes scan results to the managed workspace directory."
+
+    def test_knowledge_absent_when_not_in_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                registry = load_commands_registry()
+        entry = registry["commands"][0]
+        assert "knowledge" not in entry
+
+    # ── feature_required in catalog projection ─────────────────────────────────
+
+    def test_feature_required_projected_onto_catalog_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: aiquery
+                category: AI
+                description: AI-powered query tool.
+                feature_required: ai_enabled
+                policy:
+                  allow:
+                    - aiquery
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        assert len(catalog) == 1
+        assert catalog[0]["feature_required"] == "ai_enabled"
+
+    def test_feature_required_none_when_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        assert catalog[0]["feature_required"] is None
+
+    # ── knowledge in catalog projection ───────────────────────────────────────
+
+    def test_knowledge_projected_onto_catalog_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nuclei
+                category: Network Reconnaissance
+                description: Template-based vulnerability scanner.
+                policy:
+                  allow:
+                    - nuclei
+                knowledge:
+                  gotchas:
+                    - Status lines can be very noisy.
+                  artifact_behavior: Writes findings to the workspace directory.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        knowledge = cast(dict, catalog[0]["knowledge"])
+        assert knowledge["gotchas"] == ["Status lines can be very noisy."]
+        assert knowledge["artifact_behavior"] == "Writes findings to the workspace directory."
+
+    def test_knowledge_empty_dict_when_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        assert catalog[0]["knowledge"] == {}
+
+    # ── .local overlay merge ───────────────────────────────────────────────────
+
+    def test_local_overlay_extends_list_knowledge_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "commands.yaml"
+            local = Path(tmp) / "commands.local.yaml"
+            base.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  notes:
+                    - Base note 1.
+                    - Base note 2.
+                    - Base note 3.
+                    - Base note 4.
+            """))
+            local.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                knowledge:
+                  notes:
+                    - Overlay note 1.
+                    - Overlay note 2.
+                  gotchas:
+                    - Overlay gotcha.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base)):
+                catalog = command_catalog_from_registry()
+        knowledge = cast(dict, catalog[0]["knowledge"])
+        notes = cast(list, knowledge["notes"])
+        assert notes == [
+            "Base note 1.",
+            "Base note 2.",
+            "Base note 3.",
+            "Base note 4.",
+            "Overlay note 1.",
+        ]
+        assert knowledge["gotchas"] == ["Overlay gotcha."]
+
+    def test_local_overlay_dedupes_list_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "commands.yaml"
+            local = Path(tmp) / "commands.local.yaml"
+            base.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  notes:
+                    - Existing note.
+            """))
+            local.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                knowledge:
+                  notes:
+                    - Existing note.
+                    - New note.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base)):
+                catalog = command_catalog_from_registry()
+        notes = cast(list, cast(dict, catalog[0]["knowledge"])["notes"])
+        assert notes.count("Existing note.") == 1
+        assert "New note." in notes
+
+    def test_local_overlay_replaces_scalar_knowledge_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "commands.yaml"
+            local = Path(tmp) / "commands.local.yaml"
+            base.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  artifact_behavior: Base artifact behavior.
+            """))
+            local.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                knowledge:
+                  artifact_behavior: Overlay artifact behavior.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base)):
+                catalog = command_catalog_from_registry()
+        assert cast(dict, catalog[0]["knowledge"])["artifact_behavior"] == "Overlay artifact behavior."
+
+    # ── pipe_catalog_from_registry ─────────────────────────────────────────────
+
+    def test_pipe_catalog_returns_pipe_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands: []
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines by pattern
+                  flags:
+                    - value: -i
+                      description: Ignore case
+                    - value: -v
+                      description: Invert match
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                pipes = pipe_catalog_from_registry()
+        assert len(pipes) == 1
+        assert pipes[0]["root"] == "grep"
+        assert pipes[0]["description"] == "Filter lines by pattern"
+        flags = cast(list, pipes[0]["flags"])
+        assert {"value": "-i", "description": "Ignore case"} in flags
+        assert {"value": "-v", "description": "Invert match"} in flags
+
+    def test_pipe_catalog_real_registry_returns_app_native_helpers(self):
+        pipes = pipe_catalog_from_registry()
+        roots = [p["root"] for p in pipes]
+        assert "grep" in roots
+        assert "head" in roots
+        assert "tail" in roots
+
+    def test_pipe_catalog_entry_has_no_feature_required_when_absent(self):
+        pipes = pipe_catalog_from_registry()
+        for pipe in pipes:
+            assert "feature_required" not in pipe or pipe.get("feature_required")
+
+    def test_pipe_catalog_disabled_entry_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands: []
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines by pattern
+              - root: disabled_helper
+                autocomplete:
+                  pipe:
+                    enabled: false
+                    description: Should not appear
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                pipes = pipe_catalog_from_registry()
+        roots = [p["root"] for p in pipes]
+        assert "grep" in roots
+        assert "disabled_helper" not in roots
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
