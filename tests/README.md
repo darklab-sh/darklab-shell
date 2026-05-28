@@ -1633,7 +1633,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryRoute.test_insights_filters_app_builtin_commands` | Verifies that app built-ins (`pwd`, `whoami`, `help`, …) are filtered from the constellation, treemap, heatmap, events, and `max_day_count` returned by `/history/insights`. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
-| `TestHistoryRoute.test_bulk_delete_history_reports_partial_results_and_rejects_running_runs` | Verifies bulk history delete reports per-run results and rejects running runs without deleting them. |
+| `TestHistoryRoute.test_bulk_history_export_and_delete_report_partial_results` | Verifies bulk history export and delete preserve per-item results, full-output fallback, selected ordering, truncation summaries, and running-run skips. |
 | `TestHistoryRoute.test_bulk_delete_history_rejects_malformed_ids` | Verifies that bulk history delete rejects non-string and overlong run IDs before querying or logging them. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
 | `TestHistoryRoute.test_ai_summary_routes_enqueue_and_list_session_scoped_assists` | Checks that browser AI summary assist routes enqueue, list, and enforce session scope. |
@@ -2591,7 +2591,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `uses copy and restore as mobile history row primaries and moves the rest into the menu` | Verifies that mobile history rows keep Copy command and Restore as primary actions while moving the remaining run actions into the overflow menu. |
 | `renders select mode checkboxes and toggles row selection without opening run details` | Verifies that History select mode renders row checkboxes, disables unfinished runs, and turns row clicks into selection instead of opening Run Details. |
 | `selects all visible completed runs, reports mixed state, and clears selection` | Verifies that History select-all only includes visible completed runs, announces mixed selection state, and clears selected rows. |
-| `disables project bulk actions without an active project or with mixed selected item types` | Verifies project bulk actions are disabled when no active project is selected or the selection includes snapshots. |
+| `keeps export enabled for mixed selections while disabling project bulk actions` | Verifies mixed run/snapshot selections can export JSONL while project-only bulk actions stay disabled. |
 | `resets select mode and selection before the next history drawer open` | Verifies that closing the History drawer clears stale select mode and selection before the next refresh. |
 | `keeps row actions from toggling selection while select mode is enabled` | Verifies row-level action controls do not toggle selection or open Run Details while select mode is active. |
 | `locks the bulk toolbar and selected rows while a bulk action is in flight` | Verifies bulk requests disable select-mode controls and keep row selection stable until the request finishes. |
@@ -3662,7 +3662,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 | `history drawer can filter to snapshots and shows snapshot actions` | Verifies that the history drawer can switch to snapshot-only mode, render the `SNAPSHOT` row treatment, and expose the snapshot action set. |
-| `history bulk select can add remove and delete visible runs` | Verifies that desktop History select mode can select visible runs, add them to the active project, remove them from a project, and bulk-delete them. |
+| `history bulk select can export add remove and delete visible runs` | Verifies that desktop History select mode can export selected runs without closing the drawer, then add them to the active project, remove them from a project, and bulk-delete them. |
 | `run comparison split view works from history and project entry points` | Verifies that seeded same-command runs render the split comparison from both the History drawer and Projects modal, including synced scrolling, lazy equal-line expansion, long-line expansion, counts, and project-scoped lazy fetches. |
 
 #### `interaction-contract.spec.js`

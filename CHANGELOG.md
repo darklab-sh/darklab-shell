@@ -58,6 +58,11 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Guidance focuses on web-shell-specific behavior: injected unprivileged scan types, status-line/progress noise and the quiet flags that suppress it, and how each tool's output and input flags are rewritten into the session workspace when Files are enabled.
   - Each `artifact_behavior` is cross-checked against the tool's actual `workspace_flags`/`runtime_adaptations` so the description matches enforced behavior; bare output paths denied by policy are called out.
 
+- **Bulk history export** — added session-scoped export for selected completed runs and snapshots.
+  - **Why:** bulk history selection already supports destructive actions; export gives the same selected rows a safe download path for handoff and local review.
+  - **What:** accepts ordered `run_ids` and `snapshot_ids`, streams `txt` or newline-delimited JSON with UTF-8 content types and download filenames, uses the same per-item failure shape as existing bulk actions, skips running/missing/cross-session items without failing the whole request, emits a final JSONL summary or TXT skipped footer, and exposes **export text** / **export JSONL** actions from the existing History bulk menu without clearing the selection.
+  - **Tests:** extended existing history route coverage for JSONL and TXT exports, snapshot records, skipped active and cross-session items, full-output artifact fallback, byte-cap truncation, selected-order preservation, unsupported formats, empty selections, and export item caps; extended History drawer unit coverage so mixed run/snapshot selections can export JSONL, download the server filename, and keep selection state.
+
 ### Changed
 
 - **Shared diff classifier foundation** — lifted the watcher diff classifier registry into `services.diff.classifiers` so Watchers and run-comparison summaries can share one tool-aware parser family.

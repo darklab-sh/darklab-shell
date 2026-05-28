@@ -748,7 +748,7 @@ test.describe('history drawer', () => {
     await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   })
 
-  test('history bulk select can add remove and delete visible runs', async ({ page }, testInfo) => {
+  test('history bulk select can export add remove and delete visible runs', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     const bulkCommands = [
       'dig bulk-a.playwright.example +short',
@@ -769,6 +769,14 @@ test.describe('history drawer', () => {
     await bulkToolbar.locator('.history-bulk-toggle input').check()
     await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
     await selectVisibleHistoryRuns(page, bulkCommands)
+    await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
+
+    await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
+    const downloadPromise = page.waitForEvent('download')
+    await activateHistoryBulkMenuItem(page, 'bulk-export-jsonl')
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toMatch(/^darklab-history-\d{8}-\d{6}\.jsonl$/)
+    await expect(page.locator('#permalink-toast')).toContainText('History JSONL export started')
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
 
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()

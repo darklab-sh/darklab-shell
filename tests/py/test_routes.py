@@ -8593,19 +8593,90 @@ class TestHistoryRoute:
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
 
-    def test_bulk_delete_history_reports_partial_results_and_rejects_running_runs(self):
+    def test_bulk_history_export_and_delete_report_partial_results(self):
+        import gzip
+
+        from services.runs.output_store import (
+            RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
+            RUN_OUTPUT_DIR,
+            ensure_run_output_dir,
+        )
+
         client = get_client()
         session_id = "bulk-delete-session"
         owned_run_id = "run-" + uuid.uuid4().hex
+        full_run_id = "run-" + uuid.uuid4().hex
+        fallback_run_id = "run-" + uuid.uuid4().hex
+        large_run_id = "run-" + uuid.uuid4().hex
         incomplete_run_id = "run-" + uuid.uuid4().hex
         running_run_id = "run-" + uuid.uuid4().hex
         other_run_id = "run-" + uuid.uuid4().hex
         missing_run_id = "run-" + uuid.uuid4().hex
+        full_rel_path = f"{full_run_id}.txt.gz"
+        fallback_rel_path = f"{fallback_run_id}.txt.gz"
+        full_artifact_path = Path(RUN_OUTPUT_DIR) / full_rel_path
+        fallback_artifact_path = Path(RUN_OUTPUT_DIR) / fallback_rel_path
+        ensure_run_output_dir()
+        with gzip.open(full_artifact_path, "wt", encoding="utf-8") as artifact:
+            artifact.write(json.dumps({
+                "v": RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
+                "created": "2026-05-28T00:00:00Z",
+                "run_id": full_run_id,
+            }, separators=(",", ":")) + "\n")
+            artifact.write(json.dumps({"text": "full artifact one"}, separators=(",", ":")) + "\n")
+            artifact.write(json.dumps({"text": "full artifact two"}, separators=(",", ":")) + "\n")
+        fallback_artifact_path.write_bytes(b"not a gzip transcript")
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
-                "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0)",
-                (owned_run_id, session_id, "nmap darklab.sh"),
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 1)",
+                (owned_run_id, session_id, "nmap darklab.sh", json.dumps([{"text": "443/tcp open https"}])),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count, "
+                "full_output_available, full_output_truncated) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 2, 1, 0)",
+                (
+                    full_run_id,
+                    session_id,
+                    "cat full-output.txt",
+                    json.dumps([{"text": "preview should not export"}]),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count, "
+                "full_output_available, full_output_truncated) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 1, 1, 0)",
+                (
+                    fallback_run_id,
+                    session_id,
+                    "cat fallback-output.txt",
+                    json.dumps([{"text": "fallback preview"}]),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 1)",
+                (
+                    large_run_id,
+                    session_id,
+                    "cat large-output.txt",
+                    json.dumps([{"text": "x" * 1000}]),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO run_output_artifacts "
+                "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                "VALUES (?, ?, 'gzip', ?, 2, 0, datetime('now'))",
+                (full_run_id, full_rel_path, full_artifact_path.stat().st_size),
+            )
+            conn.execute(
+                "INSERT INTO run_output_artifacts "
+                "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                "VALUES (?, ?, 'gzip', ?, 1, 0, datetime('now'))",
+                (fallback_run_id, fallback_rel_path, fallback_artifact_path.stat().st_size),
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
@@ -8619,19 +8690,130 @@ class TestHistoryRoute:
                 "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (other_run_id, "bulk-delete-other", "whois darklab.sh"),
             )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-" + owned_run_id, session_id, "owned snapshot", json.dumps([{"text": "snapshot line"}])),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-" + full_run_id, session_id, "full snapshot", json.dumps([{"text": "snapshot first"}])),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-" + other_run_id, "bulk-delete-other", "other snapshot", json.dumps([{"text": "other line"}])),
+            )
             conn.commit()
 
         with mock.patch.object(history_routes, "active_runs_for_session", return_value=[{"run_id": running_run_id}]):
-            resp = client.post(
-                "/history/bulk-delete",
-                json={"run_ids": [owned_run_id, incomplete_run_id, running_run_id, other_run_id, missing_run_id]},
+            export_resp = client.post(
+                "/history/bulk-export",
+                json={
+                    "run_ids": [
+                        full_run_id,
+                        owned_run_id,
+                        fallback_run_id,
+                        incomplete_run_id,
+                        running_run_id,
+                        other_run_id,
+                        missing_run_id,
+                    ],
+                    "snapshot_ids": ["snap-" + full_run_id, "snap-" + owned_run_id, "snap-" + other_run_id],
+                    "format": "jsonl",
+                },
                 headers={"X-Session-ID": session_id},
             )
+            with mock.patch.object(history_routes, "BULK_HISTORY_EXPORT_MAX_BYTES", 260):
+                truncated_export_resp = client.post(
+                    "/history/bulk-export",
+                    json={"run_ids": [large_run_id], "snapshot_ids": [], "format": "jsonl"},
+                    headers={"X-Session-ID": session_id},
+                )
+            txt_export_resp = client.post(
+                "/history/bulk-export",
+                json={
+                    "run_ids": [owned_run_id, running_run_id],
+                    "snapshot_ids": ["snap-" + owned_run_id],
+                    "format": "txt",
+                },
+                headers={"X-Session-ID": session_id},
+            )
+            resp = client.post(
+                "/history/bulk-delete",
+                json={
+                    "run_ids": [
+                        owned_run_id,
+                        full_run_id,
+                        fallback_run_id,
+                        incomplete_run_id,
+                        running_run_id,
+                        other_run_id,
+                        missing_run_id,
+                    ],
+                },
+                headers={"X-Session-ID": session_id},
+            )
+        assert export_resp.status_code == 200
+        assert export_resp.content_type == "application/x-ndjson; charset=utf-8"
+        assert "attachment" in export_resp.headers["Content-Disposition"]
+        assert "darklab-history-" in export_resp.headers["Content-Disposition"]
+        exported = [json.loads(line) for line in export_resp.data.decode("utf-8").splitlines()]
+        assert [(item["kind"], item["id"]) for item in exported[:-1]] == [
+            ("run", full_run_id),
+            ("run", owned_run_id),
+            ("run", fallback_run_id),
+            ("snapshot", "snap-" + full_run_id),
+            ("snapshot", "snap-" + owned_run_id),
+        ]
+        assert exported[0]["kind"] == "run"
+        assert exported[0]["id"] == full_run_id
+        assert exported[0]["lines"] == ["full artifact one", "full artifact two"]
+        assert exported[0]["output_source"] == "full"
+        assert exported[1]["id"] == owned_run_id
+        assert exported[1]["lines"] == ["443/tcp open https"]
+        assert exported[2]["id"] == fallback_run_id
+        assert exported[2]["lines"] == ["fallback preview"]
+        assert exported[2]["output_source"] == "preview"
+        assert exported[3]["kind"] == "snapshot"
+        assert exported[3]["id"] == "snap-" + full_run_id
+        assert exported[3]["lines"] == ["snapshot first"]
+        assert exported[4]["id"] == "snap-" + owned_run_id
+        assert exported[4]["lines"] == ["snapshot line"]
+        assert exported[-1]["kind"] == "summary"
+        assert exported[-1]["items"] == 5
+        assert exported[-1]["truncated"] is False
+        assert exported[-1]["skipped"] == [
+            {"kind": "run", "id": incomplete_run_id, "status": "rejected", "reason": "incomplete"},
+            {"kind": "run", "id": running_run_id, "status": "rejected", "reason": "running"},
+            {"kind": "run", "id": other_run_id, "status": "not_found"},
+            {"kind": "run", "id": missing_run_id, "status": "not_found"},
+            {"kind": "snapshot", "id": "snap-" + other_run_id, "status": "not_found"},
+        ]
+        assert truncated_export_resp.status_code == 200
+        truncated_exported = [
+            json.loads(line)
+            for line in truncated_export_resp.data.decode("utf-8").splitlines()
+        ]
+        assert truncated_exported == [{
+            "kind": "summary",
+            "items": 0,
+            "skipped": [],
+            "truncated": True,
+        }]
+        assert txt_export_resp.status_code == 200
+        assert txt_export_resp.content_type == "text/plain; charset=utf-8"
+        txt_export = txt_export_resp.data.decode("utf-8")
+        assert "darklab history export\nitems: 2\ntruncated: no" in txt_export
+        assert f"-- run {owned_run_id} --" in txt_export
+        assert "443/tcp open https" in txt_export
+        assert f"-- snapshot snap-{owned_run_id} --" in txt_export
+        assert f"-- skipped --\n{running_run_id}\trun\trunning\n" in txt_export
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["counts"] == {"deleted": 1, "not_found": 2, "rejected": 2}
+        assert data["counts"] == {"deleted": 3, "not_found": 2, "rejected": 2}
         assert data["results"] == [
             {"run_id": owned_run_id, "status": "deleted"},
+            {"run_id": full_run_id, "status": "deleted"},
+            {"run_id": fallback_run_id, "status": "deleted"},
             {"run_id": incomplete_run_id, "status": "rejected", "reason": "incomplete"},
             {"run_id": running_run_id, "status": "rejected", "reason": "running"},
             {"run_id": other_run_id, "status": "not_found"},
@@ -8645,6 +8827,12 @@ class TestHistoryRoute:
                     (owned_run_id, incomplete_run_id, running_run_id, other_run_id),
                 ).fetchall()
             }
+            conn.execute(
+                "DELETE FROM snapshots WHERE id IN (?, ?, ?)",
+                ("snap-" + owned_run_id, "snap-" + full_run_id, "snap-" + other_run_id),
+            )
+            conn.execute("DELETE FROM runs WHERE id = ?", (large_run_id,))
+            conn.commit()
         assert remaining_ids == {incomplete_run_id, running_run_id, other_run_id}
 
     def test_bulk_delete_history_rejects_malformed_ids(self):
@@ -8675,6 +8863,30 @@ class TestHistoryRoute:
         )
         assert too_many_resp.status_code == 400
         assert json.loads(too_many_resp.data) == {"error": "too_many", "limit": 100}
+
+        empty_export_resp = client.post(
+            "/history/bulk-export",
+            json={"run_ids": [], "snapshot_ids": [], "format": "jsonl"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert empty_export_resp.status_code == 400
+        assert json.loads(empty_export_resp.data) == {"error": "selection_required"}
+
+        bad_format_resp = client.post(
+            "/history/bulk-export",
+            json={"run_ids": ["run-ok"], "format": "zip"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert bad_format_resp.status_code == 400
+        assert json.loads(bad_format_resp.data) == {"error": "unsupported_format", "formats": ["txt", "jsonl"]}
+
+        too_many_export_resp = client.post(
+            "/history/bulk-export",
+            json={"run_ids": [f"run-{index}" for index in range(501)], "format": "jsonl"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert too_many_export_resp.status_code == 400
+        assert json.loads(too_many_export_resp.data) == {"error": "too_many", "limit": 500}
 
     def test_get_run_nonexistent_returns_404(self):
         client = get_client()

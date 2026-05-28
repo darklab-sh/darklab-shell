@@ -892,6 +892,57 @@ async function _historyPostBulkDelete(url, payload) {
   return resp.json();
 }
 
+function _historyBulkExportFilename(format) {
+  const suffix = format === 'jsonl' ? 'jsonl' : 'txt';
+  return `darklab-history-${new Date().toISOString().replace(/[:.]/g, '-')}.${suffix}`;
+}
+
+function _historyFilenameFromDisposition(value) {
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(String(value || ''));
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1].replace(/"$/u, ''));
+  } catch (_) {
+    return match[1].replace(/"$/u, '');
+  }
+}
+
+async function _historyBulkExportSelectedItems(format) {
+  const runIds = _historySelectedRunIds();
+  const snapshotIds = _historySelectedSnapshotIds();
+  if (!runIds.length && !snapshotIds.length) return;
+  const downloader = typeof window !== 'undefined' && typeof window.downloadBlobAsAttachment === 'function'
+    ? window.downloadBlobAsAttachment
+    : downloadBlobAsAttachment;
+  if (typeof downloader !== 'function') {
+    showToast('Downloads are not available', 'error');
+    return;
+  }
+  const exportFormat = format === 'jsonl' ? 'jsonl' : 'txt';
+  _historySetBulkBusy(true);
+  try {
+    const resp = await apiFetch('/history/bulk-export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_ids: runIds,
+        snapshot_ids: snapshotIds,
+        format: exportFormat,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const filename = _historyFilenameFromDisposition(resp.headers?.get?.('content-disposition'))
+      || _historyBulkExportFilename(exportFormat);
+    downloader(blob, filename, { container: historyPanel });
+    showToast(`History ${exportFormat.toUpperCase()} export started`);
+  } catch (_) {
+    showToast('Failed to export selected history items', 'error');
+  } finally {
+    _historySetBulkBusy(false);
+  }
+}
+
 async function _historyBulkDeleteSelectedItems() {
   const runIds = _historySelectedRunIds();
   const snapshotIds = _historySelectedSnapshotIds();
@@ -959,6 +1010,8 @@ function _historyBuildBulkActionMenu(disabled) {
     ['bulk-add-active-project', 'add to active project'],
     ['bulk-add-project', 'add to project'],
     ['bulk-remove-project', 'remove from project'],
+    ['bulk-export-txt', 'export text'],
+    ['bulk-export-jsonl', 'export JSONL'],
     ['bulk-delete', 'delete'],
   ].forEach(([action, label]) => {
     const item = document.createElement('button');
@@ -966,7 +1019,8 @@ function _historyBuildBulkActionMenu(disabled) {
     item.className = 'dropdown-item dropdown-item-compact';
     item.dataset.action = action;
     item.textContent = label;
-    const projectActionDisabled = action !== 'bulk-delete' && !hasOnlyProjectLinkableRuns;
+    const projectActionDisabled = !['bulk-delete', 'bulk-export-txt', 'bulk-export-jsonl'].includes(action)
+      && !hasOnlyProjectLinkableRuns;
     item.disabled = disabled
       || projectActionDisabled
       || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
@@ -1080,6 +1134,24 @@ function _renderHistoryBulkToolbar() {
       event.stopPropagation();
       _closeHistoryBulkActionMenu();
       _historyBulkRemoveFromAllProjects();
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-export-txt"]'), {
+    refocusComposer: false,
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _closeHistoryBulkActionMenu();
+      _historyBulkExportSelectedItems('txt');
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-export-jsonl"]'), {
+    refocusComposer: false,
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _closeHistoryBulkActionMenu();
+      _historyBulkExportSelectedItems('jsonl');
     },
   });
   bindPressable(actions.querySelector('[data-action="bulk-delete"]'), {

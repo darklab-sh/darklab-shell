@@ -53,11 +53,6 @@ No technical debt items are currently tracked.
 ### API / CLI Enhancements
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Not for v1.1, but worth scoping — once outbound notifications land, the headless API becomes the natural place to receive `pull-request-merged` / `engagement-kicked-off` webhooks that auto-create projects.
-- **CLI: `darklab logs <run_id>`.**
-  - A thin wrapper over ranged output reads. An operator-shaped command that makes the CLI feel like a tool rather than an HTTP client.
-- **CLI: `darklab session token-info / revoke`.**
-  - Token lifecycle from the CLI, gated on the current token having a `tok_` scope. Avoids forcing operators back to the browser to manage their own keys.
-
 ### Atlas Enhancements
 - **Future**
   - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
@@ -156,7 +151,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
 ### Bulk history export and share
-- The history drawer can delete all, delete non-favorites, and use visible-page multi-select for bulk project add/remove plus selected-item delete. Bulk export to JSONL/txt and bulk share would close the remaining gap when packaging selected history items after an engagement.
+- The history drawer can delete all, delete non-favorites, export selected history as text/JSONL, and use visible-page multi-select for bulk project add/remove plus selected-item delete. Bulk share/permalink bundles would close the remaining gap when packaging selected history items after an engagement.
 
 ### Mobile share ergonomics
 - The native share-sheet for permalink URLs is done (v1.5, `navigator.share()` with clipboard fallback). What remains is making the broader mobile save/share experience feel intentional:

@@ -2076,7 +2076,9 @@ describe('history panel actions', () => {
     expect(historyFetchCount()).toBe(1)
   })
 
-  it('disables project bulk actions without an active project or with mixed selected item types', async () => {
+  it('keeps export enabled for mixed selections while disabling project bulk actions', async () => {
+    const exportBlob = new Blob(['{"kind":"summary","items":2}\n'], { type: 'application/x-ndjson' })
+    const downloadBlobAsAttachment = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -2102,9 +2104,19 @@ describe('history panel actions', () => {
           }),
         })
       }
+      if (url === '/history/bulk-export') {
+        return Promise.resolve({
+          ok: true,
+          headers: { get: () => 'attachment; filename="darklab-history-test.jsonl"' },
+          blob: () => Promise.resolve(exportBlob),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      downloadBlobAsAttachmentImpl: downloadBlobAsAttachment,
+    })
 
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
@@ -2124,7 +2136,25 @@ describe('history panel actions', () => {
 
     expect(document.querySelector('[data-action="bulk-add-project"]').disabled).toBe(true)
     expect(document.querySelector('[data-action="bulk-remove-project"]').disabled).toBe(true)
+    expect(document.querySelector('[data-action="bulk-export-txt"]').disabled).toBe(false)
+    expect(document.querySelector('[data-action="bulk-export-jsonl"]').disabled).toBe(false)
     expect(document.querySelector('[data-action="bulk-delete"]').disabled).toBe(false)
+
+    document.querySelector('[data-action="bulk-export-jsonl"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
+    const exportCall = apiFetch.mock.calls.find(([url]) => url === '/history/bulk-export')
+    expect(JSON.parse(exportCall[1].body)).toEqual({
+      run_ids: ['run-1'],
+      snapshot_ids: ['snap-1'],
+      format: 'jsonl',
+    })
+    expect(downloadBlobAsAttachment).toHaveBeenCalledWith(
+      exportBlob,
+      'darklab-history-test.jsonl',
+      expect.objectContaining({ container: document.getElementById('history-panel') }),
+    )
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
   })
 
   it('resets select mode and selection before the next history drawer open', async () => {

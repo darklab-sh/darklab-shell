@@ -10,7 +10,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 import config as _config
 import services.runs.comparison as run_comparison
@@ -87,6 +87,9 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
+
+BULK_HISTORY_EXPORT_MAX_ITEMS = 500
+BULK_HISTORY_EXPORT_MAX_BYTES = 50 * 1024 * 1024
 
 
 @history_bp.before_request
@@ -1730,14 +1733,16 @@ def history_run_atlas_cleanup_preview(run_id):
     return jsonify({"ok": True, "cleanup": public_cleanup_preview(preview)})
 
 
-def _normalize_bulk_ids_payload(data, key):
+def _normalize_bulk_ids_payload(data, key, *, required=True, limit=MAX_BULK_RUN_ACTION_ITEMS):
     if not isinstance(data, dict):
         return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
     raw_ids = data.get(key)
+    if raw_ids is None and not required:
+        return [], None
     if not isinstance(raw_ids, list):
         return None, (jsonify({"error": f"{key} must be a list"}), 400)
-    if len(raw_ids) > MAX_BULK_RUN_ACTION_ITEMS:
-        return None, (jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400)
+    if len(raw_ids) > limit:
+        return None, (jsonify({"error": "too_many", "limit": limit}), 400)
     ids = []
     seen = set()
     for raw_id in raw_ids:
@@ -1750,17 +1755,17 @@ def _normalize_bulk_ids_payload(data, key):
             continue
         seen.add(item_id)
         ids.append(item_id)
-    if not ids:
+    if not ids and required:
         return None, (jsonify({"error": f"{key} is required"}), 400)
     return ids, None
 
 
-def _normalize_bulk_run_ids_payload(data):
-    return _normalize_bulk_ids_payload(data, "run_ids")
+def _normalize_bulk_run_ids_payload(data, *, required=True, limit=MAX_BULK_RUN_ACTION_ITEMS):
+    return _normalize_bulk_ids_payload(data, "run_ids", required=required, limit=limit)
 
 
-def _normalize_bulk_snapshot_ids_payload(data):
-    return _normalize_bulk_ids_payload(data, "snapshot_ids")
+def _normalize_bulk_snapshot_ids_payload(data, *, required=True, limit=MAX_BULK_RUN_ACTION_ITEMS):
+    return _normalize_bulk_ids_payload(data, "snapshot_ids", required=required, limit=limit)
 
 
 def _bulk_delete_result(counts, item_id, status, *, key="run_id", reason=None):
@@ -1786,6 +1791,267 @@ def _bulk_delete_failures(results, *, key="run_id"):
         if len(failures) >= BULK_AUDIT_FAILURE_LIMIT:
             break
     return failures
+
+
+def _normalize_bulk_export_payload(data):
+    if not isinstance(data, dict):
+        return None, None, None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+    export_format = str(data.get("format") or "txt").strip().lower()
+    if export_format not in {"txt", "jsonl"}:
+        return None, None, None, (jsonify({"error": "unsupported_format", "formats": ["txt", "jsonl"]}), 400)
+    run_ids, error_response = _normalize_bulk_run_ids_payload(
+        data,
+        required=False,
+        limit=BULK_HISTORY_EXPORT_MAX_ITEMS,
+    )
+    if error_response is not None:
+        return None, None, None, error_response
+    snapshot_ids, error_response = _normalize_bulk_snapshot_ids_payload(
+        data,
+        required=False,
+        limit=BULK_HISTORY_EXPORT_MAX_ITEMS,
+    )
+    if error_response is not None:
+        return None, None, None, error_response
+    assert run_ids is not None
+    assert snapshot_ids is not None
+    if len(run_ids) + len(snapshot_ids) > BULK_HISTORY_EXPORT_MAX_ITEMS:
+        return None, None, None, (
+            jsonify({"error": "too_many", "limit": BULK_HISTORY_EXPORT_MAX_ITEMS}),
+            400,
+        )
+    if not run_ids and not snapshot_ids:
+        return None, None, None, (jsonify({"error": "selection_required"}), 400)
+    return run_ids, snapshot_ids, export_format, None
+
+
+def _history_export_filename(export_format):
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    suffix = "jsonl" if export_format == "jsonl" else "txt"
+    return f"darklab-history-{stamp}.{suffix}"
+
+
+def _history_export_run_record(run):
+    output = load_run_output_entries_for_run(run, log_event="BULK_HISTORY_EXPORT_OUTPUT_LOAD_FAILED")
+    lines = [str(entry.get("text") or "") for entry in output.entries]
+    return {
+        "kind": "run",
+        "id": str(run.get("id") or ""),
+        "command": str(run.get("command") or ""),
+        "run_kind": str(run.get("run_kind") or ""),
+        "status": "completed",
+        "started": run.get("started"),
+        "finished": run.get("finished"),
+        "exit_code": run.get("exit_code"),
+        "line_count": len(lines),
+        "output_source": output.source,
+        "output_truncated": bool(output.truncated),
+        "lines": lines,
+    }
+
+
+def _history_export_snapshot_record(snapshot):
+    try:
+        content = json.loads(load_text_body(snapshot.get("content")) or "[]")
+    except (TypeError, json.JSONDecodeError, ValueError):
+        content = []
+    lines = []
+    for item in content:
+        if isinstance(item, str):
+            lines.append(item)
+        elif isinstance(item, dict):
+            lines.append(str(item.get("text") or ""))
+    return {
+        "kind": "snapshot",
+        "id": str(snapshot.get("id") or ""),
+        "label": str(snapshot.get("label") or ""),
+        "created": snapshot.get("created"),
+        "line_count": len(lines),
+        "lines": lines,
+    }
+
+
+def _history_export_skip_record(item_kind, item_id, status, reason=""):
+    record = {"kind": item_kind, "id": item_id, "status": status}
+    if reason:
+        record["reason"] = reason
+    return record
+
+
+def _history_export_bytes(lines):
+    return sum(len(line.encode("utf-8")) for line in lines)
+
+
+def _history_export_jsonl_summary(items, skipped, *, truncated):
+    return json.dumps({
+        "kind": "summary",
+        "items": int(items),
+        "skipped": skipped,
+        "truncated": bool(truncated),
+    }, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def _history_export_jsonl_lines(records, skipped):
+    accepted = []
+    emitted = 0
+    truncated = False
+    summary_bytes = len(_history_export_jsonl_summary(0, skipped, truncated=True).encode("utf-8"))
+    for record in records:
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        line_bytes = len(line.encode("utf-8"))
+        if emitted + line_bytes + summary_bytes > BULK_HISTORY_EXPORT_MAX_BYTES:
+            truncated = True
+            break
+        emitted += line_bytes
+        accepted.append(line)
+    for line in accepted:
+        yield line
+    yield _history_export_jsonl_summary(len(accepted), skipped, truncated=truncated)
+
+
+def _history_export_txt_block(record):
+    if record.get("kind") == "run":
+        lines = [
+            f"-- run {record.get('id')} --\n",
+            f"command: {record.get('command')}\n",
+            f"started: {record.get('started') or ''}\n",
+            f"finished: {record.get('finished') or ''}\n",
+            f"exit_code: {record.get('exit_code') if record.get('exit_code') is not None else ''}\n\n",
+        ]
+    else:
+        lines = [
+            f"-- snapshot {record.get('id')} --\n",
+            f"label: {record.get('label')}\n",
+            f"created: {record.get('created') or ''}\n\n",
+        ]
+    for line in record.get("lines") or []:
+        lines.append(f"{line}\n")
+    lines.append("\n")
+    return lines
+
+
+def _history_export_txt_skipped_footer(skipped):
+    if not skipped:
+        return []
+    lines = ["-- skipped --\n"]
+    for item in skipped:
+        lines.append("\t".join([
+            str(item.get("id") or ""),
+            str(item.get("kind") or ""),
+            str(item.get("reason") or item.get("status") or ""),
+        ]) + "\n")
+    return lines
+
+
+def _history_export_txt_lines(records, skipped):
+    accepted_blocks = []
+    emitted = 0
+    truncated = False
+    footer = _history_export_txt_skipped_footer(skipped)
+    footer_bytes = _history_export_bytes(footer)
+    header_bytes = len("darklab history export\nitems: 0\ntruncated: yes\n\n".encode("utf-8"))
+    for record in records:
+        block = _history_export_txt_block(record)
+        block_bytes = _history_export_bytes(block)
+        if emitted + block_bytes + footer_bytes + header_bytes > BULK_HISTORY_EXPORT_MAX_BYTES:
+            truncated = True
+            break
+        emitted += block_bytes
+        accepted_blocks.append(block)
+    yield f"darklab history export\nitems: {len(accepted_blocks)}\ntruncated: {'yes' if truncated else 'no'}\n\n"
+    for block in accepted_blocks:
+        yield from block
+    if skipped:
+        yield from footer
+
+
+@history_bp.route("/history/bulk-export", methods=["POST"])
+def bulk_export_history():
+    """Export selected completed runs and snapshots for this session."""
+    session_id = get_session_id()
+    run_ids, snapshot_ids, export_format, error_response = _normalize_bulk_export_payload(
+        request.get_json(silent=True) or {},
+    )
+    if error_response is not None:
+        return error_response
+    assert run_ids is not None
+    assert snapshot_ids is not None
+    assert export_format is not None
+
+    active_ids = {
+        str(item.get("run_id") or "")
+        for item in active_runs_for_session(session_id)
+        if item.get("run_id")
+    }
+    records = []
+    skipped = []
+    counts = {"exported": 0, "not_found": 0, "rejected": 0}
+    with db_connect() as conn:
+        owned_runs = {}
+        if run_ids:
+            placeholders = ",".join("?" for _ in run_ids)
+            rows = conn.execute(
+                f"SELECT runs.*, art.rel_path "  # nosec
+                f"FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+                f"WHERE runs.session_id = ? AND runs.id IN ({placeholders})",
+                [session_id, *run_ids],
+            ).fetchall()
+            owned_runs = {str(row["id"]): dict(row) for row in rows}
+        owned_snapshots = {}
+        if snapshot_ids:
+            placeholders = ",".join("?" for _ in snapshot_ids)
+            rows = conn.execute(
+                f"SELECT * FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
+                [session_id, *snapshot_ids],
+            ).fetchall()
+            owned_snapshots = {str(row["id"]): dict(row) for row in rows}
+
+    for run_id in run_ids:
+        if run_id in active_ids:
+            skipped.append(_history_export_skip_record("run", run_id, "rejected", "running"))
+            _bulk_delete_result(counts, run_id, "rejected", reason="running")
+            continue
+        run = owned_runs.get(run_id)
+        if run is None:
+            skipped.append(_history_export_skip_record("run", run_id, "not_found"))
+            _bulk_delete_result(counts, run_id, "not_found")
+            continue
+        if run.get("finished") is None and run.get("exit_code") is None:
+            skipped.append(_history_export_skip_record("run", run_id, "rejected", "incomplete"))
+            _bulk_delete_result(counts, run_id, "rejected", reason="incomplete")
+            continue
+        records.append(_history_export_run_record(run))
+        _bulk_delete_result(counts, run_id, "exported")
+
+    for snapshot_id in snapshot_ids:
+        snapshot = owned_snapshots.get(snapshot_id)
+        if snapshot is None:
+            skipped.append(_history_export_skip_record("snapshot", snapshot_id, "not_found"))
+            _bulk_delete_result(counts, snapshot_id, "not_found", key="snapshot_id")
+            continue
+        records.append(_history_export_snapshot_record(snapshot))
+        _bulk_delete_result(counts, snapshot_id, "exported", key="snapshot_id")
+
+    filename = _history_export_filename(export_format)
+    if export_format == "jsonl":
+        lines = _history_export_jsonl_lines(records, skipped)
+        content_type = "application/x-ndjson; charset=utf-8"
+    else:
+        lines = _history_export_txt_lines(records, skipped)
+        content_type = "text/plain; charset=utf-8"
+
+    log.info("HISTORY_BULK_EXPORTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "format": export_format,
+        "counts": counts,
+        "failures": skipped[:BULK_AUDIT_FAILURE_LIMIT],
+    })
+    return Response(
+        lines,
+        content_type=content_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @history_bp.route("/history/bulk-delete", methods=["POST"])
