@@ -28,6 +28,7 @@
   const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
   const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
+  const findingsBoardBtn = document.getElementById('atlas-findings-board-btn');
   const clearFiltersBtn = document.getElementById('atlas-clear-filters-btn');
   const findingBulkRow = document.getElementById('atlas-finding-bulk-row');
   const selectToggle = document.getElementById('atlas-select-toggle');
@@ -1503,6 +1504,21 @@
     }
   }
 
+  function openFindingsBoardFromAtlas() {
+    if (typeof global.openFindingsBoard !== 'function') return;
+    void global.openFindingsBoard({
+      source: 'atlas',
+      query: state.query,
+      projectId: state.projectId,
+      projectName: state.projectName,
+      runId: state.runId,
+      runLabel: state.runLabel,
+      reviewState: state.findingStatus,
+      orphanFilter: state.orphanFilter,
+      suppressionFilter: state.suppressionFilter,
+    });
+  }
+
   async function bulkUpdateFindings(reviewStateOverride = '') {
     const reviewState = String(reviewStateOverride || findingBulkStatus?.value || '').trim();
     const findingIds = [...state.selectedFindingIds];
@@ -2088,6 +2104,7 @@
       }
     });
     refreshBtn?.addEventListener('click', () => refreshAtlas());
+    findingsBoardBtn?.addEventListener('click', openFindingsBoardFromAtlas);
     clearFiltersBtn?.addEventListener('click', () => clearAtlasFilters());
     prevBtn?.addEventListener('click', () => {
       state.offset = Math.max(0, state.offset - state.limit);

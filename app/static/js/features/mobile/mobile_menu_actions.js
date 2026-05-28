@@ -44,6 +44,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'options') openOptions();
   if (action === 'projects' && typeof openProjectWorkspace === 'function') void openProjectWorkspace();
   if (action === 'atlas' && typeof openAtlas === 'function') void openAtlas({ source: 'mobile-menu' });
+  if (action === 'findings-board' && typeof openFindingsBoard === 'function') void openFindingsBoard({ source: 'mobile-menu' });
   if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
     void openStatusMonitor({ source: 'mobile-menu' });
   }

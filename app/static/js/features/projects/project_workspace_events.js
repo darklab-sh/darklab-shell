@@ -127,6 +127,15 @@
 
     async function handleChange(event) {
       if (ctx.packagesController?.().handleChange(event)) return;
+      const findingViewModeControl = event.target.closest?.('[data-project-finding-view-mode]');
+      if (findingViewModeControl) {
+        event.preventDefault();
+        event.stopPropagation();
+        const mode = String(findingViewModeControl.dataset.projectFindingViewMode || 'list');
+        ctx.setFindingViewMode(mode);
+        ctx.renderProjectExplorer();
+        return;
+      }
       const compareModeControl = event.target.closest?.('[data-project-compare-mode]');
       if (compareModeControl) {
         event.stopPropagation();
@@ -598,6 +607,15 @@
         ctx.renderProjectExplorer();
         return;
       }
+      const findingViewModeButton = event.target.closest?.('[data-project-finding-view-mode]');
+      if (findingViewModeButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const mode = String(findingViewModeButton.dataset.projectFindingViewMode || 'list');
+        ctx.setFindingViewMode(mode);
+        ctx.renderProjectExplorer();
+        return;
+      }
       const tabBtn = event.target.closest?.('[data-project-tab]');
       if (tabBtn) {
         event.preventDefault();
@@ -787,6 +805,17 @@
           ctx.closeProjectWorkspace({ refocus: false });
           if (typeof global.openAtlas === 'function') {
             void global.openAtlas({
+              source: 'project-workspace',
+              projectId,
+              projectName: project ? ctx.projectDisplayName(project) : '',
+            });
+          }
+          return;
+        } else if (action === 'open-findings-board') {
+          const project = projectFromRowsOrSummary(projectId);
+          if (typeof global.openFindingsBoard === 'function') {
+            ctx.closeProjectWorkspace({ refocus: false });
+            void global.openFindingsBoard({
               source: 'project-workspace',
               projectId,
               projectName: project ? ctx.projectDisplayName(project) : '',

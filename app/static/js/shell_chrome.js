@@ -3,7 +3,7 @@
 // Loaded after dom.js, state.js, ui_helpers.js, history.js, tabs.js, app.js,
 // project_details.js, project_list.js, project_navigation.js, project_entity_editor.js,
 // project_active_context.js, project_workspace_constants.js, project_workspace_state.js, project_workspace_lifecycle.js, project_workspace_renderer.js, project_workspace_bootstrap.js, project_shared_ui.js, project_nested_sheets.js, project_mobile_compare.js, project_mobile_shell.js, project_mobile_detail.js,
-// project_entities.js, project_findings.js, project_artifacts.js, project_packages.js, and controller.js
+// project_entities.js, project_findings.js, project_findings_board.js, findings_board_modal.js, project_artifacts.js, project_packages.js, and controller.js
 // so the helpers and overlays it delegates to are already defined.
 
 (function initShellChrome(global) {
@@ -452,6 +452,10 @@
     }
     if (action === 'atlas' && typeof global.openAtlas === 'function') {
       void global.openAtlas({ source: 'rail' });
+      return;
+    }
+    if (action === 'findings-board' && typeof global.openFindingsBoard === 'function') {
+      void global.openFindingsBoard({ source: 'rail' });
       return;
     }
     if (action === 'status-monitor' && typeof global.openStatusMonitor === 'function') {
@@ -1136,6 +1140,26 @@
 
   let projectFindingsController = null;
 
+  let projectFindingsBoardController = null;
+
+  function _projectFindingsBoardController() {
+    if (projectFindingsBoardController) return projectFindingsBoardController;
+    const factory = global.DarklabProjectFindingsBoard
+      && global.DarklabProjectFindingsBoard.createProjectFindingsBoardController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectFindingsBoard is unavailable');
+    projectFindingsBoardController = factory({
+      entityMetadataChipClass: _entityMetadataChipClass,
+      entityMetadataChips: _entityMetadataChips,
+      projectFindingTargetText: _projectFindingTargetText,
+      projectTargetLabel: _projectTargetLabel,
+      makeProjectButton: _makeProjectButton,
+      reviewControl: (finding, projectId) => _projectFindingsController().reviewControl(finding, projectId),
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      metaSeparator: ' · ',
+    });
+    return projectFindingsBoardController;
+  }
+
   function _projectFindingsController() {
     if (projectFindingsController) return projectFindingsController;
     const factory = global.DarklabProjectFindings && global.DarklabProjectFindings.createProjectFindingsController;
@@ -1146,10 +1170,12 @@
       collapsedFindingGroupLabels: _projectCollapsedFindingGroupLabels,
       findingsLoadingId: () => _projectFindingsDataController().loadingId(),
       hasFindings: projectId => _projectFindingsDataController().loaded(projectId),
+      findingViewMode: projectWorkspaceState.findingViewMode,
       findingSelectMode: projectWorkspaceState.findingSelectMode,
       selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       projectFindingPagination: (projectId, summary) => _projectFindingsDataController().page(projectId, summary),
       projectFindingItems: _projectFindingItems,
+      projectFindingBoard: (projectId, summary, options) => _projectFindingsDataController().board(projectId, summary, options),
       filteredProjectFindings: _filteredProjectFindings,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
       projectFindingTargetText: _projectFindingTargetText,
@@ -1158,6 +1184,10 @@
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
+      renderProjectFindingBoard: (container, projectId, summary, board) => (
+        _projectFindingsBoardController().renderBoard(container, projectId, summary, board)
+      ),
+      setFindingSelectMode: projectWorkspaceState.setFindingSelectMode,
       projectItemRow: _projectItemRow,
       groupBy: _groupBy,
       metaSeparator: ' · ',
@@ -1830,6 +1860,7 @@
       selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       selectedProjectId: projectWorkspaceState.selectedId,
       selectProjectFromMobile: _selectProjectFromMobile,
+      setFindingViewMode: projectWorkspaceState.setFindingViewMode,
       setProjectFindingPageOffset: _setProjectFindingPageOffset,
       setProjectArtifactPageOffset: _setProjectArtifactPageOffset,
       setProjectRunPageOffset: _setProjectRunPageOffset,

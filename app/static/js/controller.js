@@ -283,6 +283,7 @@ function setupModalFocusTraps() {
     'faq-modal',
     'command-registry-modal',
     'provider-status-modal',
+    'findings-board-modal',
     'project-workspace-modal',
     'project-target-editor-modal',
     'project-package-manifest-modal',

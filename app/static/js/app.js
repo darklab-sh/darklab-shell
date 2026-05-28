@@ -163,6 +163,9 @@ function _closeMajorOverlays() {
   if (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen()) {
     if (typeof closeAtlas === 'function') closeAtlas({ refocus: false });
   }
+  if (typeof isFindingsBoardOpen === 'function' && isFindingsBoardOpen()) {
+    if (typeof closeFindingsBoard === 'function') closeFindingsBoard({ refocus: false });
+  }
   if (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen()) {
     if (typeof closeHistoryRunOverlay === 'function') closeHistoryRunOverlay();
   }

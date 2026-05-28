@@ -3091,7 +3091,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
-| `opens Status Monitor from the desktop rail nav item` | Verifies that the desktop rail exposes Status Monitor as a first-class navigation item. |
+| `opens Status Monitor and Findings Board from the desktop rail nav item` | Verifies that the desktop rail exposes Status Monitor and the Findings Board as first-class navigation items. |
 | `keeps the default split when workflows is closed and reopened before resizing` | Verifies that the desktop rail preserves the default Recents/Workflows split when Workflows is collapsed before the user drags the splitter. |
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |

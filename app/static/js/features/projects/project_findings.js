@@ -109,6 +109,33 @@
       return toolbar;
     }
 
+    function renderViewToggle(projectId) {
+      const current = ctx.findingViewMode();
+      const tools = document.createElement('div');
+      tools.className = 'project-finding-view-tools';
+      const wrap = document.createElement('div');
+      wrap.className = 'project-finding-view-toggle';
+      wrap.setAttribute('aria-label', 'Findings view');
+      [
+        { value: 'list', label: 'List' },
+        { value: 'board', label: 'Board' },
+      ].forEach(({ value, label }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `toggle-btn project-finding-view-button${current === value ? ' is-active' : ''}`;
+        btn.dataset.projectFindingViewMode = value;
+        btn.dataset.projectId = projectId;
+        btn.setAttribute('aria-pressed', current === value ? 'true' : 'false');
+        btn.textContent = label;
+        ctx.bindProjectRuntimePressable(btn);
+        wrap.appendChild(btn);
+      });
+      const open = ctx.makeProjectButton('Open board', 'open-findings-board', projectId);
+      open.classList.add('project-finding-board-open');
+      tools.append(wrap, open);
+      return tools;
+    }
+
     function renderPagination(projectId, summary, findings, position = 'bottom') {
       const pagination = ctx.projectFindingPagination?.(projectId, summary) || {};
       const limit = Math.max(1, Number(pagination.limit || 50));
@@ -195,8 +222,16 @@
       const findings = ctx.filteredProjectFindings(projectId, summary);
       const pagination = initialPagination;
       const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
+      const viewMode = ctx.findingViewMode();
       pruneSelection(findings);
-      container.appendChild(renderBulkToolbar(projectId, findings));
+      container.appendChild(renderViewToggle(projectId));
+      if (viewMode === 'board' && ctx.findingSelectMode()) {
+        ctx.selectedFindingIds().clear();
+        ctx.setFindingSelectMode(false);
+      }
+      if (viewMode !== 'board') {
+        container.appendChild(renderBulkToolbar(projectId, findings));
+      }
       if (!allFindings.length && total === 0) {
         container.appendChild(ctx.emptyProjectPanel('No persisted findings for linked runs or linked entities yet.'));
         return;
@@ -212,9 +247,13 @@
       }
       const topPager = renderPagination(projectId, summary, findings, 'top');
       if (topPager) container.appendChild(topPager);
-      findings.forEach((finding) => {
-        container.appendChild(renderFindingRow(projectId, summary, finding));
-      });
+      if (viewMode === 'board') {
+        ctx.renderProjectFindingBoard(container, projectId, summary, ctx.projectFindingBoard(projectId, summary));
+      } else {
+        findings.forEach((finding) => {
+          container.appendChild(renderFindingRow(projectId, summary, finding));
+        });
+      }
       const pager = renderPagination(projectId, summary, findings, 'bottom');
       if (pager) container.appendChild(pager);
     }

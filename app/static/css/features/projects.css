@@ -1743,6 +1743,45 @@
   border-left: 1px solid var(--border);
 }
 
+.project-finding-view-tools {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-self: start;
+  min-width: 0;
+}
+
+.project-finding-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  width: fit-content;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.project-finding-view-button.toggle-btn {
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.project-finding-view-button.toggle-btn.is-active,
+.project-finding-view-button.toggle-btn[aria-pressed="true"] {
+  color: var(--green);
+  background: var(--green-glow);
+}
+
 
 
 .project-explorer-filter-chips {
@@ -3126,6 +3165,254 @@ button.project-explorer-item:focus-visible,
   border-color: var(--border);
   color: var(--muted);
   opacity: 0.78;
+}
+
+.project-finding-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(210px, 1fr));
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.project-finding-board-column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.project-finding-board-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.project-finding-board-column-header h3 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.project-finding-board-column-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--theme-chrome-row-bg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.project-finding-board-column-body {
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-finding-board-card {
+  display: grid;
+  align-self: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.project-finding-board-card:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 2px;
+}
+
+.project-finding-board-card.review-important,
+.project-finding-board-card.review-needs_followup {
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+}
+
+.project-finding-board-card.review-reviewed {
+  border-color: color-mix(in srgb, var(--green-dim) 60%, var(--border));
+}
+
+.project-finding-board-card.review-false_positive {
+  opacity: 0.78;
+}
+
+.project-finding-board-card-header {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-finding-board-card-title {
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.project-finding-board-card-badges,
+.project-finding-board-card-chips,
+.project-finding-board-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-finding-board-card-meta,
+.project-finding-board-card-detail,
+.project-finding-board-empty,
+.project-finding-board-truncated {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.project-finding-board-card-detail {
+  color: var(--text-muted, var(--muted));
+}
+
+.project-finding-board-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.project-finding-board-badge.is-important {
+  border-color: color-mix(in srgb, var(--amber) 64%, var(--border));
+  color: var(--amber);
+}
+
+.project-finding-board-card-actions .project-finding-review {
+  width: min(100%, 150px);
+}
+
+.findings-board-modal {
+  width: min(1180px, calc(100vw - 32px));
+  max-width: min(1180px, calc(100vw - 32px));
+  height: min(820px, calc(100svh - 44px));
+  max-height: min(820px, calc(100svh - 44px));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.findings-board-modal .faq-header {
+  gap: 16px;
+}
+
+.findings-board-modal .faq-header > div:first-child {
+  min-width: 0;
+}
+
+.findings-board-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.findings-board-subtitle,
+.findings-board-message,
+.findings-board-empty-state {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.findings-board-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.findings-board-message {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 8px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.findings-board-message.is-error {
+  border-color: color-mix(in srgb, var(--red) 58%, var(--theme-panel-border));
+  color: var(--red);
+}
+
+.findings-board-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.findings-board-grid {
+  grid-template-columns: repeat(4, minmax(240px, 1fr));
+  min-width: 1000px;
+  align-items: stretch;
+}
+
+.findings-board-column {
+  min-height: 100%;
+}
+
+.findings-board-column.is-drop-target {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, var(--surface));
+}
+
+.findings-board-card {
+  cursor: grab;
+}
+
+.findings-board-card.is-dragging {
+  opacity: 0.58;
+}
+
+.findings-board-review {
+  width: min(100%, 160px);
+}
+
+.findings-board-empty-state {
+  padding: 18px;
+  border: 1px dashed var(--theme-panel-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
 }
 
 

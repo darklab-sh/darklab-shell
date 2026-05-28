@@ -203,6 +203,11 @@
             <span class="menu-item-label">atlas</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="findings-board">
+            <span class="menu-item-icon" aria-hidden="true">▦</span>
+            <span class="menu-item-label">findings</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
             <span class="menu-item-icon" aria-hidden="true">◉</span>
             <span class="menu-item-label">status</span>
@@ -321,6 +326,7 @@
         <button class="rail-nav-item nav-item rail-more-item" data-action="schedules" type="button" role="menuitem" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="watchers" type="button" role="menuitem" title="Change-detection watchers"><span class="rail-nav-glyph">◌</span><span class="rail-nav-label">watchers</span></button>
         <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="findings-board" type="button" role="menuitem" title="Finding triage board"><span class="rail-nav-glyph">▦</span><span class="rail-nav-label">findings</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="status-monitor" type="button" role="menuitem" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="command-registry" type="button" role="menuitem" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="faq" type="button" role="menuitem" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
@@ -519,6 +525,7 @@
                 </div>
               </div>
               <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+              <button id="atlas-findings-board-btn" class="btn btn-secondary btn-compact" type="button">Board</button>
               <button id="atlas-clear-filters-btn" class="btn btn-ghost btn-compact" type="button">Clear filters</button>
             </div>
           </div>
@@ -859,6 +866,24 @@
     </div>
     <div id="command-registry-body" class="command-registry-body nice-scroll" aria-live="polite"></div>
   </div>
+</div>
+
+<div id="findings-board-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="findings-board-modal" class="modal-card mobile-sheet-surface findings-board-modal" role="dialog" aria-modal="true" aria-labelledby="findings-board-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close findings board"></div>
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="findings-board-title">FINDINGS BOARD</span>
+        <div class="findings-board-subtitle" id="findings-board-subtitle">All findings</div>
+      </div>
+      <div class="findings-board-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="findings-board-refresh-btn">Refresh</button>
+        <button type="button" class="close-btn findings-board-close" aria-label="Close findings board">✕</button>
+      </div>
+    </div>
+    <div id="findings-board-message" class="findings-board-message u-hidden" role="status" aria-live="polite"></div>
+    <div id="findings-board-body" class="findings-board-body nice-scroll" aria-live="polite"></div>
+  </section>
 </div>
 
 <div id="project-workspace-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
@@ -1384,6 +1409,8 @@
 <script src="/static/js/features/projects/project_filters.js"></script>
 <script src="/static/js/features/projects/project_entities.js"></script>
 <script src="/static/js/features/projects/project_findings.js"></script>
+<script src="/static/js/features/projects/project_findings_board.js"></script>
+<script src="/static/js/features/findings/findings_board_modal.js"></script>
 <script src="/static/js/features/projects/project_artifacts.js"></script>
 <script src="/static/js/features/projects/project_packages.js"></script>
 <script src="/static/js/tour_modal.js"></script>

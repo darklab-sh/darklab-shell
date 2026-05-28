@@ -108,6 +108,14 @@ const PROJECT_FINDINGS_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings.js'),
   'utf8',
 )
+const PROJECT_FINDINGS_BOARD_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_board.js'),
+  'utf8',
+)
+const FINDINGS_BOARD_MODAL_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/findings/findings_board_modal.js'),
+  'utf8',
+)
 const PROJECT_ARTIFACTS_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_artifacts.js'),
   'utf8',
@@ -197,6 +205,7 @@ function loadShellChrome({
         <button id="rail-more-btn" class="rail-nav-item nav-item" data-action="rail-more" type="button" aria-expanded="false" aria-controls="rail-more-menu"></button>
         <div id="rail-more-menu" class="u-hidden">
           <button class="rail-nav-item nav-item" data-action="status-monitor" type="button"></button>
+          <button class="rail-nav-item nav-item" data-action="findings-board" type="button"></button>
         </div>
         <button class="rail-nav-item nav-item" data-action="projects" type="button"><span class="rail-nav-glyph">◇</span></button>
       </nav>
@@ -296,6 +305,16 @@ function loadShellChrome({
             <button id="project-entity-submit" type="submit"></button>
           </form>
         </div>
+      </div>
+    </div>
+    <div id="findings-board-overlay" class="u-hidden" aria-hidden="true">
+      <div id="findings-board-modal">
+        <span id="findings-board-title"></span>
+        <div id="findings-board-subtitle"></div>
+        <button id="findings-board-refresh-btn" type="button"></button>
+        <button class="findings-board-close" type="button"></button>
+        <div id="findings-board-message" class="u-hidden"></div>
+        <div id="findings-board-body"></div>
       </div>
     </div>
   `
@@ -419,6 +438,8 @@ function loadShellChrome({
       ${PROJECT_FILTERS_SRC}
       ${PROJECT_ENTITIES_SRC}
       ${PROJECT_FINDINGS_SRC}
+      ${PROJECT_FINDINGS_BOARD_SRC}
+      ${FINDINGS_BOARD_MODAL_SRC}
       ${PROJECT_ARTIFACTS_SRC}
       ${PROJECT_PACKAGES_SRC}
       ${SHELL_CHROME_SRC}
@@ -497,6 +518,7 @@ function loadShellChrome({
     showToast,
     bindDismissible,
     bindMobileSheet,
+    projectFindingsData: global.DarklabProjectFindingsData,
     openProjectWorkspace: global.openProjectWorkspace,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
@@ -505,9 +527,43 @@ function loadShellChrome({
 }
 
 describe('shell chrome rail sections', () => {
-  it('opens Status Monitor from the desktop rail nav item', () => {
+  it('opens Status Monitor and Findings Board from the desktop rail nav item', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
-    const shell = loadShellChrome({ openStatusMonitor })
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/atlas/findings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [{
+              id: 'finding-rail',
+              title: 'Rail finding',
+              raw_line: '443/tcp open https',
+              review_state: 'new',
+              run_id: 'run-rail',
+              run_command: 'nmap rail.example',
+            }],
+            total: 1,
+            has_more: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const bindDismissible = vi.fn((_el, options) => {
+      const keyHandler = (event) => {
+        if (event.key === 'Escape' && options.isOpen()) {
+          event.preventDefault()
+          options.onClose()
+        }
+      }
+      document.addEventListener('keydown', keyHandler)
+      return {
+        dispose: vi.fn(() => {
+          document.removeEventListener('keydown', keyHandler)
+        }),
+      }
+    })
+    const shell = loadShellChrome({ apiFetch, openStatusMonitor, bindDismissible })
     const nav = document.getElementById('rail-nav')
     const rail = document.getElementById('rail')
     const trigger = document.getElementById('rail-more-btn')
@@ -535,6 +591,21 @@ describe('shell chrome rail sections', () => {
 
     expect(shell.openStatusMonitor).toHaveBeenCalledWith({ source: 'rail' })
     expect(nav.querySelector('#rail-more-menu').classList.contains('u-hidden')).toBe(true)
+
+    trigger.click()
+    nav.querySelector('[data-action="findings-board"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(true)
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('findings-board-overlay'),
+      expect.objectContaining({ level: 'modal' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith(expect.stringMatching(/^\/atlas\/findings\?/), { cache: 'no-store' })
+    expect(document.getElementById('findings-board-body').textContent).toContain('Rail finding')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await tick()
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
   })
 
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {
@@ -3969,6 +4040,75 @@ describe('shell chrome project workspace', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
     const shell = loadShellChrome({ apiFetch })
+    const projectFindingsData = shell.projectFindingsData
+    const board = projectFindingsData.boardColumnsFromFindings([
+      ...projectFindings,
+      {
+        id: 'finding-unknown',
+        title: 'Unknown review state',
+        review_state: 'triaged_elsewhere',
+        target_ids: ['target-api', 'target-api'],
+        labels: ['needs-owner'],
+        note: 'check manually',
+        source_run_exists: false,
+      },
+      { id: 'finding-extra-new', title: 'Another new issue', review_state: 'new' },
+    ], { limit: 1 })
+    const uncappedBoard = projectFindingsData.boardColumnsFromFindings([
+      ...projectFindings,
+      {
+        id: 'finding-unknown',
+        title: 'Unknown review state',
+        review_state: 'triaged_elsewhere',
+        target_ids: ['target-api', 'target-api'],
+        labels: ['needs-owner'],
+        note: 'check manually',
+        source_run_exists: false,
+      },
+    ], { limit: 10 })
+    const newColumn = board.columns.find(column => column.state === 'new')
+    const reviewedColumn = board.columns.find(column => column.state === 'reviewed')
+    const falsePositiveColumn = board.columns.find(column => column.state === 'false_positive')
+    const followUpColumn = board.columns.find(column => column.state === 'needs_followup')
+
+    expect(board.columns.map(column => column.state)).toEqual(['new', 'reviewed', 'false_positive', 'needs_followup'])
+    expect(board.counts).toMatchObject({ new: 3, reviewed: 2, false_positive: 0, needs_followup: 0 })
+    expect(board.total).toBe(5)
+    expect(board.truncated).toBe(true)
+    expect(newColumn).toMatchObject({ label: 'New', total: 3, truncated: true })
+    expect(newColumn.cards[0]).toMatchObject({
+      id: 'finding-high',
+      workflow_state: 'new',
+      review_state: 'new',
+      important: false,
+      target_ids: ['target-api'],
+    })
+    expect(reviewedColumn).toMatchObject({ label: 'Reviewed', total: 2, truncated: true })
+    expect(reviewedColumn.cards[0]).toMatchObject({
+      id: 'finding-low',
+      workflow_state: 'reviewed',
+      review_state: 'reviewed',
+      important: false,
+    })
+    expect(uncappedBoard.columns.find(column => column.state === 'reviewed').cards.at(-1)).toMatchObject({
+      id: 'finding-info',
+      workflow_state: 'reviewed',
+      review_state: 'important',
+      important: true,
+    })
+    expect(uncappedBoard.columns.find(column => column.state === 'new').cards.at(-1)).toMatchObject({
+      id: 'finding-unknown',
+      workflow_state: 'new',
+      review_state: 'triaged_elsewhere',
+      labels: ['needs-owner'],
+      note: 'check manually',
+      orphan_source: true,
+      target_ids: ['target-api'],
+    })
+    expect(projectFindingsData.boardWorkflowState({ review_state: 'important' })).toBe('reviewed')
+    expect(projectFindingsData.boardWorkflowState('triaged_elsewhere')).toBe('new')
+    expect(falsePositiveColumn).toMatchObject({ cards: [], total: 0, truncated: false })
+    expect(followUpColumn).toMatchObject({ cards: [], total: 0, truncated: false })
 
     await shell.openProjectWorkspace()
     document.querySelector('[data-project-tab="findings"]').click()
@@ -3979,6 +4119,7 @@ describe('shell chrome project workspace', () => {
 
     expect(titles()).toEqual(['Low issue', 'High issue', 'Critical issue'])
     expect(document.querySelector('.project-explorer-group-count')).toBeNull()
+    expect(document.querySelector('.project-finding-view-button[aria-pressed="true"]')?.textContent).toBe('List')
 
     let sortControl = document.querySelector('[data-project-finding-sort]')
     await tick()
@@ -4002,6 +4143,38 @@ describe('shell chrome project workspace', () => {
     sortControl.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
     expect(titles()).toEqual(['High issue', 'Critical issue', 'Low issue'])
+
+    document.querySelector('[data-project-finding-view-mode="board"]').click()
+    await tick()
+    expect(document.querySelector('.project-finding-view-button[aria-pressed="true"]')?.textContent).toBe('Board')
+    expect(document.querySelector('.project-finding-board')).not.toBeNull()
+    expect(Array.from(document.querySelectorAll('.project-finding-board-column-header h3')).map(node => node.textContent))
+      .toEqual(['New', 'Reviewed', 'False positive', 'Follow-up'])
+    expect(Array.from(document.querySelectorAll('.project-finding-board-card-title')).map(node => node.textContent))
+      .toEqual(['High issue', 'Critical issue', 'Low issue'])
+    expect(document.querySelector('.project-finding-board-badge.is-important')?.textContent).toBe('important')
+    expect(document.querySelector('.project-finding-bulk-toolbar')).toBeNull()
+
+    document.querySelector('[data-project-finding-view-mode="list"]').click()
+    await tick()
+    expect(document.querySelector('.project-finding-board')).toBeNull()
+    expect(document.querySelector('.project-finding-bulk-toolbar')).not.toBeNull()
+
+    document.querySelector('[data-project-action="open-findings-board"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('findings-board-subtitle').textContent).toContain('Project: Sort Project')
+    expect(document.getElementById('findings-board-body').textContent).toContain('Critical issue')
+    const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
+    boardReview.value = 'false_positive'
+    boardReview.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-high/review', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ review_state: 'false_positive' }),
+    }))
   })
 
   it('refreshes an open Projects modal after a cross-tab project broadcast', async () => {

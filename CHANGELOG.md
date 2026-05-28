@@ -63,6 +63,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **What:** accepts ordered `run_ids` and `snapshot_ids`, streams `txt` or newline-delimited JSON with UTF-8 content types and download filenames, uses the same per-item failure shape as existing bulk actions, skips running/missing/cross-session items without failing the whole request, emits a final JSONL summary or TXT skipped footer, and exposes **export text** / **export JSONL** actions from the existing History bulk menu without clearing the selection.
   - **Tests:** extended existing history route coverage for JSONL and TXT exports, snapshot records, skipped active and cross-session items, full-output artifact fallback, byte-cap truncation, selected-order preservation, unsupported formats, empty selections, and export item caps; extended History drawer unit coverage so mixed run/snapshot selections can export JSONL, download the server filename, and keep selection state.
 
+- **Project Findings board view** — added a desktop board option for Project Findings.
+  - **What:** the Findings tab now has a session-persisted List/Board toggle, and the rail, mobile menu, Atlas toolbar, and Project Findings tab can open a larger Findings Board modal. Board mode groups findings into New, Reviewed, False positive, and Follow-up lanes, keeps `important` findings visible as reviewed cards with an important badge, and uses the existing review route for card moves.
+  - **Tests:** extended Project workspace browser coverage for board normalization, empty lanes, important mapping, unknown-state fallback, board rendering, the larger board modal, project-scoped launches, review updates, and returning to the list view.
+
 ### Changed
 
 - **Shared diff classifier foundation** — lifted the watcher diff classifier registry into `services.diff.classifiers` so Watchers and run-comparison summaries can share one tool-aware parser family.

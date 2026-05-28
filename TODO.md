@@ -34,7 +34,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No Open TODOs are currently tracked.
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -206,19 +206,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - **Architecture:**
   - Extend or parallel `app/core/output_signals.py` with a user-rules loader.
   - Surface validation and a `/diag` inspector mode for testing new rules against recent output samples.
-
-### Finding kanban / triage board view
-- Add a Kanban board presentation over a project's (or Atlas-scoped) findings as an alternative to the existing paged table/list views.
-- Columns are customizable (New, Investigating, Confirmed, False Positive, Remediated, etc.); swimlanes by target, severity, or tool.
-- Drag-and-drop transitions update the same review-state and label metadata already used by the list view and bulk actions.
-- **Entry-level scope:**
-  - Desktop-first board with mobile list fallback or sheet details.
-  - Persist column definitions and swimlane choice per project or as session preference.
-  - Quick card actions for notes, target attribution, source-run jump, suppress, and ticket linking (when the ticketing entry exists).
-- **Architecture:**
-  - New browser component under `app/static/js/features/findings/` (or reuse/extend existing finding list components).
-  - Reuses the existing project findings query endpoints and bulk update routes in `app/blueprints/projects.py`.
-  - Board state lives in the existing metadata tables; no new persistence required for core functionality.
 
 ---
 
