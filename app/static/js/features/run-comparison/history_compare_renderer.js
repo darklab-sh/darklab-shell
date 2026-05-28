@@ -722,6 +722,21 @@ function _renderHistoryCompareOmittedNote(truncated = {}) {
   return note;
 }
 
+function _historyCompareNoiseOmittedTotal(data = {}) {
+  const left = Number(data.left?.output_source?.noise_lines_omitted || 0);
+  const right = Number(data.right?.output_source?.noise_lines_omitted || 0);
+  return Math.max(0, left) + Math.max(0, right);
+}
+
+function _renderHistoryCompareNoiseNote(data = {}) {
+  const omitted = _historyCompareNoiseOmittedTotal(data);
+  if (!omitted) return null;
+  const note = document.createElement('div');
+  note.className = 'history-compare-counts-note';
+  note.textContent = `${omitted.toLocaleString()} noisy transcript line(s) folded out of this comparison.`;
+  return note;
+}
+
 function _historyCompareObjectText(item, kind) {
   if (!item || typeof item !== 'object') return '';
   if (kind === 'artifact') {
@@ -904,6 +919,8 @@ function _renderHistoryComparison(data) {
   body.appendChild(metrics);
   const omittedNote = _renderHistoryCompareOmittedNote(data.truncated || {});
   if (omittedNote) body.appendChild(omittedNote);
+  const noiseNote = _renderHistoryCompareNoiseNote(data);
+  if (noiseNote) body.appendChild(noiseNote);
 
   const findingsTruncated = !!(
     data.truncated

@@ -18,6 +18,7 @@ var DarklabRunOutputModel = (function (global) {
     'exit-fail',
   ]);
   const LINE_SIGNAL_VALUES = Object.freeze(['findings', 'warnings', 'errors', 'summaries']);
+  const LINE_NOISE_KIND_VALUES = Object.freeze(['progress', 'status', 'boilerplate']);
 
   const LineKind = Object.freeze({
     INFO: 'info',
@@ -46,6 +47,12 @@ var DarklabRunOutputModel = (function (global) {
     WARNINGS: 'warnings',
     ERRORS: 'errors',
     SUMMARIES: 'summaries',
+  });
+
+  const LineNoiseKind = Object.freeze({
+    PROGRESS: 'progress',
+    STATUS: 'status',
+    BOILERPLATE: 'boilerplate',
   });
 
   const LEGACY_KIND_BY_CLS = Object.freeze({
@@ -108,6 +115,11 @@ var DarklabRunOutputModel = (function (global) {
     denied: 'denied',
     'exit-ok': 'exit-ok',
     'exit-fail': 'exit-fail',
+  });
+
+  const NOISE_KIND_BY_ROLE = Object.freeze({
+    progress: LineNoiseKind.PROGRESS,
+    'status-line': LineNoiseKind.STATUS,
   });
 
   function legacyClsTokens(value) {
@@ -211,6 +223,21 @@ var DarklabRunOutputModel = (function (global) {
     return KIND_LEGACY_CLS[event.kind || LineKind.INFO] || '';
   }
 
+  function noiseKindForRole(role) {
+    return NOISE_KIND_BY_ROLE[role] || null;
+  }
+
+  function noiseKindForEvent(event) {
+    if (!event || (Array.isArray(event.signals) && event.signals.length)) return null;
+    if (event.kind === LineKind.WARN || event.kind === LineKind.ERROR) return null;
+    if (event.noise_kind) return event.noise_kind;
+    return noiseKindForRole(event.role || LineRole.BODY);
+  }
+
+  function isNoiseLineEvent(event) {
+    return noiseKindForEvent(event) !== null;
+  }
+
   function legacyPayload(event) {
     const payload = {
       text: String(event.text || ''),
@@ -223,16 +250,30 @@ var DarklabRunOutputModel = (function (global) {
     if (event.command_root) payload.command_root = String(event.command_root);
     if (event.target) payload.target = String(event.target);
     if (Array.isArray(event.entities) && event.entities.length) payload.entities = event.entities.map(entityToWire);
+    const noiseKind = noiseKindForEvent(event);
+    if (noiseKind) {
+      payload.noise_kind = noiseKind;
+      if (event.noise_reason) payload.noise_reason = String(event.noise_reason);
+    }
     return payload;
   }
 
   function fromWireLineEvent(payload, unknownCollector) {
     const item = payload && typeof payload === 'object' ? payload : {};
     const clsValue = item.cls || '';
+    const kind = enumValue(LINE_KIND_VALUES, item.kind, legacyClsToKind(clsValue), 'kind', unknownCollector);
+    const role = enumValue(LINE_ROLE_VALUES, item.role, legacyClsToRole(clsValue), 'role', unknownCollector);
+    const noiseKind = enumValue(
+      LINE_NOISE_KIND_VALUES,
+      item.noise_kind,
+      noiseKindForRole(role),
+      'noise_kind',
+      unknownCollector,
+    );
     return {
       text: String(item.text || ''),
-      kind: enumValue(LINE_KIND_VALUES, item.kind, legacyClsToKind(clsValue), 'kind', unknownCollector),
-      role: enumValue(LINE_ROLE_VALUES, item.role, legacyClsToRole(clsValue), 'role', unknownCollector),
+      kind,
+      role,
       legacy_cls: String(clsValue || ''),
       ts_clock: String(item.tsC || ''),
       ts_elapsed: String(item.tsE || ''),
@@ -241,6 +282,8 @@ var DarklabRunOutputModel = (function (global) {
       command_root: String(item.command_root || ''),
       target: String(item.target || ''),
       entities: entitiesFromWire(item.entities),
+      noise_kind: noiseKind,
+      noise_reason: noiseKind ? String(item.noise_reason || '') : '',
     };
   }
 
@@ -263,15 +306,20 @@ var DarklabRunOutputModel = (function (global) {
   const api = Object.freeze({
     LINE_EVENT_SCHEMA_VERSION,
     LINE_KIND_VALUES,
+    LINE_NOISE_KIND_VALUES,
     LINE_ROLE_VALUES,
     LINE_SIGNAL_VALUES,
     LineKind,
+    LineNoiseKind,
     LineRole,
     LineSignal,
     eventSearchText,
     fromWireLineEvent,
+    isNoiseLineEvent,
     legacyClsToKind,
     legacyClsToRole,
+    noiseKindForEvent,
+    noiseKindForRole,
     toLegacyWireLineEvent,
     toWireLineEvent,
   });

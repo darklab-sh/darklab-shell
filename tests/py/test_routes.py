@@ -1866,9 +1866,15 @@ class TestProjectRoutes:
                             "signals": ["findings"],
                             "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
                         },
-                        {"text": "scan completed", "cls": "", "line_index": 1},
+                        {
+                            "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+                            "role": "progress",
+                            "noise_kind": "progress",
+                            "line_index": 1,
+                        },
+                        {"text": "scan completed", "cls": "", "line_index": 2},
                     ]),
-                    2,
+                    3,
                 ),
             )
             conn.execute(
@@ -2321,7 +2327,7 @@ class TestProjectRoutes:
         assert [item["label"] for item in package_get["package"]["labels"]] == ["handoff"]
         assert package_get["package"]["note"]["body"] == "Package review note"
         with (
-            mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 1}),
+            mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 2}),
             mock.patch.object(project_routes.log, "info") as package_log,
         ):
             package_download = client.get(
@@ -2402,6 +2408,7 @@ class TestProjectRoutes:
         assert downloaded_manifest["transcripts"][0]["lines"][0]["line_index"] == 0
         assert downloaded_manifest["transcripts"][0]["lines"][0]["signals"] == ["findings"]
         assert downloaded_manifest["transcripts"][0]["lines"][0]["entities"][0]["canonical_value"] == "darklab.sh"
+        assert "0.10-kpps" not in json.dumps(downloaded_manifest["transcripts"][0]["lines"])
         assert findings_json["count"] == 1
         assert findings_json["findings"][0]["raw_line"] == "443/tcp open https"
         assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
@@ -2484,6 +2491,7 @@ class TestProjectRoutes:
         assert "reports/old.txt" in readme
         assert "nmap darklab.sh" in run_html
         assert "443/tcp open https" in run_html
+        assert "0.10-kpps" in run_html
         assert "Download full text transcript" in run_html
         assert "scan completed" in run_text
         assert skipped_items["items"][0]["kind"] == "artifact"
@@ -9951,8 +9959,14 @@ class TestHistoryRoute:
         output = json.dumps([
             {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
             {"text": "alpha", "cls": "", "line_index": 0},
-            {"text": "beta", "cls": "", "line_index": 1},
-            {"text": "gamma", "cls": "", "line_index": 2},
+            {
+                "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+                "role": "progress",
+                "noise_kind": "progress",
+                "line_index": 1,
+            },
+            {"text": "beta", "cls": "", "line_index": 2},
+            {"text": "gamma", "cls": "", "line_index": 3},
             {"text": "[process exited with code 0]", "cls": "exit-ok"},
         ])
         try:
@@ -9974,13 +9988,23 @@ class TestHistoryRoute:
                 headers={"X-Session-ID": session},
             )
             data = json.loads(resp.data)
+            compare_resp = client.get(
+                "/history/compare?left=cmp-lines-left&right=cmp-lines-right",
+                headers={"X-Session-ID": session},
+            )
+            compare_data = json.loads(compare_resp.data)
 
             assert resp.status_code == 200
             assert data["start"] == 1
             assert data["end"] == 3
             assert data["truncated"] is False
             assert [item["text"] for item in data["lines"]] == ["beta", "gamma"]
-            assert data["lines"][0]["line_index"] == 1
+            assert data["lines"][0]["line_index"] == 2
+            assert compare_resp.status_code == 200
+            assert compare_data["left"]["output_source"]["noise_lines_omitted"] == 1
+            assert compare_data["left"]["output_source"]["noise_kind_counts"] == {"progress": 1}
+            assert compare_data["right"]["output_source"]["noise_lines_omitted"] == 1
+            assert "0.10-kpps" not in json.dumps(compare_data["hunks"])
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))

@@ -858,6 +858,18 @@ describe('appendLine', () => {
     })
 
     resetOutputFixture()
+    const noiseFiltered = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    noiseFiltered._getTabs()[0].command = 'nmap -sV darklab.sh'
+    noiseFiltered.appendLine('9999/tcp open fake-service', '', 'tab-1', { noise_kind: 'boilerplate' })
+    noiseFiltered.appendLine('443/tcp open https nginx', '', 'tab-1')
+    expect(noiseFiltered.renderCommandOutcomeSummary('tab-1')).toBe(true)
+    const outcomeText = Array.from(document.querySelectorAll('.command-outcome-summary-row'))
+      .map(line => line.textContent)
+      .join('\n')
+    expect(outcomeText).toContain('Open ports: 1 (443/tcp https nginx)')
+    expect(outcomeText).not.toContain('fake-service')
+
+    resetOutputFixture()
     const unsupported = loadOutputFns({ appConfig: { max_output_lines: 30 } })
     unsupported._getTabs()[0].command = 'whoami'
     unsupported.appendLine('nona', '', 'tab-1')

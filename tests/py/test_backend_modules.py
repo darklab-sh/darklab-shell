@@ -11514,6 +11514,12 @@ class TestOutputSignals:
         ]
 
     def test_classifies_projectdiscovery_and_port_scanner_findings(self):
+        dnsx_classifier = OutputSignalClassifier("dnsx -d darklab.sh -w dns.txt")
+        current_dnsx = dnsx_classifier.classify_line("[INF] Current dnsx version 1.2.3 (latest)")
+        assert current_dnsx["noise_kind"] == "status"
+        assert current_dnsx["noise_reason"] == "projectdiscovery:status"
+        assert "signals" not in current_dnsx
+
         assert classify_line("ip.darklab.sh:443", command="naabu -host ip.darklab.sh -p 80,443") == ["findings"]
         assert classify_line(
             "[INF] Found 2 ports on host ip.darklab.sh (107.178.109.44)",
@@ -11539,12 +11545,21 @@ class TestOutputSignals:
         assert classify_line("[INF] Scan completed in 4m. 21 matches found.", command="nuclei -u https://ip.darklab.sh") == [
             "summaries",
         ]
+        nuclei_classifier = OutputSignalClassifier("nuclei -u https://ip.darklab.sh")
+        nuclei_status = nuclei_classifier.classify_line("[INF] Templates loaded for current scan: 65")
+        nuclei_result = nuclei_classifier.classify_line("[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls12\"]")
+        assert nuclei_status["noise_kind"] == "status"
+        assert nuclei_status["noise_reason"] == "nuclei:status"
+        assert "signals" not in nuclei_status
+        assert "noise_kind" not in nuclei_result
 
     def test_classifies_scanner_progress_lines_as_progress_role(self):
         from blueprints.run import _capture_event_with_signals
 
         masscan_classifier = OutputSignalClassifier("masscan -p 1-1000 192.168.1.3")
         ffuf_classifier = OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt")
+        gobuster_classifier = OutputSignalClassifier("gobuster dir -u https://darklab.sh -w words.txt")
+        openssl_classifier = OutputSignalClassifier("openssl s_client -connect darklab.sh:443")
 
         masscan_progress = masscan_classifier.classify_line(
             "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2"
@@ -11562,16 +11577,34 @@ class TestOutputSignals:
         ffuf_error_progress = ffuf_classifier.classify_line(
             ":: Progress: [18000/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:20] :: Errors: 2 ::"
         )
+        ffuf_config = ffuf_classifier.classify_line(":: URL              : https://darklab.sh/FUZZ")
+        gobuster_config = gobuster_classifier.classify_line("[+] Url:                     https://darklab.sh")
+        openssl_payload = openssl_classifier.classify_line("CONNECTED(00000003)")
 
         assert masscan_progress["role"] == LineRole.progress.value
+        assert masscan_progress["noise_kind"] == "progress"
+        assert masscan_progress["noise_reason"] == "masscan:rate"
         assert masscan_waiting["role"] == LineRole.progress.value
+        assert masscan_waiting["noise_kind"] == "progress"
         assert masscan_finding["signals"] == ["findings"]
         assert ffuf_progress["role"] == LineRole.progress.value
+        assert ffuf_progress["noise_kind"] == "progress"
+        assert ffuf_progress["noise_reason"] == "ffuf:progress"
         assert ffuf_final_progress["role"] == LineRole.progress.value
         assert ffuf_error_progress["role"] == LineRole.progress.value
+        assert ffuf_config["signals"] == ["summaries"]
+        assert gobuster_config["noise_kind"] == "boilerplate"
+        assert gobuster_config["noise_reason"] == "gobuster:config"
+        assert openssl_payload["noise_kind"] == "boilerplate"
+        assert openssl_payload["noise_reason"] == "openssl:payload"
         assert "signals" not in masscan_progress
         assert "signals" not in masscan_waiting
         assert "signals" not in ffuf_progress
+        assert "noise_kind" not in ffuf_config
+        assert "signals" not in gobuster_config
+        assert "signals" not in openssl_payload
+        assert "noise_kind" not in ffuf_final_progress
+        assert "noise_kind" not in ffuf_error_progress
         assert ffuf_final_progress["signals"] == ["summaries"]
         assert ffuf_error_progress["signals"] == ["warnings"]
 
@@ -11603,6 +11636,7 @@ class TestOutputSignals:
         )
 
         assert capture.preview_lines[0]["cls"] == LineRole.progress.value
+        assert capture.preview_lines[0]["noise_kind"] == "progress"
 
     def test_live_output_batcher_coalesces_progress_without_dropping_saved_lines(self):
         import blueprints.run as run_blueprint
@@ -11827,11 +11861,15 @@ class TestOutputSignals:
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
         nuclei_classifier = OutputSignalClassifier("nuclei -u https://darklab.sh")
-        assert "entities" not in nuclei_classifier.classify_line("\t\tprojectdiscovery.io")
-        assert "entities" not in nuclei_classifier.classify_line("\x1b[36m\t\tprojectdiscovery.io\x1b[0m")
-        assert "entities" not in nuclei_classifier.classify_line(
+        projectdiscovery_banner = nuclei_classifier.classify_line("\t\tprojectdiscovery.io")
+        projectdiscovery_banner_ansi = nuclei_classifier.classify_line("\x1b[36m\t\tprojectdiscovery.io\x1b[0m")
+        interactsh_banner = nuclei_classifier.classify_line(
             "\x1b[34m[INF]\x1b[0m Using Interactsh Server: \x1b[36moast.site\x1b[0m"
         )
+        for line in (projectdiscovery_banner, projectdiscovery_banner_ansi, interactsh_banner):
+            assert "entities" not in line
+            assert line["noise_kind"] == "boilerplate"
+            assert line["noise_reason"] == "projectdiscovery:banner"
         assert "entities" in OutputSignalClassifier("curl https://projectdiscovery.io").classify_line(
             "https://projectdiscovery.io"
         )
@@ -12328,12 +12366,33 @@ class TestRunOutputCapture:
             "text": "second line",
             "entities": [{"type": "domain", "canonical_value": long_value, "value": long_value, "confidence": "medium"}],
         })
+        noise_event = from_wire({
+            "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+            "role": "progress",
+            "noise_kind": "progress",
+            "entities": [
+                {"type": "domain", "canonical_value": "noise.example", "value": "noise.example", "confidence": "medium"},
+            ],
+        })
+        signal_event = from_wire({
+            "text": "summary line stays searchable",
+            "role": "progress",
+            "signals": ["summaries"],
+        })
 
-        search_text = run_blueprint._search_text_from_events([event, capped_event])
+        search_text = run_blueprint._search_text_from_events([event, capped_event, noise_event, signal_event])
 
-        assert search_text.splitlines() == ["line text", "second line", "beta.example", "192.0.2.10"]
+        assert search_text.splitlines() == [
+            "line text",
+            "second line",
+            "summary line stays searchable",
+            "beta.example",
+            "192.0.2.10",
+        ]
         assert long_value not in search_text
         assert "<redacted>" not in search_text
+        assert "0.10-kpps" not in search_text
+        assert "noise.example" not in search_text
 
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("services.commands.registry.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):

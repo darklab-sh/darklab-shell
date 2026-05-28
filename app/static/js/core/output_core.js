@@ -151,6 +151,7 @@ var DarklabOutputCore = (function (global) {
   }
 
   function _outcomeLines(lines) {
+    const model = window.DarklabRunOutputModel || null;
     return (Array.isArray(lines) ? lines : [])
       .filter(line => line && typeof line === 'object')
       .filter(line => {
@@ -158,6 +159,13 @@ var DarklabOutputCore = (function (global) {
         const cls = String(line.cls || '').split(/\s+/).filter(Boolean);
         if (role === 'prompt-echo' || role === 'exit-ok' || role === 'exit-fail') return false;
         if (cls.includes('prompt-echo') || cls.includes('exit-ok') || cls.includes('exit-fail')) return false;
+        if (model && typeof model.isNoiseLineEvent === 'function') {
+          try {
+            if (model.isNoiseLineEvent(model.fromWireLineEvent(line))) return false;
+          } catch (_) {
+            // Fall through to class-based filtering when older payloads surprise the decoder.
+          }
+        }
         return !cls.some(name => isSyntheticSummaryClassName(name));
       })
       .map(_plainOutcomeLineText)

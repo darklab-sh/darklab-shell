@@ -475,6 +475,20 @@ describe('history compare split renderer', () => {
   it('renders per-hunk and surplus truncation placeholders', () => {
     const { _renderHistoryComparison } = loadCompareHelpers()
     _renderHistoryComparison(compareData({
+      left: {
+        id: 'run-a',
+        command: 'nmap darklab.sh',
+        exit_code: 0,
+        output_line_count: 5,
+        output_source: { noise_lines_omitted: 2 },
+      },
+      right: {
+        id: 'run-b',
+        command: 'nmap darklab.sh',
+        exit_code: 1,
+        output_line_count: 6,
+        output_source: { noise_lines_omitted: 1 },
+      },
       truncated: {
         hunks_omitted: 2,
         lines_omitted: { left: 1, right: 0, total: 1 },
@@ -487,6 +501,8 @@ describe('history compare split renderer', () => {
       .toContain('1 changed line(s) omitted in this block.')
     expect(document.querySelector('[data-side="a"]')?.textContent)
       .toContain('2 additional changed hunk(s) omitted.')
+    expect(document.querySelector('#history-compare-body')?.textContent)
+      .toContain('3 noisy transcript line(s) folded out of this comparison')
   })
 
   it('expands folded equal hunks through paginated lazy fetches and reuses cached lines', async () => {

@@ -484,6 +484,8 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
   if (!metadata || typeof metadata !== 'object') return;
   if (typeof metadata.kind === 'string' && metadata.kind) rawLine.kind = metadata.kind;
   if (typeof metadata.role === 'string' && metadata.role) rawLine.role = metadata.role;
+  if (typeof metadata.noise_kind === 'string' && metadata.noise_kind) rawLine.noise_kind = metadata.noise_kind;
+  if (typeof metadata.noise_reason === 'string' && metadata.noise_reason) rawLine.noise_reason = metadata.noise_reason;
   const signals = _normalizeOutputSignals(metadata.signals);
   if (signals.length) {
     rawLine.signals = signals;
@@ -961,7 +963,10 @@ function _mergeLineEventMetadata(payload, metadata = null) {
   ];
   sources.forEach(source => {
     if (!source || typeof source !== 'object') return;
-    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'high_volume_resume', 'live_output', 'faq_command'].forEach(key => {
+    [
+      'kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities',
+      'noise_kind', 'noise_reason', 'high_volume_resume', 'live_output', 'faq_command',
+    ].forEach(key => {
       if (source[key] !== undefined && source[key] !== null && source[key] !== '') merged[key] = source[key];
     });
   });
@@ -972,12 +977,12 @@ function _lineEventPayload(text, cls, metadata = null) {
   if (text && typeof text === 'object') {
     const payload = { ...text };
     if (payload.metadata && typeof payload.metadata === 'object') {
-      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'noise_kind', 'noise_reason'].forEach(key => {
         if (payload[key] === undefined && payload.metadata[key] !== undefined) payload[key] = payload.metadata[key];
       });
     }
     if (metadata && typeof metadata === 'object') {
-      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'noise_kind', 'noise_reason'].forEach(key => {
         if (metadata[key] !== undefined) payload[key] = metadata[key];
       });
     }
@@ -985,7 +990,7 @@ function _lineEventPayload(text, cls, metadata = null) {
   }
   const payload = { text: String(text ?? ''), cls: String(cls || '') };
   if (metadata && typeof metadata === 'object') {
-    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'noise_kind', 'noise_reason'].forEach(key => {
       if (metadata[key] !== undefined) payload[key] = metadata[key];
     });
   }

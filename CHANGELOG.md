@@ -16,6 +16,15 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Added deterministic parsers for `nmap`, `dig`, `nslookup`, `curl`, and `openssl s_client`, deriving concise results from captured output while leaving the raw transcript primary and unchanged. The DNS parsers include compact answer records for `dig` and A/MX/TXT `nslookup` responses when present.
   - Extended text, HTML, PDF, Run Details, and permalink/share exports to recompute visible summaries at export/render time, so saved views match the UI without persisting synthetic rows into raw transcripts.
 
+- **Transcript noise classification foundation** — added shared Python/browser line-event metadata for deterministic transcript noise.
+  - Added `noise_kind` (`progress`, `status`, `boilerplate`) and optional `noise_reason` to the structured output contract, with helpers that derive progress/status noise from existing line roles.
+  - Consolidated existing ffuf, masscan, openssl, gobuster, and ProjectDiscovery noise predicates under the shared metadata path, and added narrow nuclei status-noise detection.
+  - Excluded classified noise from new-run `output_search_text`, command outcome summaries, and default run comparisons while leaving raw transcripts, full-output artifacts, Run Details, and transcript exports faithful to captured output.
+  - Added folded-noise counts to run comparison payloads and a muted browser note when comparison output omits noisy progress/status/boilerplate lines.
+  - Kept evidence package transcript HTML/text raw, while package manifest transcript line indexes now use the cleaner non-noise view.
+  - Kept signal-bearing lines out of the noise path so findings, warnings, errors, and summaries remain searchable and countable even when they share progress-style formatting.
+  - **Tests:** extended Python/JS model parity, unknown-value fallback, scanner progress-role coverage, search-text derivation, command outcome summary filtering, comparison noise folding, and package manifest filtering.
+
 - **Command knowledge schema** — `commands.yaml` (and `.local` overlays) now support five optional `knowledge:` sub-fields per command entry: `notes`, `gotchas`, `safe_defaults`, `common_flags` (each a capped list of short strings), and `artifact_behavior` (a short scalar). Fields are descriptive-only and never policy-bearing.
   - Registry loader normalizes and caps all fields (strip, dedupe, list max 5, text max 200 chars) and merges overlays per a locked policy (scalar-replace, list-extend with dedupe). Unknown fields are silently ignored in normalization and flagged only by the registry lint helper.
   - `command_catalog_from_registry` now includes `knowledge` and `feature_required` in its projection, flowing through to the `/commands/catalog/<root>` API route automatically.

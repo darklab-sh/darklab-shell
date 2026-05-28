@@ -63,9 +63,16 @@ class LineSignal(str, Enum):
     summaries = "summaries"
 
 
+class LineNoiseKind(str, Enum):
+    progress = "progress"
+    status = "status"
+    boilerplate = "boilerplate"
+
+
 LINE_KIND_VALUES = tuple(kind.value for kind in LineKind)
 LINE_ROLE_VALUES = tuple(role.value for role in LineRole)
 LINE_SIGNAL_VALUES = tuple(signal.value for signal in LineSignal)
+LINE_NOISE_KIND_VALUES = tuple(kind.value for kind in LineNoiseKind)
 
 
 _LEGACY_KIND_BY_CLS = {
@@ -128,6 +135,11 @@ _ROLE_LEGACY_CLS = {
     LineRole.denied: "denied",
     LineRole.exit_ok: "exit-ok",
     LineRole.exit_fail: "exit-fail",
+}
+
+_NOISE_KIND_BY_ROLE = {
+    LineRole.progress: LineNoiseKind.progress,
+    LineRole.status_line: LineNoiseKind.status,
 }
 
 
@@ -193,6 +205,8 @@ class LineEvent:
     command_root: str = ""
     target: str = ""
     entities: tuple[LineEntity, ...] = ()
+    noise_kind: LineNoiseKind | None = None
+    noise_reason: str = ""
 
 
 def to_wire(event: LineEvent) -> dict[str, object]:
@@ -228,12 +242,15 @@ def line_event_from_legacy(
     command_root: object = "",
     target: object = "",
     entities: Sequence[Mapping[str, object]] | None = None,
+    noise_kind: LineNoiseKind | str | None = None,
+    noise_reason: object = "",
 ) -> LineEvent:
     legacy_cls = str(cls or "")
+    coerced_role = _coerce_role(role, legacy_cls)
     return LineEvent(
         text=str(text),
         kind=_coerce_kind(kind, legacy_cls),
-        role=_coerce_role(role, legacy_cls),
+        role=coerced_role,
         legacy_cls=legacy_cls,
         ts_clock=str(ts_clock or ""),
         ts_elapsed=str(ts_elapsed or ""),
@@ -242,6 +259,8 @@ def line_event_from_legacy(
         command_root=str(command_root or ""),
         target=str(target or ""),
         entities=_entities_from_wire(entities),
+        noise_kind=_coerce_noise_kind(noise_kind, coerced_role),
+        noise_reason=str(noise_reason or ""),
     )
 
 
@@ -255,6 +274,13 @@ def from_wire(payload: Mapping[str, object], unknown_collector: UnknownCollector
     cls_value = payload.get("cls", "")
     kind = _enum_from_wire(LineKind, payload.get("kind"), LineKind.from_legacy_cls(cls_value), "kind", unknown_collector)
     role = _enum_from_wire(LineRole, payload.get("role"), LineRole.from_legacy_cls(cls_value), "role", unknown_collector)
+    noise_kind = _enum_from_wire(
+        LineNoiseKind,
+        payload.get("noise_kind"),
+        noise_kind_for_role(role),
+        "noise_kind",
+        unknown_collector,
+    )
     return LineEvent(
         text=str(payload.get("text", "")),
         kind=kind,
@@ -267,11 +293,33 @@ def from_wire(payload: Mapping[str, object], unknown_collector: UnknownCollector
         command_root=str(payload.get("command_root", "") or ""),
         target=str(payload.get("target", "") or ""),
         entities=_entities_from_wire(payload.get("entities")),
+        noise_kind=noise_kind,
+        noise_reason=str(payload.get("noise_reason", "") or "") if noise_kind is not None else "",
     )
 
 
 def event_search_text(event: LineEvent) -> str:
+    if is_noise_event(event):
+        return ""
     return event.text
+
+
+def noise_kind_for_role(role: LineRole | None) -> LineNoiseKind | None:
+    if role is None:
+        return None
+    return _NOISE_KIND_BY_ROLE.get(role)
+
+
+def noise_kind_for_event(event: LineEvent) -> LineNoiseKind | None:
+    if event.signals or event.kind in {LineKind.warn, LineKind.error}:
+        return None
+    if event.noise_kind is not None:
+        return event.noise_kind
+    return noise_kind_for_role(event.role)
+
+
+def is_noise_event(event: LineEvent) -> bool:
+    return noise_kind_for_event(event) is not None
 
 
 def legacy_cls_for_event(event: LineEvent) -> str:
@@ -311,6 +359,11 @@ def _legacy_payload(event: LineEvent, *, include_timestamps: bool = True) -> dic
         payload["target"] = event.target
     if event.entities:
         payload["entities"] = [entity.to_wire() for entity in event.entities]
+    noise_kind = noise_kind_for_event(event)
+    if noise_kind is not None:
+        payload["noise_kind"] = noise_kind.value
+        if event.noise_reason:
+            payload["noise_reason"] = event.noise_reason
     return payload
 
 
@@ -324,9 +377,9 @@ def _legacy_cls_tokens(value: object) -> tuple[str, ...]:
 
 
 def _enum_from_wire(
-    enum_cls: type[LineKind] | type[LineRole],
+    enum_cls: type[LineKind] | type[LineRole] | type[LineNoiseKind],
     value: object,
-    default: LineKind | LineRole,
+    default: LineKind | LineRole | LineNoiseKind | None,
     family: str,
     unknown_collector: UnknownCollector | None,
 ) -> Any:
@@ -338,6 +391,17 @@ def _enum_from_wire(
         if unknown_collector is not None:
             unknown_collector(family, str(value))
         return default
+
+
+def _coerce_noise_kind(value: LineNoiseKind | str | None, role: LineRole) -> LineNoiseKind | None:
+    if isinstance(value, LineNoiseKind):
+        return value
+    if value is None or value == "":
+        return noise_kind_for_role(role)
+    try:
+        return LineNoiseKind(str(value))
+    except ValueError:
+        return noise_kind_for_role(role)
 
 
 def _coerce_kind(value: LineKind | str | None, legacy_cls: str) -> LineKind:
@@ -412,18 +476,23 @@ def _optional_int(value: object) -> int | None:
 __all__ = [
     "LINE_EVENT_SCHEMA_VERSION",
     "LINE_KIND_VALUES",
+    "LINE_NOISE_KIND_VALUES",
     "LINE_ROLE_VALUES",
     "LINE_SIGNAL_VALUES",
     "LineEntity",
     "LineEvent",
     "LineKind",
+    "LineNoiseKind",
     "LineRole",
     "LineSignal",
     "UnknownCollector",
     "event_search_text",
     "from_wire",
+    "is_noise_event",
     "legacy_cls_for_event",
     "line_event_from_legacy",
+    "noise_kind_for_event",
+    "noise_kind_for_role",
     "to_legacy_entry",
     "to_legacy_output_event",
     "to_legacy_wire",

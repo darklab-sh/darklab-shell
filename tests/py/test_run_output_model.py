@@ -6,11 +6,14 @@ from services.runs.output_model import (
     LineEntity,
     LineEvent,
     LineKind,
+    LineNoiseKind,
     LineRole,
     LineSignal,
     event_search_text,
     from_wire,
+    is_noise_event,
     legacy_cls_for_event,
+    noise_kind_for_event,
     to_legacy_wire,
     to_wire,
 )
@@ -132,6 +135,7 @@ def test_unknown_values_fall_back_and_report_to_collector():
         "tsE": "",
         "kind": "fatal",
         "role": "sparkle",
+        "noise_kind": "future-noise",
         "signals": ["findings", "future-signal"],
     }
 
@@ -139,8 +143,14 @@ def test_unknown_values_fall_back_and_report_to_collector():
 
     assert event.kind is LineKind.notice
     assert event.role is LineRole.body
+    assert event.noise_kind is None
     assert event.signals == (LineSignal.findings,)
-    assert unknowns == [("kind", "fatal"), ("role", "sparkle"), ("signal", "future-signal")]
+    assert unknowns == [
+        ("kind", "fatal"),
+        ("role", "sparkle"),
+        ("noise_kind", "future-noise"),
+        ("signal", "future-signal"),
+    ]
 
 
 def test_entity_normalisation_matches_capture_shape():
@@ -191,3 +201,14 @@ def test_compatibility_cls_prefers_role_when_both_axes_are_non_default():
 
 def test_event_search_text_is_event_text_for_phase_zero():
     assert event_search_text(LineEvent(text="search me")) == "search me"
+
+    progress = LineEvent(text="progress", role=LineRole.progress)
+    assert event_search_text(progress) == ""
+    assert noise_kind_for_event(progress) is LineNoiseKind.progress
+    assert is_noise_event(progress)
+    assert to_wire(progress)["noise_kind"] == "progress"
+
+    finding_progress = LineEvent(text="finding", role=LineRole.progress, signals=(LineSignal.findings,))
+    assert event_search_text(finding_progress) == "finding"
+    assert noise_kind_for_event(finding_progress) is None
+    assert not is_noise_event(finding_progress)

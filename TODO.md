@@ -19,7 +19,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Multi-operator / team mode](#multi-operator--team-mode)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
-  - [Transcript noise classification](#transcript-noise-classification)
   - [Run comparison enhancements](#run-comparison-enhancements)
   - [Bulk history export and share](#bulk-history-export-and-share)
   - [Mobile share ergonomics](#mobile-share-ergonomics)
@@ -132,14 +131,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
 - Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
 
-### Transcript noise classification
-- Future cleanup for saved command output across both normal runs and interactive PTY runs.
-- Avoid broad duplicate-line removal because repeated lines can be meaningful findings for some tools.
-- Classify known progress/status/redraw lines before history/search/finding classification, starting with high-noise shapes from tools like `masscan`, `ffuf`, `nuclei`, and ProjectDiscovery tools that emit frequent status updates.
-- Keep real newline-terminated findings and normal scrollback untouched.
-- For interactive PTY runs, keep the final visible frame available so users can still inspect the last terminal state, even when progress/status redraw lines are excluded from searchable saved transcript text.
-- For normal runs, prefer command-specific noise classifiers over global suppression so raw output stays faithful while search, findings, summaries, and previews become easier to use.
-
 ### Run comparison enhancements
 - Future-state enhancements after the shared split-pane comparison flow has real use.
   - Finding-level diffs using persisted signal/finding metadata:
@@ -193,7 +184,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Output formats: markdown source plus rendered HTML and PDF, reusing the existing export pipeline.
   - Operator-editable section templates in a new `app/conf/report_templates.yaml`.
 - **Architecture:**
-  - New `app/services/reports/` service composing project-workspace data with existing finding/run/artifact serializers; templating via Jinja autoescape (aligns with the package HTML rendering follow-up in Open TODOs).
+  - New `app/services/reports/` service composing project-workspace data with existing finding/run/artifact serializers; templating via Jinja autoescape.
   - Adds `GET/POST /projects/<id>/report` to `app/blueprints/projects.py`.
   - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
   - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.

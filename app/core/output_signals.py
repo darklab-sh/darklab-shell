@@ -13,7 +13,7 @@ import ipaddress
 import re
 from urllib.parse import urlparse
 
-from services.runs.output_model import LineRole
+from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
 from services.intel.canonical import (
     CanonicalizationError,
     canonical_cve,
@@ -120,6 +120,10 @@ _PROJECTDISCOVERY_ENTITY_NOISE_RE = re.compile(
     r"^(?:\s*projectdiscovery\.io|\[INF\]\s+Using\s+Interactsh\s+Server:\s+oast\.site)\s*$",
     re.I,
 )
+_PROJECTDISCOVERY_STATUS_NOISE_RE = re.compile(
+    r"^\[INF\]\s+(?:Current\s+\S+\s+version\b.*|Templates loaded for current scan\b.*)$",
+    re.I,
+)
 _GOBUSTER_RESULT_RE = re.compile(
     r"^\S(?:.*\S)?\s+\(Status:\s*\d{3}\)\s+\[Size:\s*\d+\](?:\s+\[-->\s+\S+\])?$",
     re.I,
@@ -178,6 +182,16 @@ _RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+[0-9a-f:.]+:\d+$", re.I)
 _NAABU_FOUND_PORTS_RE = re.compile(r"^\[INF\]\s+Found\s+\d+\s+ports?\s+on host\b", re.I)
 _NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|medium|high|critical)\]\s+\S+", re.I)
 _SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
+_NUCLEI_STATUS_NOISE_RE = re.compile(
+    r"^\[INF\]\s+(?:"
+    r"Current\s+nuclei\s+version\b.*|"
+    r"Templates loaded for current scan\b.*|"
+    r"Targets loaded for current scan\b.*|"
+    r"Templates clustered\b.*|"
+    r"Using\s+Interactsh\s+Server:\s+oast\.site\b.*"
+    r")$",
+    re.I,
+)
 _MASSCAN_STARTUP_RE = re.compile(
     r"^(?:Starting masscan\b|Initiating SYN Stealth Scan|Scanning\s+\d+\s+hosts?\s+\[\d+\s+ports/host\])",
     re.I,
@@ -904,18 +918,48 @@ def _is_command_scoped_summary(root: str, stripped: str) -> bool:
 
 
 def _is_command_scoped_signal_noise(root: str, stripped: str) -> bool:
+    return classify_line_noise("", root=root, normalized_text=stripped) is not None
+
+
+def classify_line_noise(
+    text: str,
+    *,
+    root: str | None = None,
+    command: str = "",
+    normalized_text: str | None = None,
+    ansi_stripped_text: str | None = None,
+) -> tuple[LineNoiseKind, str] | None:
+    stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
+    if not stripped:
+        return None
+    root = root if root is not None else command_root(command)
+    plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
+
+    if root == "masscan":
+        if _MASSCAN_RATE_RE.search(stripped):
+            return LineNoiseKind.progress, "masscan:rate"
+        if _MASSCAN_STARTUP_RE.search(stripped):
+            return LineNoiseKind.boilerplate, "masscan:startup"
     if root == "ffuf":
-        if _is_ffuf_noise(stripped):
-            return True
         if _FFUF_PROGRESS_RE.search(stripped):
-            return not (_is_ffuf_final_progress(stripped) or _is_ffuf_progress_warning(stripped))
+            if _is_ffuf_final_progress(stripped) or _is_ffuf_progress_warning(stripped):
+                return None
+            return LineNoiseKind.progress, "ffuf:progress"
+        if _is_ffuf_noise(stripped):
+            return LineNoiseKind.boilerplate, "ffuf:banner"
     if root == "gobuster" and _GOBUSTER_CONFIG_RE.search(stripped):
-        return True
+        return LineNoiseKind.boilerplate, "gobuster:config"
     if root == "openssl" and _is_openssl_noise(stripped):
-        return True
-    if _is_progress_role_line(root, stripped):
-        return True
-    return False
+        return LineNoiseKind.boilerplate, "openssl:payload"
+    if root in _PROJECTDISCOVERY_ROOTS:
+        if _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain) or _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(stripped):
+            return LineNoiseKind.boilerplate, "projectdiscovery:banner"
+    if root == "nuclei" and _NUCLEI_STATUS_NOISE_RE.search(stripped):
+        return LineNoiseKind.status, "nuclei:status"
+    if root in _PROJECTDISCOVERY_ROOTS:
+        if _PROJECTDISCOVERY_STATUS_NOISE_RE.search(stripped):
+            return LineNoiseKind.status, "projectdiscovery:status"
+    return None
 
 
 def _is_progress_role_line(root: str, stripped: str) -> bool:
@@ -1257,6 +1301,22 @@ class OutputSignalClassifier:
         )
         if role is not None:
             metadata["role"] = role.value
+        noise = None
+        if not scopes:
+            noise = classify_line_noise(
+                text,
+                root=self.root,
+                command=self.command,
+                normalized_text=normalized_text,
+                ansi_stripped_text=ansi_stripped,
+            )
+            if noise is None:
+                noise_kind = noise_kind_for_role(role)
+                if noise_kind is not None:
+                    noise = noise_kind, "role"
+        if noise is not None:
+            metadata["noise_kind"] = noise[0].value
+            metadata["noise_reason"] = noise[1]
         can_extract_entities = (
             role not in {LineRole.progress, LineRole.status_line}
             and self.cmd_type not in {"builtin"}

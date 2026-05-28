@@ -127,6 +127,7 @@ describe('run output model', () => {
         tsE: '',
         kind: 'fatal',
         role: 'sparkle',
+        noise_kind: 'future-noise',
         signals: ['findings', 'future-signal'],
       },
       (family, value) => unknowns.push([family, value]),
@@ -134,10 +135,12 @@ describe('run output model', () => {
 
     expect(event.kind).toBe('notice');
     expect(event.role).toBe('body');
+    expect(event.noise_kind).toBeNull();
     expect(event.signals).toEqual(['findings']);
     expect(unknowns).toEqual([
       ['kind', 'fatal'],
       ['role', 'sparkle'],
+      ['noise_kind', 'future-noise'],
       ['signal', 'future-signal'],
     ]);
   });
@@ -151,8 +154,19 @@ describe('run output model', () => {
 
   it('exports enum value lists for Python parity tests', () => {
     expect(model.LINE_KIND_VALUES).toEqual(['info', 'notice', 'warn', 'error']);
+    expect(model.LINE_NOISE_KIND_VALUES).toEqual(['progress', 'status', 'boilerplate']);
     expect(model.LINE_SIGNAL_VALUES).toEqual(['findings', 'warnings', 'errors', 'summaries']);
     expect(model.LINE_ROLE_VALUES).toContain('prompt-echo');
+
+    const progress = model.fromWireLineEvent({ text: 'progress', cls: 'progress', tsC: '', tsE: '' });
+    expect(progress.noise_kind).toBe('progress');
+    expect(model.noiseKindForEvent(progress)).toBe('progress');
+    expect(model.isNoiseLineEvent(progress)).toBe(true);
+    expect(model.toWireLineEvent(progress).noise_kind).toBe('progress');
+
+    const findingProgress = { ...progress, signals: ['findings'] };
+    expect(model.noiseKindForEvent(findingProgress)).toBeNull();
+    expect(model.isNoiseLineEvent(findingProgress)).toBe(false);
   });
 
   it('matches the shared legacy class fixture', () => {

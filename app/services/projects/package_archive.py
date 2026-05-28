@@ -16,8 +16,8 @@ from typing import cast
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from core.redaction import apply_redaction_rules, line_entries_from_events, redact_line_entries
-from services.runs.output_model import LineEvent
+from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
+from services.runs.output_model import LineEvent, is_noise_event
 from services.projects.artifacts import (
     artifact_snapshot_mismatch_reason as _artifact_snapshot_mismatch_reason,
     row_to_run_file_artifact as _row_to_run_file_artifact,
@@ -481,9 +481,14 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 run_path = f"runs/{run_id}.html"
                 run_pages[run_id] = run_path
                 line_entries = cast(Sequence[LineEvent | Mapping[str, object] | str], entries)
-                manifest_entries = line_entries_from_events(
+                manifest_events = (
                     redact_line_entries(line_entries, redaction_rules)
-                ) if redaction_rules else entries
+                    if redaction_rules
+                    else line_events_from_entries(line_entries)
+                )
+                manifest_entries = line_entries_from_events(
+                    [event for event in manifest_events if not is_noise_event(event)]
+                )
                 transcript_manifest_entries.append(_package_transcript_manifest_entry(
                     run,
                     manifest_entries,

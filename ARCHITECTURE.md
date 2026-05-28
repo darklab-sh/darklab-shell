@@ -869,6 +869,21 @@ Run output moves through the app as `LineEvent` data. The model keeps the user-v
 - `kind` describes severity-like meaning: `info`, `notice`, `warn`, or `error`.
 - `role` describes how the line should render: body text, prompt echo, section header, key/value row, PTY marker, progress, status line, success, denied, or exit status.
 
+Line events can also carry `noise_kind` (`progress`, `status`, or `boilerplate`)
+plus an optional `noise_reason`. Noise metadata is separate from
+finding/warning/error signals: a line that already carries a signal stays useful
+output even when its role looks progress-like. The Python and browser helpers
+share the same rule, so future derived surfaces can ask whether a line is
+background chatter without relying on CSS classes. The server-side signal
+classifier assigns the metadata for known scanner chatter such as ffuf progress,
+masscan rates, ProjectDiscovery banners/status lines, and nuclei status lines.
+New-run `output_search_text`, command outcome summaries, and default run
+comparisons skip classified noise, while raw transcript storage, full-output
+artifacts, Run Details, permalinks, and transcript exports keep the captured
+rows visible. Evidence package HTML/text transcripts stay faithful to raw
+output; the package manifest's derived transcript line index uses the cleaner
+non-noise view.
+
 The legacy `cls` field still exists at storage and API boundaries so cached transcripts, old artifacts, older clients, exports, and mirrors keep working. Internal producers use typed factories and `RunOutputCapture.add_event()`, while readers call the shared Python or browser decoder before rendering, comparing, redacting, exporting, or deriving search text.
 
 Full-output artifacts are versioned JSONL. New files start with a small header row that names the artifact format version, creation time, and run id. Older headerless JSONL or plain-text artifacts are upgraded in memory when read; the app does not rewrite historical files on disk. Preview output in the database keeps the existing JSON-array shape for fast history loads, and `output_search_text` is derived from decoded line events so captured entity values can be searched without teaching FTS about the line-event schema.

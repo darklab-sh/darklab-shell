@@ -72,7 +72,9 @@ from services.runs.output_model import (
     LineEvent,
     LineKind,
     LineRole,
+    event_search_text,
     from_wire,
+    is_noise_event,
     legacy_cls_for_event,
     line_event_from_legacy,
     to_legacy_output_event,
@@ -540,10 +542,12 @@ def _bounded_entity_search_values(values: Sequence[str], max_bytes: int = _SEARC
 
 
 def _search_text_from_events(events: Sequence[LineEvent]) -> str:
-    lines = [event.text for event in events]
+    lines = [text for event in events if (text := event_search_text(event))]
     entity_values = []
     seen_entities = set()
     for event in events:
+        if is_noise_event(event):
+            continue
         for entity in event.entities:
             canonical_value = entity.canonical_value.strip()
             if not canonical_value or canonical_value == REDACTED_ENTITY_SENTINEL:

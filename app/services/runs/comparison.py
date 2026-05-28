@@ -13,6 +13,7 @@ from core.output_signals import (
     strip_ansi_codes,
 )
 from services.runs.output_model import LineEvent
+from services.runs.output_model import is_noise_event, noise_kind_for_event
 from services.runs.output_store import load_run_output_events_for_run
 
 MAX_COMPARE_ITEMS_PER_SIDE = 5000
@@ -266,15 +267,22 @@ def compare_full_output_events(run):
     return result.events, result.source, result.partial
 
 
-def is_compare_chrome_line(event: LineEvent, text):
+def compare_line_exclusion(event: LineEvent, text):
     stripped = str(text or "").strip()
     if not stripped:
-        return True
-    if event.role.value in {"prompt-echo", "progress", "pty-marker", "status-line"}:
-        return True
+        return "blank", ""
+    if is_noise_event(event):
+        noise_kind = noise_kind_for_event(event)
+        return "noise", noise_kind.value if noise_kind is not None else ""
+    if event.role.value in {"prompt-echo", "pty-marker"}:
+        return "chrome", event.role.value
     if re.match(r"^\[(?:process exited with code|history\s+—\s+exit)\b", stripped, re.I):
-        return True
-    return False
+        return "chrome", "exit"
+    return None
+
+
+def is_compare_chrome_line(event: LineEvent, text):
+    return compare_line_exclusion(event, text) is not None
 
 
 def line_entry_text(entry):
@@ -288,9 +296,17 @@ def compare_entries_for_diff(run):
     compared = []
     byte_count = 0
     truncated_by_limit = False
+    noise_counts: Counter[str] = Counter()
+    chrome_lines_omitted = 0
     for event in events:
         text = event.text.rstrip("\n")
-        if is_compare_chrome_line(event, text):
+        exclusion = compare_line_exclusion(event, text)
+        if exclusion is not None:
+            reason, detail = exclusion
+            if reason == "noise":
+                noise_counts[detail or "unknown"] += 1
+            else:
+                chrome_lines_omitted += 1
             continue
         encoded_len = len(text.encode("utf-8", errors="replace"))
         if len(compared) >= COMPARE_MAX_LINES or byte_count + encoded_len > COMPARE_MAX_BYTES:
@@ -313,6 +329,9 @@ def compare_entries_for_diff(run):
         "compared_lines": len(compared),
         "max_lines": COMPARE_MAX_LINES,
         "max_bytes": COMPARE_MAX_BYTES,
+        "noise_lines_omitted": sum(noise_counts.values()),
+        "noise_kind_counts": dict(sorted(noise_counts.items())),
+        "chrome_lines_omitted": chrome_lines_omitted,
     }
 
 
