@@ -11468,6 +11468,55 @@ class TestOutputSignals:
         assert classify_line("[+] Timeout:                 10s", command=gobuster_command) == []
         assert classify_line("[+] User Agent:              gobuster/3.8.2", command=gobuster_command) == []
         assert classify_line("[+] Negative Status codes:   404", command=gobuster_command) == []
+        from services.runs import comparison as run_comparison
+
+        ffuf_derived = run_comparison.compare_derived_changes(
+            {"command": ffuf_command},
+            {"command": ffuf_command},
+            [{
+                "text": "index.html              [Status: 200, Size: 990209, Words: 99640, Lines: 36208, Duration: 84ms]",
+                "line_index": 0,
+            }],
+            [{
+                "text": "index.html              [Status: 301, Size: 990209, Words: 99640, Lines: 36208, Duration: 84ms]",
+                "line_index": 0,
+            }, {
+                "text": "api                     [Status: 200, Size: 169, Words: 5, Lines: 8, Duration: 42ms]",
+                "line_index": 1,
+            }],
+        )
+        ffuf_group = ffuf_derived["groups"][0]
+        assert ffuf_group["kind"] == "urls"
+        assert ffuf_group["added"][0]["canonical_url"] == "https://tor-stats.darklab.sh/api"
+        assert ffuf_group["changed"][0]["before"]["status_code"] == 200
+        assert ffuf_group["changed"][0]["after"]["status_code"] == 301
+
+        gobuster_derived = run_comparison.compare_derived_changes(
+            {"command": "gobuster dir -u https://tor-stats.darklab.sh -w common.txt"},
+            {"command": "gobuster dir -u https://tor-stats.darklab.sh -w common.txt"},
+            [{"text": "index.html           (Status: 200) [Size: 991254]", "line_index": 0}],
+            [{
+                "text": "static               (Status: 301) [Size: 169] [--> https://tor-stats.darklab.sh/static/]",
+                "line_index": 0,
+            }],
+        )
+        gobuster_group = gobuster_derived["groups"][0]
+        assert gobuster_group["added"][0]["canonical_url"] == "https://tor-stats.darklab.sh/static"
+        assert gobuster_group["added"][0]["redirect_canonical_url"] == "https://tor-stats.darklab.sh/static"
+        assert gobuster_group["removed"][0]["canonical_url"] == "https://tor-stats.darklab.sh/index.html"
+
+        katana_derived = run_comparison.compare_derived_changes(
+            {"command": "katana -u https://p.darklab.sh"},
+            {"command": "katana -u https://p.darklab.sh"},
+            [{"text": "https://p.darklab.sh/js/privatebin.js?2.0.4", "line_index": 0}],
+            [
+                {"text": "https://p.darklab.sh/js/privatebin.js?2.0.4", "line_index": 0},
+                {"text": "https://p.darklab.sh/js/'+t+'", "line_index": 1},
+                {"text": "https://p.darklab.sh/css/app.css", "line_index": 2},
+            ],
+        )
+        assert katana_derived["groups"][0]["added_count"] == 1
+        assert katana_derived["groups"][0]["added"][0]["canonical_url"] == "https://p.darklab.sh/css/app.css"
         assert classify_line(
             "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
             command="wafw00f https://darklab.sh",

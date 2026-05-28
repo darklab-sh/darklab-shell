@@ -60,6 +60,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Shared diff classifier foundation** — lifted the watcher diff classifier registry into `services.diff.classifiers` so Watchers and run-comparison summaries can share one tool-aware parser family.
+  - Kept `services.watchers.classifiers` as compatibility exports for existing imports.
+  - Added shared diff result constants in `services.diff.models`.
+  - Added optional source `line_index` values to normalized diff records so compare-facing adapters can map derived changes back to transcript rows without changing watcher payload expectations.
+  - Added `derived_changes` to `/history/compare`, currently populated for nmap-style open-port/service deltas with added, removed, and changed port buckets plus transcript jump pointers.
+  - Added URL/status derived changes for `httpx`, `ffuf`, `gobuster`, and `katana` comparisons, including URL additions/removals plus status, title, and redirect changes when the output format exposes them confidently.
+  - Run Comparison now renders derived changes in a compact **Detected changes** section above the transcript diff, grouped by tool-aware change type with jump actions back to the matching transcript rows.
+  - **Tests:** updated watcher classifier coverage to assert the shared and compatibility registries stay in parity, nmap port records carry source line indexes, and Watchers/Run Comparison agree on noisy ambiguous-target nmap output; extended run-comparison route coverage for derived nmap port changes and `httpx` URL/status changes; covered `ffuf`, `gobuster`, and `katana` URL parsing through existing web-enumeration output tests; and added browser coverage for the detected-change renderer and transcript-jump actions.
+
 - **Auto-collapsing tab-bar chrome** — when the tab strip runs low on room, the right-hand chrome (search, findings badge, summarize, line numbers, timestamps) automatically collapses to a magnifier (`⌕`, opens search) plus the findings badge, so tabs reclaim the width. A leading toggle reads as its action — `»` collapses the chrome, `«` restores it — and pins the chrome open when used; the choice persists.
   - The collapse decision is computed from intrinsic widths (tab content + full-chrome width vs. the bar width), so it is state-independent and never oscillates between collapsed and expanded.
   - Keyboard shortcuts and the Options/mobile menus still reach search and the line-number/timestamp toggles when the inline chrome is collapsed.

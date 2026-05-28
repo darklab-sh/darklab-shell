@@ -36,7 +36,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, and a mobile History panel with collapsible search, filter, and bulk-action tools
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, deterministic outcome summaries for supported noisy tools, quieter handling for known progress/status chatter, jump-to-live / jump-to-bottom controls, and exports/permalinks that include the same visible summaries while keeping raw transcripts unchanged
 - **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, cleaner saved search text that skips known scanner noise without deleting raw output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
-- **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context, folded scanner chatter, lazy expansion for unchanged lines, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
+- **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context, folded scanner chatter, detected-change summaries for supported scan output, lazy expansion for unchanged lines, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — per-session API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
@@ -563,6 +563,17 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # Diagnostics service package marker
 │   │   │   ├── classifier_drift.py # Recent-output classifier drift sampler for /diag
 │   │   │   └── storage.py      # Shared cached database storage snapshot for /diag and Prometheus
+│   │   ├── diff/
+│   │   │   ├── __init__.py     # Shared diff service package marker
+│   │   │   ├── classifiers/
+│   │   │   │   ├── __init__.py # Shared tool-aware diff classifier registry and priority ordering
+│   │   │   │   ├── common.py   # Shared parser, host, line-index, and bounded-list helpers
+│   │   │   │   ├── findings.py # Structured finding fingerprint diff classifier
+│   │   │   │   ├── hosts.py    # Host and subdomain list diff classifier
+│   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
+│   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
+│   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
+│   │   │   └── models.py       # Shared diff result dataclass and diff-kind constants
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
@@ -683,13 +694,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── watchers/
 │   │   │   ├── __init__.py     # Watcher change-detection service package marker
 │   │   │   ├── classifiers/
-│   │   │   │   ├── __init__.py # Watcher diff classifier registry and priority ordering
-│   │   │   │   ├── common.py   # Shared parser, host, and bounded-list helpers for watcher classifiers
-│   │   │   │   ├── findings.py # Structured finding fingerprint diff classifier
-│   │   │   │   ├── hosts.py    # Host and subdomain list diff classifier
-│   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
-│   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
-│   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
+│   │   │   │   ├── __init__.py # Compatibility exports for the shared diff classifier registry
+│   │   │   │   ├── common.py   # Compatibility exports for shared diff classifier helpers
+│   │   │   │   ├── findings.py # Compatibility wrapper for the shared findings classifier
+│   │   │   │   ├── hosts.py    # Compatibility wrapper for the shared hosts classifier
+│   │   │   │   ├── ports.py    # Compatibility wrapper for the shared ports classifier
+│   │   │   │   ├── textual.py  # Compatibility wrapper for the shared textual classifier
+│   │   │   │   └── tls.py      # Compatibility wrapper for the shared TLS classifier
 │   │   │   ├── diff.py         # Watcher diff wrapper over shared run-comparison helpers
 │   │   │   ├── finalize.py     # Completed watcher-run diff, state transition, and notification hook
 │   │   │   ├── models.py       # Watcher, watcher-fire, and watcher-diff dataclasses and constants

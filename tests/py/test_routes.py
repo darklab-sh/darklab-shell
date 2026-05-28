@@ -10155,35 +10155,105 @@ class TestHistoryRoute:
             {"text": "443/tcp open https", "cls": "", "signals": ["findings"], "line_index": 1},
             {"text": "[process exited with code 0]", "cls": "exit-ok"},
         ])
+        left_web_output = json.dumps([
+            {
+                "text": "https://darklab.sh [200] [Old title]",
+                "cls": "",
+                "signals": ["findings"],
+                "line_index": 0,
+                "entities": [{
+                    "type": "url",
+                    "value": "https://darklab.sh",
+                    "canonical_value": "https://darklab.sh",
+                    "confidence": "medium",
+                }],
+            },
+            {
+                "text": "https://darklab.sh/login [404] [Login]",
+                "cls": "",
+                "signals": ["findings"],
+                "line_index": 1,
+                "entities": [{
+                    "type": "url",
+                    "value": "https://darklab.sh/login",
+                    "canonical_value": "https://darklab.sh/login",
+                    "confidence": "medium",
+                }],
+            },
+        ])
+        right_web_output = json.dumps([
+            {
+                "text": "https://darklab.sh [301] [New title]",
+                "cls": "",
+                "signals": ["findings"],
+                "line_index": 0,
+                "entities": [{
+                    "type": "url",
+                    "value": "https://darklab.sh",
+                    "canonical_value": "https://darklab.sh",
+                    "confidence": "medium",
+                }],
+            },
+            {
+                "text": "https://darklab.sh/admin [200] [Admin]",
+                "cls": "",
+                "signals": ["findings"],
+                "line_index": 1,
+                "entities": [{
+                    "type": "url",
+                    "value": "https://darklab.sh/admin",
+                    "canonical_value": "https://darklab.sh/admin",
+                    "confidence": "medium",
+                }],
+            },
+        ])
         try:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute(
+            conn.executemany(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
                 "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "cmp-left",
-                    session,
-                    "nmap darklab.sh",
-                    "2026-01-01T00:00:01",
-                    "2026-01-01T00:00:03",
-                    0,
-                    left_output,
-                    4,
-                ),
-            )
-            conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
-                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "cmp-right",
-                    session,
-                    "nmap darklab.sh",
-                    "2026-01-01T00:00:04",
-                    "2026-01-01T00:00:09",
-                    0,
-                    right_output,
-                    4,
-                ),
+                [
+                    (
+                        "cmp-left",
+                        session,
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:01",
+                        "2026-01-01T00:00:03",
+                        0,
+                        left_output,
+                        4,
+                    ),
+                    (
+                        "cmp-right",
+                        session,
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:04",
+                        "2026-01-01T00:00:09",
+                        0,
+                        right_output,
+                        4,
+                    ),
+                    (
+                        "cmp-web-left",
+                        session,
+                        "httpx -u https://darklab.sh -status-code -title",
+                        "2026-01-01T00:00:10",
+                        "2026-01-01T00:00:11",
+                        0,
+                        left_web_output,
+                        2,
+                    ),
+                    (
+                        "cmp-web-right",
+                        session,
+                        "httpx -u https://darklab.sh -status-code -title",
+                        "2026-01-01T00:00:12",
+                        "2026-01-01T00:00:13",
+                        0,
+                        right_web_output,
+                        2,
+                    ),
+                ],
             )
             conn.execute(
                 "INSERT INTO findings "
@@ -10277,6 +10347,49 @@ class TestHistoryRoute:
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/right.txt"]
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/left.txt"]
             assert "compare_line_index" not in data["objects"]["artifacts"]["added"][0]
+            derived_changes = data["derived_changes"]
+            assert derived_changes["group_count"] == 1
+            assert derived_changes["changed_count"] == 2
+            assert derived_changes["truncated"] is False
+            port_group = derived_changes["groups"][0]
+            assert port_group["id"] == "nmap_ports"
+            assert port_group["kind"] == "ports"
+            assert port_group["display_target"] == "darklab.sh"
+            assert port_group["added_count"] == 1
+            assert port_group["removed_count"] == 1
+            assert port_group["changed_count"] == 0
+            assert port_group["added"][0]["key"] == "443/tcp"
+            assert port_group["added"][0]["compare_line_index"] == 2
+            assert port_group["added"][0]["compare_side"] == "right"
+            assert port_group["removed"][0]["key"] == "8080/tcp"
+            assert port_group["removed"][0]["compare_line_index"] == 2
+            assert port_group["removed"][0]["compare_side"] == "left"
+
+            web_resp = client.get(
+                "/history/compare?left=cmp-web-left&right=cmp-web-right",
+                headers={"X-Session-ID": session},
+            )
+            web_data = json.loads(web_resp.data)
+            assert web_resp.status_code == 200
+            web_group = web_data["derived_changes"]["groups"][0]
+            assert web_group["id"] == "web_urls"
+            assert web_group["kind"] == "urls"
+            assert web_group["display_target"] == "darklab.sh"
+            assert web_group["added_count"] == 1
+            assert web_group["removed_count"] == 1
+            assert web_group["changed_count"] == 1
+            assert web_group["added"][0]["canonical_url"] == "https://darklab.sh/admin"
+            assert web_group["added"][0]["status_code"] == 200
+            assert web_group["added"][0]["compare_line_index"] == 1
+            assert web_group["removed"][0]["canonical_url"] == "https://darklab.sh/login"
+            assert web_group["removed"][0]["status_code"] == 404
+            assert web_group["changed"][0]["key"] == "https://darklab.sh"
+            assert web_group["changed"][0]["before"]["status_code"] == 200
+            assert web_group["changed"][0]["before"]["title"] == "Old title"
+            assert web_group["changed"][0]["after"]["status_code"] == 301
+            assert web_group["changed"][0]["after"]["title"] == "New title"
+            assert web_data["objects"]["entities"]["added"][0]["canonical_value"] == "https://darklab.sh/admin"
+            assert web_data["objects"]["entities"]["removed"][0]["canonical_value"] == "https://darklab.sh/login"
 
             with mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
                 capped_resp = client.get(

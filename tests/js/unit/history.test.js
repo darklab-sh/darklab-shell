@@ -3299,6 +3299,99 @@ describe('history panel actions', () => {
                   removed: [{ workspace_path: 'reports/old.json', kind: 'output', byte_size: 10 }],
                 },
               },
+              derived_changes: {
+                group_count: 2,
+                changed_count: 5,
+                truncated: false,
+                groups: [
+                  {
+                    id: 'nmap_ports',
+                    kind: 'ports',
+                    title: 'Open ports and services',
+                    display_target: 'darklab.sh',
+                    added_count: 1,
+                    removed_count: 1,
+                    changed_count: 1,
+                    added: [{
+                      key: '443/tcp',
+                      port: '443',
+                      proto: 'tcp',
+                      state: 'open',
+                      service: 'https',
+                      line: '443/tcp open https',
+                      compare_line_index: 1,
+                      compare_side: 'right',
+                    }],
+                    removed: [{
+                      key: '8080/tcp',
+                      port: '8080',
+                      proto: 'tcp',
+                      state: 'open',
+                      service: 'http-proxy',
+                      line: '8080/tcp open http-proxy',
+                      compare_line_index: 1,
+                      compare_side: 'left',
+                    }],
+                    changed: [{
+                      key: '80/tcp',
+                      before: {
+                        key: '80/tcp',
+                        port: '80',
+                        proto: 'tcp',
+                        state: 'open',
+                        service: 'http',
+                        service_text: 'http Apache httpd',
+                        compare_line_index: 0,
+                        compare_side: 'left',
+                      },
+                      after: {
+                        key: '80/tcp',
+                        port: '80',
+                        proto: 'tcp',
+                        state: 'open',
+                        service: 'http',
+                        service_text: 'http nginx',
+                        compare_line_index: 0,
+                        compare_side: 'right',
+                      },
+                    }],
+                  },
+                  {
+                    id: 'web_urls',
+                    kind: 'urls',
+                    title: 'URLs and HTTP status',
+                    display_target: 'darklab.sh',
+                    added_count: 1,
+                    removed_count: 0,
+                    changed_count: 1,
+                    added: [{
+                      canonical_url: 'https://darklab.sh/admin',
+                      status_code: 200,
+                      title: 'Admin',
+                      compare_line_index: 1,
+                      compare_side: 'right',
+                    }],
+                    removed: [],
+                    changed: [{
+                      key: 'https://darklab.sh',
+                      before: {
+                        canonical_url: 'https://darklab.sh',
+                        status_code: 200,
+                        title: 'Old title',
+                        compare_line_index: 0,
+                        compare_side: 'left',
+                      },
+                      after: {
+                        canonical_url: 'https://darklab.sh',
+                        status_code: 301,
+                        title: 'New title',
+                        compare_line_index: 0,
+                        compare_side: 'right',
+                      },
+                    }],
+                  },
+                ],
+              },
               truncated: {},
             }),
         })
@@ -3366,6 +3459,13 @@ describe('history panel actions', () => {
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed findings (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed artifacts (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('reports/new.json')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Detected changes (5)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Open ports and services')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('URLs and HTTP status')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('80/tcp')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('80/tcp open http Apache httpd -> 80/tcp open http nginx')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('https://darklab.sh/admin')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('https://darklab.sh · 200 · Old title -> https://darklab.sh · 301 · New title')
     let insertedOutputRow = document.querySelector('.history-compare-pane[data-side="b"] .history-compare-row.is-insert')
     let pairedSpacer = document.querySelector(
       `.history-compare-pane[data-side="a"] .history-compare-row[data-compare-pair="${insertedOutputRow.dataset.comparePair}"]`,
@@ -3443,6 +3543,17 @@ describe('history panel actions', () => {
     clearOutputPulses()
     nextChange.click()
     expect(pulsedPair()).toBe(visitedPairs[0])
+
+    const addedDerivedPortRow = [...document.querySelectorAll(
+      '.history-compare-derived-row[data-derived-kind="ports"][data-compare-side="b"]',
+    )].find(row => row.textContent.includes('443/tcp open https'))
+    expect(addedDerivedPortRow.tagName).toBe('BUTTON')
+    emitUiEvent.mockClear()
+    addedDerivedPortRow.click()
+    expect(emitUiEvent).toHaveBeenCalledWith('app:compare-anchor-scroll', {
+      side: 'b',
+      compare_line_index: 1,
+    })
 
     const addedFindingRow = document.querySelector(
       '.history-compare-object-row[data-object-kind="finding"][data-compare-side="b"]',

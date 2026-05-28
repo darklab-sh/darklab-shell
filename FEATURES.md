@@ -524,6 +524,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Run comparison can launch from the History drawer, Run Details modal, mobile History panel, and Projects modal. Project-scoped comparison uses the same canonical compare flow as History after resolving the selected linked runs or baseline label.
 - Transcript comparison strips app chrome lines before diffing, keeps each run's original output order, and aligns changed hunks across Run A and Run B. Unchanged context is folded by default with **Show unchanged lines** controls and lazy expansion for large equal regions.
 - Lines classified as transcript noise are folded out of the default comparison so progress/status churn doesn't look like a meaningful change. When that happens, the comparison shows a muted note with the number of folded noisy lines.
+- When supported scan output exposes stable structure, Run comparison shows a compact **Detected changes** section above the transcript diff. It currently summarizes nmap port/service changes and web URL/status changes from common web enumeration tools, with rows that jump back to the matching transcript line.
 - Users can switch between responsive view modes: automatic for the current screen, side-by-side where space allows, unified, changes-only, and findings-only. Context controls expose compact, expanded, and all-context views for the current comparison without changing the user's saved default options.
 - **Prev change** and **Next change** navigate between changed transcript regions. Restore actions can load Run A, Run B, or both runs back into terminal tabs, and **Copy summary** creates a concise text summary of the comparison.
 - Findings and run-owned artifacts are compared as objects rather than raw line positions. This keeps matching findings/artifacts stable even when tools emit the same results in a different order. Added, removed, and changed object groups include per-side totals and truncation metadata.
@@ -633,7 +634,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. First-run watchers require a command because there is no completed run to inherit from yet. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
 
-**Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, diff classifiers, finalization, and fire audit helpers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), `app/static/css/features/watchers.css` (modal layout), and `docs/watchers.md` (operator guide).
+**Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, finalization, and fire audit helpers), `app/services/diff/` (shared tool-aware diff classifiers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), `app/static/css/features/watchers.css` (modal layout), and `docs/watchers.md` (operator guide).
 
 ---
 

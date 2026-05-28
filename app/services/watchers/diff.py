@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.watchers.classifiers import diff_with_classifiers
+from services.diff.classifiers import diff_with_classifiers
 
 
 def run_row(conn, session_token: str, run_id: str) -> dict[str, Any] | None:

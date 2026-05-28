@@ -1,10 +1,13 @@
 """Shared run comparison helpers for history and project responses."""
 
 import re
+import shlex
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime
 from difflib import SequenceMatcher
+from typing import Any
+from urllib.parse import urlparse
 
 from core.output_signals import (
     classify_line,
@@ -12,6 +15,8 @@ from core.output_signals import (
     extract_target,
     strip_ansi_codes,
 )
+from services.intel.canonical import CanonicalizationError, canonical_url
+from services.diff.models import DIFF_KIND_NONE
 from services.runs.output_model import LineEvent
 from services.runs.output_model import is_noise_event, noise_kind_for_event
 from services.runs.output_store import load_run_output_events_for_run
@@ -29,6 +34,21 @@ COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5
 COMPARE_REPLACE_PAIR_QUICK_RATIO = COMPARE_REPLACE_PAIR_MIN_RATIO
 COMPARE_REPLACE_PAIR_CANDIDATES = 32
 COMPARE_MINIMAP_BUCKETS = 256
+COMPARE_DERIVED_CHANGE_LIMIT = 1000
+URL_COMPARE_ROOTS = {"httpx", "ffuf", "gobuster", "katana"}
+_HTTPX_COMPARE_RE = re.compile(r"^(?P<url>https?://\S+)\s+(?P<brackets>(?:\[[^\]]*\]\s*)+)$", re.I)
+_FFUF_COMPARE_RE = re.compile(
+    r"^(?P<path>.+?)\s+\[Status:\s*(?P<status>\d{3}),\s*Size:\s*\d+,\s*"
+    r"Words:\s*\d+,\s*Lines:\s*\d+,\s*Duration:\s*[^\]]+\]$",
+    re.I,
+)
+_GOBUSTER_COMPARE_RE = re.compile(
+    r"^(?P<path>\S(?:.*\S)?)\s+\(Status:\s*(?P<status>\d{3})\)\s+"
+    r"\[Size:\s*\d+\](?:\s+\[-->\s+(?P<redirect>\S+)\])?$",
+    re.I,
+)
+_CLEAN_HTTP_URL_RE = re.compile(r"^https?://\S+$", re.I)
+_SHELL_TEMPLATE_URL_NOISE_RE = re.compile(r"(?:'\+|\+'\$|/\$1\b)")
 
 
 def compare_item_limit(limit=None):
@@ -180,6 +200,349 @@ def add_compare_line_indexes(finding_diff, left_entries, right_entries):
         **finding_diff,
         "added": _enrich_compare_line_indexes(finding_diff.get("added", []), right_index_by_line),
         "removed": _enrich_compare_line_indexes(finding_diff.get("removed", []), left_index_by_line),
+    }
+
+
+def _enrich_derived_line_pointer(item, index_by_output_line, side):
+    enriched_item = dict(item)
+    line_index = enriched_item.get("line_index")
+    if isinstance(line_index, int) and not isinstance(line_index, bool):
+        compare_line_index = index_by_output_line.get(line_index)
+        if compare_line_index is not None:
+            enriched_item["compare_line_index"] = compare_line_index
+            enriched_item["compare_side"] = side
+    return enriched_item
+
+
+def _port_group_display(left_run, right_run):
+    left_target = compare_run_target(left_run)
+    right_target = compare_run_target(right_run)
+    left_root = compare_run_root(left_run)
+    right_root = compare_run_root(right_run)
+    display_target = right_target or left_target or right_root or left_root or "nmap"
+    return {
+        "command_root": right_root or left_root,
+        "target": right_target or left_target,
+        "left_target": left_target,
+        "right_target": right_target,
+        "display_target": display_target,
+        "target_ambiguous": bool(left_target and right_target and left_target != right_target),
+    }
+
+
+def _compare_nmap_port_changes(left_run, right_run, left_entries, right_entries):
+    from services.diff.classifiers import ports as port_diff_classifier  # noqa: PLC0415
+
+    command_text = str(right_run.get("command") or left_run.get("command") or "")
+    if not port_diff_classifier.applies_to(command_text, right_run):
+        return None
+
+    diff = port_diff_classifier.diff(left_run, right_run, None, None)
+    summary = diff.summary
+    if diff.kind == DIFF_KIND_NONE:
+        return None
+
+    left_index_by_line = compare_line_index_by_output_line(left_entries)
+    right_index_by_line = compare_line_index_by_output_line(right_entries)
+    added = [
+        _enrich_derived_line_pointer(item, right_index_by_line, "right")
+        for item in summary.get("added_ports", [])[:COMPARE_DERIVED_CHANGE_LIMIT]
+    ]
+    removed = [
+        _enrich_derived_line_pointer(item, left_index_by_line, "left")
+        for item in summary.get("removed_ports", [])[:COMPARE_DERIVED_CHANGE_LIMIT]
+    ]
+    changed = []
+    for item in summary.get("changed_ports", [])[:COMPARE_DERIVED_CHANGE_LIMIT]:
+        changed.append({
+            "key": item.get("key"),
+            "before": _enrich_derived_line_pointer(
+                item.get("before", {}),
+                left_index_by_line,
+                "left",
+            ),
+            "after": _enrich_derived_line_pointer(
+                item.get("after", {}),
+                right_index_by_line,
+                "right",
+            ),
+        })
+
+    return {
+        "id": "nmap_ports",
+        "kind": "ports",
+        "classifier": "ports",
+        "title": "Open ports and services",
+        **_port_group_display(left_run, right_run),
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "added_count": int(summary.get("added_port_count") or 0),
+        "removed_count": int(summary.get("removed_port_count") or 0),
+        "changed_count": int(summary.get("changed_port_count") or 0),
+        "suppressed_removed_count": int(summary.get("suppressed_removed_port_count") or 0),
+        "truncated": bool(diff.truncated),
+    }
+
+
+def _command_flag_value(command, names):
+    try:
+        tokens = shlex.split(str(command or ""))
+    except ValueError:
+        tokens = str(command or "").split()
+    for index, token in enumerate(tokens):
+        if token in names and index + 1 < len(tokens):
+            return tokens[index + 1]
+        for name in names:
+            prefix = f"{name}="
+            if token.startswith(prefix):
+                return token[len(prefix):]
+    return ""
+
+
+def _command_url_template(command):
+    return _command_flag_value(command, {"-u", "--url", "-target", "--target"})
+
+
+def _join_base_url(base, path):
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        return ""
+    if _CLEAN_HTTP_URL_RE.match(raw_path):
+        return raw_path
+    parsed = urlparse(str(base or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    if "FUZZ" in str(base):
+        return str(base).replace("FUZZ", raw_path.lstrip("/"), 1)
+    if raw_path.startswith("/"):
+        return f"{parsed.scheme}://{parsed.netloc}{raw_path}"
+    return f"{str(base).rstrip('/')}/{raw_path.lstrip('/')}"
+
+
+def _canonical_compare_url(value):
+    try:
+        return canonical_url(value)
+    except CanonicalizationError:
+        return ""
+
+
+def _parse_httpx_url_record(text, command):
+    match = _HTTPX_COMPARE_RE.match(text)
+    if not match:
+        return None
+    url = match.group("url")
+    canonical = _canonical_compare_url(url)
+    if not canonical:
+        return None
+    bracket_values = re.findall(r"\[([^\]]*)\]", match.group("brackets") or "")
+    record = {"key": canonical, "url": url, "canonical_url": canonical}
+    extra_values = []
+    for value in bracket_values:
+        stripped = value.strip()
+        if not stripped:
+            continue
+        if re.fullmatch(r"\d{3}", stripped):
+            record["status_code"] = int(stripped)
+        elif _CLEAN_HTTP_URL_RE.match(stripped):
+            redirect_canonical = _canonical_compare_url(stripped)
+            if redirect_canonical:
+                record["redirect_url"] = stripped
+                record["redirect_canonical_url"] = redirect_canonical
+        else:
+            extra_values.append(stripped)
+    if extra_values and "-title" in str(command or ""):
+        record["title"] = extra_values[0]
+    if extra_values:
+        record["labels"] = extra_values
+    return record
+
+
+def _parse_ffuf_url_record(text, command):
+    match = _FFUF_COMPARE_RE.match(text)
+    if not match:
+        return None
+    url = _join_base_url(_command_url_template(command), match.group("path"))
+    canonical = _canonical_compare_url(url)
+    if not canonical:
+        return None
+    return {
+        "key": canonical,
+        "url": url,
+        "canonical_url": canonical,
+        "status_code": int(match.group("status")),
+    }
+
+
+def _parse_gobuster_url_record(text, command):
+    match = _GOBUSTER_COMPARE_RE.match(text)
+    if not match:
+        return None
+    url = _join_base_url(_command_url_template(command), match.group("path"))
+    canonical = _canonical_compare_url(url)
+    if not canonical:
+        return None
+    record = {
+        "key": canonical,
+        "url": url,
+        "canonical_url": canonical,
+        "status_code": int(match.group("status")),
+    }
+    redirect = str(match.group("redirect") or "").strip()
+    redirect_canonical = _canonical_compare_url(redirect) if redirect else ""
+    if redirect_canonical:
+        record["redirect_url"] = redirect
+        record["redirect_canonical_url"] = redirect_canonical
+    return record
+
+
+def _parse_katana_url_record(text):
+    if not _CLEAN_HTTP_URL_RE.match(text) or _SHELL_TEMPLATE_URL_NOISE_RE.search(text):
+        return None
+    canonical = _canonical_compare_url(text)
+    if not canonical:
+        return None
+    return {"key": canonical, "url": text, "canonical_url": canonical}
+
+
+def _parse_url_record(root, text, command):
+    stripped = strip_ansi_codes(str(text or "")).strip()
+    if root == "httpx":
+        return _parse_httpx_url_record(stripped, command)
+    if root == "ffuf":
+        return _parse_ffuf_url_record(stripped, command)
+    if root == "gobuster":
+        return _parse_gobuster_url_record(stripped, command)
+    if root == "katana":
+        return _parse_katana_url_record(stripped)
+    return None
+
+
+def _url_entity_record(entry):
+    for entity in entry.get("entities") or []:
+        if not isinstance(entity, dict) or str(entity.get("type") or "") != "url":
+            continue
+        canonical = str(entity.get("canonical_value") or entity.get("value") or "").strip()
+        if not canonical:
+            continue
+        return {
+            "key": canonical.casefold(),
+            "url": str(entity.get("value") or canonical),
+            "canonical_url": canonical,
+        }
+    return None
+
+
+def _url_records_for_compare(run, entries):
+    root = compare_run_root(run)
+    if root not in URL_COMPARE_ROOTS:
+        return {}
+    command = str(run.get("command") or "")
+    records = {}
+    for entry in entries:
+        parsed = _parse_url_record(root, entry.get("text"), command)
+        entity_record = _url_entity_record(entry)
+        record: dict[str, Any] | None = entity_record or parsed
+        if parsed and entity_record:
+            record = {**entity_record, **parsed, "key": parsed["key"].casefold()}
+        elif parsed:
+            record = {**parsed, "key": parsed["key"].casefold()}
+        if not record:
+            continue
+        line_index = entry.get("line_index")
+        if isinstance(line_index, int) and not isinstance(line_index, bool):
+            record["line_index"] = line_index
+        record["line"] = str(entry.get("text") or "")
+        records[record["key"]] = record
+    return records
+
+
+def _url_signature(record):
+    return (
+        str(record.get("status_code") or ""),
+        str(record.get("title") or "").strip().casefold(),
+        str(record.get("redirect_canonical_url") or "").strip().casefold(),
+    )
+
+
+def _compare_url_changes(left_run, right_run, left_entries, right_entries):
+    left_root = compare_run_root(left_run)
+    right_root = compare_run_root(right_run)
+    if left_root not in URL_COMPARE_ROOTS and right_root not in URL_COMPARE_ROOTS:
+        return None
+
+    left = _url_records_for_compare(left_run, left_entries)
+    right = _url_records_for_compare(right_run, right_entries)
+    added_keys = sorted(set(right) - set(left))
+    removed_keys = sorted(set(left) - set(right))
+    changed_keys = sorted(
+        key for key in set(left) & set(right)
+        if _url_signature(left[key]) != _url_signature(right[key])
+    )
+    if not added_keys and not removed_keys and not changed_keys:
+        return None
+
+    left_index_by_line = compare_line_index_by_output_line(left_entries)
+    right_index_by_line = compare_line_index_by_output_line(right_entries)
+    added = [
+        _enrich_derived_line_pointer(right[key], right_index_by_line, "right")
+        for key in added_keys[:COMPARE_DERIVED_CHANGE_LIMIT]
+    ]
+    removed = [
+        _enrich_derived_line_pointer(left[key], left_index_by_line, "left")
+        for key in removed_keys[:COMPARE_DERIVED_CHANGE_LIMIT]
+    ]
+    changed = [
+        {
+            "key": key,
+            "before": _enrich_derived_line_pointer(left[key], left_index_by_line, "left"),
+            "after": _enrich_derived_line_pointer(right[key], right_index_by_line, "right"),
+        }
+        for key in changed_keys[:COMPARE_DERIVED_CHANGE_LIMIT]
+    ]
+    total_emitted = len(added) + len(removed) + len(changed)
+    total_changes = len(added_keys) + len(removed_keys) + len(changed_keys)
+    return {
+        "id": "web_urls",
+        "kind": "urls",
+        "classifier": "urls",
+        "title": "URLs and HTTP status",
+        "command_root": right_root or left_root,
+        "target": compare_run_target(right_run) or compare_run_target(left_run),
+        "display_target": compare_run_target(right_run)
+        or compare_run_target(left_run)
+        or right_root
+        or left_root
+        or "web",
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "added_count": len(added_keys),
+        "removed_count": len(removed_keys),
+        "changed_count": len(changed_keys),
+        "truncated": total_changes > total_emitted,
+    }
+
+
+def compare_derived_changes(left_run, right_run, left_entries, right_entries):
+    groups = []
+    port_group = _compare_nmap_port_changes(left_run, right_run, left_entries, right_entries)
+    if port_group is not None:
+        groups.append(port_group)
+    url_group = _compare_url_changes(left_run, right_run, left_entries, right_entries)
+    if url_group is not None:
+        groups.append(url_group)
+    total_change_count = sum(
+        int(group.get("added_count") or 0)
+        + int(group.get("removed_count") or 0)
+        + int(group.get("changed_count") or 0)
+        for group in groups
+    )
+    return {
+        "groups": groups,
+        "group_count": len(groups),
+        "changed_count": total_change_count,
+        "truncated": any(bool(group.get("truncated")) for group in groups),
     }
 
 

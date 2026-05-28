@@ -1407,6 +1407,12 @@ def compare_history_runs():
             "artifacts": artifact_objects,
             "entities": run_comparison.compare_entity_sets(left_entries, right_entries),
         },
+        "derived_changes": run_comparison.compare_derived_changes(
+            left_run,
+            right_run,
+            left_entries,
+            right_entries,
+        ),
         "hunks": diff["hunks"],
         "density_buckets": density_buckets,
         "totals": diff["totals"],
