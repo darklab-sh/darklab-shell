@@ -588,6 +588,7 @@ function createTab(label) {
     runStart: null,
     currentRunStartIndex: null,
     exitCode: null,
+    commandOutcomeSummary: null,
     rawLines: [],
     previewTruncated: false,
     fullOutputAvailable: false,
@@ -758,6 +759,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
     t.rawLines = [];
+    t.commandOutcomeSummary = null;
     if (typeof _resetTabOutputSignalCounts === 'function') _resetTabOutputSignalCounts(t);
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;

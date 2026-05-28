@@ -1173,8 +1173,8 @@ describe('tabs helpers', () => {
       },
     }
 
-    const { buildExportLinesHtml, buildTerminalExportHtml } = fromDomScripts(
-      ['app/static/js/export_html.js'],
+    const { buildExportLinesHtml, buildExportDocumentModel, buildTerminalExportHtml } = fromDomScripts(
+      ['app/static/js/core/output_core.js', 'app/static/js/export_html.js'],
       {
         document,
         window,
@@ -1213,6 +1213,21 @@ describe('tabs helpers', () => {
     expect(html).toContain('<span class="export-entity-token"')
     expect(html).toContain('data-export-toggle-highlights')
     expect(html).not.toContain('href="#entity-')
+
+    const exportModel = buildExportDocumentModel({
+      appName: 'darklab_shell',
+      title: 'nmap scan',
+      label: 'nmap scan',
+      command: 'nmap -sV darklab.sh',
+      includeCommandOutcomeSummary: true,
+      rawLines: [
+        { text: '443/tcp open  https', cls: '' },
+        { text: 'Nmap done: 1 IP address (1 host up) scanned in 2.10 seconds', cls: '' },
+      ],
+    })
+    expect(exportModel.rawLines.map(line => line.text)).toContain('Command outcome')
+    expect(exportModel.rawLines.map(line => line.text)).toContain('Open ports: 1 (443/tcp https)')
+    expect(exportModel.rawLines.map(line => line.text)).toContain('Hosts: 1 up')
 
     delete window.ThemeRegistry
   })

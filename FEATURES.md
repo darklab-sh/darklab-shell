@@ -224,15 +224,22 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - The output view follows the live tail automatically, including during bursty runs that repaint quickly. Only a real user scroll-away disables follow mode and shows the tab-scoped jump-to-live / jump-to-bottom helper until the tail is rejoined.
 - A live elapsed run-timer sits next to the status pill while a command runs; the final elapsed time is recorded in the exit line.
 - Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu). Timestamp fragments stay on each row, while line numbers are assigned once as output is emitted so high-volume commands do not have to renumber thousands of visible rows after `max_output_lines` trimming begins.
+- Completed output for supported noisy tools can show a short **Command
+  outcome** block below the transcript. The summary is deterministic and
+  app-native, not AI-generated, and currently covers common `nmap`, `dig`,
+  `nslookup`, `curl`, and `openssl s_client` outcomes such as open ports, DNS
+  answers, HTTP redirects, and certificate details.
 - Live output rendering batches bursty streams, skips full transcript scans on normal appends, uses browser content visibility for offscreen rows, and trims old rendered rows without changing the retained raw-output model. Once `max_output_lines` is reached, visible line numbers continue increasing with the command's emitted output order rather than resetting to `1` for the remaining rendered window.
 - Very noisy brokered commands automatically enter high-volume output mode after `high_volume_output_line_threshold` received lines. The tab keeps running and counting output, but the browser renders periodic status lines instead of every row until the user chooses to resume live rendering for new output.
 - When the SSE stream goes quiet for 45 seconds, the shell shows inline warning copy instead of waiting indefinitely with a spinning run state.
 - If the original stream later resumes, the shell prints an inline reconnection success line, restores the tab/HUD to `RUNNING`, re-enables the kill affordance, and continues streaming output in place.
 - If a normal command stream detaches while the backend run is still active, the shell reattaches the brokered stream in the original tab when that tab still exists, keeps the run timer tied to the server start time, and prints a clear `[reattached to active run after stream recovery]` notice.
 
-**Limits:** stall detection fires after 45 seconds of silence per tab; each tab has its own stall timeout so concurrent runs don't interfere. Reattach uses the normal brokered run stream and falls back to a recovery tab when the original browser tab is gone.
+**Limits:** stall detection fires after 45 seconds of silence per tab; each tab has its own stall timeout so concurrent runs don't interfere. Reattach uses the normal brokered run stream and falls back to a recovery tab when the original browser tab is gone. Outcome summaries are additive and best-effort; when a supported parser can't derive a useful result, the transcript simply renders without the extra block.
 
-**Configuration:** timestamp and line-number preferences persist in browser cookies; both are off by default.
+**Configuration:** timestamp and line-number preferences persist in browser cookies; both are off by default. Command outcome summaries are on by default and can be disabled from Options or with `config set command-outcome-summaries off`.
+
+When command outcome summaries are enabled, text, HTML, PDF, Run Details, and permalink/share exports include the same visible summary block. The saved raw transcript remains unchanged, so the summary is always a derived view of the captured output rather than a replacement for it.
 
 **Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run.py` (server-side SSE generator).
 
@@ -1199,8 +1206,9 @@ wget -q -O /dev/null --server-response https://example.com
 | **Project Run Capture** | on / off | Add completed external command runs to the active project |
 | **Project Entity Capture** | on / off | Add generated Atlas entities when an auto-linked run is added to the active project |
 | **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time; shown on desktop, hidden from the mobile Options sheet |
+| **Command Outcome Summaries** | on / off | Show deterministic app-native outcome summaries below supported completed command output |
 
-**Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
+**Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `command-outcome-summaries`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
 
 **Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/services/commands/builtins_notify.py` (server-owned terminal `notify` command), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 

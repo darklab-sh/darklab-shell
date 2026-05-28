@@ -19,7 +19,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Multi-operator / team mode](#multi-operator--team-mode)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
-  - [Command outcome summaries](#command-outcome-summaries)
   - [Transcript noise classification](#transcript-noise-classification)
   - [Run comparison enhancements](#run-comparison-enhancements)
   - [Bulk history export and share](#bulk-history-export-and-share)
@@ -132,12 +131,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.
 - Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
 - Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
-
-### Command outcome summaries
-- For selected tools, generate short app-native summaries below the raw output. Security tool output is high-volume; a clear findings layer is what separates a purpose-built tool from a raw terminal.
-- Keep raw output primary — the summary is additive, never a replacement.
-- Start narrow: nmap (open ports + service table), dig (records returned), curl (status code + redirect chain), openssl s_client (cert expiry + trust chain).
-- The structured output model (see Architecture) is the right long-term foundation. Build this feature so it can move onto that model later instead of requiring it up front.
 
 ### Transcript noise classification
 - Future cleanup for saved command output across both normal runs and interactive PTY runs.

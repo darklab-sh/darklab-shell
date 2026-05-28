@@ -258,7 +258,16 @@ def _expiry_note(created: str) -> str:
         return ""
 
 
-def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None, meta=None):
+def _permalink_context(
+    title,
+    label,
+    created,
+    content_lines,
+    json_url,
+    extra_actions=None,
+    meta=None,
+    command=None,
+):
     # Build one context shape for both live responses and downloadable HTML so
     # metadata/actions stay in sync across both surfaces.
     app_name = CFG.get("app_name", "darklab_shell")
@@ -280,10 +289,12 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
         "transcript": {
             "lines": normalized_lines,
             "hasTimestampMetadata": has_timestamp_metadata,
+            "command": command or label,
         },
         "export": {
             "appName": app_name,
             "label": label,
+            "command": command or label,
             "created": created,
             "createdDisplay": created_fmt,
             "fontFacesCss": _font_face_css(embed=True),
@@ -337,7 +348,16 @@ def _permalink_error_page(noun: str) -> Response:
     return Response(html, status=404, mimetype="text/html")
 
 
-def _permalink_page(title, label, created, content_lines, json_url, extra_actions=None, meta=None) -> Response:
+def _permalink_page(
+    title,
+    label,
+    created,
+    content_lines,
+    json_url,
+    extra_actions=None,
+    meta=None,
+    command=None,
+) -> Response:
     """Render a themed HTML page for a permalink."""
     html = render_template(
         "permalink.html",
@@ -349,6 +369,7 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
             json_url=json_url,
             extra_actions=extra_actions,
             meta=meta,
+            command=command,
         ),
     )
     return Response(html, mimetype="text/html")

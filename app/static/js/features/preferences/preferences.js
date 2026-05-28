@@ -94,6 +94,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_project_auto_link_external_runs: getProjectAutoLinkExternalRunsPreference(),
     pref_project_auto_link_run_entities: getProjectAutoLinkRunEntitiesPreference(),
     pref_run_notify: getRunNotifyPreference(),
+    pref_command_outcome_summaries: getCommandOutcomeSummariesPreference(),
     pref_hud_clock: getHudClockPreference(),
     pref_prompt_username: getPromptUsernamePreference(),
     pref_compare_view_mode: getCompareViewModePreference(),
@@ -176,6 +177,7 @@ async function loadSessionPreferences() {
     applyPromptUsernamePreference(prefs.pref_prompt_username, false);
     applyCompareViewModePreference(prefs.pref_compare_view_mode, false);
     applyCompareContextPreference(prefs.pref_compare_context, false);
+    applyCommandOutcomeSummariesPreference(prefs.pref_command_outcome_summaries, false);
     applyConstellationFullDayPreference(prefs.pref_constellation_full_day, false);
     if (typeof applyRunNotifyPreference === 'function') {
       await applyRunNotifyPreference(prefs.pref_run_notify, false);
@@ -207,6 +209,10 @@ function getProjectAutoLinkRunEntitiesPreference() {
 
 function getRunNotifyPreference() {
   return PreferenceCore.coerceRunNotifyMode(getPreference('pref_run_notify'));
+}
+
+function getCommandOutcomeSummariesPreference() {
+  return PreferenceCore.coerceCommandOutcomeSummariesMode(getPreference('pref_command_outcome_summaries'));
 }
 
 function getConstellationFullDayPreference() {
@@ -379,6 +385,9 @@ function syncOptionsControls() {
   if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
+  if (optionsCommandOutcomeSummariesToggle) {
+    optionsCommandOutcomeSummariesToggle.checked = getCommandOutcomeSummariesPreference() === 'on';
+  }
   if (optionsProjectAutoLinkExternalRunsToggle) {
     optionsProjectAutoLinkExternalRunsToggle.checked = getProjectAutoLinkExternalRunsPreference() !== 'off';
   }
@@ -467,6 +476,20 @@ function applyProjectAutoLinkRunEntitiesPreference(mode, persist = true) {
     _primePreferenceValue('pref_project_auto_link_run_entities', nextMode);
   }
   syncOptionsControls();
+}
+
+function applyCommandOutcomeSummariesPreference(mode, persist = true) {
+  const nextMode = PreferenceCore.coerceCommandOutcomeSummariesMode(mode);
+  if (persist) {
+    _primePreferenceValue('pref_command_outcome_summaries', nextMode);
+    try { void _persistCurrentSessionPreferences(); }
+    catch (err) { logClientError('failed to persist command outcome summaries preference', err); }
+  } else {
+    _primePreferenceValue('pref_command_outcome_summaries', nextMode);
+  }
+  syncOptionsControls();
+  if (typeof refreshCommandOutcomeSummaries === 'function') refreshCommandOutcomeSummaries();
+  return nextMode;
 }
 
 function applyConstellationFullDayPreference(mode, persist = true) {

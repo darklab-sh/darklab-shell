@@ -10,6 +10,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Command outcome summaries** — added deterministic app-native outcome summaries for supported noisy commands.
+  - Added the synced `command-outcome-summaries` user option, with matching Options modal and terminal `config` controls.
+  - Added the structured browser-side summary model and renderer so summaries can appear below completed output without mutating raw transcripts, signal counts, Atlas entity extraction, or stored history output.
+  - Added deterministic parsers for `nmap`, `dig`, `nslookup`, `curl`, and `openssl s_client`, deriving concise results from captured output while leaving the raw transcript primary and unchanged. The DNS parsers include compact answer records for `dig` and A/MX/TXT `nslookup` responses when present.
+  - Extended text, HTML, PDF, Run Details, and permalink/share exports to recompute visible summaries at export/render time, so saved views match the UI without persisting synthetic rows into raw transcripts.
+
 - **Command knowledge schema** — `commands.yaml` (and `.local` overlays) now support five optional `knowledge:` sub-fields per command entry: `notes`, `gotchas`, `safe_defaults`, `common_flags` (each a capped list of short strings), and `artifact_behavior` (a short scalar). Fields are descriptive-only and never policy-bearing.
   - Registry loader normalizes and caps all fields (strip, dedupe, list max 5, text max 200 chars) and merges overlays per a locked policy (scalar-replace, list-extend with dedupe). Unknown fields are silently ignored in normalization and flagged only by the registry lint helper.
   - `command_catalog_from_registry` now includes `knowledge` and `feature_required` in its projection, flowing through to the `/commands/catalog/<root>` API route automatically.

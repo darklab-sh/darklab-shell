@@ -32,6 +32,7 @@ const optionsLnToggle = document.getElementById('options-ln-toggle');
 const optionsWelcomeSelect = document.getElementById('options-welcome-select');
 const optionsShareRedactionSelect = document.getElementById('options-share-redaction-select');
 const optionsNotifyToggle = document.getElementById('options-notify-toggle');
+const optionsCommandOutcomeSummariesToggle = document.getElementById('options-command-outcome-summaries-toggle');
 const optionsProjectAutoLinkExternalRunsToggle = document.getElementById('options-project-auto-link-external-runs-toggle');
 const optionsProjectAutoLinkRunEntitiesToggle = document.getElementById('options-project-auto-link-run-entities-toggle');
 const optionsHudClockSelect = document.getElementById('options-hud-clock-select');

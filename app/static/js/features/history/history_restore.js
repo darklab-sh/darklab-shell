@@ -129,6 +129,7 @@ function restoreHistoryRunIntoTab(run, {
         t.fullOutputAvailable = !!fullRun.full_output_available;
         t.fullOutputLoaded = !!fullRun.full_output_available && !previewNotice;
         t.reconnectedRun = false;
+        t.commandOutcomeSummary = fullRun.command_outcome_summary || fullRun.output_outcome_summary || null;
       }
       _appendHistoryCommandEcho(tabId, fullRun.command);
       const outputLines = Array.isArray(fullRun.output_entries) ? fullRun.output_entries : (fullRun.output || []);
@@ -139,6 +140,7 @@ function restoreHistoryRunIntoTab(run, {
         _historyExitClass(fullRun.exit_code),
         tabId
       );
+      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
       _suppressHistoryRestoreStatusPeek(tabId);
       if (typeof setTabStatus === 'function') {
         setTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');

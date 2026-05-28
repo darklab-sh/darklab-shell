@@ -1669,6 +1669,7 @@ def get_run(run_id):
         content_lines=content_lines,
         json_url=f"/history/{run_id}?json",
         meta=meta,
+        command=run["command"],
     )
 
 
@@ -1992,6 +1993,7 @@ def get_share(share_id):
         content_lines=content_lines,
         json_url=f"/share/{share_id}?json",
         meta=meta,
+        command=snap["label"],
     )
 
 

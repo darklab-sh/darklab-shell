@@ -338,6 +338,7 @@ describe('app helpers', () => {
       'pref_project_auto_link_external_runs',
       'pref_project_auto_link_run_entities',
       'pref_run_notify',
+      'pref_command_outcome_summaries',
       'pref_hud_clock',
       'pref_prompt_username',
       'pref_compare_view_mode',
@@ -1596,6 +1597,7 @@ describe('app helpers', () => {
           pref_welcome_intro: 'animated',
           pref_project_auto_link_external_runs: 'on',
           pref_project_auto_link_run_entities: 'on',
+          pref_command_outcome_summaries: 'on',
           pref_prompt_username: '',
           pref_compare_view_mode: 'auto',
           pref_compare_context: '3',
@@ -1607,10 +1609,12 @@ describe('app helpers', () => {
     await handleConfigCommand('config set welcome static', 'tab-1')
     await handleConfigCommand('config set project-auto-link-runs off', 'tab-1')
     await handleConfigCommand('config set project-auto-link-run-entities off', 'tab-1')
+    await handleConfigCommand('config set command-outcome-summaries off', 'tab-1')
     await handleConfigCommand('config set prompt-username nona', 'tab-1')
     await handleConfigCommand('config set compare-view changes-only', 'tab-1')
     await handleConfigCommand('config set compare-context all', 'tab-1')
     await handleConfigCommand('config get project-auto-link-run-entities', 'tab-1')
+    await handleConfigCommand('config get command-outcome-summaries', 'tab-1')
     await handleConfigCommand('config get prompt-username', 'tab-1')
     await handleConfigCommand('config list', 'tab-1')
 
@@ -1620,6 +1624,7 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
     expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
+    expect(document.cookie).toContain('pref_command_outcome_summaries=off')
     expect(document.cookie).toContain('pref_prompt_username=nona')
     expect(document.cookie).toContain('pref_compare_view_mode=changes_only')
     expect(document.cookie).toContain('pref_compare_context=all')
@@ -1628,10 +1633,12 @@ describe('app helpers', () => {
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-runs off')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-run-entities off')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set command-outcome-summaries off')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-view changes-only')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-context all')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get project-auto-link-run-entities')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get command-outcome-summaries')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
     expect(setStatus).toHaveBeenCalledWith('ok')
@@ -1850,7 +1857,9 @@ describe('app helpers', () => {
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
     expect(context.config.arg_hints.set.map(item => item.value)).toContain('prompt-username')
     expect(context.config.arg_hints.set.map(item => item.value)).toContain('compare-view')
+    expect(context.config.arg_hints.set.map(item => item.value)).toContain('command-outcome-summaries')
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.config.sequence_arg_hints['set command-outcome-summaries'].map(item => item.value)).toEqual(['on', 'off'])
     expect(context.config.sequence_arg_hints['set compare-view'].map(item => item.value)).toEqual([
       'auto',
       'side-by-side',
@@ -6018,6 +6027,7 @@ describe('app helpers', () => {
       getShareRedactionDefaultPreference,
       getProjectAutoLinkExternalRunsPreference,
       getProjectAutoLinkRunEntitiesPreference,
+      getCommandOutcomeSummariesPreference,
       getHudClockPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
@@ -6094,6 +6104,10 @@ describe('app helpers', () => {
     document
       .getElementById('options-project-auto-link-run-entities-toggle')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-command-outcome-summaries-toggle').checked = false
+    document
+      .getElementById('options-command-outcome-summaries-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -6106,6 +6120,7 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
     expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
     expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
+    expect(document.cookie).toContain('pref_command_outcome_summaries=off')
     expect(document.cookie).toContain('pref_hud_clock=local')
     expect(document.cookie).toContain('pref_compare_view_mode=side_by_side')
     expect(document.cookie).toContain('pref_compare_context=10')
@@ -6113,6 +6128,7 @@ describe('app helpers', () => {
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
     expect(getProjectAutoLinkRunEntitiesPreference()).toBe('off')
+    expect(getCommandOutcomeSummariesPreference()).toBe('off')
     expect(getHudClockPreference()).toBe('local')
     expect(getCompareViewModePreference()).toBe('side_by_side')
     expect(getCompareContextPreference()).toBe('10')
@@ -6131,6 +6147,7 @@ describe('app helpers', () => {
         pref_share_redaction_default: 'redacted',
         pref_project_auto_link_external_runs: 'off',
         pref_project_auto_link_run_entities: 'off',
+        pref_command_outcome_summaries: 'off',
         pref_hud_clock: 'local',
         pref_compare_view_mode: 'side_by_side',
         pref_compare_context: '10',
@@ -6691,13 +6708,15 @@ describe('syncOptionsControls notify toggle', () => {
     const { syncOptionsControls } = await loadAppFns({})
     syncOptionsControls()
     expect(document.getElementById('options-notify-toggle').checked).toBe(false)
+    expect(document.getElementById('options-command-outcome-summaries-toggle').checked).toBe(true)
   })
 
   it('reflects on preference as checked toggle', async () => {
     const { syncOptionsControls } = await loadAppFns({
-      cookies: { pref_run_notify: 'on' },
+      cookies: { pref_run_notify: 'on', pref_command_outcome_summaries: 'off' },
     })
     syncOptionsControls()
     expect(document.getElementById('options-notify-toggle').checked).toBe(true)
+    expect(document.getElementById('options-command-outcome-summaries-toggle').checked).toBe(false)
   })
 })

@@ -1144,6 +1144,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     if (msg.code === 0) {
       if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
+      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
       if (tabId === activeTabId) setStatus('ok');
       setTabStatus(tabId, 'ok');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
@@ -1152,6 +1153,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     } else {
       appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
+      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
@@ -3095,6 +3097,7 @@ function submitCommand(rawCmd) {
     _runTab.fullOutputLoaded = false;
     _runTab.historyRunId = null;
     _runTab.reconnectedRun = false;
+    _runTab.commandOutcomeSummary = null;
     _runTab.lastEventId = '';
     _runTab.attachMode = '';
     _runTab.followOutput = true;

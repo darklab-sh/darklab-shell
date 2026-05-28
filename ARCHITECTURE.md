@@ -875,6 +875,16 @@ Full-output artifacts are versioned JSONL. New files start with a small header r
 
 Live streams advertise the same contract. `/runs/<id>/stream` and `/api/v1/runs/<id>/stream` send a `schema` frame or row first, then keep using `output` events with a versioned line-event payload. Older clients can keep reading `type` and `text`; newer clients use `kind`, `role`, `signals`, and `entities`.
 
+Browser-side command outcome summaries are derived display metadata layered on
+top of `LineEvent` transcripts. `output_core.js` normalizes explicit summary
+payloads and builds deterministic summaries for supported roots such as `nmap`,
+`dig`, `nslookup`, `curl`, and `openssl s_client`. Renderer code treats those rows as
+synthetic so line numbering, signal counts, entity extraction, raw transcript
+data, and stored history remain driven by the original output rows. Export and
+permalink/share surfaces recompute the same visible summary rows at render time
+when the user's summary preference is enabled; they do not persist synthetic
+summary rows back into the transcript.
+
 The contract is guarded from both sides:
 
 - Python unit tests cover legacy-class decoding, entity normalization, artifact header/read compatibility, search-text derivation, redaction, and structural comparison.

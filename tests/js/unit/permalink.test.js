@@ -35,6 +35,15 @@ function makeExportHtmlUtilsMock() {
     exportTimestamp: vi.fn(() => '2025-01-15T10-30-00'),
     buildExportMetaLine: vi.fn(({ label, createdText }) => `${label} · ${createdText}`),
     normalizeExportTranscriptLines: vi.fn((lines) => lines),
+    appendCommandOutcomeSummaryLines: vi.fn((lines, { command, enabled } = {}) => {
+      if (!enabled || !String(command || '').includes('nmap')) return lines
+      return [
+        ...lines,
+        { text: 'Command outcome', cls: 'command-outcome-summary command-outcome-summary-title' },
+        { text: 'Hosts: 1 up', cls: 'command-outcome-summary command-outcome-summary-row' },
+      ]
+    }),
+    isCommandOutcomeSummaryLine: vi.fn((line) => String(line?.cls || '').split(/\s+/).includes('command-outcome-summary')),
     lineEventFromWire: vi.fn((line) => ({
       ...line,
       text: String(line?.text || ''),
@@ -63,7 +72,16 @@ function makeExportHtmlUtilsMock() {
         version: runMeta.version || null,
       }
     }),
-    buildExportDocumentModel: vi.fn(({ appName, title, label, createdText, runMeta, rawLines }) => ({
+    buildExportDocumentModel: vi.fn(({
+      appName,
+      title,
+      label,
+      createdText,
+      runMeta,
+      rawLines,
+      command,
+      includeCommandOutcomeSummary,
+    }) => ({
       appName,
       title,
       metaLine: `${label} · ${createdText}`,
@@ -75,7 +93,13 @@ function makeExportHtmlUtilsMock() {
             version: runMeta.version || null,
           }
         : null,
-      rawLines,
+      rawLines: includeCommandOutcomeSummary && String(command || '').includes('nmap')
+        ? [
+            ...rawLines,
+            { text: 'Command outcome', cls: 'command-outcome-summary command-outcome-summary-title' },
+            { text: 'Hosts: 1 up', cls: 'command-outcome-summary command-outcome-summary-row' },
+          ]
+        : rawLines,
     })),
     buildExportLinesHtml: vi.fn(() => ({ linesHtml: '<span>line</span>', prefixWidth: 0 })),
     buildTerminalExportHtml: vi.fn(() => '<html>export</html>'),
@@ -107,6 +131,7 @@ function loadPermalink({
   hasTimestampMetadata = false,
   appName = 'testapp',
   label = 'test label',
+  command = '',
   created = '2025-01-15T10:30:00Z',
   createdDisplay = '2025-01-15 10:30:00 UTC',
   fontFacesCss = '',
@@ -138,6 +163,7 @@ function loadPermalink({
     hasTimestampMetadata,
     appName,
     label,
+    command,
     created,
     createdDisplay,
     fontFacesCss,
@@ -146,6 +172,7 @@ function loadPermalink({
 
   // Seed cookie (jsdom cookie jar — set then read back via getCookie)
   document.cookie = `pref_line_numbers=${cookie.includes('pref_line_numbers=on') ? 'on' : 'off'}`
+  document.cookie = `pref_command_outcome_summaries=${cookie.includes('pref_command_outcome_summaries=off') ? 'off' : 'on'}`
   if (cookie.includes('pref_timestamps=')) {
     const m = cookie.match(/pref_timestamps=([^;]+)/)
     if (m) document.cookie = `pref_timestamps=${m[1]}`
@@ -627,6 +654,8 @@ describe('data-action dispatch', () => {
       createdText: '2026-04-22 02:39:24 UTC',
       runMeta: null,
       rawLines: lines,
+      command: 'ping -i 0.5 -c 20 darklab.sh',
+      includeCommandOutcomeSummary: true,
     })
     expect(mocks.ExportHtmlUtils.buildTerminalExportHtml.mock.calls[0][0].metaLine)
       .toBe('ping -i 0.5 -c 20 darklab.sh · 2026-04-22 02:39:24 UTC')
@@ -666,6 +695,8 @@ describe('data-action dispatch', () => {
       createdText: '2026-04-22 02:39:24 UTC',
       runMeta: null,
       rawLines: lines,
+      command: 'ping -i 0.5 -c 20 darklab.sh',
+      includeCommandOutcomeSummary: true,
     })
     expect(mocks.ExportPdfUtils.buildTerminalExportPdf.mock.calls[0][0].metaLine)
       .toBe('ping -i 0.5 -c 20 darklab.sh · 2026-04-22 02:39:24 UTC')

@@ -645,6 +645,10 @@ describe('history panel actions', () => {
                 command: 'ping darklab.sh',
                 output: ['ok'],
                 output_entries: [{ text: 'ok', cls: '' }],
+                command_outcome_summary: {
+                  title: 'Command outcome',
+                  items: [{ label: 'Result', value: 'Finished cleanly' }],
+                },
                 exit_code: 0,
               }),
           })
@@ -656,6 +660,10 @@ describe('history panel actions', () => {
                 id: 'run-1',
                 command: 'ping darklab.sh',
                 output_entries: [{ text: 'full export line', cls: '' }],
+                command_outcome_summary: {
+                  title: 'Command outcome',
+                  items: [{ label: 'Result', value: 'Finished cleanly' }],
+                },
                 exit_code: 0,
                 started: '2026-01-01T00:00:00Z',
               }),
@@ -957,6 +965,12 @@ describe('history panel actions', () => {
       runId: 'run-1',
       runLabel: 'ping darklab.sh',
     })
+
+    document.querySelector('[data-history-run-tab="output"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.getElementById('history-run-body').textContent).toContain('Command outcome')
+    expect(document.getElementById('history-run-body').textContent).toContain('ResultFinished cleanly')
+    expect(_historyRunPlainExportText(_historyRunPrimary())).toContain('Command outcome')
   })
 
   it('opens the watchers modal from the Run Details baseline action', async () => {

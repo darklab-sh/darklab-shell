@@ -218,6 +218,13 @@ function _cliConfigEntries() {
       set: (value) => applyRunNotifyPreference(value),
     },
     {
+      key: 'command-outcome-summaries',
+      description: 'Show short app-generated summaries below completed command output',
+      values: ['on', 'off'],
+      get: () => getCommandOutcomeSummariesPreference(),
+      set: (value) => applyCommandOutcomeSummariesPreference(value),
+    },
+    {
       key: 'hud-clock',
       description: 'HUD clock timezone',
       values: _hudClockModes.slice(),

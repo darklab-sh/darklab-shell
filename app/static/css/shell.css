@@ -461,7 +461,8 @@ body.ts-clock .output .shell-prompt-wrap {
 .output .line.builtin-signal-summary-section::before,
 .output .line.builtin-signal-summary-row::before,
 .output .line.builtin-signal-summary-note::before,
-.output .line.builtin-signal-summary-sep::before {
+.output .line.builtin-signal-summary-sep::before,
+.output .line.command-outcome-summary::before {
   content: none !important;
   display: none !important;
   width: 0 !important;
@@ -1809,6 +1810,23 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--border-bright);
   letter-spacing: 0.04em;
   margin: 6px 0;
+}
+.line.command-outcome-summary-title {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+.line.command-outcome-summary-row,
+.line.command-outcome-summary-note {
+  white-space: pre-wrap;
+}
+.line.command-outcome-summary-row {
+  color: var(--text);
+}
+.line.command-outcome-summary-note {
+  color: var(--muted);
+  font-style: italic;
 }
 .line.builtin-catalog-item {
   color: color-mix(in srgb, var(--text) 94%, var(--blue));

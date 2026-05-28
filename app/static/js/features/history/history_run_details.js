@@ -290,6 +290,73 @@ function _historyRunOutputEntries(run) {
   return [];
 }
 
+function _historyCommandOutcomeSummariesEnabled() {
+  if (typeof getCommandOutcomeSummariesPreference === 'function') {
+    return getCommandOutcomeSummariesPreference() !== 'off';
+  }
+  return true;
+}
+
+function _historyNormalizeCommandOutcomeSummary(raw) {
+  const normalizer = typeof window !== 'undefined' && window.DarklabOutputCore
+    && typeof window.DarklabOutputCore.normalizeCommandOutcomeSummary === 'function'
+    ? window.DarklabOutputCore.normalizeCommandOutcomeSummary
+    : null;
+  if (normalizer) return normalizer(raw);
+  if (!raw || typeof raw !== 'object') return null;
+  const title = String(raw.title || raw.heading || 'Command outcome').trim() || 'Command outcome';
+  const sourceItems = Array.isArray(raw.items) ? raw.items : (Array.isArray(raw.lines) ? raw.lines : []);
+  const items = sourceItems.map(item => {
+    if (item == null) return null;
+    if (typeof item !== 'object') {
+      const value = String(item).trim();
+      return value ? { value } : null;
+    }
+    const label = String(item.label || item.key || '').trim();
+    const value = String(item.value || item.text || item.summary || '').trim();
+    return label || value ? { ...(label ? { label } : {}), value } : null;
+  }).filter(Boolean);
+  return items.length ? { kind: 'command_outcome', title, items } : null;
+}
+
+function _historyRunCommandOutcomeSummary(run) {
+  const explicit = _historyNormalizeCommandOutcomeSummary(
+    run && (run.command_outcome_summary || run.output_outcome_summary || run.commandOutcomeSummary),
+  );
+  if (explicit) return explicit;
+  const builder = typeof window !== 'undefined' && window.DarklabOutputCore
+    && typeof window.DarklabOutputCore.buildCommandOutcomeSummary === 'function'
+    ? window.DarklabOutputCore.buildCommandOutcomeSummary
+    : null;
+  if (!builder) return null;
+  return builder(run && run.command || '', _historyRunOutputEntries(run));
+}
+
+function _historyCommandOutcomeSummaryToLines(summary) {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.commandOutcomeSummaryToLines === 'function') {
+    return ExportHtmlUtils.commandOutcomeSummaryToLines(summary);
+  }
+  if (!summary || !Array.isArray(summary.items) || !summary.items.length) return [];
+  const lines = [{
+    text: summary.title || 'Command outcome',
+    cls: 'command-outcome-summary command-outcome-summary-title',
+    command_outcome_summary: true,
+  }];
+  summary.items.forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const label = String(item.label || '').trim();
+    const value = String(item.value || '').trim();
+    const text = label && value ? `${label}: ${value}` : (value || label);
+    if (!text) return;
+    lines.push({
+      text,
+      cls: 'command-outcome-summary command-outcome-summary-row',
+      command_outcome_summary: true,
+    });
+  });
+  return lines;
+}
+
 function _historyRunMetaRow(label, value) {
   const row = document.createElement('div');
   row.className = 'history-run-meta-row';
@@ -1033,8 +1100,39 @@ function _renderHistoryOutputSummary(body, run) {
   body.appendChild(section);
 }
 
+function _renderHistoryCommandOutcomeSummary(body, run) {
+  if (!_historyCommandOutcomeSummariesEnabled()) return;
+  const summary = _historyRunCommandOutcomeSummary(run);
+  if (!summary) return;
+  const section = document.createElement('div');
+  section.className = 'history-run-section history-run-command-outcome-summary command-outcome-summary';
+  section.appendChild(_historyRunSectionHeader(summary.title || 'Command outcome'));
+  const list = document.createElement('div');
+  list.className = 'history-run-command-outcome-list';
+  summary.items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'history-run-command-outcome-row';
+    const label = String(item && item.label || '').trim();
+    const value = String(item && item.value || '').trim();
+    if (label) {
+      const key = document.createElement('span');
+      key.className = 'history-run-command-outcome-label';
+      key.textContent = label;
+      row.appendChild(key);
+    }
+    const text = document.createElement('span');
+    text.className = 'history-run-command-outcome-value';
+    text.textContent = value || label;
+    row.appendChild(text);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  body.appendChild(section);
+}
+
 function _renderHistoryRunOutput(body, run) {
   const output = _historyRunOutputEntries(run);
+  const outcomeSummary = _historyRunCommandOutcomeSummary(run);
   if (!output.length && _historyRunModalState.loadingDetails) {
     const loading = document.createElement('div');
     loading.className = 'history-run-empty';
@@ -1047,6 +1145,7 @@ function _renderHistoryRunOutput(body, run) {
     empty.className = 'history-run-empty';
     empty.textContent = 'No saved output preview is available.';
     body.appendChild(empty);
+    if (outcomeSummary) _renderHistoryCommandOutcomeSummary(body, run);
     return;
   }
   _renderHistoryOutputSummary(body, run);
@@ -1065,6 +1164,7 @@ function _renderHistoryRunOutput(body, run) {
     if (index < output.length - 1) pre.appendChild(document.createTextNode('\n'));
   });
   body.appendChild(pre);
+  _renderHistoryCommandOutcomeSummary(body, run);
   if (run.preview_notice) {
     const notice = document.createElement('div');
     notice.className = 'history-run-notice';
@@ -1577,6 +1677,16 @@ function _historyRunExportLines(run) {
   return lines.filter(line => line && typeof line.text === 'string');
 }
 
+function _historyRunExportLinesWithOutcome(run) {
+  const rawLines = _historyRunExportLines(run);
+  if (!_historyCommandOutcomeSummariesEnabled()) {
+    return rawLines;
+  }
+  const summary = _historyRunCommandOutcomeSummary(run);
+  if (!summary) return rawLines;
+  return rawLines.concat(_historyCommandOutcomeSummaryToLines(summary));
+}
+
 async function _historyRunLoadExportRun() {
   const run = _historyRunPrimary();
   if (!run || !run.id) return run || {};
@@ -1591,6 +1701,11 @@ function _historyRunBuildExportModel(run) {
   const rawLines = typeof omitRawOnlyLineEntries === 'function'
     ? omitRawOnlyLineEntries(exportLines)
     : exportLines;
+  const visibleLines = _historyRunExportLinesWithOutcome({
+    ...(run || {}),
+    output_entries: rawLines,
+    preview_notice: null,
+  });
   if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
     return ExportHtmlUtils.buildExportDocumentModel({
       appName: APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell',
@@ -1603,7 +1718,7 @@ function _historyRunBuildExportModel(run) {
         lines: `${rawLines.length.toLocaleString()} lines`,
         version: APP_CONFIG && APP_CONFIG.version || null,
       },
-      rawLines,
+      rawLines: visibleLines,
     });
   }
   return {
@@ -1616,12 +1731,12 @@ function _historyRunBuildExportModel(run) {
       lines: `${rawLines.length.toLocaleString()} lines`,
       version: APP_CONFIG && APP_CONFIG.version || null,
     },
-    rawLines,
+    rawLines: visibleLines,
   };
 }
 
 function _historyRunPlainExportText(run) {
-  return _historyRunExportLines(run)
+  return _historyRunExportLinesWithOutcome(run)
     .map(line => String(line.text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''))
     .join('\n');
 }

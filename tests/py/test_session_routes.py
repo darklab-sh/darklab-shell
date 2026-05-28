@@ -1398,6 +1398,7 @@ class TestSessionPreferences:
                 "pref_project_auto_link_external_runs": "off",
                 "pref_project_auto_link_run_entities": "off",
                 "pref_run_notify": "on",
+                "pref_command_outcome_summaries": "off",
                 "pref_prompt_username": "operator_1",
                 "pref_compare_view_mode": "unified",
                 "pref_compare_context": "10",

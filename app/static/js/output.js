@@ -379,13 +379,10 @@ function _isWelcomeLine(line) {
 
 function _isSyntheticSummaryLine(line) {
   if (!line || !line.classList) return false;
-  return [
-    'builtin-signal-summary-header',
-    'builtin-signal-summary-section',
-    'builtin-signal-summary-row',
-    'builtin-signal-summary-note',
-    'builtin-signal-summary-sep',
-  ].some(cls => line.classList.contains(cls));
+  const isSyntheticClass = typeof _outputCore.isSyntheticSummaryClassName === 'function'
+    ? _outputCore.isSyntheticSummaryClassName
+    : _outputCore.isSignalSummaryClassName;
+  return [...line.classList].some(cls => isSyntheticClass(cls));
 }
 
 function _isPrefixExcludedLine(line) {
@@ -1358,6 +1355,96 @@ function _appendOutputSpan(out, span) {
   else out.appendChild(span);
 }
 
+function _commandOutcomeSummariesEnabled() {
+  if (typeof getCommandOutcomeSummariesPreference === 'function') {
+    return getCommandOutcomeSummariesPreference() !== 'off';
+  }
+  return true;
+}
+
+function _normalizeCommandOutcomeSummary(outcome) {
+  if (_outputCore && typeof _outputCore.normalizeCommandOutcomeSummary === 'function') {
+    return _outputCore.normalizeCommandOutcomeSummary(outcome);
+  }
+  return null;
+}
+
+function _buildCommandOutcomeSummary(tab) {
+  if (!tab || !_outputCore || typeof _outputCore.buildCommandOutcomeSummary !== 'function') return null;
+  return _outputCore.buildCommandOutcomeSummary(tab.command || '', tab.rawLines || []);
+}
+
+function _removeCommandOutcomeSummary(out) {
+  if (!out || typeof out.querySelectorAll !== 'function') return;
+  out.querySelectorAll('.command-outcome-summary').forEach(line => line.remove());
+}
+
+function _commandOutcomeItemText(item) {
+  if (!item || typeof item !== 'object') return '';
+  const label = String(item.label || '').trim();
+  const value = String(item.value || '').trim();
+  if (label && value) return `${label}: ${value}`;
+  return value || label;
+}
+
+function _appendCommandOutcomeLine(out, tab, text, className) {
+  const line = document.createElement('span');
+  line.className = `line command-outcome-summary ${className}`;
+  line.dataset.commandOutcomeSummary = 'true';
+  const content = document.createElement('span');
+  content.className = 'line-content';
+  content.textContent = String(text || '');
+  line.appendChild(content);
+  _assignOutputLineNumber(out, tab, line);
+  line.dataset.prefix = '';
+  _appendOutputSpan(out, line);
+  return line;
+}
+
+function renderCommandOutcomeSummary(tabId, outcome = null) {
+  const id = tabId || activeTabId;
+  const out = getOutput(id);
+  const tab = getTab(id);
+  if (!out || !tab) return false;
+  _flushPendingOutputBeforeHighVolumeSkip(id);
+  _removeCommandOutcomeSummary(out);
+  if (!_commandOutcomeSummariesEnabled()) {
+    _syncOutputPrefixesForAppend(out);
+    return false;
+  }
+  const summary = _normalizeCommandOutcomeSummary(outcome || tab.commandOutcomeSummary)
+    || _buildCommandOutcomeSummary(tab);
+  if (!summary) {
+    _syncOutputPrefixesForAppend(out);
+    return false;
+  }
+  tab.commandOutcomeSummary = summary;
+  _appendCommandOutcomeLine(out, tab, summary.title || 'Command outcome', 'command-outcome-summary-title');
+  summary.items.forEach(item => {
+    const text = _commandOutcomeItemText(item);
+    if (text) _appendCommandOutcomeLine(out, tab, text, 'command-outcome-summary-row');
+  });
+  _syncOutputPrefixesForAppend(out);
+  _followOutputAfterAppend(out, tab);
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  return true;
+}
+
+function setTabCommandOutcomeSummary(tabId, outcome, { render = true } = {}) {
+  const tab = getTab(tabId || activeTabId);
+  if (!tab) return null;
+  tab.commandOutcomeSummary = _normalizeCommandOutcomeSummary(outcome);
+  if (render) renderCommandOutcomeSummary(tab.id);
+  return tab.commandOutcomeSummary;
+}
+
+function refreshCommandOutcomeSummaries() {
+  if (!Array.isArray(tabs)) return;
+  tabs.forEach(tab => {
+    if (tab && tab.id) renderCommandOutcomeSummary(tab.id);
+  });
+}
+
 function _stickOutputToBottom(out, tab) {
   if (!out) return;
   if (tab) {
@@ -1514,6 +1601,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
   tab.rawLines = lines;
   _resetTabOutputSignalCounts(tab, lines);
   lines.forEach(line => _appendRestoredOutputSpan(out, line, tabId));
+  renderCommandOutcomeSummary(tabId);
   syncOutputPrefixes(out);
   if (lines.length) {
     tab.followOutput = true;

@@ -407,6 +407,9 @@ optionsShareRedactionSelect?.addEventListener('change', e => {
 optionsNotifyToggle?.addEventListener('change', e => {
   applyRunNotifyPreference(e.target.checked ? 'on' : 'off');
 });
+optionsCommandOutcomeSummariesToggle?.addEventListener('change', e => {
+  applyCommandOutcomeSummariesPreference(e.target.checked ? 'on' : 'off');
+});
 optionsProjectAutoLinkExternalRunsToggle?.addEventListener('change', e => {
   applyProjectAutoLinkExternalRunsPreference(e.target.checked ? 'on' : 'off');
 });

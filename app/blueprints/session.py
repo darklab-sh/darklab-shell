@@ -60,6 +60,7 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_welcome_intro",
     "pref_share_redaction_default",
     "pref_run_notify",
+    "pref_command_outcome_summaries",
     "pref_hud_clock",
     "pref_prompt_username",
     "pref_compare_view_mode",
@@ -118,7 +119,11 @@ def _normalize_session_preferences(raw):
             continue
         if key == "pref_active_project_id" and not re.fullmatch(r"prj_[0-9a-f]{16}", value):
             continue
-        if key in {"pref_project_auto_link_external_runs", "pref_project_auto_link_run_entities"}:
+        if key in {
+            "pref_project_auto_link_external_runs",
+            "pref_project_auto_link_run_entities",
+            "pref_command_outcome_summaries",
+        }:
             value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
         if key == "pref_constellation_full_day":
             value = "on" if value.lower() in {"1", "true", "yes", "on"} else "off"
