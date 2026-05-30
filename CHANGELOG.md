@@ -64,8 +64,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** extended existing history route coverage for JSONL and TXT exports, snapshot records, skipped active and cross-session items, full-output artifact fallback, byte-cap truncation, selected-order preservation, unsupported formats, empty selections, and export item caps; extended History drawer unit coverage so mixed run/snapshot selections can export JSONL, download the server filename, and keep selection state.
 
 - **Project Findings board view** — added a desktop board option for Project Findings.
-  - **What:** the Findings tab now has a session-persisted List/Board toggle, and the rail, mobile menu, Atlas toolbar, and Project Findings tab can open a larger Findings Board modal. Board mode groups findings into New, Reviewed, False positive, and Follow-up lanes, keeps `important` findings visible as reviewed cards with an important badge, and uses the existing review route for card moves.
-  - **Tests:** extended Project workspace browser coverage for board normalization, empty lanes, important mapping, unknown-state fallback, board rendering, the larger board modal, project-scoped launches, review updates, and returning to the list view.
+  - **What:** the desktop Findings tab now has a session-persisted List/Board toggle, and the rail, Atlas toolbar, and Project Findings tab can open a larger Findings Board modal. Mobile Findings stays in the list/detail flow so the narrow surface does not expose the wide board. Board mode groups findings into New, Reviewed, False positive, and Follow-up lanes, keeps `important` findings visible as reviewed cards with an important badge, and uses the existing review route for card moves.
+  - **Tests:** extended Project workspace browser coverage for board normalization, empty lanes, important mapping, unknown-state fallback, board rendering, the larger board modal, project-scoped launches, review updates, mobile list-only rendering, and returning to the list view.
 
 - **Team-Mode** — added multi-operator team workspaces while preserving the single-operator personal scope.
   - **What:** durable session-token users can create teams, join by invite or recovery code, manage members/invites/recovery codes from the Options **Teams** tab, switch active personal/team scope from the Teams tab or compact HUD/mobile selector, and use the same team scope through `/api/v1`, terminal `team`, and `darklab team ...` commands. `X-Team-ID`, `DARKLAB_TEAM`, and CLI config scope are supported for team-aware browser/API/CLI workflows.
@@ -104,8 +104,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Workspace cleanup permissions** — inactive workspace cleanup now skips stale directories it cannot read or remove and logs a warning with the path and reason instead of raising repeated cleanup errors.
-  - **Tests:** extended workspace cleanup coverage so unreadable expired workspaces are skipped while removable expired workspaces are still evicted.
+- **Workspace cleanup permissions** — inactive workspace cleanup now repairs scanner-owned child directories before removing expired session workspaces, and any remaining cleanup skip logs render the path and reason directly in the log line.
+  - **Tests:** extended workspace cleanup coverage so unreadable expired workspaces are skipped with visible path/reason logging, removable expired workspaces are still evicted, and scanner-owned child directories are repaired before cleanup retries.
+- **Findings Board run opens** — clicking **Open** on a Findings Board card now closes the board after handing the source run to Run Details, so the run doesn't open behind the modal.
+  - **Tests:** extended the Findings Board unit coverage to assert run opens restore the correct line and dismiss the board.
 - **History bulk-select drawer stability** — clicking **Select all** or **Clear** in History bulk mode no longer bubbles into document-level outside-click handlers after the toolbar re-renders.
   - **Tests:** updated the History bulk-selection unit coverage so Select all must keep document click handlers quiet while selecting the visible completed runs.
 - **Mobile menu schedule and watcher counts** — the mobile menu now shows saved-count hints for Schedules and Watchers, matching the existing count hints for History and Workflows.

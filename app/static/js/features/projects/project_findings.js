@@ -43,6 +43,11 @@
         : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
+    function findingsBoardAvailable() {
+      if (typeof ctx.findingsBoardAvailable === 'function') return !!ctx.findingsBoardAvailable();
+      return !(document.body && document.body.classList.contains('mobile-terminal-mode'));
+    }
+
     function reviewControl(finding, projectId) {
       const control = document.createElement('select');
       const reviewState = String(finding.review_state || 'new');
@@ -130,16 +135,18 @@
     }
 
     function renderViewToggle(projectId) {
-      const current = ctx.findingViewMode();
+      const boardAllowed = findingsBoardAvailable();
+      const current = boardAllowed ? ctx.findingViewMode() : 'list';
       const tools = document.createElement('div');
       tools.className = 'project-finding-view-tools';
       const wrap = document.createElement('div');
       wrap.className = 'project-finding-view-toggle';
       wrap.setAttribute('aria-label', 'Findings view');
-      [
+      const viewOptions = [
         { value: 'list', label: 'List' },
-        { value: 'board', label: 'Board' },
-      ].forEach(({ value, label }) => {
+        ...(boardAllowed ? [{ value: 'board', label: 'Board' }] : []),
+      ];
+      viewOptions.forEach(({ value, label }) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = `toggle-btn project-finding-view-button${current === value ? ' is-active' : ''}`;
@@ -150,9 +157,12 @@
         ctx.bindProjectRuntimePressable(btn);
         wrap.appendChild(btn);
       });
-      const open = ctx.makeProjectButton('Open board', 'open-findings-board', projectId);
-      open.classList.add('project-finding-board-open');
-      tools.append(wrap, open);
+      tools.appendChild(wrap);
+      if (boardAllowed) {
+        const open = ctx.makeProjectButton('Open board', 'open-findings-board', projectId);
+        open.classList.add('project-finding-board-open');
+        tools.appendChild(open);
+      }
       return tools;
     }
 
@@ -242,7 +252,7 @@
       const findings = ctx.filteredProjectFindings(projectId, summary);
       const pagination = initialPagination;
       const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
-      const viewMode = ctx.findingViewMode();
+      const viewMode = findingsBoardAvailable() ? ctx.findingViewMode() : 'list';
       pruneSelection(findings);
       container.appendChild(renderViewToggle(projectId));
       if (viewMode === 'board' && ctx.findingSelectMode()) {

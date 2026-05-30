@@ -7233,7 +7233,7 @@ class TestSessionWorkspace:
             except WorkspaceQuotaExceeded:
                 pass
 
-    def test_cleanup_removes_only_expired_session_directories(self, monkeypatch):
+    def test_cleanup_removes_only_expired_session_directories(self, monkeypatch, caplog):
         from services.teams.scope import team_owner_context
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -7258,6 +7258,7 @@ class TestSessionWorkspace:
                 return original_rmtree(path, *args, **kwargs)
 
             monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
+            caplog.set_level("WARNING", logger=workspace_module.log.name)
 
             removed = cleanup_inactive_workspaces(cfg, now=4601)
 
@@ -7267,6 +7268,29 @@ class TestSessionWorkspace:
             assert fresh_root.exists()
             assert team_root.exists()
             assert unrelated.exists()
+            assert "WORKSPACE_CLEANUP_SKIP path=" in caplog.text
+            assert str(blocked_root) in caplog.text
+            assert "PermissionError" in caplog.text
+
+    def test_cleanup_repairs_scanner_owned_child_directories_before_remove(self, monkeypatch):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("scanner-output-session", cfg)
+            scanner_child = root / "nuclei"
+            scanner_child.mkdir()
+            (scanner_child / "result.txt").write_text("finding\n", encoding="utf-8")
+            scanner_child.chmod(0o200)
+            os.utime(root, (1000, 1000))
+
+            def fake_is_scanner_owned(path_stat):
+                return stat.S_IMODE(path_stat.st_mode) == 0o200
+
+            monkeypatch.setattr(workspace_module, "_is_scanner_owned", fake_is_scanner_owned)
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not root.exists()
 
     def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:

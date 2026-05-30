@@ -1207,6 +1207,7 @@
       projectFindingBoard: (projectId, summary, options) => _projectFindingsDataController().board(projectId, summary, options),
       filteredProjectFindings: _filteredProjectFindings,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
+      findingsBoardAvailable: () => !(document.body && document.body.classList.contains('mobile-terminal-mode')),
       projectFindingTargetText: _projectFindingTargetText,
       projectTargetLabel: _projectTargetLabel,
       entityMetadataChips: _entityMetadataChips,

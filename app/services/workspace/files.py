@@ -974,6 +974,100 @@ def _remove_workspace_directory(path: Path) -> None:
         )
 
 
+def _log_workspace_cleanup_skip(path: Path, exc: BaseException) -> None:
+    log.warning(
+        "WORKSPACE_CLEANUP_SKIP path=%s reason=%s error=%s",
+        path,
+        exc.__class__.__name__,
+        exc,
+        extra={"path": str(path), "reason": exc.__class__.__name__},
+    )
+
+
+def _repair_workspace_tree_for_cleanup(path: Path) -> None:
+    def on_walk_error(exc: OSError) -> None:
+        raise exc
+
+    for dirpath, dirnames, filenames in os.walk(path, topdown=True, onerror=on_walk_error):
+        current = Path(dirpath)
+        try:
+            _workspace_repair_dir_if_needed(current, current.lstat())
+        except FileNotFoundError:
+            continue
+        for name in list(dirnames):
+            child = current / name
+            try:
+                _workspace_repair_dir_if_needed(child, child.lstat())
+            except FileNotFoundError:
+                dirnames.remove(name)
+        for name in filenames:
+            child = current / name
+            try:
+                _workspace_repair_file_if_needed(child, child.lstat())
+            except FileNotFoundError:
+                continue
+
+
+def _scanner_owned_cleanup_targets(path: Path) -> list[Path]:
+    targets: list[Path] = []
+    try:
+        root_stat = path.lstat()
+    except FileNotFoundError:
+        return targets
+    if _is_scanner_owned(root_stat):
+        return [path]
+
+    def on_walk_error(exc: OSError) -> None:
+        raise exc
+
+    for dirpath, dirnames, filenames in os.walk(path, topdown=True, onerror=on_walk_error):
+        current = Path(dirpath)
+        for name in list(dirnames):
+            child = current / name
+            try:
+                child_stat = child.lstat()
+            except FileNotFoundError:
+                dirnames.remove(name)
+                continue
+            if _is_scanner_owned(child_stat):
+                targets.append(child)
+                dirnames.remove(name)
+        for name in filenames:
+            child = current / name
+            try:
+                child_stat = child.lstat()
+            except FileNotFoundError:
+                continue
+            if _is_scanner_owned(child_stat):
+                targets.append(child)
+    return targets
+
+
+def _remove_workspace_cleanup_target(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        _remove_workspace_directory(path)
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _remove_inactive_workspace_directory(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        _repair_workspace_tree_for_cleanup(path)
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        for target in _scanner_owned_cleanup_targets(path):
+            _remove_workspace_cleanup_target(target)
+    shutil.rmtree(path)
+
+
 def _workspace_path_kind_and_count(path: Path) -> tuple[str, int]:
     try:
         path_stat = path.lstat()
@@ -1364,19 +1458,13 @@ def cleanup_inactive_workspaces(
         try:
             expired = child.stat().st_mtime < cutoff
         except OSError as exc:
-            log.warning(
-                "WORKSPACE_CLEANUP_SKIP",
-                extra={"path": str(child), "reason": exc.__class__.__name__},
-            )
+            _log_workspace_cleanup_skip(child, exc)
             continue
         if expired:
             try:
-                shutil.rmtree(child)
+                _remove_inactive_workspace_directory(child)
             except OSError as exc:
-                log.warning(
-                    "WORKSPACE_CLEANUP_SKIP",
-                    extra={"path": str(child), "reason": exc.__class__.__name__},
-                )
+                _log_workspace_cleanup_skip(child, exc)
                 continue
             removed += 1
     app_metrics.record_workspace_evictions(removed, "inactive")

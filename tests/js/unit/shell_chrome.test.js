@@ -1395,6 +1395,9 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('443 open')
       expect(detailBody.textContent).toContain('443/tcp open https')
       expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
+      expect(detailBody.querySelector('[data-project-action="open-findings-board"]')).toBeNull()
+      expect(detailBody.querySelector('[data-project-finding-view-mode="board"]')).toBeNull()
+      expect(detailBody.querySelector('.project-finding-board')).toBeNull()
       detailBody.querySelector('.project-mobile-row-menu-trigger').click()
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
@@ -4181,6 +4184,22 @@ describe('shell chrome project workspace', () => {
       method: 'PUT',
       body: JSON.stringify({ review_state: 'false_positive' }),
     }))
+
+    shell.restoreHistoryRunIntoTab.mockClear()
+    document.querySelector('#findings-board-body [data-findings-board-action="open-run"]').click()
+    await tick()
+    expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+      {
+        id: 'run-old',
+        command: 'nuclei old.example',
+        full_output_available: true,
+      },
+      {
+        hidePanelOnSuccess: false,
+        highlightLineIndex: 20,
+      },
+    )
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
   })
 
   it('locks finding review dropdowns and board dragging for view-only team members', async () => {

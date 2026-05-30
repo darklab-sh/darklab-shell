@@ -221,6 +221,10 @@
   justify-content: flex-start;
 }
 
+body.mobile-terminal-mode #atlas-findings-board-btn {
+  display: none !important;
+}
+
 .atlas-run-filter-chip {
   display: flex;
   align-items: center;

@@ -440,6 +440,7 @@
     if (!action) return;
     if (action.dataset.findingsBoardAction === 'open-run') {
       event.preventDefault();
+      let opened = false;
       if (typeof global.restoreHistoryRunIntoTab === 'function') {
         const lineIndex = Number(action.dataset.lineIndex || '');
         void global.restoreHistoryRunIntoTab({
@@ -450,9 +451,12 @@
           hidePanelOnSuccess: false,
           highlightLineIndex: Number.isInteger(lineIndex) ? lineIndex : null,
         });
+        opened = true;
       } else if (typeof global.dispatchEvent === 'function') {
         global.dispatchEvent(new CustomEvent(LINE_OPEN_EVENT, { detail: { runId: action.dataset.runId || '' } }));
+        opened = true;
       }
+      if (opened) closeFindingsBoard({ refocus: false });
     }
   });
   bodyEl?.addEventListener('dragstart', event => {
