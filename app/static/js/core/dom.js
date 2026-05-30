@@ -90,6 +90,7 @@ const workspaceTextInput = document.getElementById('workspace-text-input');
 const workspaceRefreshBtn = document.getElementById('workspace-refresh-btn');
 const workspaceNewBtn = document.getElementById('workspace-new-btn');
 const workspaceNewFolderBtn = document.getElementById('workspace-new-folder-btn');
+const workspaceSaveBtn = document.getElementById('workspace-save-btn');
 const workspaceCancelEditBtn = document.getElementById('workspace-cancel-edit-btn');
 const workspaceCloseViewerBtn = document.getElementById('workspace-close-viewer-btn');
 const historyList  = document.getElementById('history-list');

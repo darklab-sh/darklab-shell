@@ -2760,6 +2760,7 @@ class TestPostgresMigrations:
             "0022",
             "0023",
             "0024",
+            "0025",
         ]
         for table_name in (
             "runs",
@@ -2999,15 +3000,18 @@ class TestTeamModeFoundation:
         assert role_can("owner", Capability.ARCHIVE_TEAM)
         assert role_can("admin", Capability.MANAGE_MEMBERS)
         assert role_can("admin", Capability.MANAGE_SECRETS)
+        assert role_can("admin", Capability.MANAGE_WORKSPACE_FILES)
         assert role_can("operator", Capability.RUN_COMMANDS)
         assert role_can("operator", Capability.MANAGE_HISTORY)
         assert role_can("operator", Capability.MANAGE_AUTOMATION)
+        assert role_can("operator", Capability.MANAGE_WORKSPACE_FILES)
         assert not role_can("operator", Capability.MANAGE_MEMBERS)
         assert not role_can("operator", Capability.MANAGE_SECRETS)
         assert role_can("viewer", Capability.VIEW_TEAM)
         assert not role_can("viewer", Capability.RUN_COMMANDS)
         assert not role_can("viewer", Capability.MANAGE_HISTORY)
         assert not role_can("viewer", Capability.MANAGE_AUTOMATION)
+        assert not role_can("viewer", Capability.MANAGE_WORKSPACE_FILES)
         assert not role_can("unknown", Capability.VIEW_TEAM)
         assert not role_can("owner", "not_a_capability")
 
@@ -3034,15 +3038,21 @@ class TestTeamModeFoundation:
 
     def test_owner_context_predicates_keep_personal_scope_default(self):
         from services.teams.scope import (
+            anonymous_owner_context,
+            owner_context_for_scope,
             personal_owner_context,
             personal_scope_predicate,
             shared_owner_predicate,
             team_owner_context,
         )
 
+        anonymous = anonymous_owner_context()
         personal = personal_owner_context("sess_abc")
         team = team_owner_context("team_abc", actor_member_id="tmem_123", actor_session_id="sess_abc")
 
+        assert anonymous.scope == "personal"
+        assert anonymous.owner_id == "anonymous"
+        assert anonymous.actor_session_id == ""
         assert personal.scope == "personal"
         assert personal_scope_predicate(personal) == ("session_id = ?", ("sess_abc",))
         assert shared_owner_predicate(personal) == (
@@ -3050,6 +3060,13 @@ class TestTeamModeFoundation:
             ("sess_abc",),
         )
         assert shared_owner_predicate(team) == ("team_id = ?", ("team_abc",))
+        assert owner_context_for_scope("").owner_id == "anonymous"
+        assert owner_context_for_scope("sess_abc") == personal
+        assert owner_context_for_scope(
+            "sess_abc",
+            team_id="team_abc",
+            actor_member_id="tmem_123",
+        ) == team
 
         with pytest.raises(ValueError):
             personal_scope_predicate(team)
@@ -3107,6 +3124,33 @@ class TestTeamModeFoundation:
             assert rejected_extra["source"] == "header"
             assert rejected_extra["team_id"] == team["id"]
             assert rejected_extra["session"] != "tok_scope_other"
+        finally:
+            conn.close()
+
+    def test_request_scope_can_resolve_archived_teams_as_read_only_when_requested(self):
+        from flask import request
+        from services.teams import request_scope, storage
+
+        conn = self._team_db()
+        try:
+            team = storage.create_team(conn, name="Archived Files", creator_session_token="tok_archived_owner")
+            storage.update_team_status(conn, team["id"], status="archived")
+            conn.commit()
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+                with pytest.raises(request_scope.RequestScopeError) as blocked:
+                    request_scope.current_request_scope("tok_archived_owner", request)
+            assert blocked.value.code == "team_archived"
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+                scope = request_scope.current_request_scope("tok_archived_owner", request, allow_archived=True)
+
+            assert scope.is_team is True
+            assert scope.is_archived is True
+            assert scope.read_only is True
+            assert scope.team_id == team["id"]
         finally:
             conn.close()
 
@@ -6853,6 +6897,52 @@ class TestSessionWorkspace:
             assert mode & 0o1730 == 0o1730
             assert not mode & 0o004
 
+    def test_owner_workspace_names_separate_personal_and_team_roots(self):
+        from services.teams.scope import personal_owner_context, team_owner_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            personal = personal_owner_context("tok_workspace_owner")
+            team = team_owner_context(
+                "team_workspace_owner",
+                actor_session_id="tok_workspace_owner",
+                actor_member_id="tmem_workspace_owner",
+            )
+
+            personal_path = workspace_module.ensure_owner_workspace(personal, cfg)
+            team_path = workspace_module.ensure_owner_workspace(team, cfg)
+
+            assert personal_path.name == session_workspace_name("tok_workspace_owner")
+            assert team_path.name.startswith("team_")
+            assert personal_path != team_path
+            assert "tok_workspace_owner" not in str(personal_path)
+            assert "team_workspace_owner" not in str(team_path)
+
+    def test_owner_workspace_files_are_isolated_and_keep_session_wrappers_compatible(self):
+        from services.teams.scope import team_owner_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            team = team_owner_context("team_workspace_shared", actor_session_id="tok_member_a")
+
+            write_workspace_text_file("tok_member_a", "targets.txt", "personal\n", cfg)
+            workspace_module.write_owner_workspace_text_file(team, "targets.txt", "team\n", cfg)
+
+            assert read_workspace_text_file("tok_member_a", "targets.txt", cfg) == "personal\n"
+            assert workspace_module.read_owner_workspace_text_file(team, "targets.txt", cfg) == "team\n"
+            assert workspace_usage("tok_member_a", cfg).bytes_used == len("personal\n")
+            assert workspace_module.owner_workspace_usage(team, cfg).bytes_used == len("team\n")
+
+    def test_session_workspace_migration_rejects_team_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_module.migrate_session_workspace("team_from", "tok_to", cfg)
+
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_module.migrate_session_workspace("tok_from", "team_to", cfg)
+
     def test_session_workspace_logs_chmod_failures_without_blocking_creation(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
@@ -7082,9 +7172,17 @@ class TestSessionWorkspace:
             outside = Path(tmp) / "outside.txt"
             outside.write_text("outside\n", encoding="utf-8")
             real_resolve = workspace_module.resolve_workspace_path
+            real_owner_resolve = workspace_module.resolve_owner_workspace_path
 
             def swap_final_component(session_id, relative_path, active_cfg=None, *, ensure_parent=False):
                 path = real_resolve(session_id, relative_path, active_cfg, ensure_parent=ensure_parent)
+                if path.exists() or path.is_symlink():
+                    path.unlink()
+                path.symlink_to(outside)
+                return path
+
+            def swap_final_owner_component(owner, relative_path, active_cfg=None, *, ensure_parent=False):
+                path = real_owner_resolve(owner, relative_path, active_cfg, ensure_parent=ensure_parent)
                 if path.exists() or path.is_symlink():
                     path.unlink()
                 path.symlink_to(outside)
@@ -7103,7 +7201,11 @@ class TestSessionWorkspace:
                 if target.exists() or target.is_symlink():
                     target.unlink()
                 target.write_text("inside\n", encoding="utf-8")
-                with mock.patch("services.workspace.files.resolve_workspace_path", side_effect=swap_final_component):
+                with mock.patch("services.workspace.files.resolve_workspace_path", side_effect=swap_final_component), \
+                     mock.patch(
+                         "services.workspace.files.resolve_owner_workspace_path",
+                         side_effect=swap_final_owner_component,
+                     ):
                     with pytest.raises(InvalidWorkspacePath):
                         operation()
                 assert outside.read_text(encoding="utf-8") == "outside\n"
@@ -7132,11 +7234,14 @@ class TestSessionWorkspace:
                 pass
 
     def test_cleanup_removes_only_expired_session_directories(self, monkeypatch):
+        from services.teams.scope import team_owner_context
+
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
             old_root = ensure_session_workspace("old-session", cfg)
             blocked_root = ensure_session_workspace("blocked-session", cfg)
             fresh_root = ensure_session_workspace("fresh-session", cfg)
+            team_root = workspace_module.ensure_owner_workspace(team_owner_context("team-cleanup"), cfg)
             unrelated = Path(tmp) / "manual"
             unrelated.mkdir()
             old_ts = 1000
@@ -7144,6 +7249,7 @@ class TestSessionWorkspace:
             os.utime(old_root, (old_ts, old_ts))
             os.utime(blocked_root, (old_ts, old_ts))
             os.utime(fresh_root, (fresh_ts, fresh_ts))
+            os.utime(team_root, (old_ts, old_ts))
             original_rmtree = workspace_module.shutil.rmtree
 
             def fake_rmtree(path, *args, **kwargs):
@@ -7159,6 +7265,7 @@ class TestSessionWorkspace:
             assert not old_root.exists()
             assert blocked_root.exists()
             assert fresh_root.exists()
+            assert team_root.exists()
             assert unrelated.exists()
 
     def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
@@ -8157,7 +8264,7 @@ class TestDerivedCommandRegistry:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 50,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 40,
                 "workspace_inactivity_ttl_hours": 1,
@@ -8315,7 +8422,7 @@ class TestDerivedCommandRegistry:
                     cfg=cfg,
                 )
                 assert not result.allowed
-                assert "managed tools/amass session directory" in result.reason
+                assert "managed tools/amass workspace directory" in result.reason
 
                 result = commands.validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
@@ -13669,6 +13776,12 @@ class TestDatabaseInit:
             occurrence_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('findings_occurrences')").fetchall()
             }
+            label_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('entity_labels')").fetchall()
+            }
+            note_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('entity_notes')").fetchall()
+            }
             conn.close()
 
         assert {
@@ -13698,6 +13811,8 @@ class TestDatabaseInit:
             "status",
         }.issubset(finding_columns)
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
+        assert "team_id" in label_columns
+        assert "team_id" in note_columns
 
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -14115,9 +14230,101 @@ class TestDatabaseInit:
         assert "idx_entity_run_links_run" in entity_run_indexes
         assert "idx_entity_run_links_entity_seen" in entity_run_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
+        assert "idx_entity_labels_personal_unique" in label_indexes
+        assert "idx_entity_labels_team_unique" in label_indexes
         assert "idx_entity_notes_entity_updated" in note_indexes
+        assert "idx_entity_notes_personal_unique" in note_indexes
+        assert "idx_entity_notes_team_unique" in note_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
+
+    def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE entity_labels (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created TEXT NOT NULL,
+                UNIQUE (session_id, entity_type, entity_id, label)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE entity_notes (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                body TEXT NOT NULL,
+                created TEXT NOT NULL,
+                updated TEXT NOT NULL,
+                UNIQUE (session_id, entity_type, entity_id)
+            )
+        """)
+        conn.execute(
+            "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, created) "
+            "VALUES ('lbl-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'important', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+            "VALUES ('note-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'personal', 'now', 'now')"
+        )
+
+        database._migrate_workspace_metadata_team_scope(conn)
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_labels_personal_unique "
+            "ON entity_labels (session_id, entity_type, entity_id, label) "
+            "WHERE team_id IS NULL OR team_id = ''"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_labels_team_unique "
+            "ON entity_labels (team_id, entity_type, entity_id, label) "
+            "WHERE team_id != ''"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_notes_personal_unique "
+            "ON entity_notes (session_id, entity_type, entity_id) "
+            "WHERE team_id IS NULL OR team_id = ''"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_notes_team_unique "
+            "ON entity_notes (team_id, entity_type, entity_id) "
+            "WHERE team_id != ''"
+        )
+        conn.execute(
+            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
+            "VALUES ('lbl-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'important', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
+            "VALUES ('lbl-team-b', 'tok_owner', 'team_b', 'workspace_file', 'targets.txt', 'important', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+            "VALUES ('note-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'team', 'now', 'now')"
+        )
+
+        labels = conn.execute(
+            "SELECT id, team_id FROM entity_labels ORDER BY id"
+        ).fetchall()
+        notes = conn.execute(
+            "SELECT id, team_id FROM entity_notes ORDER BY id"
+        ).fetchall()
+        conn.close()
+
+        assert {row["id"]: row["team_id"] for row in labels} == {
+            "lbl-personal": "",
+            "lbl-team-a": "team_a",
+            "lbl-team-b": "team_b",
+        }
+        assert {row["id"]: row["team_id"] for row in notes} == {
+            "note-personal": "",
+            "note-team-a": "team_a",
+        }
 
     def test_project_slug_migration_separates_personal_and_team_scopes(self):
         with tempfile.TemporaryDirectory() as tmp:

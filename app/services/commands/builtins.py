@@ -90,6 +90,7 @@ from services.commands.builtins_workspace import (
 )
 from services.commands.builtins_wordlist import run_builtin_wordlist as _run_builtin_wordlist
 from services.commands.wordlists import load_wordlist_catalog
+from services.teams.scope import OwnerContext, owner_context_for_scope
 from config import CFG
 from core.process import active_runs_for_session, redis_client
 
@@ -374,6 +375,7 @@ def execute_builtin_command(
     tab_id: str = "",
     team_id: str = "",
     team_role: str = "",
+    owner_context: OwnerContext | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     # Built-in commands still return the same [{text, class}, ...], exit_code shape
     # as real runs so the frontend path is identical.
@@ -382,6 +384,25 @@ def execute_builtin_command(
     handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
+    if root in _WORKSPACE_BUILTIN_ROOTS:
+        workspace_owner = owner_context
+        if workspace_owner is None:
+            workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
+        if root == "file":
+            result = _run_builtin_workspace(
+                command,
+                session_id,
+                owner_context=workspace_owner,
+                team_role=team_role,
+            )
+        else:
+            result = _run_builtin_workspace_alias(
+                command,
+                session_id,
+                owner_context=workspace_owner,
+                team_role=team_role,
+            )
+        return result, 0
     if root == "project":
         result = _run_builtin_project(command, session_id, tab_id=tab_id)
         return result, 0

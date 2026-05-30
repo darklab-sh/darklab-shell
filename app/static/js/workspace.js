@@ -7,6 +7,15 @@ let _workspaceDirs = [];
 let _workspaceLimits = {};
 let _workspaceLoaded = false;
 let _workspaceCurrentDir = '';
+let _workspaceCurrentScopeKey = 'personal';
+const _workspaceDirByScope = new Map();
+let _workspaceOwner = {
+  scope: 'personal',
+  team_id: '',
+  label: 'Personal',
+  read_only: false,
+  read_only_reason: '',
+};
 let _workspaceViewedPath = '';
 let _workspaceViewerPayloadCache = null;
 let _workspaceViewerSearchController = null;
@@ -35,6 +44,7 @@ const WORKSPACE_VIEWER_LARGE_SEARCH_LINE_THRESHOLD = 2000;
 const WORKSPACE_VIEWER_LARGE_SEARCH_CHAR_THRESHOLD = 500000;
 const WORKSPACE_VIEWER_LARGE_SEARCH_SIZE_THRESHOLD = 1024 * 1024;
 const WORKSPACE_VIEWER_LARGE_SEARCH_MIN_CHARS = 3;
+const WORKSPACE_MANAGE_CAPABILITY = 'manage_workspace_files';
 
 function isWorkspaceEnabled() {
   return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
@@ -49,6 +59,115 @@ function _workspaceErrorMessage(err, fallback = 'Files request failed') {
   return fallback;
 }
 
+function _workspaceActiveScopeKeyFromOwner(owner = _workspaceOwner) {
+  const scope = String(owner?.scope || '').trim();
+  const teamId = String(owner?.team_id || '').trim();
+  if (scope === 'team' && teamId) return `team:${teamId}`;
+  if (typeof getActiveTeamId === 'function') {
+    const activeTeamId = String(getActiveTeamId() || '').trim();
+    if (activeTeamId) return `team:${activeTeamId}`;
+  }
+  return 'personal';
+}
+
+function _workspaceReadOnlyReason(action = 'change Files') {
+  if (_workspaceOwner.read_only_reason) return _workspaceOwner.read_only_reason;
+  if (_workspaceOwner.scope === 'team' && typeof teamScopeDeniedMessage === 'function') {
+    return teamScopeDeniedMessage(action);
+  }
+  return `Files are read-only right now, so you can't ${action}.`;
+}
+
+function isWorkspaceReadOnly() {
+  if (_workspaceOwner.read_only) return true;
+  if (_workspaceOwner.scope === 'team' && typeof activeTeamScopeCan === 'function') {
+    return !activeTeamScopeCan(WORKSPACE_MANAGE_CAPABILITY);
+  }
+  return false;
+}
+
+function workspaceCanWrite(action = 'change Files', { toast = false } = {}) {
+  if (!isWorkspaceReadOnly()) return true;
+  if (toast) _showWorkspaceToast(_workspaceReadOnlyReason(action), 'error');
+  return false;
+}
+
+function _workspaceOwnerFromPayload(payload = {}) {
+  const owner = payload.owner && typeof payload.owner === 'object' ? payload.owner : {};
+  const scope = String(owner.scope || '').trim() === 'team' ? 'team' : 'personal';
+  return {
+    scope,
+    owner_id: String(owner.owner_id || ''),
+    team_id: scope === 'team' ? String(owner.team_id || '') : '',
+    label: String(owner.label || (scope === 'team' ? 'Team' : 'Personal')),
+    team_status: String(owner.team_status || ''),
+    role: String(owner.role || ''),
+    read_only: owner.read_only === true,
+    read_only_reason: String(owner.read_only_reason || owner.write_denial || ''),
+  };
+}
+
+function _workspaceSetCurrentDir(path = '') {
+  _workspaceCurrentDir = _normalizeWorkspaceDir(path);
+  _workspaceDirByScope.set(_workspaceCurrentScopeKey, _workspaceCurrentDir);
+}
+
+function _workspaceApplyOwner(owner = _workspaceOwner) {
+  const previousScopeKey = _workspaceCurrentScopeKey;
+  const nextScopeKey = _workspaceActiveScopeKeyFromOwner(owner);
+  if (previousScopeKey && previousScopeKey !== nextScopeKey) {
+    _workspaceDirByScope.set(previousScopeKey, _normalizeWorkspaceDir(_workspaceCurrentDir));
+    _workspaceCurrentDir = _workspaceDirByScope.get(nextScopeKey) || '';
+  }
+  _workspaceCurrentScopeKey = nextScopeKey;
+  _workspaceOwner = owner;
+}
+
+function _workspaceOwnerLabel() {
+  if (_workspaceOwner.scope !== 'team') return 'Personal';
+  return _workspaceOwner.label || 'Team';
+}
+
+function _workspaceSyncWriteControls() {
+  const readOnly = isWorkspaceReadOnly();
+  const title = readOnly ? _workspaceReadOnlyReason('change Files') : '';
+  [workspaceNewBtn, workspaceNewFolderBtn].forEach(btn => {
+    if (!btn) return;
+    btn.disabled = readOnly;
+    btn.setAttribute('aria-disabled', readOnly ? 'true' : 'false');
+    if (title) btn.title = title;
+    else btn.removeAttribute('title');
+  });
+  if (workspaceSaveBtn) {
+    workspaceSaveBtn.disabled = readOnly;
+    workspaceSaveBtn.setAttribute('aria-disabled', readOnly ? 'true' : 'false');
+    if (title) workspaceSaveBtn.title = title;
+    else workspaceSaveBtn.removeAttribute('title');
+  }
+  if (workspaceTextInput) workspaceTextInput.readOnly = readOnly;
+  [workspaceLabelsInput, workspaceNotesInput].forEach(input => {
+    if (!input) return;
+    input.readOnly = readOnly;
+    input.disabled = readOnly;
+  });
+  if (workspaceViewer) {
+    workspaceViewer.querySelectorAll('[data-workspace-viewer-action="edit"], [data-workspace-viewer-action="delete"]').forEach(btn => {
+      btn.disabled = readOnly;
+      btn.setAttribute('aria-disabled', readOnly ? 'true' : 'false');
+      if (title) btn.title = title;
+      else btn.removeAttribute('title');
+    });
+  }
+}
+
+function _workspaceResetForScopeChange() {
+  hideWorkspaceEditor();
+  hideWorkspaceViewer();
+  _workspaceLoaded = false;
+  _workspaceFiles = [];
+  _workspaceDirs = [];
+}
+
 async function _workspaceJson(resp) {
   let data = {};
   try {
@@ -57,7 +176,12 @@ async function _workspaceJson(resp) {
     data = {};
   }
   if (!resp.ok) {
-    throw new Error(data && data.error ? data.error : `Files request failed (${resp.status})`);
+    const message = data && typeof data.message === 'string' ? data.message.trim() : '';
+    const error = data && typeof data.error === 'string' ? data.error.trim() : '';
+    if (message) throw new Error(message);
+    if (error === 'team_forbidden') throw new Error(_workspaceReadOnlyReason('change Files'));
+    if (error === 'team_archived') throw new Error('Archived teams are read-only in Files.');
+    throw new Error(error || `Files request failed (${resp.status})`);
   }
   return data;
 }
@@ -96,7 +220,7 @@ function _workspaceFileReadBlockedReason(path = '') {
   if (!(maxFileBytes > 0)) return '';
   const fileSize = _workspaceViewerFileSize(path);
   if (!(Number.isFinite(fileSize) && fileSize > maxFileBytes)) return '';
-  return 'file exceeds session max file size';
+  return 'file exceeds workspace max file size';
 }
 
 function _workspaceFileByPath(path = '') {
@@ -602,6 +726,7 @@ async function switchWorkspaceViewerMode(raw = false) {
 
 function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false, labels = [], noteBody = '' } = {}) {
   if (!workspaceEditor) return;
+  if (!workspaceCanWrite(path ? 'edit Files' : 'create Files', { toast: true })) return;
   hideWorkspaceViewer();
   workspaceEditor.classList.remove('u-hidden');
   if (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay) {
@@ -623,6 +748,7 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false, label
     workspaceNotesInput.value = String(noteBody || '');
   }
   if (workspaceTextInput) workspaceTextInput.value = text;
+  _workspaceSyncWriteControls();
   setTimeout(() => {
     const active = document.activeElement;
     const activeIsEditable = active instanceof HTMLInputElement
@@ -846,6 +972,7 @@ function renderWorkspaceBrowser() {
   if (!workspaceFileList) return;
   workspaceFileList.textContent = '';
   renderWorkspaceBreadcrumbs();
+  const readOnly = isWorkspaceReadOnly();
 
   const { folders, files } = _workspaceDirectEntries(_workspaceCurrentDir);
   if (_workspaceCurrentDir) {
@@ -869,10 +996,10 @@ function renderWorkspaceBrowser() {
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'open-folder', label: 'Open', tone: 'secondary' },
-      { action: 'move-folder', label: 'Move', tone: 'secondary' },
-      { action: 'delete-folder', label: 'Delete', tone: 'secondary' },
+      { action: 'move-folder', label: 'Move', tone: 'secondary', write: true },
+      { action: 'delete-folder', label: 'Delete', tone: 'secondary', write: true },
     ]));
-    row.draggable = true;
+    row.draggable = !readOnly;
     workspaceFileList.appendChild(row);
   }
 
@@ -881,7 +1008,7 @@ function renderWorkspaceBrowser() {
     row.className = 'workspace-file-row panel-row';
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
-    row.draggable = true;
+    row.draggable = !readOnly;
     const artifactDetails = _workspaceArtifactDetails(file);
     row.appendChild(_workspaceMetaNode(
       file.name || _workspaceFileBasename(file.path),
@@ -892,10 +1019,10 @@ function renderWorkspaceBrowser() {
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'view', label: 'View', tone: 'secondary' },
-      { action: 'edit', label: 'Edit', tone: 'secondary' },
-      { action: 'move', label: 'Move', tone: 'secondary' },
+      { action: 'edit', label: 'Edit', tone: 'secondary', write: true },
+      { action: 'move', label: 'Move', tone: 'secondary', write: true },
       { action: 'download', label: 'Download', tone: 'secondary' },
-      { action: 'delete', label: 'Delete', tone: 'secondary' },
+      { action: 'delete', label: 'Delete', tone: 'secondary', write: true },
     ]));
     workspaceFileList.appendChild(row);
   }
@@ -903,7 +1030,7 @@ function renderWorkspaceBrowser() {
   if (!folders.length && !files.length && !_workspaceCurrentDir) {
     const empty = document.createElement('div');
     empty.className = 'workspace-empty panel-row';
-    empty.textContent = 'No session files yet. Create a text file or save command output to use with file-enabled commands.';
+    empty.textContent = 'No workspace files yet. Create a text file or save command output to use with file-enabled commands.';
     workspaceFileList.appendChild(empty);
   } else if (!folders.length && !files.length) {
     const empty = document.createElement('div');
@@ -965,11 +1092,18 @@ function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = ''
 function _workspaceActionsNode(items = []) {
   const actions = document.createElement('div');
   actions.className = 'workspace-file-actions';
+  const readOnly = isWorkspaceReadOnly();
+  const readOnlyTitle = readOnly ? _workspaceReadOnlyReason('change Files') : '';
   for (const item of items) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `btn btn-${item.tone === 'destructive' ? 'destructive' : 'secondary'} btn-compact`;
     btn.dataset.workspaceAction = item.action;
+    if (item.write && readOnly) {
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = readOnlyTitle;
+    }
     btn.textContent = item.label;
     actions.appendChild(btn);
   }
@@ -978,6 +1112,7 @@ function _workspaceActionsNode(items = []) {
 
 function renderWorkspaceFiles(payload = {}) {
   _workspaceLoaded = true;
+  _workspaceApplyOwner(_workspaceOwnerFromPayload(payload));
   _workspaceDirs = Array.isArray(payload.directories) ? payload.directories : [];
   _workspaceFiles = Array.isArray(payload.files) ? payload.files : [];
   _workspaceLimits = payload.limits && typeof payload.limits === 'object' ? payload.limits : {};
@@ -988,7 +1123,7 @@ function renderWorkspaceFiles(payload = {}) {
     const path = String(directory.path || '').split('/').filter(Boolean).join('/');
     return path === _workspaceCurrentDir || path.startsWith(`${_workspaceCurrentDir}/`);
   });
-  if (!currentHasEntries) _workspaceCurrentDir = '';
+  if (!currentHasEntries) _workspaceSetCurrentDir('');
   const usage = payload.usage || {};
   const limits = payload.limits || {};
   const fileCount = Number(usage.file_count) || 0;
@@ -997,8 +1132,11 @@ function renderWorkspaceFiles(payload = {}) {
   const quotaBytes = Number(limits.quota_bytes) || 0;
 
   if (workspaceSummary) {
-    workspaceSummary.textContent = `${fileCount}${maxFiles ? ` / ${maxFiles}` : ''} files · ${_formatWorkspaceBytes(bytesUsed)}${quotaBytes ? ` / ${_formatWorkspaceBytes(quotaBytes)}` : ''}`;
+    const ownerLabel = _workspaceOwnerLabel();
+    const readOnlySuffix = isWorkspaceReadOnly() ? ' · read-only' : '';
+    workspaceSummary.textContent = `${ownerLabel} · ${fileCount}${maxFiles ? ` / ${maxFiles}` : ''} files · ${_formatWorkspaceBytes(bytesUsed)}${quotaBytes ? ` / ${_formatWorkspaceBytes(quotaBytes)}` : ''}${readOnlySuffix}`;
   }
+  _workspaceSyncWriteControls();
   if (!workspaceFileList) return;
   renderWorkspaceBrowser();
 }
@@ -1043,6 +1181,7 @@ async function refreshWorkspaceFilesFromButton() {
 }
 
 async function saveWorkspaceFile(path, text, metadata = null) {
+  if (!workspaceCanWrite('save Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('save Files'));
   const resp = await apiFetch('/workspace/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1067,6 +1206,7 @@ async function saveWorkspaceFile(path, text, metadata = null) {
 }
 
 async function createWorkspaceDirectory(path) {
+  if (!workspaceCanWrite('create folders in Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('create folders in Files'));
   const normalized = _normalizeWorkspaceDir(path);
   const resp = await apiFetch('/workspace/directories', {
     method: 'POST',
@@ -1074,7 +1214,7 @@ async function createWorkspaceDirectory(path) {
     body: JSON.stringify({ path: normalized }),
   });
   const data = await _workspaceJson(resp);
-  _workspaceCurrentDir = data.directory?.path || normalized;
+  _workspaceSetCurrentDir(data.directory?.path || normalized);
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceEditor();
   hideWorkspaceViewer();
@@ -1083,6 +1223,7 @@ async function createWorkspaceDirectory(path) {
 }
 
 async function promptWorkspaceFolderName() {
+  if (!workspaceCanWrite('create folders in Files', { toast: true })) return null;
   const current = _normalizeWorkspaceDir(_workspaceCurrentDir);
   const promptDefault = current ? `${current}/` : '';
   if (typeof showConfirm !== 'function') {
@@ -1148,7 +1289,7 @@ async function promptWorkspaceFolderName() {
 
   const choice = await showConfirm({
     body: {
-      text: 'Create a session folder?',
+      text: 'Create a workspace folder?',
       note: current ? `Current folder: ${current}` : 'Create it at the Files root or include a path.',
     },
     content: field,
@@ -1162,6 +1303,7 @@ async function promptWorkspaceFolderName() {
 }
 
 async function promptWorkspaceMove(sourcePath, { kind = 'file' } = {}) {
+  if (!workspaceCanWrite('move Files', { toast: true })) return null;
   const source = String(sourcePath || '').trim();
   if (!source || typeof showConfirm !== 'function') {
     _showWorkspaceToast('Unable to open move prompt', 'error');
@@ -1234,6 +1376,7 @@ async function readWorkspaceFile(path) {
 }
 
 async function deleteWorkspacePath(path) {
+  if (!workspaceCanWrite('delete Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('delete Files'));
   const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
   const data = await _workspaceJson(resp);
   renderWorkspaceFiles(data.workspace || {});
@@ -1245,6 +1388,7 @@ async function deleteWorkspacePath(path) {
 }
 
 async function moveWorkspacePath(source, destination) {
+  if (!workspaceCanWrite('move Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('move Files'));
   const resp = await apiFetch('/workspace/files/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1278,7 +1422,6 @@ async function openWorkspace() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkspaceOverlay();
-  _workspaceCurrentDir = '';
   hideWorkspaceEditor();
   hideWorkspaceViewer();
   try {
@@ -1297,6 +1440,7 @@ async function openWorkspace() {
 
 async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
   if (!isWorkspaceEnabled()) return false;
+  if (!workspaceCanWrite(String(action || '').toLowerCase() === 'edit' ? 'edit Files' : 'create Files', { toast: true })) return false;
   if (typeof hideWorkspaceOverlay === 'function') hideWorkspaceOverlay();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   hideWorkspaceViewer();
@@ -1316,7 +1460,7 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
       });
     } catch (err) {
       hideWorkspaceEditor();
-      _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
+      _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load workspace file'), 'error');
       return false;
     }
     return true;
@@ -1336,7 +1480,7 @@ async function handleWorkspaceFileAction(action, path) {
   try {
     setWorkspaceMessage('');
     if (action === 'open-folder') {
-      _workspaceCurrentDir = _normalizeWorkspaceDir(path);
+      _workspaceSetCurrentDir(path);
       hideWorkspaceViewer();
       renderWorkspaceBrowser();
     } else if (action === 'view') {
@@ -1351,6 +1495,7 @@ async function handleWorkspaceFileAction(action, path) {
       if (_workspaceViewedPath !== String(path || '').trim()) return;
       showWorkspaceViewer(data.path || path, data.text || '', { size: data.size });
     } else if (action === 'edit') {
+      if (!workspaceCanWrite('edit Files', { toast: true })) return;
       const blockedReason = _workspaceFileReadBlockedReason(path);
       if (blockedReason) {
         _showWorkspaceToast(blockedReason, 'error');
@@ -1368,11 +1513,13 @@ async function handleWorkspaceFileAction(action, path) {
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);
     } else if (action === 'move') {
+      if (!workspaceCanWrite('move Files', { toast: true })) return;
       await promptWorkspaceMove(path, { kind: 'file' });
     } else if (action === 'delete') {
+      if (!workspaceCanWrite('delete Files', { toast: true })) return;
       const confirmed = typeof showConfirm === 'function'
         ? await showConfirm({
-            body: { text: `Delete ${path}?`, note: 'This only removes the session file.' },
+            body: { text: `Delete ${path}?`, note: 'This only removes the workspace file.' },
             tone: 'danger',
             actions: [
               { id: 'cancel', label: 'Cancel', role: 'cancel' },
@@ -1382,10 +1529,11 @@ async function handleWorkspaceFileAction(action, path) {
         : 'delete';
       if (confirmed === 'delete') await deleteWorkspacePath(path);
     } else if (action === 'delete-folder') {
+      if (!workspaceCanWrite('delete Files', { toast: true })) return;
       const count = _workspaceFolderFileCount(path);
       const note = count
         ? `This will also delete ${count} ${count === 1 ? 'file' : 'files'} in this folder.`
-        : 'This only removes the empty session folder.';
+        : 'This only removes the empty workspace folder.';
       const confirmed = typeof showConfirm === 'function'
         ? await showConfirm({
             body: { text: `Delete folder ${path}?`, note },
@@ -1398,6 +1546,7 @@ async function handleWorkspaceFileAction(action, path) {
         : 'delete';
       if (confirmed === 'delete') await deleteWorkspacePath(path);
     } else if (action === 'move-folder') {
+      if (!workspaceCanWrite('move Files', { toast: true })) return;
       await promptWorkspaceMove(path, { kind: 'folder' });
     }
   } catch (err) {
@@ -1418,14 +1567,17 @@ workspaceViewerAutoRefreshToggle?.addEventListener('click', () => {
     _workspaceSyncViewerAutoRefreshToggle();
   }
 });
-workspaceNewBtn?.addEventListener('click', () => showWorkspaceEditor('', ''));
+workspaceNewBtn?.addEventListener('click', () => {
+  if (!workspaceCanWrite('create Files', { toast: true })) return;
+  showWorkspaceEditor('', '');
+});
 workspaceNewFolderBtn?.addEventListener('click', () => { promptWorkspaceFolderName(); });
 workspaceCancelEditBtn?.addEventListener('click', () => hideWorkspaceEditor());
 workspaceCloseViewerBtn?.addEventListener('click', () => hideWorkspaceViewer());
 workspaceBreadcrumbs?.addEventListener('click', event => {
   const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-dir]') : null;
   if (!btn) return;
-  _workspaceCurrentDir = _normalizeWorkspaceDir(btn.dataset.workspaceDir || '');
+  _workspaceSetCurrentDir(btn.dataset.workspaceDir || '');
   hideWorkspaceViewer();
   renderWorkspaceBrowser();
 });
@@ -1460,6 +1612,7 @@ workspaceViewer?.addEventListener('click', event => {
 });
 workspaceEditor?.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (!workspaceCanWrite('save Files', { toast: true })) return;
   try {
     await saveWorkspaceFile(
       _workspacePathInCurrentDir(workspacePathInput?.value || ''),
@@ -1472,12 +1625,13 @@ workspaceEditor?.addEventListener('submit', async (event) => {
       },
     );
   } catch (err) {
-    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to save workspace file'), 'error');
   }
 });
 workspaceFileList?.addEventListener('click', event => {
   const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-action]') : null;
   if (!btn) return;
+  if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
   const row = btn.closest('.workspace-file-row');
   if (!row || !workspaceFileList.contains(row)) return;
   const action = btn.dataset.workspaceAction;
@@ -1485,6 +1639,20 @@ workspaceFileList?.addEventListener('click', event => {
   if (!path && action !== 'open-folder') return;
   handleWorkspaceFileAction(action, path);
 });
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('app:scope-changed', () => {
+    _workspaceResetForScopeChange();
+    if (workspaceSummary) workspaceSummary.textContent = 'Loading...';
+    if (workspaceFileList) workspaceFileList.textContent = '';
+    if (isWorkspaceEnabled()) {
+      refreshWorkspaceFileCache().catch(() => {});
+    }
+  });
+  window.addEventListener('app:scope-capabilities-changed', () => {
+    _workspaceSyncWriteControls();
+    if (workspaceFileList) renderWorkspaceBrowser();
+  });
+}
 if (typeof window !== 'undefined') {
   window.openWorkspace = openWorkspace;
   window.closeWorkspace = closeWorkspace;
@@ -1498,6 +1666,8 @@ if (typeof window !== 'undefined') {
   window.deleteWorkspacePath = deleteWorkspacePath;
   window.downloadWorkspaceFile = downloadWorkspaceFile;
   window.showWorkspaceViewer = showWorkspaceViewer;
+  window.isWorkspaceReadOnly = isWorkspaceReadOnly;
+  window.workspaceCanWrite = workspaceCanWrite;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

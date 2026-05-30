@@ -231,10 +231,10 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
-| `workspace_enabled` | `false` | Server-side only. Enables the app-managed per-session workspace foundation. This does not enable shell navigation or redirection by itself |
-| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. The label does not mount storage by itself |
-| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed per-session workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
-| `workspace_quota_mb` | `50 MB` | Server-side only. Per-session workspace quota |
+| `workspace_enabled` | `false` | Server-side only. Enables app-managed personal and team Files. This does not enable shell navigation or redirection by itself |
+| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. Team Files on `tmpfs` are single-container scratch space and disappear on restart; use `volume` for durable shared team Files |
+| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed personal `sess_*` and team `team_*` workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
+| `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace |
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
@@ -886,6 +886,8 @@ Files/workspace storage has two coordinated settings:
 - `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
 
 Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
+
+Team Files use the same root as personal Files. Personal directories are named `sess_*`; team directories are named `team_*`. For durable shared team Files, use the `volume` backend with a persistent shared mount. The `tmpfs` backend is useful for scratch personal sessions, but team Files stored there are lost on container restart and are only shared inside one running container.
 
 ### Short-lived tmpfs storage
 

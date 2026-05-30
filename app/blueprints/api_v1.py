@@ -52,7 +52,7 @@ from services.notifications.channels_store import (
     send_test_notification,
     update_notification_channel,
 )
-from services.projects.artifacts import artifact_availability
+from services.projects.artifacts import artifact_availability, artifact_owner_context
 from services.projects.contracts import (
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
@@ -142,7 +142,7 @@ from services.watchers.service import (
     resume_watcher,
     update_watcher,
 )
-from services.workspace.files import WorkspaceError, open_workspace_file_for_download
+from services.workspace.files import WorkspaceError, open_owner_workspace_file_for_download
 
 from blueprints.run import (  # noqa: PLC0415
     _RunPreparationError,
@@ -1023,21 +1023,22 @@ def _artifact_for_run(session_id: str, team_id: str, run_id: str, artifact_id: s
     with db_connect() as conn:
         scope_sql, scope_params = _run_owner_clause(session_id, team_id, alias="")
         run_row = conn.execute(
-            f"SELECT session_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
+            f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
             (*scope_params, run_id),
         ).fetchone()
         if not run_row:
             return None
         row = conn.execute(
             "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-            "detected_by, content_type, preview_type, content_sha256, created "
+            "detected_by, content_type, preview_type, content_sha256, created, ? AS run_team_id "
             "FROM run_file_artifacts WHERE run_id = ? AND id = ?",
-            (run_id, artifact_id),
+            (str(run_row["team_id"] or ""), run_id, artifact_id),
         ).fetchone()
     if not row:
         return None
     artifact = dict(row)
-    artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact))
+    owner_context = artifact_owner_context(str(artifact.get("session_id") or ""), artifact)
+    artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact, owner_context=owner_context))
     return artifact
 
 
@@ -1045,22 +1046,23 @@ def _artifacts_for_run(session_id: str, team_id: str, run_id: str) -> list[dict[
     with db_connect() as conn:
         scope_sql, scope_params = _run_owner_clause(session_id, team_id, alias="")
         run_row = conn.execute(
-            f"SELECT session_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
+            f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
             (*scope_params, run_id),
         ).fetchone()
         if not run_row:
             return None
         rows = conn.execute(
             "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-            "detected_by, content_type, preview_type, content_sha256, created "
+            "detected_by, content_type, preview_type, content_sha256, created, ? AS run_team_id "
             "FROM run_file_artifacts WHERE run_id = ? "
             "ORDER BY created ASC, workspace_path ASC",
-            (run_id,),
+            (str(run_row["team_id"] or ""), run_id),
         ).fetchall()
     artifacts = []
     for row in rows:
         artifact = dict(row)
-        artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact))
+        owner_context = artifact_owner_context(str(artifact.get("session_id") or ""), artifact)
+        artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact, owner_context=owner_context))
         artifacts.append(artifact_summary(artifact))
     return artifacts
 
@@ -1802,7 +1804,8 @@ def api_history_run_artifact_download(run_id, artifact_id):
         return _api_json_error("artifact_unavailable", artifact.get("file_status_detail") or "Artifact unavailable.", status)
     try:
         artifact_session_id = str(artifact.get("session_id") or "")
-        handle = open_workspace_file_for_download(artifact_session_id, artifact["workspace_path"], CFG)
+        owner_context = artifact_owner_context(artifact_session_id, artifact)
+        handle = open_owner_workspace_file_for_download(owner_context, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
         return _api_json_error("artifact_unavailable", str(exc), 404)
     log.info("API_ARTIFACT_DOWNLOADED", extra={

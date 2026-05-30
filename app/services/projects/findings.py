@@ -11,7 +11,7 @@ from typing import Any
 
 from core.database import db_connect
 from core.output_signals import strip_ansi_codes
-from services.atlas.lookup import finding_exists_in_scope, metadata_owner_id
+from services.atlas.lookup import finding_exists_in_scope
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.atlas.materializer import (
     canonicalize_entity_record,
@@ -26,7 +26,7 @@ from services.projects.contracts import (
     MAX_LABEL_LEN,
     ProjectWorkspaceError,
 )
-from services.projects.metadata import _entity_labels_by_id, _entity_notes_by_id
+from services.projects.metadata import _entity_labels_by_id, _entity_notes_by_id, _metadata_owner_where
 from services.projects.scope import shared_owner_where
 from services.projects.targets import _canonical_target_payload, _target_payload_from_candidate
 from services.projects.utils import (
@@ -385,7 +385,12 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
     with db_connect() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
-        metadata_owner = metadata_owner_id(session_id, team_id)
+        metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id, table_alias="filter_label")
+        note_metadata_owner_sql, note_metadata_owner_params = _metadata_owner_where(
+            session_id,
+            team_id,
+            table_alias="filter_note",
+        )
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
             (*project_owner_params, project_id),
@@ -517,35 +522,35 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         if labels:
             placeholders = ",".join("?" for _ in labels)
             where_clauses.append(
-                "EXISTS ("
+                "EXISTS ("  # nosec
                 "  SELECT 1 FROM entity_labels filter_label "
-                "  WHERE filter_label.session_id = ? "
+                "  WHERE " + metadata_owner_sql + " "
                 "  AND filter_label.entity_type = 'finding' "
                 "  AND filter_label.entity_id = f.id "
                 f"  AND filter_label.label IN ({placeholders})"  # nosec
                 ")"
             )
-            params.extend([metadata_owner, *labels])
+            params.extend([*metadata_owner_params, *labels])
         if note_state == "noted":
             where_clauses.append(
-                "EXISTS ("
+                "EXISTS ("  # nosec
                 "  SELECT 1 FROM entity_notes filter_note "
-                "  WHERE filter_note.session_id = ? "
+                "  WHERE " + note_metadata_owner_sql + " "
                 "  AND filter_note.entity_type = 'finding' "
                 "  AND filter_note.entity_id = f.id"
                 ")"
             )
-            params.append(metadata_owner)
+            params.extend(note_metadata_owner_params)
         elif note_state == "unnoted":
             where_clauses.append(
-                "NOT EXISTS ("
+                "NOT EXISTS ("  # nosec
                 "  SELECT 1 FROM entity_notes filter_note "
-                "  WHERE filter_note.session_id = ? "
+                "  WHERE " + note_metadata_owner_sql + " "
                 "  AND filter_note.entity_type = 'finding' "
                 "  AND filter_note.entity_id = f.id"
                 ")"
             )
-            params.append(metadata_owner)
+            params.extend(note_metadata_owner_params)
         if orphan_filter == "hide":
             where_clauses.append(source_exists_sql)
         elif orphan_filter == "only":

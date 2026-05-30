@@ -26,10 +26,16 @@ class RequestScope:
     context: OwnerContext
     team_id: str = ""
     member: dict[str, Any] | None = None
+    team_status: str = ""
+    read_only: bool = False
 
     @property
     def is_team(self) -> bool:
         return self.context.is_team
+
+    @property
+    def is_archived(self) -> bool:
+        return self.is_team and self.team_status == "archived"
 
     @property
     def owner_id(self) -> str:
@@ -154,7 +160,12 @@ def _raise_scope_error(
     raise RequestScopeError(code, message, status_code=status_code)
 
 
-def current_request_scope(session_id: str, request: Request) -> RequestScope:
+def current_request_scope(
+    session_id: str,
+    request: Request,
+    *,
+    allow_archived: bool = False,
+) -> RequestScope:
     """Resolve the request's active data scope.
 
     Team scope is explicit and request-local. Missing team metadata falls back
@@ -204,7 +215,28 @@ def current_request_scope(session_id: str, request: Request) -> RequestScope:
             source=source,
             status_code=403,
         )
-    if str(member.get("team_status") or "") != "active":
+    team_status = str(member.get("team_status") or "")
+    if team_status != "active":
+        if allow_archived and team_status == "archived":
+            _log_scope_resolved(
+                request=request,
+                session_id=session_id,
+                team_id=team_id,
+                source=source,
+                scope="team",
+                member=member,
+            )
+            return RequestScope(
+                team_owner_context(
+                    team_id,
+                    actor_member_id=str(member.get("id") or ""),
+                    actor_session_id=session_id,
+                ),
+                team_id=team_id,
+                member=member,
+                team_status=team_status,
+                read_only=True,
+            )
         _raise_scope_error(
             "team_archived",
             "Team is archived. Reactivate it before using team scope.",
@@ -230,6 +262,7 @@ def current_request_scope(session_id: str, request: Request) -> RequestScope:
         ),
         team_id=team_id,
         member=member,
+        team_status=team_status,
     )
 
 

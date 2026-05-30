@@ -10,6 +10,7 @@ from services.atlas.lookup import metadata_owner_id
 from services.projects.active import active_project_id_from_preferences as _active_project_id_from_preferences
 from services.projects.artifacts import (
     artifact_availability as _artifact_availability,
+    artifact_owner_context as _artifact_owner_context,
     row_to_run_file_artifact as _row_to_run_file_artifact,
 )
 from services.projects.contracts import MAX_ENTITY_ID_LEN
@@ -20,6 +21,7 @@ from services.projects.metadata import (
     _count_entity_metadata_for_ids,
     _entity_labels_by_id,
     _entity_notes_by_id,
+    _metadata_owner_where,
 )
 from services.projects.models import (
     row_to_link as _row_to_link,
@@ -251,7 +253,7 @@ def _project_list_metrics(conn, session_id, project_ids, *, team_id=""):
     package_filter_sql, package_filter_params = dialect.in_clause("project_id", ids)
     meta_filter_sql, meta_filter_params = dialect.in_clause("entity_id", ids)
     run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
-    metadata_session_id = metadata_owner_id(session_id, team_id)
+    metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id)
     entity_owner_sql, entity_owner_params = _project_entity_owner_clause(session_id, team_id)
     finding_owner_sql, finding_owner_params = _project_finding_owner_clause(session_id, team_id)
 
@@ -369,17 +371,17 @@ def _project_list_metrics(conn, session_id, project_ids, *, team_id=""):
 
     for row in conn.execute(
         "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_labels "  # nosec
-        "WHERE session_id = ? AND entity_type = 'project' AND " + meta_filter_sql + " "
+        "WHERE " + metadata_owner_sql + " AND entity_type = 'project' AND " + meta_filter_sql + " "
         "GROUP BY entity_id",
-        (metadata_session_id, *meta_filter_params),
+        (*metadata_owner_params, *meta_filter_params),
     ).fetchall():
         counts[str(row["project_id"])]["labels"] = int(row["count"] or 0)
 
     for row in conn.execute(
         "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_notes "  # nosec
-        "WHERE session_id = ? AND entity_type = 'project' AND " + meta_filter_sql + " "
+        "WHERE " + metadata_owner_sql + " AND entity_type = 'project' AND " + meta_filter_sql + " "
         "GROUP BY entity_id",
-        (metadata_session_id, *meta_filter_params),
+        (*metadata_owner_params, *meta_filter_params),
     ).fetchall():
         counts[str(row["project_id"])]["notes"] = int(row["count"] or 0)
 
@@ -665,14 +667,14 @@ def _project_finding_scope(session_id, project_id, *, team_id=""):
 
 def _project_finding_metadata_count(conn, session_id, project_id, table, *, team_id=""):
     scope_sql, scope_params = _project_finding_scope(session_id, project_id, team_id=team_id)
-    metadata_session = metadata_owner_id(session_id, team_id)
+    metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id, table_alias="m")
     row = conn.execute(
         f"SELECT COUNT(DISTINCT m.id) AS count FROM {table} m "  # nosec
         "JOIN (SELECT DISTINCT finding_id FROM ("
         + scope_sql
         + ")) project_findings ON project_findings.finding_id = m.entity_id "
-        "WHERE m.session_id = ? AND m.entity_type = 'finding'",
-        (*scope_params, metadata_session),
+        "WHERE " + metadata_owner_sql + " AND m.entity_type = 'finding'",
+        (*scope_params, *metadata_owner_params),
     ).fetchone()
     return int(row["count"] or 0) if row else 0
 
@@ -703,9 +705,10 @@ def _project_artifact_rows_to_items(session_id, conn, rows, *, team_id=""):
             continue
         item_id = str(item["id"])
         artifact_owner_session = str(item.get("session_id") or session_id)
+        owner_context = _artifact_owner_context(artifact_owner_session, item)
         artifact = {
             **item,
-            **_artifact_availability(artifact_owner_session, item),
+            **_artifact_availability(artifact_owner_session, item, owner_context=owner_context),
             "labels": artifact_labels.get(item_id, []),
             "note": artifact_notes.get(item_id),
         }
@@ -1154,11 +1157,12 @@ def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, of
         run_counts = {str(row["run_id"] or ""): int(row["count"] or 0) for row in count_rows}
         total = sum(run_counts.values())
         rows = conn.execute(
-            "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "  # nosec
-            "detected_by, content_type, preview_type, content_sha256, created "
-            "FROM run_file_artifacts "
-            f"WHERE run_id IN ({placeholders}) "  # nosec
-            "ORDER BY created DESC, id DESC "
+            "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, a.byte_size, "  # nosec
+            "a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created, "
+            "r.team_id AS run_team_id "
+            "FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
+            f"WHERE a.run_id IN ({placeholders}) "  # nosec
+            "ORDER BY a.created DESC, a.id DESC "
             "LIMIT ? OFFSET ?",
             (*ordered_run_ids, safe_limit, safe_offset),
         ).fetchall()
@@ -1229,7 +1233,8 @@ def get_project_run_file_artifact(session_id, project_id, artifact_id, *, team_i
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         row = conn.execute(
             "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, "
-            "a.byte_size, a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created "
+            "a.byte_size, a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created, "
+            "r.team_id AS run_team_id "
             "FROM run_file_artifacts a "
             "JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = a.run_id "
             "JOIN projects p ON p.id = l.project_id "
@@ -1243,9 +1248,10 @@ def get_project_run_file_artifact(session_id, project_id, artifact_id, *, team_i
     if not artifact:
         return None
     artifact_owner_session = str(artifact.get("session_id") or session_id)
+    owner_context = _artifact_owner_context(artifact_owner_session, artifact)
     result = {
         **artifact,
-        **_artifact_availability(artifact_owner_session, artifact),
+        **_artifact_availability(artifact_owner_session, artifact, owner_context=owner_context),
     }
     actor = _actor_for_session(artifact.get("session_id"), actors)
     if actor:

@@ -1749,16 +1749,36 @@ body.mobile-terminal-mode .output-follow-btn {
 .team-scope-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .team-scope-option {
   align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 transparent;
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  min-height: 44px;
+  min-height: 52px;
+  padding: 10px 12px;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease;
   width: 100%;
+}
+
+.team-scope-option:hover,
+.team-scope-option:focus-visible {
+  border-color: var(--green);
+}
+
+.team-scope-option.is-active {
+  border-color: var(--green);
+  box-shadow: inset 3px 0 0 var(--green);
 }
 
 .team-scope-option-main {
@@ -1779,6 +1799,17 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
+}
+
+.team-scope-option-marker {
+  flex: 0 0 auto;
+  min-width: 52px;
+  text-align: right;
+}
+
+.team-scope-option:hover .team-scope-option-marker,
+.team-scope-option:focus-visible .team-scope-option-marker {
+  color: var(--green);
 }
 
 .team-scope-option.is-active .team-scope-option-marker {

@@ -59,6 +59,23 @@ def metadata_owner_id(session_id: str, team_id: str = "") -> str:
     return _normalize_team_id(team_id) or str(session_id or "").strip()
 
 
+def _metadata_owner_sql(alias: str, team_id: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    if _normalize_team_id(team_id):
+        return (
+            f"({prefix}team_id = ? OR "
+            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))"
+        )
+    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?"
+
+
+def _metadata_owner_params(session_id: str, team_id: str = "") -> list[str]:
+    normalized_team_id = _normalize_team_id(team_id)
+    if normalized_team_id:
+        return [normalized_team_id, metadata_owner_id(session_id, normalized_team_id)]
+    return [str(session_id or "").strip()]
+
+
 def _run_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     if _normalize_team_id(team_id):
@@ -569,27 +586,32 @@ def _atlas_search_params(
     columns: list[str],
     extra_expr_count: int = 0,
     *,
-    metadata_owner: str = "",
+    metadata_owner_params: list[str] | None = None,
 ) -> list[Any]:
     params: list[Any] = [search]
     params.extend([search_like] * len(columns))
+    owner_params = metadata_owner_params or [""]
     for _ in range(extra_expr_count):
-        params.extend([metadata_owner, search_like])
+        params.extend([*owner_params, search_like])
     return params
 
 
 def _metadata_search_expr(
     table_name: str,
     alias: str,
-    metadata_owner_sql: str,
     entity_type: str,
     entity_id_sql: str,
+    *,
+    team_id: str = "",
 ) -> str:
     column = "label" if table_name == "entity_labels" else "body"
+    owner_sql = _metadata_owner_sql(alias, team_id)
     return _sql_join((
         "EXISTS (",
         f"SELECT 1 FROM {table_name} {alias} ",  # nosec
-        f"WHERE {alias}.session_id = {metadata_owner_sql} ",
+        "WHERE ",
+        owner_sql,
+        " ",
         f"AND {alias}.entity_type = '{entity_type}' ",
         f"AND {alias}.entity_id = {entity_id_sql} ",
         "AND ",
@@ -598,19 +620,19 @@ def _metadata_search_expr(
     ))
 
 
-def _entity_metadata_search_exprs(metadata_owner_sql: str, entity_id_sql: str) -> tuple[str, str]:
+def _entity_metadata_search_exprs(team_id: str, entity_id_sql: str) -> tuple[str, str]:
     return (
-        _metadata_search_expr("entity_labels", "entity_search_label", metadata_owner_sql, "atlas_entity", entity_id_sql),
-        _metadata_search_expr("entity_notes", "entity_search_note", metadata_owner_sql, "atlas_entity", entity_id_sql),
+        _metadata_search_expr("entity_labels", "entity_search_label", "atlas_entity", entity_id_sql, team_id=team_id),
+        _metadata_search_expr("entity_notes", "entity_search_note", "atlas_entity", entity_id_sql, team_id=team_id),
     )
 
 
-def _finding_metadata_search_exprs(metadata_owner_sql: str) -> tuple[str, str, str, str]:
+def _finding_metadata_search_exprs(team_id: str) -> tuple[str, str, str, str]:
     return (
-        _metadata_search_expr("entity_labels", "finding_search_label", metadata_owner_sql, "finding", "f.id"),
-        _metadata_search_expr("entity_notes", "finding_search_note", metadata_owner_sql, "finding", "f.id"),
-        _metadata_search_expr("entity_labels", "finding_entity_search_label", metadata_owner_sql, "atlas_entity", "e.id"),
-        _metadata_search_expr("entity_notes", "finding_entity_search_note", metadata_owner_sql, "atlas_entity", "e.id"),
+        _metadata_search_expr("entity_labels", "finding_search_label", "finding", "f.id", team_id=team_id),
+        _metadata_search_expr("entity_notes", "finding_search_note", "finding", "f.id", team_id=team_id),
+        _metadata_search_expr("entity_labels", "finding_entity_search_label", "atlas_entity", "e.id", team_id=team_id),
+        _metadata_search_expr("entity_notes", "finding_entity_search_note", "atlas_entity", "e.id", team_id=team_id),
     )
 
 
@@ -1005,19 +1027,20 @@ def _row_to_finding(row) -> dict[str, Any]:
 
 
 def _metadata_for_entity(conn, session_id: str, entity_id: str, *, team_id: str = "") -> dict[str, Any]:
-    metadata_owner = metadata_owner_id(session_id, team_id)
+    metadata_owner_sql = _metadata_owner_sql("", team_id)
+    metadata_owner_params = _metadata_owner_params(session_id, team_id)
     project_scope_sql = _project_scope_sql("p", team_id)
     project_scope_params = _project_scope_params(session_id, team_id)
     labels = conn.execute(
         "SELECT id, label, source, created "  # nosec
-        "FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ? "
+        "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' AND entity_id = ? "
         "ORDER BY " + _label_order_sql(),
-        (metadata_owner, entity_id),
+        (*metadata_owner_params, entity_id),
     ).fetchall()
     note = conn.execute(
         "SELECT id, body, created, updated "
-        "FROM entity_notes WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-        (metadata_owner, entity_id),
+        "FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' AND entity_id = ?",  # nosec
+        (*metadata_owner_params, entity_id),
     ).fetchone()
     links = conn.execute(
         "SELECT l.id, l.project_id, p.name AS project_name, l.entity_type, l.entity_id, l.source, l.created "
@@ -1036,7 +1059,8 @@ def _metadata_for_entity(conn, session_id: str, entity_id: str, *, team_id: str 
 def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str], *, team_id: str = "") -> dict[str, dict[str, Any]]:
     if not entity_ids:
         return {}
-    metadata_owner = metadata_owner_id(session_id, team_id)
+    metadata_owner_sql = _metadata_owner_sql("", team_id)
+    metadata_owner_params = _metadata_owner_params(session_id, team_id)
     dialect = dialect_for_backend(DB_BACKEND)
     entity_filter_sql, entity_filter_params = dialect.in_clause("entity_id", entity_ids)
     link_filter_sql, link_filter_params = dialect.in_clause("l.entity_id", entity_ids)
@@ -1051,9 +1075,9 @@ def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str], *,
     }
     labels = conn.execute(
         "SELECT entity_id, id, label, source, created "
-        "FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' "  # nosec
         "AND " + entity_filter_sql + " ORDER BY " + _label_order_sql(),  # nosec
-        [metadata_owner, *entity_filter_params],
+        [*metadata_owner_params, *entity_filter_params],
     ).fetchall()
     for row in labels:
         entity_id = str(row["entity_id"] or "")
@@ -1206,8 +1230,8 @@ def list_findings(
         "f.tool_root",
         "e.canonical_value",
     ]
-    metadata_owner = metadata_owner_id(session_id, team_id)
-    search_exprs = _finding_metadata_search_exprs("?")
+    metadata_params = _metadata_owner_params(session_id, team_id)
+    search_exprs = _finding_metadata_search_exprs(team_id)
     search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
     run_filter = str(run_id or "").strip()
@@ -1228,7 +1252,7 @@ def list_findings(
             search_like,
             search_columns,
             len(search_exprs),
-            metadata_owner=metadata_owner,
+            metadata_owner_params=metadata_params,
         ),
         project_filter,
         project_filter,
@@ -1412,8 +1436,8 @@ def list_entities(
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
     search_columns = ["e.canonical_value"]
-    metadata_owner = metadata_owner_id(session_id, team_id)
-    search_exprs = _entity_metadata_search_exprs("?", "e.id")
+    metadata_params = _metadata_owner_params(session_id, team_id)
+    search_exprs = _entity_metadata_search_exprs(team_id, "e.id")
     search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
     run_filter = str(run_id or "").strip()
@@ -1434,7 +1458,7 @@ def list_entities(
             search_like,
             search_columns,
             len(search_exprs),
-            metadata_owner=metadata_owner,
+            metadata_owner_params=metadata_params,
         ),
         project_filter,
         project_filter,
@@ -1565,8 +1589,8 @@ def _query_export_entities(
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
     search_columns = ["e.canonical_value"]
-    metadata_owner = metadata_owner_id(session_id, team_id)
-    search_exprs = _entity_metadata_search_exprs("?", "e.id")
+    metadata_params = _metadata_owner_params(session_id, team_id)
+    search_exprs = _entity_metadata_search_exprs(team_id, "e.id")
     search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
     run_filter = str(run_id or "").strip()
@@ -1590,7 +1614,7 @@ def _query_export_entities(
             search_like,
             search_columns,
             len(search_exprs),
-            metadata_owner=metadata_owner,
+            metadata_owner_params=metadata_params,
         ),
         project_filter,
         project_filter,
@@ -1655,17 +1679,19 @@ def _query_export_entities(
     if not entity_ids:
         return entities
     placeholders = ",".join("?" for _ in entity_ids)
+    metadata_owner_sql = _metadata_owner_sql("", team_id)
+    metadata_owner_params = _metadata_owner_params(session_id, team_id)
     labels = conn.execute(
         "SELECT entity_id, label FROM entity_labels "
-        "WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' "  # nosec
         f"AND entity_id IN ({placeholders}) ORDER BY " + _label_order_sql(),  # nosec
-        [metadata_owner, *entity_ids],
+        [*metadata_owner_params, *entity_ids],
     ).fetchall()
     notes = conn.execute(
         "SELECT entity_id, body FROM entity_notes "
-        "WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' "  # nosec
         f"AND entity_id IN ({placeholders})",  # nosec
-        [metadata_owner, *entity_ids],
+        [*metadata_owner_params, *entity_ids],
     ).fetchall()
     projects = conn.execute(
         "SELECT l.entity_id, p.name FROM project_links l JOIN projects p ON p.id = l.project_id "
@@ -1676,7 +1702,7 @@ def _query_export_entities(
     snapshots = conn.execute(
         "SELECT entity_id, provider, data_json FROM entity_intel_snapshots "
         f"WHERE session_id = ? AND entity_id IN ({placeholders}) ORDER BY " + _provider_order_sql(),  # nosec
-        [metadata_owner, *entity_ids],
+        [metadata_owner_id(session_id, team_id), *entity_ids],
     ).fetchall()
     by_id = {str(entity["id"]): entity for entity in entities}
     for row in labels:

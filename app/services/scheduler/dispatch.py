@@ -393,6 +393,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
         split_command_argv,
     )
     from services.runs.broker import broker_available, broker_unavailable_reason, publish_run_event  # noqa: PLC0415
+    from services.teams.scope import personal_owner_context, team_owner_context  # noqa: PLC0415
 
     original_command = str(schedule.command_text or "").strip()
     if not original_command:
@@ -402,6 +403,11 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
 
     client_ip = "scheduler"
     owner_tab_id = f"schedule:{schedule.id}"
+    owner_context = (
+        team_owner_context(schedule.team_id, actor_session_id=schedule.session_token)
+        if schedule.team_id
+        else personal_owner_context(schedule.session_token)
+    )
     interactive_spec = interactive_pty_spec_for_command(original_command)
     interactive_trigger = str((interactive_spec or {}).get("trigger_flag") or "").strip()
     if interactive_trigger and interactive_trigger in split_command_argv(original_command)[1:]:
@@ -415,6 +421,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             schedule.session_token,
             tab_id=owner_tab_id,
             team_id=schedule.team_id,
+            owner_context=owner_context,
         )
         synthetic_kwargs = {"owner_tab_id": owner_tab_id}
         if schedule.team_id:
@@ -445,6 +452,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             schedule.session_token,
             tab_id=owner_tab_id,
             team_id=schedule.team_id,
+            owner_context=owner_context,
         )
         synthetic_kwargs = {"owner_tab_id": owner_tab_id}
         if schedule.team_id:
@@ -471,6 +479,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             client_ip,
             "",
             team_id=schedule.team_id,
+            owner_context=owner_context,
         )
     except run_blueprint._RunPreparationError as exc:  # noqa: SLF001
         raise ScheduleFireError(str(exc)) from exc
@@ -499,6 +508,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             prepared_real,
             owner_tab_id=owner_tab_id,
             team_id=schedule.team_id,
+            owner_context=owner_context,
         )
     except run_blueprint._RunSpawnError as exc:  # noqa: SLF001
         raise ScheduleFireError(str(exc)) from exc

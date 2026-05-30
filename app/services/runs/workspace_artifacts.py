@@ -4,16 +4,30 @@ from __future__ import annotations
 
 import config as app_config
 from services.commands.registry import AMASS_DEFAULT_WORKSPACE_DIR, CommandValidationResult
-from services.workspace.files import InvalidWorkspacePath, WorkspaceDisabled, resolve_workspace_path
+from services.teams.scope import OwnerContext, personal_owner_context
+from services.workspace.files import InvalidWorkspacePath, WorkspaceDisabled, resolve_owner_workspace_path
 
 APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (
     AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),
 )
 
 
-def workspace_artifact_size(session_id: str, workspace_path: str) -> int:
+def _artifact_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
+    return owner_context or personal_owner_context(session_id)
+
+
+def workspace_artifact_size(
+    session_id: str,
+    workspace_path: str,
+    *,
+    owner_context: OwnerContext | None = None,
+) -> int:
     try:
-        path = resolve_workspace_path(session_id, workspace_path, app_config.CFG)
+        path = resolve_owner_workspace_path(
+            _artifact_owner_context(session_id, owner_context),
+            workspace_path,
+            app_config.CFG,
+        )
         if path.is_file():
             return max(0, int(path.stat().st_size))
     except (InvalidWorkspacePath, OSError, WorkspaceDisabled):
@@ -60,7 +74,12 @@ def is_app_managed_workspace_artifact_path(workspace_path: str) -> bool:
     )
 
 
-def workspace_artifacts_with_sizes(session_id: str, artifacts: object) -> list[dict]:
+def workspace_artifacts_with_sizes(
+    session_id: str,
+    artifacts: object,
+    *,
+    owner_context: OwnerContext | None = None,
+) -> list[dict]:
     sized = []
     artifact_items = artifacts if isinstance(artifacts, list) else []
     for item in artifact_items:
@@ -68,6 +87,6 @@ def workspace_artifacts_with_sizes(session_id: str, artifacts: object) -> list[d
             continue
         artifact = dict(item)
         workspace_path = str(artifact.get("workspace_path") or "")
-        artifact["byte_size"] = workspace_artifact_size(session_id, workspace_path)
+        artifact["byte_size"] = workspace_artifact_size(session_id, workspace_path, owner_context=owner_context)
         sized.append(artifact)
     return sized

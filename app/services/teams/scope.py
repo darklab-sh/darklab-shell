@@ -29,6 +29,10 @@ def personal_owner_context(session_id: str) -> OwnerContext:
     return OwnerContext(scope="personal", owner_id=session_id, actor_session_id=session_id)
 
 
+def anonymous_owner_context() -> OwnerContext:
+    return OwnerContext(scope="personal", owner_id="anonymous", actor_session_id="")
+
+
 def team_owner_context(team_id: str, *, actor_member_id: str = "", actor_session_id: str = "") -> OwnerContext:
     team_id = team_id.strip()
     if not team_id:
@@ -39,6 +43,26 @@ def team_owner_context(team_id: str, *, actor_member_id: str = "", actor_session
         actor_session_id=actor_session_id.strip(),
         actor_member_id=actor_member_id.strip(),
     )
+
+
+def owner_context_for_scope(
+    session_id: str,
+    *,
+    team_id: str = "",
+    actor_member_id: str = "",
+) -> OwnerContext:
+    """Return the workspace/data owner for a personal or team-scoped action."""
+    normalized_team_id = str(team_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    if normalized_team_id:
+        return team_owner_context(
+            normalized_team_id,
+            actor_member_id=actor_member_id,
+            actor_session_id=normalized_session_id,
+        )
+    if normalized_session_id:
+        return personal_owner_context(normalized_session_id)
+    return anonymous_owner_context()
 
 
 def personal_scope_predicate(

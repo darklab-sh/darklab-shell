@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from services.teams.scope import OwnerContext, owner_context_for_scope
+
 
 class RunPreparationError(Exception):
     def __init__(self, message: str, *, status_code: int = 403):
@@ -74,6 +76,7 @@ def start_brokered_run(
     link_project_id: str = "",
     thread_name_prefix: str = "run-broker",
 ) -> BrokeredRunStartResult:
+    owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
     if handlers.resolves_exact_special_builtin_command(original_command):
         if link_project_id:
             raise RunStartRejected(
@@ -81,7 +84,7 @@ def start_brokered_run(
                 "Project links only support external command runs.",
                 status_code=409,
             )
-        builtin_kwargs: dict[str, str] = {"tab_id": owner_tab_id}
+        builtin_kwargs: dict[str, Any] = {"tab_id": owner_tab_id, "owner_context": owner_context}
         if team_id:
             builtin_kwargs.update({"team_id": team_id, "team_role": team_role})
         events, exit_code = handlers.execute_builtin_command(original_command, session_id, **builtin_kwargs)
@@ -111,7 +114,7 @@ def start_brokered_run(
                 "Project links only support external command runs.",
                 status_code=409,
             )
-        builtin_kwargs = {"tab_id": owner_tab_id}
+        builtin_kwargs = {"tab_id": owner_tab_id, "owner_context": owner_context}
         if team_id:
             builtin_kwargs.update({"team_id": team_id, "team_role": team_role})
         events, exit_code = handlers.execute_builtin_command(prepared_input.execution_command, session_id, **builtin_kwargs)
@@ -145,6 +148,7 @@ def start_brokered_run(
             client_ip,
             workspace_cwd,
             team_id=team_id,
+            owner_context=owner_context,
         )
     else:
         prepared_real = handlers.prepare_real_command(
@@ -179,13 +183,14 @@ def start_brokered_run(
             exit_code=127,
         )
 
-    start_kwargs: dict[str, str] = {}
+    start_kwargs: dict[str, Any] = {}
     if owner_client_id:
         start_kwargs["owner_client_id"] = owner_client_id
     if owner_tab_id:
         start_kwargs["owner_tab_id"] = owner_tab_id
     if team_id:
         start_kwargs["team_id"] = team_id
+        start_kwargs["owner_context"] = owner_context
     started = handlers.start_real_command_process(
         original_command,
         session_id,

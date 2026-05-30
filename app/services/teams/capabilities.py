@@ -20,6 +20,7 @@ class Capability(str, Enum):
     ARCHIVE_TEAM = "archive_team"
     RUN_COMMANDS = "run_commands"
     MANAGE_HISTORY = "manage_history"
+    MANAGE_WORKSPACE_FILES = "manage_workspace_files"
     MANAGE_AUTOMATION = "manage_automation"
     MUTATE_PROJECTS = "mutate_projects"
     TRIAGE_FINDINGS = "triage_findings"
@@ -36,6 +37,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[Capability]] = {
         Capability.MANAGE_INVITES,
         Capability.RUN_COMMANDS,
         Capability.MANAGE_HISTORY,
+        Capability.MANAGE_WORKSPACE_FILES,
         Capability.MANAGE_AUTOMATION,
         Capability.MUTATE_PROJECTS,
         Capability.TRIAGE_FINDINGS,
@@ -47,6 +49,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[Capability]] = {
         Capability.VIEW_TEAM,
         Capability.RUN_COMMANDS,
         Capability.MANAGE_HISTORY,
+        Capability.MANAGE_WORKSPACE_FILES,
         Capability.MANAGE_AUTOMATION,
         Capability.MUTATE_PROJECTS,
         Capability.TRIAGE_FINDINGS,

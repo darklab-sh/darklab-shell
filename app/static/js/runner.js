@@ -778,6 +778,16 @@ function _runStartDeniedMessage() {
   return _runTeamScopeDeniedMessage('run commands in team scope');
 }
 
+function _workspaceTerminalCanWrite(action = 'change Files') {
+  if (typeof workspaceCanWrite === 'function') return workspaceCanWrite(action, { toast: false });
+  return true;
+}
+
+function _workspaceTerminalDeniedMessage(action = 'change Files') {
+  if (typeof teamScopeDeniedMessage === 'function') return teamScopeDeniedMessage(action);
+  return `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+}
+
 function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
   const shown = APP_CONFIG.max_output_lines || outputLineCount || 0;
   const total = outputLineCount || shown;
@@ -2574,6 +2584,9 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'file' });
       outputLines = await _workspaceReadLines(target);
     } else if (root === 'mkdir' || (root === 'file' && ['add-dir', 'mkdir'].includes(action))) {
+      if (!_workspaceTerminalCanWrite('create folders in Files')) {
+        throw new Error(_workspaceTerminalDeniedMessage('create folders in Files'));
+      }
       const rawTarget = root === 'mkdir' ? parts[1] : parts[2];
       if (!rawTarget || (root === 'mkdir' ? parts.length !== 2 : parts.length !== 3)) {
         throw new Error(root === 'mkdir' ? 'Usage: mkdir <folder>' : 'Usage: file add-dir <folder>');
@@ -2632,6 +2645,11 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   const parsedDelete = _workspaceDeleteCommand(cmd);
   let target = parsedDelete && !parsedDelete.invalid ? parsedDelete.target : '';
   appendCommandEcho(cmd);
+  if (!_workspaceTerminalCanWrite('delete Files')) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage('delete Files')}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   if (!target) {
     appendLine(_workspaceDeleteUsageForCommand(parsedDelete), 'exit-fail', tabId);
     setStatus('fail');
@@ -2724,6 +2742,11 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
 async function _handleWorkspaceMoveCommand(cmd, tabId) {
   const parsed = _workspaceMoveCommand(cmd);
   appendCommandEcho(cmd);
+  if (!_workspaceTerminalCanWrite('move Files')) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage('move Files')}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   if (!parsed || parsed.invalid || !parsed.source || !parsed.destination) {
     appendLine(parsed?.usage || 'Usage: file move <source> <destination>', 'exit-fail', tabId);
     setStatus('fail');
@@ -2770,6 +2793,12 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
 async function _handleWorkspaceEditorCommand(cmd, tabId) {
   const parsed = _workspaceEditorCommand(cmd);
   appendCommandEcho(cmd);
+  const writeAction = parsed && parsed.action === 'edit' ? 'edit Files' : 'create Files';
+  if (!_workspaceTerminalCanWrite(writeAction)) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage(writeAction)}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   if (!parsed || parsed.invalid || (parsed.action === 'edit' && !parsed.target)) {
     const action = parsed?.action || 'add';
     const operand = action === 'add' ? '[file]' : '<file>';
@@ -2789,7 +2818,8 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
           ? _resolveExistingWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId), kind: 'file' })
           : _resolveWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId) }))
       : '';
-    await openWorkspaceEditorFromCommand(parsed.action, target);
+    const opened = await openWorkspaceEditorFromCommand(parsed.action, target);
+    if (opened === false) throw new Error(_workspaceTerminalDeniedMessage(writeAction));
     const targetLabel = target ? ` ${target}` : '';
     appendLine(`file: opened${targetLabel} in the file editor`, '', tabId);
     _recordSuccessfulLocalCommand(cmd);

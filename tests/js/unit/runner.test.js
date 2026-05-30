@@ -730,6 +730,8 @@ function loadRunnerFns({
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
   normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
   workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
+  workspaceCanWrite: workspaceCanWriteOverride = undefined,
+  teamScopeDeniedMessage: teamScopeDeniedMessageOverride = undefined,
   refreshActiveProjectContext: refreshActiveProjectContextOverride = undefined,
   refreshProjectWorkspace: refreshProjectWorkspaceOverride = undefined,
   isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = undefined,
@@ -915,6 +917,8 @@ function loadRunnerFns({
       ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
       ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
       ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
+      ...(workspaceCanWriteOverride ? { workspaceCanWrite: workspaceCanWriteOverride } : {}),
+      ...(teamScopeDeniedMessageOverride ? { teamScopeDeniedMessage: teamScopeDeniedMessageOverride } : {}),
       ...(refreshActiveProjectContextOverride ? { refreshActiveProjectContext: refreshActiveProjectContextOverride } : {}),
       ...(refreshProjectWorkspaceOverride ? { refreshProjectWorkspace: refreshProjectWorkspaceOverride } : {}),
       ...(isProjectWorkspaceOpenOverride ? { isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride } : {}),
@@ -3329,6 +3333,43 @@ describe('workspace file delete confirmation', () => {
     expect(status.className).toBe('status-pill ok')
   })
 
+  it('blocks terminal workspace write commands when Files are read-only in team scope', async () => {
+    const appendLine = vi.fn()
+    const createWorkspaceDirectory = vi.fn()
+    const moveWorkspacePath = vi.fn()
+    const openWorkspaceEditorFromCommand = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      apiFetch,
+      createWorkspaceDirectory,
+      moveWorkspacePath,
+      openWorkspaceEditorFromCommand,
+      workspaceCanWrite: vi.fn(() => false),
+      teamScopeDeniedMessage: action => `View-only team members can't ${action}.`,
+    })
+
+    await submitCommand('mkdir reports')
+    await submitCommand('file move targets.txt reports')
+    await submitCommand('file add notes.txt')
+    await submitCommand('rm targets.txt')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      "[error] View-only team members can't create folders in Files.",
+      'exit-fail',
+      'tab-1',
+    ))
+    expect(appendLine).toHaveBeenCalledWith("[error] View-only team members can't move Files.", 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith("[error] View-only team members can't create Files.", 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith("[error] View-only team members can't delete Files.", 'exit-fail', 'tab-1')
+    expect(createWorkspaceDirectory).not.toHaveBeenCalled()
+    expect(moveWorkspacePath).not.toHaveBeenCalled()
+    expect(openWorkspaceEditorFromCommand).not.toHaveBeenCalled()
+    expect(apiFetch).not.toHaveBeenCalledWith('/workspace/files/info?path=targets.txt')
+    expect(status.className).toBe('status-pill fail')
+  })
+
   it('shows usage for incomplete workspace move commands', async () => {
     const appendLine = vi.fn()
     const moveWorkspacePath = vi.fn()
@@ -3512,7 +3553,7 @@ describe('workspace file delete confirmation', () => {
     const setComposerPromptMode = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (String(url).startsWith('/workspace/files/info?path=missing.txt')) {
-        return Promise.resolve(new Response(JSON.stringify({ error: 'session file or folder was not found' }), {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'workspace file or folder was not found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -3529,7 +3570,7 @@ describe('workspace file delete confirmation', () => {
     await submitCommand('file rm missing.txt')
 
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('[error] session file or folder was not found', 'exit-fail', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('[error] workspace file or folder was not found', 'exit-fail', 'tab-1'),
     )
     expect(appendLine).not.toHaveBeenCalledWith("delete session file 'missing.txt'?", '', 'tab-1')
     expect(setComposerPromptMode).not.toHaveBeenCalledWith('confirm')

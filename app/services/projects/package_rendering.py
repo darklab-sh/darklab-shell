@@ -12,10 +12,10 @@ from pathlib import PurePosixPath
 
 from jinja2 import Environment, select_autoescape
 
-from services.atlas.lookup import metadata_owner_id
 from core.redaction import line_entries_from_events, redact_line_entries
 from services.history.permalinks import _font_face_css, _format_duration, _permalink_context
 from services.projects.contracts import ProjectWorkspaceError
+from services.projects.metadata import _metadata_owner_where
 from services.projects.models import entity_note_body as _entity_note_body
 from services.projects.packages import (
     redact_package_run as _redact_package_run,
@@ -1188,7 +1188,7 @@ def _package_manifest_with_inline_metadata(manifest, labels, notes):
 
 def _package_metadata_rows(conn, session_id, table, targets, *, team_id=""):
     rows = []
-    metadata_session = metadata_owner_id(session_id, team_id)
+    metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id)
     for entity_type, entity_ids in targets.items():
         if not entity_ids:
             continue
@@ -1196,16 +1196,16 @@ def _package_metadata_rows(conn, session_id, table, targets, *, team_id=""):
         if table == "entity_labels":
             rows.extend(conn.execute(
                 "SELECT id, entity_type, entity_id, label, source, created "  # nosec
-                f"FROM entity_labels WHERE session_id = ? AND entity_type = ? "
+                "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = ? "
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, label ASC",
-                [metadata_session, entity_type, *entity_ids],
+                [*metadata_owner_params, entity_type, *entity_ids],
             ).fetchall())
         elif table == "entity_notes":
             rows.extend(conn.execute(
                 "SELECT id, entity_type, entity_id, body, created, updated "  # nosec
-                f"FROM entity_notes WHERE session_id = ? AND entity_type = ? "
+                "FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = ? "
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, updated ASC, id ASC",
-                [metadata_session, entity_type, *entity_ids],
+                [*metadata_owner_params, entity_type, *entity_ids],
             ).fetchall())
     return rows
 

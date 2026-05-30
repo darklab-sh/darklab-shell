@@ -114,6 +114,36 @@ describe('team scope selector', () => {
       .toBe("View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.")
   })
 
+  it('renders scope choices as selectable rows with visible state markers', async () => {
+    const sessionId = 'tok_scope_options'
+    const apiFetch = defaultApiFetch({
+      teams: [{
+        id: 'team_live_1',
+        name: 'Live team',
+        slug: 'live-team',
+        member: { role: 'operator' },
+      }],
+    })
+    await loadTeamScopeHarness({
+      apiFetch,
+      sessionId,
+      localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_live_1' },
+    })
+
+    window.openTeamScopeSelector()
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-team-scope-option="team_live_1"]')?.textContent).toContain('Live team')
+    })
+    const personal = document.querySelector('[data-team-scope-option="personal"]')
+    const team = document.querySelector('[data-team-scope-option="team_live_1"]')
+    expect(personal.classList.contains('dropdown-item')).toBe(true)
+    expect(personal.classList.contains('team-scope-option')).toBe(true)
+    expect(personal.querySelector('.team-scope-option-marker')?.textContent).toBe('select')
+    expect(team.getAttribute('aria-selected')).toBe('true')
+    expect(team.querySelector('.team-scope-option-marker')?.textContent).toBe('active')
+  })
+
   it('clears team state without showing selector noise when team refresh returns 401', async () => {
     const sessionId = 'tok_scope_unauthorized'
     const apiFetch = defaultApiFetch({

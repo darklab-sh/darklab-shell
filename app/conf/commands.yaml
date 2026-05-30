@@ -1458,7 +1458,7 @@ commands:
           - -help
           - --help
         reject_alternate: true
-        reject_message: Amass database commands use the managed tools/amass session directory.
+        reject_message: Amass database commands use the managed tools/amass workspace directory.
       environment:
         - name: XDG_CONFIG_HOME
           value: "{managed_workspace_parent}"

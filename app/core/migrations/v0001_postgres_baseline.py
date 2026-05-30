@@ -493,24 +493,24 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS entity_labels (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             entity_type TEXT NOT NULL,
             entity_id TEXT NOT NULL,
             label TEXT NOT NULL,
             source TEXT NOT NULL DEFAULT 'manual',
-            created TEXT NOT NULL,
-            UNIQUE (session_id, entity_type, entity_id, label)
+            created TEXT NOT NULL
         )
         """,
         """
         CREATE TABLE IF NOT EXISTS entity_notes (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             entity_type TEXT NOT NULL,
             entity_id TEXT NOT NULL,
             body TEXT NOT NULL,
             created TEXT NOT NULL,
-            updated TEXT NOT NULL,
-            UNIQUE (session_id, entity_type, entity_id)
+            updated TEXT NOT NULL
         )
         """,
         """
@@ -777,7 +777,27 @@ MIGRATION = Migration(
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_run ON findings_occurrences (run_id)",
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_finding_seen ON findings_occurrences (finding_id, seen_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_entity_labels_entity_created ON entity_labels (entity_type, entity_id, created)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_labels_personal_unique
+        ON entity_labels (session_id, entity_type, entity_id, label)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_labels_team_unique
+        ON entity_labels (team_id, entity_type, entity_id, label)
+        WHERE team_id != ''
+        """,
         "CREATE INDEX IF NOT EXISTS idx_entity_notes_entity_updated ON entity_notes (entity_type, entity_id, updated)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_personal_unique
+        ON entity_notes (session_id, entity_type, entity_id)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_team_unique
+        ON entity_notes (team_id, entity_type, entity_id)
+        WHERE team_id != ''
+        """,
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated ON evidence_packages (project_id, updated DESC)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_session_project ON evidence_packages (session_id, project_id)",
         """

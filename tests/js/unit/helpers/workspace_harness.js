@@ -77,6 +77,9 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     if (typeof fn === 'function') fn()
     return 1
   }
+  testWindow.addEventListener = vi.fn()
+  testWindow.removeEventListener = vi.fn()
+  testWindow.dispatchEvent = vi.fn()
   const globals = {
     document,
     window: testWindow,

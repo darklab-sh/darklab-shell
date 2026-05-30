@@ -1275,7 +1275,8 @@ def test_api_v1_ai_assists_honor_team_scope(monkeypatch):
 
 
 def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_path):
-    from services.workspace.files import ensure_session_workspace
+    from services.teams.scope import team_owner_context
+    from services.workspace.files import ensure_session_workspace, resolve_owner_workspace_path
 
     client = get_client()
     token = _token(client)
@@ -1316,7 +1317,14 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
     workspace_dir = ensure_session_workspace(token, shell_app.CFG)
     (workspace_dir / "reports").mkdir()
     (workspace_dir / "reports" / "artifact.txt").write_text("artifact body", encoding="utf-8")
-    (workspace_dir / "reports" / "team-artifact.txt").write_text("team artifact body", encoding="utf-8")
+    (workspace_dir / "reports" / "team-artifact.txt").write_text("personal shadow body", encoding="utf-8")
+    team_artifact_path = resolve_owner_workspace_path(
+        team_owner_context(team_id, actor_session_id=token),
+        "reports/team-artifact.txt",
+        shell_app.CFG,
+        ensure_parent=True,
+    )
+    team_artifact_path.write_text("team artifact body", encoding="utf-8")
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO run_file_artifacts "

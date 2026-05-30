@@ -647,24 +647,24 @@ def _create_project_workspace_schema(conn):
         CREATE TABLE IF NOT EXISTS entity_labels (
             id          TEXT PRIMARY KEY,
             session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
             entity_type TEXT NOT NULL,
             entity_id   TEXT NOT NULL,
             label       TEXT NOT NULL,
             source      TEXT NOT NULL DEFAULT 'manual',
-            created     TEXT NOT NULL,
-            UNIQUE (session_id, entity_type, entity_id, label)
+            created     TEXT NOT NULL
         )
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entity_notes (
             id           TEXT PRIMARY KEY,
             session_id   TEXT NOT NULL,
+            team_id      TEXT NOT NULL DEFAULT '',
             entity_type  TEXT NOT NULL,
             entity_id    TEXT NOT NULL,
             body         TEXT NOT NULL,
             created      TEXT NOT NULL,
-            updated      TEXT NOT NULL,
-            UNIQUE (session_id, entity_type, entity_id)
+            updated      TEXT NOT NULL
         )
     """)
     conn.execute(f"""
@@ -1045,8 +1045,28 @@ def _create_indexes(conn):
         "ON entity_labels (entity_type, entity_id, created)"
     )
     conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_labels_personal_unique "
+        "ON entity_labels (session_id, entity_type, entity_id, label) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_labels_team_unique "
+        "ON entity_labels (team_id, entity_type, entity_id, label) "
+        "WHERE team_id != ''"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_notes_entity_updated "
         "ON entity_notes (entity_type, entity_id, updated)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_personal_unique "
+        "ON entity_notes (session_id, entity_type, entity_id) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_team_unique "
+        "ON entity_notes (team_id, entity_type, entity_id) "
+        "WHERE team_id != ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated "
@@ -1362,6 +1382,68 @@ def _migrate_atlas_team_scope(conn) -> None:
         conn.execute("ALTER TABLE findings ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
 
 
+def _migrate_workspace_metadata_team_scope(conn) -> None:
+    """Rebuild workspace metadata owner keys for personal and team scopes."""
+
+    def rebuild_table(table_name: str, create_sql: str, insert_sql: str) -> None:
+        if not sqlite_table_exists(conn, table_name):
+            return
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        create_table_sql = str(row[0] or "") if row else ""
+        columns = sqlite_table_columns(conn, table_name)
+        if "team_id" in columns and "UNIQUE (session_id, entity_type, entity_id" not in create_table_sql:
+            return
+        legacy_name = f"{table_name}_legacy_team_scope"
+        conn.execute(f"ALTER TABLE {quote_sqlite_identifier(table_name)} RENAME TO {quote_sqlite_identifier(legacy_name)}")
+        conn.execute(create_sql)
+        conn.execute(insert_sql)
+        conn.execute(f"DROP TABLE {quote_sqlite_identifier(legacy_name)}")
+
+    rebuild_table(
+        "entity_labels",
+        """
+        CREATE TABLE entity_labels (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
+            entity_type TEXT NOT NULL,
+            entity_id   TEXT NOT NULL,
+            label       TEXT NOT NULL,
+            source      TEXT NOT NULL DEFAULT 'manual',
+            created     TEXT NOT NULL
+        )
+        """,
+        """
+        INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, source, created)
+        SELECT id, session_id, '', entity_type, entity_id, label, source, created
+          FROM entity_labels_legacy_team_scope
+        """,
+    )
+    rebuild_table(
+        "entity_notes",
+        """
+        CREATE TABLE entity_notes (
+            id           TEXT PRIMARY KEY,
+            session_id   TEXT NOT NULL,
+            team_id      TEXT NOT NULL DEFAULT '',
+            entity_type  TEXT NOT NULL,
+            entity_id    TEXT NOT NULL,
+            body         TEXT NOT NULL,
+            created      TEXT NOT NULL,
+            updated      TEXT NOT NULL
+        )
+        """,
+        """
+        INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated)
+        SELECT id, session_id, '', entity_type, entity_id, body, created, updated
+          FROM entity_notes_legacy_team_scope
+        """,
+    )
+
+
 def _migrate_team_code_hash_uniqueness(conn) -> None:
     """Rebuild team code tables so opaque codes are globally unique."""
 
@@ -1654,6 +1736,10 @@ def _migrate_schema(conn):
     _drop_legacy_project_entity_tables(conn)
     try:
         _migrate_atlas_team_scope(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        _migrate_workspace_metadata_team_scope(conn)
     except SQLiteOperationalError:
         pass
     try:

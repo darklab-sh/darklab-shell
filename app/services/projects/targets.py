@@ -27,7 +27,7 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
 )
 from services.projects.links import _insert_project_link
-from services.projects.metadata import _attach_target_metadata
+from services.projects.metadata import _attach_target_metadata, _metadata_owner_where
 from services.projects.models import row_to_target as _row_to_target
 from services.projects.scope import shared_owner_where
 from services.projects.utils import (
@@ -713,14 +713,14 @@ def delete_project_target(session_id, project_id, target_id, *, team_id=""):
         ).fetchone()
         if not project:
             return None
-        metadata_session = metadata_owner_id(session_id, team_id)
+        metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id)
         conn.execute(
-            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-            (metadata_session, target_id),
+            "DELETE FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' AND entity_id = ?",  # nosec
+            (*metadata_owner_params, target_id),
         )
         conn.execute(
-            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-            (metadata_session, target_id),
+            "DELETE FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' AND entity_id = ?",  # nosec
+            (*metadata_owner_params, target_id),
         )
         result = conn.execute(
             "DELETE FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",

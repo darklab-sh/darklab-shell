@@ -67,7 +67,7 @@ from services.teams.request_scope import (
     requested_team_id,
     scope_error_payload,
 )
-from services.teams.scope import OwnerContext
+from services.teams.scope import OwnerContext, owner_context_for_scope, personal_owner_context
 from services.teams.capabilities import Capability, require_capability, role_can
 from services.teams.contracts import TeamPermissionDenied
 from services.runs.broker import (
@@ -131,7 +131,7 @@ from services.projects.targets import (
 from services import metrics as app_metrics
 from services.notifications.hooks import enqueue_run_complete
 from services.session.variables import SessionVariableError, expand_session_variables
-from services.workspace.files import WorkspaceDisabled, session_workspace_dir
+from services.workspace.files import WorkspaceDisabled, owner_workspace_dir
 from services.pty.service import (
     PtyDependencyError,
     claim_pty_stream_owner,
@@ -205,6 +205,7 @@ def _validate_command_for_run(
     workspace_cwd: str = "",
     *,
     extra_allowed_prefixes: list[str] | None = None,
+    owner_context: OwnerContext | None = None,
 ) -> CommandValidationResult:
     # Several route tests monkeypatch this module's legacy is_command_allowed
     # symbol to keep subprocess behavior focused. Honor that seam while the
@@ -216,6 +217,15 @@ def _validate_command_for_run(
             reason,
             display_command=command,
             exec_command=command,
+        )
+    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+        return validate_command(
+            command,
+            session_id=session_id,
+            cfg=CFG,
+            workspace_cwd=workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+            owner_context=owner_context,
         )
     return validate_command(
         command,
@@ -705,6 +715,7 @@ def _save_completed_run(
         recorded_findings = []
         recorded_targets = []
         persisted_entries = preview_lines
+        workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
         # Index full output when available so early lines of long runs are searchable.
         # Falls back to preview if the artifact can't be read.
         if capture.full_output_available and capture.artifact_rel_path:
@@ -797,6 +808,14 @@ def _save_completed_run(
                     })
             if workspace_artifacts:
                 try:
+                    if team_id:
+                        sized_workspace_artifacts = _workspace_artifacts_with_sizes(
+                            session_id,
+                            workspace_artifacts,
+                            owner_context=workspace_owner,
+                        )
+                    else:
+                        sized_workspace_artifacts = _workspace_artifacts_with_sizes(session_id, workspace_artifacts)
                     recorded_artifacts = _run_finalize_savepoint(
                         conn,
                         "run_file_artifacts",
@@ -804,7 +823,8 @@ def _save_completed_run(
                             conn,
                             session_id,
                             run_id,
-                            _workspace_artifacts_with_sizes(session_id, workspace_artifacts),
+                            sized_workspace_artifacts,
+                            **({"owner_context": workspace_owner} if team_id else {}),
                         ),
                     )
                 except Exception:
@@ -1359,15 +1379,16 @@ class _SyntheticPostFilterProcessor:
 
 
 class _WorkspacePathOutputFilter:
-    """Display absolute session-workspace paths as user-facing workspace paths."""
+    """Display absolute owner-workspace paths as user-facing workspace paths."""
 
-    def __init__(self, session_id: str, cfg: dict):
+    def __init__(self, session_id: str, cfg: dict, *, owner_context: OwnerContext | None = None):
         self.prefix = ""
         self.pattern = None
         if not session_id or not cfg.get("workspace_enabled"):
             return
         try:
-            self.prefix = str(session_workspace_dir(session_id, cfg).resolve(strict=False)).rstrip(os.sep)
+            owner = owner_context or personal_owner_context(session_id)
+            self.prefix = str(owner_workspace_dir(owner, cfg).resolve(strict=False)).rstrip(os.sep)
         except (WorkspaceDisabled, OSError):
             self.prefix = ""
         if self.prefix:
@@ -1494,6 +1515,8 @@ def _prepare_interactive_pty_command(
     session_id: str,
     client_ip: str,
     workspace_cwd: str = "",
+    *,
+    owner_context: OwnerContext | None = None,
 ) -> tuple[list[str], str, dict[str, object]]:
     tokens = split_command_argv(original_command)
     spec = interactive_pty_spec_for_command(original_command)
@@ -1512,12 +1535,22 @@ def _prepare_interactive_pty_command(
         root = str(spec.get("root") or tokens[0].lower())
         raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
     execution_command = shlex.join(argv)
-    validation = _validate_command_for_run(
-        execution_command,
-        session_id,
-        workspace_cwd,
-        extra_allowed_prefixes=[str(spec.get("root") or tokens[0].lower())],
-    )
+    extra_allowed_prefixes = [str(spec.get("root") or tokens[0].lower())]
+    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+        validation = _validate_command_for_run(
+            execution_command,
+            session_id,
+            workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+            owner_context=owner_context,
+        )
+    else:
+        validation = _validate_command_for_run(
+            execution_command,
+            session_id,
+            workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+        )
     if not validation.allowed:
         log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
@@ -1674,15 +1707,32 @@ def _prepare_real_command(
     workspace_cwd: str = "",
     *,
     team_id: str = "",
+    owner_context: OwnerContext | None = None,
 ) -> _PreparedRealCommand:
     registry_command = execution_command
-    validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
+    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+        validation = _validate_command_for_run(
+            execution_command,
+            session_id,
+            workspace_cwd,
+            owner_context=owner_context,
+        )
+    else:
+        validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
     if not validation.allowed:
         log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
     execution_command = validation.exec_command or execution_command
 
-    command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
+    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+        command, notice = rewrite_command(
+            execution_command,
+            session_id=session_id,
+            cfg=CFG,
+            owner_context=owner_context,
+        )
+    else:
+        command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
     if command != execution_command:
         log.info("CMD_REWRITE", extra={
             "ip": client_ip, "original": original_command, "rewritten": command,
@@ -1761,12 +1811,16 @@ def _start_real_command_process(
     owner_client_id: str = "",
     owner_tab_id: str = "",
     team_id: str = "",
+    owner_context: OwnerContext | None = None,
 ) -> _StartedRealCommand:
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
     signal_classifier = OutputSignalClassifier(prepared_real.execution_command, cmd_type="real")
-    workspace_path_filter = _WorkspacePathOutputFilter(session_id, CFG)
+    workspace_owner = owner_context
+    if workspace_owner is None:
+        workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
+    workspace_path_filter = _WorkspacePathOutputFilter(session_id, CFG, owner_context=workspace_owner)
     env_overrides = dict(prepared_real.env_overrides)
     popen_env = None
 
@@ -2299,6 +2353,7 @@ def start_interactive_pty_run():
             session_id,
             client_ip,
             workspace_cwd,
+            owner_context=owner_scope.context,
         )
     except _RunPreparationError as exc:
         return _preparation_error_response(exc)

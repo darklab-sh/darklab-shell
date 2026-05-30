@@ -16,6 +16,7 @@ from services.commands.builtins import (
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
     _run_builtin_commands,
+    execute_builtin_command,
     resolve_builtin_command,
 )
 from services.commands.registry import (
@@ -266,7 +267,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -319,13 +320,208 @@ class TestIsCommandAllowedEdges:
         assert db_is_dir
         assert db_mode == 0o770
 
-    def test_workspace_file_flags_resolve_relative_to_workspace_cwd(self):
+    def test_workspace_file_flags_resolve_against_team_owner_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 2,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import (
+                    owner_workspace_name,
+                    resolve_owner_workspace_path,
+                    write_owner_workspace_text_file,
+                )
+
+                owner = team_owner_context("team-command-files", actor_session_id="tok_command_actor")
+                write_owner_workspace_text_file(owner, "targets.txt", "ip.darklab.sh\n", cfg)
+
+                result = validate_command(
+                    "nmap -iL targets.txt -oN scan.txt",
+                    session_id="tok_command_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+                expected_read = str(resolve_owner_workspace_path(owner, "targets.txt", cfg))
+                expected_write = str(resolve_owner_workspace_path(owner, "scan.txt", cfg))
+
+        assert result.allowed, result.reason
+        assert result.workspace_reads == ["targets.txt"]
+        assert result.workspace_writes == ["scan.txt"]
+        assert expected_read in result.exec_command
+        assert expected_write in result.exec_command
+        assert owner_workspace_name(owner) in result.exec_command
+        assert "tok_command_actor" not in result.exec_command
+
+    def test_workspace_file_write_flags_reserve_team_quota_before_command_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = {
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
                 "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import resolve_owner_workspace_path, write_owner_workspace_text_file
+
+                owner = team_owner_context("team-command-quota", actor_session_id="tok_command_actor")
+                write_owner_workspace_text_file(owner, "existing.txt", "x" * (1024 * 1024), cfg)
+
+                result = validate_command(
+                    "nmap -oN scan.txt darklab.sh",
+                    session_id="tok_command_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+                reserved_path = resolve_owner_workspace_path(owner, "scan.txt", cfg)
+
+        assert not result.allowed
+        assert result.reason == "workspace file quota exceeded"
+        assert not reserved_path.exists()
+
+    def test_workspace_file_write_flags_precreate_team_output_under_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 2,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import resolve_owner_workspace_path
+
+                owner = team_owner_context("team-command-reserve", actor_session_id="tok_command_actor")
+                result = validate_command(
+                    "nmap -oN scan.txt darklab.sh",
+                    session_id="tok_command_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+                reserved_path = resolve_owner_workspace_path(owner, "scan.txt", cfg)
+                reserved_exists = reserved_path.is_file()
+                reserved_size = reserved_path.stat().st_size
+                reserved_mode = os.stat(reserved_path).st_mode & 0o777
+
+        assert result.allowed, result.reason
+        assert reserved_exists
+        assert reserved_size == 0
+        assert reserved_mode == 0o660
+
+    def test_restricted_workspace_list_files_read_team_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+                "restricted_command_input_cidrs": ["10.0.0.0/8"],
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "scan",
+                        "category": "Scanning",
+                        "policy": {"allow": ["scan"], "deny": ["scan -iL"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                        ],
+                        "autocomplete": {
+                            "flags": [
+                                {
+                                    "value": "-iL",
+                                    "takes_value": True,
+                                    "feature_required": "workspace",
+                                    "value_hint": {
+                                        "placeholder": "<target-file>",
+                                        "value_type": "target",
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import write_owner_workspace_text_file
+
+                owner = team_owner_context("team-restricted-files", actor_session_id="tok_restricted_actor")
+                write_owner_workspace_text_file(owner, "targets.txt", "10.1.2.3\n", cfg)
+                result = validate_command(
+                    "scan -iL targets.txt",
+                    session_id="tok_restricted_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+
+        assert not result.allowed
+        assert "targets.txt contains restricted IP/CIDR value: 10.1.2.3" in result.reason
+
+    def test_workspace_file_flags_resolve_relative_to_workspace_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -414,7 +610,7 @@ class TestIsCommandAllowedEdges:
         assert result.allowed, result.reason
         assert result.workspace_reads == ["targets.txt"]
         assert not denied.allowed
-        assert "escapes the session directory" in denied.reason
+        assert "escapes the workspace directory" in denied.reason
         assert not absolute_denied.allowed
         assert "Invalid file path: /../../scan.txt" in absolute_denied.reason
         assert "Command not allowed" not in absolute_denied.reason
@@ -425,7 +621,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -476,7 +672,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -537,7 +733,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 20,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -628,7 +824,7 @@ class TestIsCommandAllowedEdges:
                     cfg=cfg,
                 )
                 assert not denied.allowed
-                assert "managed tools/amass session directory" in denied.reason
+                assert "managed tools/amass workspace directory" in denied.reason
 
                 denied = validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
@@ -790,6 +986,44 @@ class TestIsCommandAllowedEdges:
 
 
 class TestBuiltinCommandResolution:
+    def test_workspace_builtin_reads_team_files_and_denies_viewer_writes(self, tmp_path):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        from services.teams.scope import team_owner_context
+        from services.workspace.files import write_owner_workspace_text_file
+
+        owner = team_owner_context("team-builtins-files", actor_session_id="tok_builtin_actor")
+        write_owner_workspace_text_file(owner, "notes.txt", "team notes\n", cfg)
+
+        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, **cfg}), \
+             mock.patch("services.commands.builtins_workspace.CFG", {**shell_app.CFG, **cfg}):
+            read_events, read_exit = execute_builtin_command(
+                "cat notes.txt",
+                "tok_builtin_actor",
+                team_id="team-builtins-files",
+                team_role="viewer",
+                owner_context=owner,
+            )
+            move_events, move_exit = execute_builtin_command(
+                "mv notes.txt moved.txt",
+                "tok_builtin_actor",
+                team_id="team-builtins-files",
+                team_role="viewer",
+                owner_context=owner,
+            )
+
+        assert read_exit == 0
+        assert any(str(event.get("text", "")) == "team notes" for event in read_events)
+        assert move_exit == 0
+        assert any("can view Files but can't change them" in str(event.get("text", "")) for event in move_events)
+
     def test_documented_builtin_commands_are_backed_by_runtime_dispatch(self):
         for entry in _DOCUMENTED_BUILTIN_COMMANDS:
             if "root" in entry:

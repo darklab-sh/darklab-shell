@@ -17,9 +17,9 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
-from services.atlas.lookup import metadata_owner_id
 from services.runs.output_model import LineEvent, is_noise_event
 from services.projects.artifacts import (
+    artifact_owner_context as _artifact_owner_context,
     artifact_snapshot_mismatch_reason as _artifact_snapshot_mismatch_reason,
     row_to_run_file_artifact as _row_to_run_file_artifact,
 )
@@ -31,6 +31,10 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
 )
 from services.projects.findings import list_project_findings
+from services.projects.metadata import (
+    _metadata_owner_where,
+    _metadata_row_owner_values,
+)
 from services.projects.models import entity_note_body as _entity_note_body
 from services.projects.package_rendering import (
     _metadata_items_by_entity,
@@ -82,7 +86,7 @@ from services.projects.utils import (
     raise_quota as _raise_quota,
     trim_text as _trim_text,
 )
-from services.workspace.files import WorkspaceError, resolve_workspace_path
+from services.workspace.files import WorkspaceError, resolve_owner_workspace_path
 
 log = logging.getLogger("shell")
 
@@ -119,7 +123,8 @@ def _raw_artifact_row_for_archive(session_id, project_id, artifact_id, *, team_i
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         row = conn.execute(
             "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, a.byte_size, "
-            "a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created "
+            "a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created, "
+            "r.team_id AS run_team_id "
             "FROM run_file_artifacts a "
             "JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = a.run_id "
             "JOIN projects p ON p.id = l.project_id "
@@ -340,6 +345,7 @@ def build_evidence_package_archive(
                         if raw_artifact:
                             archive_artifact = raw_artifact
                     artifact_owner_session = str(archive_artifact.get("session_id") or artifact.get("session_id") or session_id)
+                    owner_context = _artifact_owner_context(artifact_owner_session, archive_artifact)
                     public_workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
                     workspace_path = public_workspace_path
                     if redacted_artifact_mode:
@@ -359,7 +365,7 @@ def build_evidence_package_archive(
                     ):
                         raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
                     try:
-                        resolved = resolve_workspace_path(artifact_owner_session, workspace_path, cfg)
+                        resolved = resolve_owner_workspace_path(owner_context, workspace_path, cfg)
                         if not resolved.is_file():
                             raise ProjectWorkspaceError("artifact file is not available")
                         mismatch_reason = _artifact_snapshot_mismatch_reason(archive_artifact, resolved)
@@ -749,12 +755,13 @@ def build_evidence_package_archive(
 
 
 def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, team_id=""):
-    metadata_session = metadata_owner_id(session_id, team_id)
+    metadata_session, metadata_team_id = _metadata_row_owner_values(session_id, team_id)
+    metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id)
     label_values = [str(label or "").strip() for label in (labels or []) if str(label or "").strip()]
     for label in label_values:
         session_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM entity_labels WHERE session_id = ?",
-            (metadata_session,),
+            "SELECT COUNT(*) AS count FROM entity_labels WHERE " + metadata_owner_sql,  # nosec
+            metadata_owner_params,
         ).fetchone()
         if _quota_exceeded(
             int(session_count["count"] or 0) if session_count else 0,
@@ -766,10 +773,10 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
             label_id = _new_entity_label_id()
             result = conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, source, created) "
-                "VALUES (?, ?, 'package', ?, ?, 'manual', ?) "
+                "(id, session_id, team_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, ?, ?, 'package', ?, ?, 'manual', ?) "
                 "ON CONFLICT(id) DO NOTHING",
-                (label_id, metadata_session, package_id, label, _now()),
+                (label_id, metadata_session, metadata_team_id, package_id, label, _now()),
             )
             if result.rowcount:
                 break
@@ -779,8 +786,8 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
     if not body:
         return
     session_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
-        (metadata_session,),
+        "SELECT COUNT(*) AS count FROM entity_notes WHERE " + metadata_owner_sql,  # nosec
+        metadata_owner_params,
     ).fetchone()
     if _quota_exceeded(
         int(session_count["count"] or 0) if session_count else 0,
@@ -793,10 +800,10 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
         note_id = _new_entity_note_id()
         result = conn.execute(
             "INSERT INTO entity_notes "
-            "(id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES (?, ?, 'package', ?, ?, ?, ?) "
+            "(id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+            "VALUES (?, ?, ?, 'package', ?, ?, ?, ?) "
             "ON CONFLICT(id) DO NOTHING",
-            (note_id, metadata_session, package_id, body, now, now),
+            (note_id, metadata_session, metadata_team_id, package_id, body, now, now),
         )
         if result.rowcount:
             return
@@ -884,14 +891,14 @@ def delete_evidence_package(session_id, project_id, package_id, *, team_id=""):
         ).fetchone()
         if not row:
             return False
-        metadata_session = metadata_owner_id(session_id, team_id)
+        metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id)
         conn.execute(
-            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'package' AND entity_id = ?",
-            (metadata_session, package_id),
+            "DELETE FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'package' AND entity_id = ?",  # nosec
+            (*metadata_owner_params, package_id),
         )
         conn.execute(
-            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'package' AND entity_id = ?",
-            (metadata_session, package_id),
+            "DELETE FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'package' AND entity_id = ?",  # nosec
+            (*metadata_owner_params, package_id),
         )
         delete_where = "project_id = ? AND id = ?"
         delete_params = [project_id, package_id]

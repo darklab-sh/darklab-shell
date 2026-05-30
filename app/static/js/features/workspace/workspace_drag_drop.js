@@ -12,6 +12,7 @@ function _workspaceDropTargetFromEvent(event) {
 }
 
 function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
+  if (typeof isWorkspaceReadOnly === 'function' && isWorkspaceReadOnly()) return false;
   const source = String(sourcePath || '').trim();
   const destination = String(destinationPath || '').trim();
   if (!source) return false;
@@ -20,6 +21,7 @@ function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
 }
 
 async function _handleWorkspaceDropMove(event) {
+  if (typeof workspaceCanWrite === 'function' && !workspaceCanWrite('move Files', { toast: true })) return;
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
   event.preventDefault();
@@ -49,6 +51,10 @@ async function _handleWorkspaceDropMove(event) {
 }
 
 workspaceFileList?.addEventListener('dragstart', event => {
+  if (typeof workspaceCanWrite === 'function' && !workspaceCanWrite('move Files', { toast: true })) {
+    event.preventDefault();
+    return;
+  }
   const row = _workspaceDragSourceFromEvent(event);
   if (!row) return;
   _workspaceDragPath = row.dataset.path || '';

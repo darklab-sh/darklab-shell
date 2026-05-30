@@ -78,6 +78,7 @@ from services.projects.targets import (
     list_project_targets,
     update_project_target,
 )
+from services.projects.artifacts import artifact_owner_context
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
 from services.workspace.files import (
@@ -89,8 +90,8 @@ from services.workspace.files import (
     WorkspacePathNotFound,
     WorkspacePermissionDenied,
     WorkspaceQuotaExceeded,
-    open_workspace_file_for_download,
-    read_workspace_text_file,
+    open_owner_workspace_file_for_download,
+    read_owner_workspace_text_file,
 )
 from services.teams.request_scope import (
     RequestScopeError,
@@ -175,6 +176,12 @@ def _project_owner(required_capability=None):
         except TeamPermissionDenied as exc:
             return session_id, "", _team_permission_error_response(exc)
     return session_id, scope.team_id, None
+
+
+def _entity_metadata_write_capability(entity_type):
+    if str(entity_type or "").strip() == "workspace_file":
+        return Capability.MANAGE_WORKSPACE_FILES
+    return Capability.TRIAGE_FINDINGS
 
 
 def _project_bulk_too_many_response():
@@ -938,7 +945,8 @@ def projects_artifacts_preview(project_id, artifact_id):
         }), status
     try:
         artifact_session_id = str(artifact.get("session_id") or session_id)
-        text = read_workspace_text_file(artifact_session_id, artifact["workspace_path"], CFG)
+        owner_context = artifact_owner_context(artifact_session_id, artifact)
+        text = read_owner_workspace_text_file(owner_context, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
         return _workspace_project_artifact_error_response(exc)
     return jsonify({"artifact": artifact, "text": text})
@@ -960,7 +968,8 @@ def projects_artifacts_download(project_id, artifact_id):
         }), status
     try:
         artifact_session_id = str(artifact.get("session_id") or session_id)
-        handle = open_workspace_file_for_download(artifact_session_id, artifact["workspace_path"], CFG)
+        owner_context = artifact_owner_context(artifact_session_id, artifact)
+        handle = open_owner_workspace_file_for_download(owner_context, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
         return _workspace_project_artifact_error_response(exc)
     download_name = artifact.get("display_name") or artifact["workspace_path"].split("/")[-1] or "artifact"
@@ -1107,7 +1116,7 @@ def entity_labels_list(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/labels", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def entity_labels_create(entity_type, entity_id):
-    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    session_id, team_id, error_response = _project_owner(_entity_metadata_write_capability(entity_type))
     if error_response:
         return error_response
     try:
@@ -1127,7 +1136,7 @@ def entity_labels_create(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/labels", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def entity_labels_delete(entity_type, entity_id):
-    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    session_id, team_id, error_response = _project_owner(_entity_metadata_write_capability(entity_type))
     if error_response:
         return error_response
     try:
@@ -1164,7 +1173,7 @@ def entity_note_get(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/note", methods=["PUT"])
 @limiter.limit(_project_write_limit)
 def entity_note_update(entity_type, entity_id):
-    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    session_id, team_id, error_response = _project_owner(_entity_metadata_write_capability(entity_type))
     if error_response:
         return error_response
     try:
@@ -1184,7 +1193,7 @@ def entity_note_update(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/note", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def entity_note_delete(entity_type, entity_id):
-    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    session_id, team_id, error_response = _project_owner(_entity_metadata_write_capability(entity_type))
     if error_response:
         return error_response
     try:

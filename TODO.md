@@ -33,76 +33,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Team-scoped Files workspace
-
-Build Files/workspace storage so it follows the same active personal/team scope model as runs, History, Projects, Atlas, workflows, schedules, watchers, notifications, AI assists, and team secrets. Personal scope keeps using the current session workspace. Team scope shows a durable shared team workspace, rewrites workspace-aware command paths into that team workspace, and keeps personal files separate.
-
-**Current surface to reconcile**
-- `app/services/workspace/files.py` is session-id first: directory naming, path resolution, quota checks, migration, cleanup, permission repair, read/write/list/delete/move/download, and command preparation all take `session_id`.
-- `app/blueprints/workspace.py` resolves only `get_session_id()`, so `/workspace/files*` currently ignores `X-Team-ID` and cannot enforce team role permissions.
-- File labels/notes and run-file artifact metadata are keyed by `session_id` plus `entity_type='workspace_file'`; team scope needs metadata reads/writes to follow owner scope so two members see the same team-file labels/notes without leaking personal file metadata.
-- Workspace-aware command validation and runtime adaptations in `app/services/commands/registry.py` use `ensure_session_workspace()`, `resolve_workspace_path()`, and `read_workspace_text_file()` with the current session id; `wget` defaults, ProjectDiscovery `XDG_CONFIG_HOME`, Amass managed directories, and workspace file flags all need the active owner workspace.
-- Browser Files state in `app/static/js/workspace.js` assumes one current Files payload and one tab-local cwd model; active scope changes should reload the Files payload, reset stale open viewers/editors as needed, and keep tab cwd from leaking between personal and team scope.
-- The current inactivity cleanup removes only `sess_*` directories. Team workspace directories must not be aged out by session inactivity cleanup.
-
-**Committed first-pass decisions**
-- Use one configured workspace root. Personal directories stay `sess_<hash>`. Team directories become `team_<hash>` under the same `workspace_root`; no separate `team_workspace_root` config is added in the first pass.
-- Existing `workspace_quota_mb`, `workspace_max_file_mb`, and `workspace_max_files` apply per owner workspace, whether the owner is a personal session or a team.
-- Durable shared team Files require `workspace_backend: volume` with a persistent shared `workspace_root` mount. When `workspace_backend: tmpfs` is used, team workspaces are best-effort single-container scratch space and are lost on restart; the UI/API must report that limitation clearly or hard-disable team Files under tmpfs before claiming durability.
-- Team workspaces are team-owned workspace data. They are not migrated from personal workspaces automatically, not mixed into personal Files, and not deleted by session-inactivity cleanup.
-- Active-scope switches change what the Files panel and new workspace-aware commands see. In-flight runs, PTYs, and already-open command streams retain the workspace owner captured when they started.
-- Team viewers can list, read, preview, and download team files. Team write actions require a dedicated `manage_workspace_files` capability granted to owners, admins, and operators; viewers stay read-only.
-- Files is the one team surface that intentionally keeps archived teams readable. Phase 1 must add an explicit read-only archived-team resolver path, such as `current_request_scope(..., allow_archived=True)` or a small sibling helper, that returns the normal `RequestScope` plus an archived/read-only flag instead of hard-rejecting with `team_archived`.
-- Team deletion/archive behavior mirrors other durable team data: archived teams stay readable but cannot mutate Files; team deletion may remove the team workspace only through the team deletion path, not by background cleanup.
-- Quota enforcement for team workspaces must be serialized per owner around quota-gated writes. Prefer the existing database/advisory-lock pattern keyed by owner id instead of a filesystem-only lock, because team Files may be served by multiple workers or containers sharing the same database.
-- Out of scope: auto-merging personal files into a team workspace, combined personal+team file views, per-folder ACLs, cross-team sharing, real-time collaborative editing, file comments, and package-style bulk workspace export.
-
-**Phase 1 — Owner-aware workspace contract**
-- Reuse the existing team scope model instead of introducing a parallel workspace owner type. Owner-aware workspace helpers should accept `OwnerContext` or `RequestScope` from `services/teams/scope.py` and `services/teams/request_scope.py`, then derive `sess_<hash(session_id)>` for personal scope and `team_<hash(team_id)>` for team scope.
-- Keep the existing session helper names as compatibility wrappers that build a personal `OwnerContext`, then delegate to owner-aware helpers such as `workspace_owner_name()`, `owner_workspace_dir()`, `ensure_owner_workspace()`, `resolve_owner_workspace_path()`, `owner_workspace_usage()`, and owner-aware list/read/write/delete/move/download helpers.
-- Add `Capability.MANAGE_WORKSPACE_FILES` to the Python role matrix. Owners get it automatically through `frozenset(Capability)`, admins and operators get it explicitly, and viewers do not.
-- Add the archived-team read resolver needed by Files routes. The helper must preserve the normal hard rejection for existing surfaces unless callers explicitly opt into archived read-only scope.
-- Add a `v0025_*` migration for workspace-file metadata ownership. Backfill `team_id=''` on `entity_labels`, `entity_notes`, and any other workspace-file metadata table that needs shared team reads. Drop the existing table-level unique constraints first, then add the established personal/team partial unique indexes: `entity_labels` uniqueness includes `label`; `entity_notes` uniqueness is only `entity_type` + `entity_id` within the personal or team owner.
-- Add a per-owner lock around quota-gated writes and directory creates that can increase file count or bytes used.
-- Guard `migrate_session_workspace()` so token rotation remains personal-to-personal only and can never read from or write to a `team_*` directory. Apply the same personal-only guard to the token-rotation workspace metadata migration helpers in `app/services/projects/migration.py` so `_update_workspace_file_metadata()` and `_count_workspace_file_metadata()` never touch `team_id!=''` rows.
-- Add tests for directory naming, owner separation, quota isolation under concurrent writes, symlink/path traversal rejection, archived read-only resolver behavior, the metadata migration/index shape, personal compatibility wrappers, and the migration guard.
-
-**Phase 2 — Workspace routes honor active scope and role gates**
-- Update `/workspace/files`, `/workspace/files/read`, `/workspace/files/info`, `/workspace/files/download`, `/workspace/directories`, `/workspace/files/move`, and `/workspace/files` delete/write routes to resolve `current_request_scope()` from `X-Team-ID`/`team_id`.
-- Use the archived-read resolver for list/read/info/download only. Mutating routes keep the normal active-team requirement and return a clear `team_archived` denial for archived teams.
-- Apply read permission for any active or archived team member, and write/delete/move/create permission for `manage_workspace_files` on active teams only.
-- Return owner metadata in the Files payload, including scope, team id when active, display label, read-only flag, and denial message for write actions.
-- Convert file metadata helpers for labels/notes and artifact counts to owner-aware predicates using `shared_owner_predicate()` so team members share team-file labels/notes while personal file metadata remains private. Reuse the existing `team_id` parameters already threaded through project metadata helpers instead of adding a parallel metadata API.
-- Add route tests for personal isolation, cross-member team reads/writes, viewer read-only denials, archived-team read-only behavior, non-member denial, metadata sharing, and download/read parity.
-
-**Phase 3 — Commands and runtime workspace rewrites**
-- Thread owner workspace context through command validation/startup so workspace-aware flags, default `wget -P`, runtime `XDG_CONFIG_HOME`, managed Amass directories, and output path redaction resolve to the active personal or team workspace.
-- Capture the workspace owner on run start and PTY start. Persist enough metadata on active runs so stream/kill/finalize paths can continue to describe the correct workspace even after the browser switches scope.
-- Update terminal `file`, `ls`, `cat`, `mkdir`, `mv`, `rm`, `grep`, `head`, `tail`, `wc`, `sort`, and `uniq` browser/server built-ins to use the active owner workspace and to reject write commands for team viewers before opening confirmations.
-- Ensure command output path rewriting maps absolute `team_*` paths back to user-facing Files paths without exposing hashed directory names.
-- Add tests for workspace-aware command rewrites in team scope, viewer write denial, in-flight scope retention after switching back to personal scope, ProjectDiscovery tool config paths, Amass managed directory behavior, and restricted-input checks reading team-scoped list files.
-
-**Phase 4 — Browser Files scope switching and mobile parity**
-- Make the Files panel reload when the active team scope changes, close or refresh stale open viewers/editors, reset cwd per scope, and show a compact personal/team scope label consistent with History/Projects/Atlas.
-- Disable create/edit/delete/move/upload-like controls for team viewers and archived teams on desktop and mobile; keep read/preview/download available.
-- Ensure drag/drop move behavior, viewer header actions, file metadata editor, terminal `file add/edit/delete/move` handoffs, autocomplete cache, and current-directory prompt updates all follow the active scope.
-- Add browser unit coverage for personal/team payload swaps, viewer read-only controls, archived-team read-only state, scope-switch reloads, mobile Files controls, autocomplete cache separation, and stale server-denial messages.
-- Add a focused Playwright path if the existing mobile/desktop Files scenes cannot cover a team scope switch plus read-only controls.
-
-**Phase 5 — Cleanup, lifecycle, artifacts, and packages**
-- Update cleanup so session inactivity only removes `sess_*` directories and never touches `team_*` directories.
-- Add explicit team workspace removal or archival behavior under team lifecycle services, with audit/logging and permission checks on destructive deletion.
-- Verify run-file artifact capture records the owner workspace for team-owned runs so Projects, artifact previews/downloads, and evidence packages resolve team workspace files for every member while preserving personal isolation.
-- Artifact read-side resolution must derive the workspace owner from the persisted run record, never from the requester's currently active `X-Team-ID`. Name and update the history/project artifact preview and download routes that currently resolve workspace artifacts by `session_id`, including `services/projects/workspace_artifacts.py`, so member B can preview/download artifacts from member A's team run without switching to member A's personal workspace or accidentally resolving a same-named personal file.
-- Ensure package archive builders and package jobs restore team workspace context when running asynchronously, matching the existing team workflow/package scope restoration model.
-- Add tests for cleanup skipping team dirs, team delete/archive lifecycle, artifact preview/download across members, evidence package archive resolution, and package worker scope restoration.
-
-**Phase 6 — Documentation and release readiness**
-- Update `README.md`, `FEATURES.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `DECISIONS.md`, `docs/external-command-integrations.md`, `tests/README.md`, and release-draft entries in current-state language once the implementation lands.
-- Keep `TODO.md` as the only phase/future-state document while the work is in progress.
-- Update CHANGELOG under the single Team-Mode feature entry.
-- Update test counts in `ARCHITECTURE.md`, `CONTRIBUTING.md`, and `tests/README.md`, plus the full test appendix.
-- Run focused workspace/unit/route tests, `tests/py/test_docs.py`, markdownlint, `git diff --check`, and a team-scope Files browser smoke path before closing the item.
+No open TODOs are currently tracked.
 
 ## Known Issues
 

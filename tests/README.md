@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,416
+- behavior tests: 3,431
 - docs/inventory meta-tests: 34
-- `pytest`: 1908 (1874 behavior + 34 meta)
-- `vitest`: 1309
+- `pytest`: 1921 (1887 behavior + 34 meta)
+- `vitest`: 1313
 - `playwright`: 254
-- total: 3,471
+- total: 3,488
 
 This document is organized in two parts:
 
@@ -515,6 +515,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestTeamModeFoundation.test_capability_matrix_and_requirement_errors` | Verifies the team-mode role matrix grants expected capabilities and rejects denied actions with the shared exception. |
 | `TestTeamModeFoundation.test_owner_context_predicates_keep_personal_scope_default` | Verifies personal owner context remains the default query shape while team owner context uses the same helper contract. |
 | `TestTeamModeFoundation.test_request_scope_logs_resolution_and_rejections` | Verifies active personal/team request-scope resolution logs DEBUG breadcrumbs and rejected team scope attempts log WARN events without raw tokens. |
+| `TestTeamModeFoundation.test_request_scope_can_resolve_archived_teams_as_read_only_when_requested` | Verifies Files can opt into archived-team read-only scope while normal active-scope resolution still rejects archived teams. |
 | `TestTeamModeFoundation.test_team_storage_smoke_creates_member_invite_and_recovery_code` | Verifies the team foundation storage can create a team, member, invite, and recovery code together. |
 | `TestTeamModeFoundation.test_team_slug_uniqueness_raises_domain_error` | Verifies duplicate team slugs raise the team-specific domain error. |
 | `TestTeamModeFoundation.test_team_owner_guard_blocks_last_owner_removal` | Verifies member removal refuses to leave a team without an active owner. |
@@ -603,6 +604,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_builtin_intel_hash_rejects_invalid_value` | Verifies `intel hash` rejects non-hex or unsupported hash lengths with the expected user-facing message. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
+| `TestSessionWorkspace.test_owner_workspace_names_separate_personal_and_team_roots` | Verifies owner-aware workspace roots keep personal and team directories hashed and separate. |
+| `TestSessionWorkspace.test_owner_workspace_files_are_isolated_and_keep_session_wrappers_compatible` | Verifies owner-aware workspace file helpers isolate team files while the existing session wrappers keep personal behavior. |
+| `TestSessionWorkspace.test_session_workspace_migration_rejects_team_ids` | Verifies token-rotation workspace migration stays personal-only and rejects team identifiers. |
 | `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
@@ -925,6 +929,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |
 | `TestDatabaseInit.test_creates_project_workspace_indexes` | Verifies that project workspace query-shape indexes are created during database bootstrap. |
+| `TestDatabaseInit.test_workspace_metadata_migration_separates_personal_and_team_scopes` | Verifies legacy workspace-file label and note metadata migrates to separate personal/team uniqueness scopes. |
 | `TestDatabaseInit.test_project_slug_migration_separates_personal_and_team_scopes` | Verifies legacy SQLite Project slug constraints are rebuilt into separate personal and team uniqueness scopes. |
 | `TestDatabaseInit.test_init_is_idempotent` | Checks init is idempotent handling. |
 | `TestDatabaseInit.test_retention_prunes_old_runs` | Checks that retention prunes old runs. |
@@ -1346,6 +1351,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestIsCommandAllowedEdges.test_tmp_url_path_is_allowed` | Checks that /tmp URL path is allowed. |
 | `TestIsCommandAllowedEdges.test_local_tmp_path_is_blocked` | Checks that local /tmp path is blocked. |
 | `TestIsCommandAllowedEdges.test_workspace_enabled_exempts_declared_file_flags_and_rewrites_paths` | Verifies that declared workspace file flags can bypass deny entries only when workspace storage is enabled and the file names rewrite into the session workspace. |
+| `TestIsCommandAllowedEdges.test_workspace_file_flags_resolve_against_team_owner_context` | Verifies that declared workspace file flags rewrite through the active team workspace rather than the actor's personal workspace. |
+| `TestIsCommandAllowedEdges.test_workspace_file_write_flags_reserve_team_quota_before_command_runs` | Verifies that command-declared team workspace output files reserve quota before the subprocess can write. |
+| `TestIsCommandAllowedEdges.test_workspace_file_write_flags_precreate_team_output_under_lock` | Verifies that command-declared team workspace output files are prepared under the owner write lock. |
+| `TestIsCommandAllowedEdges.test_restricted_workspace_list_files_read_team_workspace` | Verifies restricted-input checks inspect team-scoped workspace list files when a command uses a declared read flag. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_resolve_relative_to_workspace_cwd` | Verifies that declared workspace file flags resolve relative file names against the active tab workspace folder before rewriting them for execution. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_allow_parent_paths_without_escaping_workspace` | Verifies that `..` path segments can move upward within the workspace but cannot escape the session workspace. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_treat_root_paths_as_workspace_root` | Verifies that leading-slash workspace file flag values resolve from the session workspace root instead of the server filesystem root. |
@@ -1357,6 +1366,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_inline_literal_targets` | Verifies configured restricted networks block literal IP and URL-host command inputs in metadata-known target slots while allowing ordinary domains. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_overlapping_cidr_targets` | Verifies configured restricted networks block overlapping CIDR command inputs in metadata-known target slots. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_inspect_workspace_target_files` | Verifies configured restricted networks are enforced for app-readable workspace target files passed through declared read flags. |
+| `TestBuiltinCommandResolution.test_workspace_builtin_reads_team_files_and_denies_viewer_writes` | Verifies terminal file aliases read from the active team workspace and reject team viewer write commands before confirmation. |
 | `TestBuiltinCommandResolution.test_documented_builtin_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_BUILTIN_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestBuiltinCommandResolution.test_resolves_supported_builtin_commands` | Checks that resolves supported built-in commands. |
 | `TestBuiltinCommandResolution.test_workspace_builtin_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
@@ -1418,8 +1428,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestTeamRoutes.test_active_team_scope_shares_user_workflows_with_role_gated_writes` | Verifies active team scope shares saved workflows across team members while keeping personal workflows isolated and team writes role-gated. |
 | `TestTeamRoutes.test_active_team_scope_shares_projects_and_team_run_links` | Verifies active team scope shares Projects and team-owned run links with team members, finalizes team runs into team Projects, and keeps personal Projects isolated. |
 | `TestTeamRoutes.test_project_slugs_are_unique_inside_personal_and_team_scopes` | Verifies one token can reuse the same Project slug in personal and team scopes while duplicates still suffix inside each scope. |
+| `TestTeamRoutes.test_team_run_rewrites_workspace_paths_against_team_workspace` | Verifies team-scoped run startup rewrites workspace flags against the team workspace and redacts hashed team paths from streamed output. |
 | `TestTeamRoutes.test_active_team_scope_shares_cross_member_project_entities_and_findings` | Verifies team Project counts, summaries, entities, and findings include rows created by another team member's team-owned run. |
 | `TestTeamRoutes.test_active_team_scope_shares_project_artifacts_and_packages` | Verifies active team scope shares Project artifacts, evidence packages, and package build jobs across team members while preserving creator attribution and owner-workspace file access. |
+| `TestTeamRoutes.test_team_scope_shares_workspace_files_and_metadata` | Verifies team Files routes share team workspace files, labels, notes, read/download access, moves, and deletes across members while preserving personal isolation and non-member denial. |
+| `TestTeamRoutes.test_team_workspace_viewers_and_archived_teams_are_read_only` | Verifies team viewers and archived teams can read and download team Files while write, move, delete, and create operations are denied. |
 | `TestTeamRoutes.test_active_team_scope_shares_notification_channels_and_events` | Verifies active team scope shares notification channels and delivery events across team members while preserving personal isolation and role checks. |
 | `TestTeamRoutes.test_active_team_scope_shares_ai_assists_for_team_runs` | Verifies active team scope shares AI assists for team-owned runs across team members while preserving personal isolation, non-member denial, and viewer trigger denial. |
 | `TestTeamRoutes.test_active_team_scope_shares_atlas_reads_for_team_runs` | Verifies active team scope shares Atlas reads for team-owned source runs while keeping personal Atlas rows isolated. |
@@ -3041,6 +3054,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `creates workspace directories with mkdir and file add-dir` | Verifies that `mkdir` and `file add-dir` create folders through the workspace directory route. |
 | `moves workspace files and folders from file move and mv commands` | Verifies that `file move` and `mv` resolve tab-relative workspace paths and move entries through the Files route. |
 | `moves every workspace file matched by a glob pattern into an existing folder` | Verifies that `mv <pattern> <folder>` expands matching workspace entries and moves each one into an existing destination folder. |
+| `blocks terminal workspace write commands when Files are read-only in team scope` | Verifies that terminal `mkdir`, `file move`, `file add`, and `rm` commands respect read-only team Files capability checks before writing. |
 | `shows usage for incomplete workspace move commands` | Verifies that incomplete `file move` and `mv` commands show usage and do not call the Files move route. |
 | `runs standalone pipe helpers against workspace files` | Verifies that `grep`, `wc -l`, `sort`, and `uniq` can run directly against workspace files. |
 | `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |
@@ -3329,6 +3343,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `clears a stale stored team id after a successful team refresh` | Verifies that a stored team id that is no longer returned by `/session/teams` is removed and the selector falls back to Personal. |
 | `exposes active team capabilities for write affordance guards` | Verifies that the active team scope exposes server-granted capabilities for browser write-action guards. |
+| `renders scope choices as selectable rows with visible state markers` | Verifies that the scope selector renders Personal and team choices as selectable rows with visible active and role state. |
 | `clears team state without showing selector noise when team refresh returns 401` | Verifies that unauthorized team refreshes clear active team state and stored scope without showing an inline selector error. |
 | `shows an inline error when the open selector cannot refresh teams` | Verifies that a failed team refresh while the selector is open shows the inline error state and unavailable labels. |
 | `reloads scoped surfaces when storage events switch team scope` | Verifies that cross-tab scope changes update the active team and refresh history, recents, Files cache, active runs, active Project, Status Monitor, and Options Secrets. |
@@ -3640,6 +3655,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
+| `renders team viewer and archived Files as read-only while keeping preview and download available` | Verifies that team read-only payloads disable Files write controls while keeping read/download actions available. |
+| `closes stale editors and reloads Files when the active scope changes` | Verifies that a team scope switch closes stale file editors and reloads the active Files payload. |
 | `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
 | `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
 | `confirms folder deletion with file counts before deleting from the browser` | Verifies that folder delete actions show count-aware confirmation copy before recursively deleting through the workspace route. |

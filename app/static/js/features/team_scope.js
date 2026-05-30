@@ -188,7 +188,7 @@
 
     const marker = document.createElement('span');
     marker.className = 'team-scope-option-marker';
-    marker.textContent = active ? 'active' : '';
+    marker.textContent = active ? 'active' : 'select';
     button.append(main, marker);
     return button;
   }

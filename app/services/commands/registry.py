@@ -36,16 +36,18 @@ from services.commands.registry_validation import (
     split_chained_commands as _split_chained_commands,
     split_command_argv,
 )
+from services.teams.scope import OwnerContext, owner_context_for_scope
 from services.workflows import catalog as workflow_catalog
 from services.workspace.files import (
-    ensure_session_workspace,
+    ensure_owner_workspace,
     InvalidWorkspacePath,
     WorkspaceDisabled,
     WorkspaceFileNotFound,
+    WorkspaceQuotaExceeded,
+    prepare_owner_workspace_target_for_command,
     prepare_workspace_directory_for_command,
-    prepare_workspace_file_for_command,
-    read_workspace_text_file,
-    resolve_workspace_path,
+    read_owner_workspace_text_file,
+    resolve_owner_workspace_path,
 )
 
 log = logging.getLogger("shell")
@@ -2591,13 +2593,14 @@ def _runtime_injection_token(
     *,
     session_id: str = "",
     cfg: dict | None = None,
+    owner_context: OwnerContext | None = None,
 ) -> str:
     if "{session_workspace}" not in token:
         return token
     if not session_id:
         return ""
     try:
-        workspace_dir = ensure_session_workspace(session_id, cfg)
+        workspace_dir = ensure_owner_workspace(_workspace_owner_context(session_id, owner_context), cfg)
     except (InvalidWorkspacePath, WorkspaceDisabled, OSError):
         return ""
     return token.replace("{session_workspace}", str(workspace_dir))
@@ -2608,12 +2611,13 @@ def _runtime_injection_flags(
     *,
     session_id: str = "",
     cfg: dict | None = None,
+    owner_context: OwnerContext | None = None,
 ) -> list[str]:
     raw_flags = inject.get("flags")
     if not isinstance(raw_flags, list):
         return []
     flags = [
-        _runtime_injection_token(str(flag), session_id=session_id, cfg=cfg).strip()
+        _runtime_injection_token(str(flag), session_id=session_id, cfg=cfg, owner_context=owner_context).strip()
         for flag in raw_flags
     ]
     return [flag for flag in flags if flag]
@@ -2624,6 +2628,7 @@ def _apply_runtime_inject_flags(
     *,
     session_id: str = "",
     cfg: dict | None = None,
+    owner_context: OwnerContext | None = None,
 ) -> tuple[str, str | None]:
     tokens = split_command_argv(command)
     if not tokens:
@@ -2641,7 +2646,7 @@ def _apply_runtime_inject_flags(
             continue
         if inject.get("requires_workspace") and not (session_id and (cfg or app_config.CFG).get("workspace_enabled")):
             continue
-        flags = _runtime_injection_flags(inject, session_id=session_id, cfg=cfg)
+        flags = _runtime_injection_flags(inject, session_id=session_id, cfg=cfg, owner_context=owner_context)
         if not flags or _runtime_injection_blocked(rewritten, inject):
             continue
         position = str(inject.get("position") or "prepend")
@@ -2826,7 +2831,7 @@ def _normalize_workspace_command_path(value: str, cwd: str = "") -> str:
             continue
         if part == "..":
             if not base_parts:
-                raise InvalidWorkspacePath("file path escapes the session directory")
+                raise InvalidWorkspacePath("file path escapes the workspace directory")
             base_parts.pop()
             continue
         base_parts.append(part)
@@ -2853,8 +2858,14 @@ def _absolute_workspace_flag_path_error(value: str) -> str:
     if os.path.isabs(raw):
         parts = [part for part in raw.split("/") if part]
         if any(part == ".." for part in parts):
-            return "file path escapes the session directory"
+            return "file path escapes the workspace directory"
     return ""
+
+
+def _workspace_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
+    if owner_context is not None:
+        return owner_context
+    return owner_context_for_scope(session_id)
 
 
 def _workspace_flag_absolute_passthrough(value: str, mode: str) -> bool:
@@ -2870,12 +2881,15 @@ def _wget_default_directory_prefix(
     session_id: str,
     cfg: dict,
     workspace_cwd: str,
+    *,
+    owner_context: OwnerContext | None = None,
 ) -> tuple[str, str]:
     if not session_id:
         return "", ""
+    owner = _workspace_owner_context(session_id, owner_context)
     if not str(workspace_cwd or "").strip():
         try:
-            resolved = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+            resolved = ensure_owner_workspace(owner, cfg).resolve(strict=True)
             prepare_workspace_directory_for_command(resolved, mode="write")
         except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
             return "", str(exc)
@@ -2884,7 +2898,7 @@ def _wget_default_directory_prefix(
         return str(resolved), ""
     try:
         workspace_value = _normalize_workspace_command_path(workspace_cwd)
-        resolved = resolve_workspace_path(session_id, workspace_value, cfg, ensure_parent=True)
+        resolved = resolve_owner_workspace_path(owner, workspace_value, cfg, ensure_parent=True)
         prepare_workspace_directory_for_command(resolved, mode="write")
     except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
         return "", str(exc)
@@ -3232,10 +3246,12 @@ def _workspace_read_file_restriction_reason(
     cfg: dict | None = None,
     *,
     workspace_cwd: str = "",
+    owner_context: OwnerContext | None = None,
 ) -> str:
     networks = _restricted_command_networks(cfg)
     if not networks or not session_id:
         return ""
+    owner = _workspace_owner_context(session_id, owner_context)
     tokens = split_command_argv(command)
     if not tokens:
         return ""
@@ -3266,7 +3282,7 @@ def _workspace_read_file_restriction_reason(
         ):
             try:
                 normalized_value = _normalize_workspace_command_path(user_value, workspace_cwd)
-                text = read_workspace_text_file(session_id, normalized_value, cfg)
+                text = read_owner_workspace_text_file(owner, normalized_value, cfg)
             except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound, OSError):
                 index = (value_index + 1) if value_index is not None else index + 1
                 continue
@@ -3297,6 +3313,7 @@ def _rewrite_workspace_file_flags(
     cfg: dict | None = None,
     *,
     workspace_cwd: str = "",
+    owner_context: OwnerContext | None = None,
 ) -> tuple[str, set[str], list[str], list[str], list[str], str]:
     cfg = cfg or app_config.CFG
     tokens = split_command_argv(command)
@@ -3332,6 +3349,7 @@ def _rewrite_workspace_file_flags(
             index = (value_index + 1) if value_index is not None else index + 1
         return command, set(), [], [], [], ""
 
+    owner = _workspace_owner_context(session_id, owner_context)
     root = tokens[0].lower()
     managed_dir = _managed_workspace_directory_for_root(root)
     managed_dir_flag = str(managed_dir.get("flag") or "")
@@ -3372,7 +3390,7 @@ def _rewrite_workspace_file_flags(
                     [],
                     [],
                     [],
-                    reject_message or f"{tokens[0]} uses the managed {managed_dir_name} session directory.",
+                    reject_message or f"{tokens[0]} uses the managed {managed_dir_name} workspace directory.",
                 )
             break
 
@@ -3418,21 +3436,16 @@ def _rewrite_workspace_file_flags(
                 return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
 
         try:
-            resolved = resolve_workspace_path(
-                session_id,
+            resolved = prepare_owner_workspace_target_for_command(
+                owner,
                 workspace_value,
                 cfg,
-                ensure_parent=mode in {"write", "read_write"} or kind == "directory",
+                mode=mode,
+                kind=kind,
             )
-            if kind == "directory":
-                prepare_workspace_directory_for_command(resolved, mode=mode)
-            else:
-                if mode in {"read", "read_write"} and not resolved.is_file():
-                    raise WorkspaceFileNotFound(f"session file not found: {workspace_value}")
-                prepare_workspace_file_for_command(resolved, mode=mode)
         except InvalidWorkspacePath as exc:
             return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
-        except (WorkspaceDisabled, WorkspaceFileNotFound) as exc:
+        except (WorkspaceDisabled, WorkspaceFileNotFound, WorkspaceQuotaExceeded) as exc:
             return command, set(), [], [], [], str(exc)
 
         resolved_value = str(resolved)
@@ -3450,7 +3463,12 @@ def _rewrite_workspace_file_flags(
         index = value_index + 1
 
     if root == "wget" and cfg.get("workspace_enabled") and not _wget_has_directory_prefix(rewritten_tokens):
-        default_prefix, default_prefix_error = _wget_default_directory_prefix(session_id, cfg, workspace_cwd)
+        default_prefix, default_prefix_error = _wget_default_directory_prefix(
+            session_id,
+            cfg,
+            workspace_cwd,
+            owner_context=owner_context,
+        )
         if default_prefix_error:
             return command, set(), [], [], [], default_prefix_error
         if default_prefix:
@@ -3513,12 +3531,13 @@ def validate_command(
     cfg: dict | None = None,
     workspace_cwd: str = "",
     extra_allowed_prefixes: list[str] | None = None,
+    owner_context: OwnerContext | None = None,
 ) -> CommandValidationResult:
     """Validate a command and return the display command plus execution command.
 
     Workspace-aware file/directory flags are still denied by default. When
     workspace storage is enabled, declared workspace flags are validated and
-    rewritten to the current session workspace before deny-prefix checks run.
+    rewritten to the active owner workspace before deny-prefix checks run.
     """
     cfg = cfg or app_config.CFG
     allowed, denied = load_command_policy()
@@ -3589,6 +3608,7 @@ def validate_command(
         session_id,
         cfg,
         workspace_cwd=workspace_cwd,
+        owner_context=owner_context,
     )
     if workspace_error:
         return CommandValidationResult(
@@ -3603,6 +3623,7 @@ def validate_command(
         session_id,
         cfg,
         workspace_cwd=workspace_cwd,
+        owner_context=owner_context,
     )
     if restricted_file_reason:
         return CommandValidationResult(
@@ -3654,7 +3675,8 @@ def rewrite_command(
     *,
     session_id: str = "",
     cfg: dict | None = None,
+    owner_context: OwnerContext | None = None,
 ) -> tuple[str, str | None]:
     """Rewrite commands that need a TTY or specific flags into a safe non-interactive equivalent.
     Returns (rewritten_command, notice_message_or_None)."""
-    return _apply_runtime_inject_flags(command, session_id=session_id, cfg=cfg)
+    return _apply_runtime_inject_flags(command, session_id=session_id, cfg=cfg, owner_context=owner_context)

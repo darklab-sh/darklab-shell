@@ -1582,6 +1582,74 @@ class TestTeamRoutes:
             for patcher in reversed(patchers):
                 patcher.stop()
 
+    def test_team_run_rewrites_workspace_paths_against_team_workspace(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        try:
+            owner_token = "tok_team_workspace_run_owner"
+            created = self._create_team(client, owner_token, name="Workspace Runtime Operators")
+            team_id = created.get_json()["team"]["id"]
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            from services.teams.scope import team_owner_context
+            from services.workspace.files import owner_workspace_name, write_owner_workspace_text_file
+
+            owner = team_owner_context(team_id, actor_session_id=owner_token)
+            write_owner_workspace_text_file(owner, "targets.txt", "ip.darklab.sh\n", workspace_cfg)
+            _CapturedThread.instances = []
+            fake_proc = _RouteFakeProc(pid=8790)
+
+            with mock.patch("config.CFG", {**shell_app.CFG, **workspace_cfg}), \
+                 mock.patch("blueprints.run.CFG", {**shell_app.CFG, **workspace_cfg}), \
+                 mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+                 mock.patch("blueprints.run.broker_available", return_value=True), \
+                 mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+                 mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+                 mock.patch("blueprints.run.pid_register"), \
+                 mock.patch("blueprints.run.active_run_register") as active_register, \
+                 mock.patch("blueprints.run.publish_run_event"), \
+                 mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)), \
+                 mock.patch("blueprints.run.uuid.uuid4", return_value="run-team-workspace"):
+                resp = client.post(
+                    "/runs",
+                    json={"command": "nmap -iL targets.txt -oN scan.txt", "tab_id": "tab-team"},
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+
+            assert resp.status_code == 202
+            shell_command = popen.call_args.args[0][-1]
+            assert owner_workspace_name(owner) in shell_command
+            assert "targets.txt" in shell_command
+            assert "scan.txt" in shell_command
+            assert team_id in active_register.call_args.kwargs["team_id"]
+            assert _CapturedThread.instances
+            workspace_filter = _CapturedThread.instances[0].kwargs["workspace_path_filter"]
+            assert workspace_filter.process_output_line(shell_command).count(owner_workspace_name(owner)) == 0
+            assert workspace_filter.process_output_line(shell_command).count("/targets.txt") == 1
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
     def test_active_team_scope_shares_cross_member_project_entities_and_findings(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
@@ -1760,8 +1828,17 @@ class TestTeamRoutes:
             artifact_id = "rfa_team_artifact_shared"
             artifact_body = b"team artifact body\n"
             with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
-                artifact_path = resolve_workspace_path(
+                from services.teams.scope import team_owner_context
+
+                personal_shadow = resolve_workspace_path(
                     owner_token,
+                    "reports/team-artifact.txt",
+                    shell_app.CFG,
+                    ensure_parent=True,
+                )
+                personal_shadow.write_bytes(b"personal shadow body\n")
+                artifact_path = workspace_files.resolve_owner_workspace_path(
+                    team_owner_context(team_id, actor_session_id=owner_token),
                     "reports/team-artifact.txt",
                     shell_app.CFG,
                     ensure_parent=True,
@@ -1814,6 +1891,16 @@ class TestTeamRoutes:
                     f"/projects/{project_id}/artifacts/{artifact_id}/preview",
                     headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
                 )
+            artifact_label = client.post(
+                f"/entities/run_file_artifact/{artifact_id}/labels",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"label": "reviewed"},
+            )
+            artifact_note = client.put(
+                f"/entities/run_file_artifact/{artifact_id}/note",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"body": "Team artifact note"},
+            )
             personal_artifacts = client.get(
                 f"/projects/{project_id}/artifacts",
                 headers={"X-Session-ID": operator_token},
@@ -1840,6 +1927,12 @@ class TestTeamRoutes:
             assert artifacts_payload["artifacts"][0]["created_by"]["display_name"] == "Owner"
             assert artifact_preview.status_code == 200
             assert artifact_preview.get_json()["text"] == artifact_body.decode("utf-8")
+            assert artifact_label.status_code == 201
+            assert artifact_label.get_json()["label"]["session_id"] == operator_token
+            assert artifact_label.get_json()["label"]["team_id"] == team_id
+            assert artifact_note.status_code == 200
+            assert artifact_note.get_json()["note"]["session_id"] == operator_token
+            assert artifact_note.get_json()["note"]["team_id"] == team_id
             assert personal_artifacts.status_code == 404
             assert package_created.status_code == 201
             package = package_created.get_json()["package"]
@@ -1900,11 +1993,260 @@ class TestTeamRoutes:
                     (package["id"],),
                 ).fetchone()
                 metadata_row = conn.execute(
-                    "SELECT session_id FROM entity_labels WHERE entity_type = 'package' AND entity_id = ?",
+                    "SELECT session_id, team_id FROM entity_labels WHERE entity_type = 'package' AND entity_id = ?",
                     (package["id"],),
                 ).fetchone()
+                artifact_metadata_row = conn.execute(
+                    "SELECT session_id, team_id FROM entity_labels "
+                    "WHERE entity_type = 'run_file_artifact' AND entity_id = ?",
+                    (artifact_id,),
+                ).fetchone()
             assert package_row["session_id"] == operator_token
-            assert metadata_row["session_id"] == team_id
+            assert metadata_row["session_id"] == operator_token
+            assert metadata_row["team_id"] == team_id
+            assert artifact_metadata_row["session_id"] == operator_token
+            assert artifact_metadata_row["team_id"] == team_id
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_scope_shares_workspace_files_and_metadata(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
+        try:
+            owner_token = "tok_team_files_owner"
+            operator_token = "tok_team_files_operator"
+            outsider_token = "tok_team_files_outsider"
+            self._register_session_token(operator_token)
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="Files Operators")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Files operator"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Files operator"},
+            )
+            assert joined.status_code == 201
+
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                personal_write = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": owner_token},
+                    json={"path": "personal.txt", "text": "personal\n"},
+                )
+                team_write = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    json={"path": "shared/notes.txt", "text": "team notes\n"},
+                )
+                from services.teams.capabilities import Capability, ROLE_CAPABILITIES
+                with mock.patch.dict(ROLE_CAPABILITIES, {
+                    "operator": frozenset({Capability.VIEW_TEAM, Capability.MANAGE_WORKSPACE_FILES}),
+                }):
+                    label = client.post(
+                        "/entities/workspace_file/shared/notes.txt/labels",
+                        headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                        json={"label": "handoff"},
+                    )
+                    note = client.put(
+                        "/entities/workspace_file/shared/notes.txt/note",
+                        headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                        json={"body": "Shared team context."},
+                    )
+                operator_list = client.get(
+                    "/workspace/files",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+                operator_read = client.get(
+                    "/workspace/files/read?path=shared/notes.txt",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+                operator_download = client.get(
+                    "/workspace/files/download?path=shared/notes.txt",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+                personal_list = client.get("/workspace/files", headers={"X-Session-ID": operator_token})
+                personal_read = client.get(
+                    "/workspace/files/read?path=shared/notes.txt",
+                    headers={"X-Session-ID": operator_token},
+                )
+                outsider_list = client.get(
+                    "/workspace/files",
+                    headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                )
+                moved = client.post(
+                    "/workspace/files/move",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    json={"source": "shared/notes.txt", "destination": "shared/moved.txt"},
+                )
+                moved_read = client.get(
+                    "/workspace/files/read?path=shared/moved.txt",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+
+            assert personal_write.status_code == 200
+            assert team_write.status_code == 200
+            assert label.status_code == 201
+            assert note.status_code == 200
+            assert operator_list.status_code == 200
+            list_payload = operator_list.get_json()
+            assert list_payload["owner"]["scope"] == "team"
+            assert list_payload["owner"]["team_id"] == team_id
+            assert list_payload["owner"]["read_only"] is False
+            assert [item["path"] for item in list_payload["files"]] == ["shared/notes.txt"]
+            assert list_payload["files"][0]["labels"][0]["label"] == "handoff"
+            assert list_payload["files"][0]["note"]["body"] == "Shared team context."
+            assert operator_read.status_code == 200
+            assert operator_read.get_json()["text"] == "team notes\n"
+            assert operator_download.status_code == 200
+            assert operator_download.data == b"team notes\n"
+            assert personal_list.status_code == 200
+            assert [item["path"] for item in personal_list.get_json()["files"]] == []
+            assert personal_read.status_code in {400, 404}
+            assert outsider_list.status_code == 403
+            assert outsider_list.get_json()["error"] == "team_forbidden"
+            assert moved.status_code == 200
+            assert moved_read.status_code == 200
+            assert moved_read.get_json()["labels"][0]["label"] == "handoff"
+            assert moved_read.get_json()["note"]["body"] == "Shared team context."
+            with db_connect() as conn:
+                metadata_rows = conn.execute(
+                    "SELECT session_id, team_id, entity_type, entity_id FROM entity_labels "
+                    "WHERE entity_type = 'workspace_file' AND label = 'handoff'",
+                ).fetchall()
+                note_rows = conn.execute(
+                    "SELECT session_id, team_id, entity_type, entity_id FROM entity_notes "
+                    "WHERE entity_type = 'workspace_file' AND body = 'Shared team context.'",
+                ).fetchall()
+            assert [
+                (row["session_id"], row["team_id"], row["entity_id"])
+                for row in metadata_rows
+            ] == [(operator_token, team_id, "shared/moved.txt")]
+            assert [
+                (row["session_id"], row["team_id"], row["entity_id"])
+                for row in note_rows
+            ] == [(operator_token, team_id, "shared/moved.txt")]
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                deleted = client.delete(
+                    "/workspace/files?path=shared/moved.txt",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+            assert deleted.status_code == 200
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_workspace_viewers_and_archived_teams_are_read_only(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
+        try:
+            owner_token = "tok_team_files_archive_owner"
+            viewer_token = "tok_team_files_archive_viewer"
+            self._register_session_token(viewer_token)
+            created = self._create_team(client, owner_token, name="Readonly Files")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "Files viewer"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Files viewer"},
+            )
+            assert joined.status_code == 201
+
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                written = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    json={"path": "shared/readme.txt", "text": "shared readme\n"},
+                )
+                viewer_list = client.get(
+                    "/workspace/files",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                )
+                viewer_read = client.get(
+                    "/workspace/files/read?path=shared/readme.txt",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                )
+                viewer_download = client.get(
+                    "/workspace/files/download?path=shared/readme.txt",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                )
+                viewer_write = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"path": "blocked.txt", "text": "nope"},
+                )
+                viewer_mkdir = client.post(
+                    "/workspace/directories",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"path": "blocked"},
+                )
+                viewer_move = client.post(
+                    "/workspace/files/move",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"source": "shared/readme.txt", "destination": "shared/moved.txt"},
+                )
+                viewer_delete = client.delete(
+                    "/workspace/files?path=shared/readme.txt",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                )
+                archived = client.patch(
+                    f"/session/teams/{team_id}",
+                    headers={"X-Session-ID": owner_token},
+                    json={"status": "archived"},
+                )
+                archived_list = client.get(
+                    "/workspace/files",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+                archived_read = client.get(
+                    "/workspace/files/read?path=shared/readme.txt",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+                archived_download = client.get(
+                    "/workspace/files/download?path=shared/readme.txt",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+                archived_write = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    json={"path": "archived.txt", "text": "nope"},
+                )
+
+            assert written.status_code == 200
+            assert viewer_list.status_code == 200
+            viewer_payload = viewer_list.get_json()
+            assert viewer_payload["owner"]["read_only"] is True
+            assert "can't change" in viewer_payload["owner"]["read_only_reason"]
+            assert "can't change" in viewer_payload["owner"]["write_denial"]
+            assert viewer_read.status_code == 200
+            assert viewer_read.get_json()["text"] == "shared readme\n"
+            assert viewer_download.status_code == 200
+            assert viewer_download.data == b"shared readme\n"
+            assert viewer_write.status_code == 403
+            assert viewer_mkdir.status_code == 403
+            assert viewer_move.status_code == 403
+            assert viewer_delete.status_code == 403
+            assert archived.status_code == 200
+            assert archived_list.status_code == 200
+            archived_payload = archived_list.get_json()
+            assert archived_payload["owner"]["read_only"] is True
+            assert archived_payload["owner"]["team_status"] == "archived"
+            assert "Archived teams" in archived_payload["owner"]["read_only_reason"]
+            assert "Archived teams" in archived_payload["owner"]["write_denial"]
+            assert archived_read.status_code == 200
+            assert archived_download.status_code == 200
+            assert archived_write.status_code == 409
+            assert archived_write.get_json()["error"] == "team_archived"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -2435,14 +2777,15 @@ class TestTeamRoutes:
             assert operator_personal_labels.status_code == 404
             with db_connect() as conn:
                 metadata_rows = conn.execute(
-                    "SELECT session_id FROM entity_labels WHERE entity_id = ?",
+                    "SELECT session_id, team_id FROM entity_labels WHERE entity_id = ?",
                     (entity_id,),
                 ).fetchall()
                 finding_status = conn.execute(
                     "SELECT status FROM findings WHERE id = ?",
                     (finding_id,),
                 ).fetchone()
-            assert {row["session_id"] for row in metadata_rows} == {team_id}
+            assert {row["session_id"] for row in metadata_rows} == {operator_token}
+            assert {row["team_id"] for row in metadata_rows} == {team_id}
             assert finding_status["status"] == "reviewed"
         finally:
             for patcher in reversed(patchers):
@@ -9355,7 +9698,7 @@ class TestWorkspaceRoutes:
                     headers={"X-Session-ID": session},
                 )
             assert unreadable.status_code == 403
-            assert json.loads(unreadable.data)["error"] == "session file is not readable"
+            assert json.loads(unreadable.data)["error"] == "workspace file is not readable"
 
             deleted = client.delete(
                 "/workspace/files?path=targets.txt",

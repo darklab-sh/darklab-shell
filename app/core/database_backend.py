@@ -674,6 +674,7 @@ POSTGRES_ADVISORY_LOCK_NAMESPACES = (
     "darklab_shell_scheduler",
     "darklab_shell_notification_worker",
     "darklab_shell_notification_sweep",
+    "darklab_shell_workspace",
 )
 
 
