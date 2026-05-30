@@ -105,6 +105,7 @@ def _decode_json_list(value: Any) -> tuple[str, ...]:
 class NotificationChannel:
     id: str
     session_token: str
+    team_id: str
     kind: str
     label: str
     secrets: dict[str, Any]
@@ -114,11 +115,16 @@ class NotificationChannel:
     created: str
     updated: str
 
+    @property
+    def secret_owner_token(self) -> str:
+        return self.team_id or self.session_token
+
     @classmethod
     def from_row(cls, row: Any) -> "NotificationChannel":
         return cls(
             id=str(row["id"]),
             session_token=str(row["session_token"]),
+            team_id=str(row["team_id"] or "") if "team_id" in row.keys() else "",
             kind=str(row["kind"]),
             label=str(row["label"] or ""),
             secrets=_decode_json_dict(row["secrets_json"]),
@@ -134,6 +140,7 @@ class NotificationChannel:
 class NotificationEvent:
     id: str
     session_token: str
+    team_id: str
     channel_id: str
     trigger: str
     payload: dict[str, Any]
@@ -151,6 +158,7 @@ class NotificationEvent:
         return cls(
             id=str(row["id"]),
             session_token=str(row["session_token"]),
+            team_id=str(row["team_id"] or "") if "team_id" in row.keys() else "",
             channel_id=str(row["channel_id"]),
             trigger=str(row["trigger"]),
             payload=_decode_json_dict(row["payload_json"]),

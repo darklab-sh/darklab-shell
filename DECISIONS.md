@@ -21,6 +21,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Workspace Moves and Globs Stay App-Mediated](#workspace-moves-and-globs-stay-app-mediated)
   - [Loopback Address Blocking](#loopback-address-blocking)
   - [Session Token Security](#session-token-security)
+  - [Team Ownership: Session Tokens Stay Actors](#team-ownership-session-tokens-stay-actors)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
 - [Deployment and Packaging Decisions](#deployment-and-packaging-decisions)
   - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
@@ -211,6 +212,18 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 **5. Revocation is enforced at the API layer, not just client-side**
 
 `session-token revoke` deletes the token row from `session_tokens`. But that alone is not enough — any client still holding the token string could keep sending it as `X-Session-ID` and get data back, because the old data routes trusted any header value unconditionally. `get_session_id()` in `helpers.py` now looks up every `tok_`-prefixed header value against `session_tokens` on each request. A revoked or never-issued token returns `""` (anonymous), so the caller immediately loses access to session-scoped runs, snapshots, and stars — no client-side coopertion required. The DB lookup adds a single indexed read per request; the `session_tokens` table is small and hit-rate is high, so the overhead is negligible.
+
+### Team Ownership: Session Tokens Stay Actors
+
+**Team mode uses hybrid ownership instead of replacing session identity.**
+
+The app already has durable `tok_` session tokens that own personal history, workspaces, preferences, secrets, and command attribution. Team mode keeps that identity model: a token still represents the operator taking an action, while `team_id` marks records that belong to a shared team scope.
+
+This avoids a disruptive rewrite of every `session_id` path into a new abstract owner table. Existing personal installs keep working as personal scopes, and team-owned surfaces can become shared one at a time by adding nullable `team_id` columns and using the shared scope helpers. Those helpers return the right query predicate for the current request: personal scope filters by the acting token, and team scope filters by the selected team plus membership and capability checks.
+
+The tradeoff is that shared surfaces need to opt in deliberately. A table is not team-owned just because a member created a row; it becomes team-owned only when the route, service, and migration add `team_id` ownership and tests for personal/team isolation. That is intentional. It keeps the security boundary easy to audit, avoids silently moving personal data into a team, and preserves historical attribution even after members leave.
+
+Active scope is request-local. The browser stores the selected team per token and sends it with API calls, while API and CLI callers pass an explicit team id by header, flag, environment variable, or local CLI config. Switching scope never re-homes in-flight runs, queued jobs, schedules, package builds, AI assists, or unsent notifications; those records keep the scope captured when they were created.
 
 ### Scheduled Runs Worker And Audit Model
 

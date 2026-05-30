@@ -160,6 +160,7 @@ def history_search_text_matches_body(body: str, query: str) -> bool:
 def history_offloaded_search_run_ids(
     conn,
     session_id: str,
+    team_id: str,
     query: str,
     command_root: str,
     exit_code_filter: str,
@@ -172,20 +173,30 @@ def history_offloaded_search_run_ids(
 ) -> list[str]:
     if not query:
         return []
-    sql = " FROM runs r WHERE r.session_id = ?"
-    params: list[Any] = [session_id]
+    if team_id:
+        sql = " FROM runs r WHERE r.team_id = ?"
+        params: list[Any] = [team_id]
+    else:
+        sql = " FROM runs r WHERE r.session_id = ? AND (r.team_id IS NULL OR r.team_id = '')"
+        params = [session_id]
     if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
         run_kind_expr = "r.run_kind" if has_run_kind_column else history_run_kind_sql("r.command", _history_backend(conn))
         sql += f" AND {run_kind_expr} = ?"
         params.append(run_kind)
     if project_id:
+        if team_id:
+            project_scope_sql = "p.team_id = ?"
+            project_scope_params: list[Any] = [team_id]
+        else:
+            project_scope_sql = "p.session_id = ? AND (p.team_id IS NULL OR p.team_id = '')"
+            project_scope_params = [session_id]
         sql += (
             " AND EXISTS (SELECT 1 FROM project_links pl "  # nosec
             "JOIN projects p ON p.id = pl.project_id "
-            "WHERE p.session_id = ? AND p.id = ? "
+            f"WHERE {project_scope_sql} AND p.id = ? "  # nosec
             "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
         )
-        params.extend([session_id, project_id])
+        params.extend([*project_scope_params, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
@@ -281,7 +292,7 @@ def run_metadata_counts_by_run(conn, run_ids) -> dict[str, dict[str, int]]:
     return counts
 
 
-def run_atlas_counts_by_run(conn, session_id: str, run_ids) -> dict[str, dict[str, int]]:
+def run_atlas_counts_by_run(conn, session_id: str, run_ids, *, team_id: str = "") -> dict[str, dict[str, int]]:
     ids = [str(run_id) for run_id in run_ids if run_id]
     counts = {
         run_id: {"atlas_entity_count": 0, "atlas_finding_count": 0}
@@ -292,4 +303,4 @@ def run_atlas_counts_by_run(conn, session_id: str, run_ids) -> dict[str, dict[st
     required_tables = ("runs", "entities", "entity_run_links", "findings", "findings_occurrences")
     if not all(history_table_exists(conn, table_name) for table_name in required_tables):
         return counts
-    return atlas_counts_by_run(conn, session_id, ids)
+    return atlas_counts_by_run(conn, session_id, ids, team_id=team_id)

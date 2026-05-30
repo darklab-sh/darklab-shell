@@ -193,6 +193,20 @@
     return item;
   }
 
+  function canTriageAtlasRows() {
+    return typeof controller.canTriageAtlasRows === 'function' ? controller.canTriageAtlasRows() : true;
+  }
+
+  function canDeleteAtlasRows() {
+    return canTriageAtlasRows();
+  }
+
+  function triageDeniedReason(action = 'triage Atlas rows') {
+    return typeof global.teamScopeDeniedMessage === 'function'
+      ? global.teamScopeDeniedMessage(action)
+      : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+  }
+
   function activeFilterCount(state) {
     let count = 0;
     if (String(state.findingStatus || '')) count += 1;
@@ -573,8 +587,11 @@
         { label: 'Export JSONL', action: () => controller.exportEntities('jsonl') },
       );
     }
+    const canSelect = controller.state.selectMode || canTriageAtlasRows();
     items.push({
       label: controller.state.selectMode ? 'Exit select mode' : 'Select mode',
+      disabled: !canSelect,
+      title: canSelect ? '' : triageDeniedReason('triage Atlas rows'),
       action: () => controller.setSelectMode(!controller.state.selectMode),
     });
     items.push({ divider: true });
@@ -617,11 +634,18 @@
       { label: 'See source run', disabled: !firstSourceRun(entity), action: () => openSourceRunFromItem(entity) },
       { label: 'Add label', action: () => openMetadataEditorForEntity(entity) },
       { label: 'Edit note', action: () => openMetadataEditorForEntity(entity) },
-      { label: entity.suppressed ? 'Restore' : 'Suppress', action: () => controller.updateSuppression(entity, !entity.suppressed) },
+      {
+        label: entity.suppressed ? 'Restore' : 'Suppress',
+        disabled: !canTriageAtlasRows(),
+        hint: !canTriageAtlasRows() ? triageDeniedReason('suppress Atlas rows') : '',
+        action: () => controller.updateSuppression(entity, !entity.suppressed),
+      },
       { divider: true },
       {
         label: 'Delete',
         tone: 'danger',
+        disabled: !canDeleteAtlasRows(),
+        title: !canDeleteAtlasRows() ? triageDeniedReason('delete Atlas rows') : '',
         action: () => {
           controller.state.selectedId = String(entity.id || '');
           return controller.confirmDeleteEntity();
@@ -634,9 +658,24 @@
   function findingActionItems(finding) {
     return [
       { label: 'Copy title', action: () => copyText(finding.title || finding.raw_line || '', 'Finding copied') },
-      { label: 'Mark reviewed', action: () => controller.updateFindingReviewState(finding, 'reviewed') },
-      { label: 'Mark important', action: () => controller.updateFindingReviewState(finding, 'important') },
-      { label: 'Mark false positive', action: () => controller.updateFindingReviewState(finding, 'false_positive') },
+      {
+        label: 'Mark reviewed',
+        disabled: !canTriageAtlasRows(),
+        hint: !canTriageAtlasRows() ? triageDeniedReason('triage Atlas findings') : '',
+        action: () => controller.updateFindingReviewState(finding, 'reviewed'),
+      },
+      {
+        label: 'Mark important',
+        disabled: !canTriageAtlasRows(),
+        hint: !canTriageAtlasRows() ? triageDeniedReason('triage Atlas findings') : '',
+        action: () => controller.updateFindingReviewState(finding, 'important'),
+      },
+      {
+        label: 'Mark false positive',
+        disabled: !canTriageAtlasRows(),
+        hint: !canTriageAtlasRows() ? triageDeniedReason('triage Atlas findings') : '',
+        action: () => controller.updateFindingReviewState(finding, 'false_positive'),
+      },
       {
         label: 'Open entity',
         disabled: !finding.entity_id || !finding.entity_type,
@@ -646,11 +685,18 @@
         },
       },
       { label: 'See source run', disabled: !firstSourceRun(finding), action: () => openSourceRunFromItem(finding) },
-      { label: finding.suppressed ? 'Restore' : 'Suppress', action: () => controller.updateSuppression(finding, !finding.suppressed) },
+      {
+        label: finding.suppressed ? 'Restore' : 'Suppress',
+        disabled: !canTriageAtlasRows(),
+        hint: !canTriageAtlasRows() ? triageDeniedReason('suppress Atlas rows') : '',
+        action: () => controller.updateSuppression(finding, !finding.suppressed),
+      },
       { divider: true },
       {
         label: 'Delete',
         tone: 'danger',
+        disabled: !canDeleteAtlasRows(),
+        title: !canDeleteAtlasRows() ? triageDeniedReason('delete Atlas rows') : '',
         action: () => {
           controller.state.selectedFindingId = String(finding.id || '');
           return controller.confirmDeleteFinding(finding);
@@ -749,13 +795,16 @@
       review.dataset.portalMenu = 'true';
       findingStates().forEach(([value, label]) => review.appendChild(option(label, value)));
       review.value = bulkStatusSelect?.value || 'reviewed';
+      review.disabled = !canTriageAtlasRows();
+      if (review.disabled) review.title = triageDeniedReason('triage Atlas findings');
       review.addEventListener('change', () => { bulkStatusSelect = review; });
       bulkStatusSelect = review;
       const apply = document.createElement('button');
       apply.type = 'button';
       apply.className = 'btn btn-secondary btn-compact';
       apply.textContent = 'Apply';
-      apply.disabled = !selectedCount || state.loading || state.bulkInFlight;
+      apply.disabled = !selectedCount || state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      if (!canTriageAtlasRows()) apply.title = triageDeniedReason('triage Atlas findings');
       apply.addEventListener('click', () => controller.bulkUpdateFindings(review.value));
       bulkBar.append(review, apply);
     }
@@ -764,7 +813,8 @@
     suppress.type = 'button';
     suppress.className = 'btn btn-secondary btn-compact';
     suppress.textContent = state.suppressionFilter === 'only' ? 'Restore' : 'Suppress';
-    suppress.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    suppress.disabled = !selectedCount || state.loading || state.bulkInFlight || !canTriageAtlasRows();
+    if (!canTriageAtlasRows()) suppress.title = triageDeniedReason('suppress Atlas rows');
     suppress.addEventListener('click', () => controller.bulkUpdateSuppression(state.suppressionFilter === 'only' ? false : true));
     bulkBar.appendChild(suppress);
 
@@ -772,7 +822,8 @@
     del.type = 'button';
     del.className = 'btn btn-secondary btn-danger btn-compact';
     del.textContent = 'Delete';
-    del.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    del.disabled = !selectedCount || state.loading || state.bulkInFlight || !canDeleteAtlasRows();
+    if (!canDeleteAtlasRows()) del.title = triageDeniedReason('delete Atlas rows');
     del.addEventListener('click', () => controller.bulkDeleteSelectedItems());
     const summary = document.createElement('span');
     summary.className = 'atlas-mobile-bulk-summary';
@@ -1117,6 +1168,8 @@
     suppression.type = 'button';
     suppression.className = 'btn btn-secondary btn-compact';
     suppression.textContent = entity.suppressed ? 'Restore' : 'Suppress';
+    suppression.disabled = !canTriageAtlasRows();
+    if (!canTriageAtlasRows()) suppression.title = triageDeniedReason('suppress Atlas rows');
     suppression.addEventListener('click', () => controller.updateSuppression(entity, !entity.suppressed));
     entityFooter.appendChild(suppression);
 
@@ -1124,6 +1177,8 @@
     del.type = 'button';
     del.className = 'btn btn-secondary btn-danger btn-compact';
     del.textContent = 'Delete';
+    del.disabled = !canDeleteAtlasRows();
+    if (!canDeleteAtlasRows()) del.title = triageDeniedReason('delete Atlas rows');
     del.addEventListener('click', () => controller.confirmDeleteEntity());
     entityFooter.appendChild(del);
   }
@@ -1212,6 +1267,10 @@
       const select = controller.detailApi.reviewStateSelect(
         finding.review_state || finding.status,
         (reviewState) => controller.updateFindingReviewState(finding, reviewState),
+        {
+          disabled: !canTriageAtlasRows(),
+          disabledReason: triageDeniedReason('triage Atlas findings'),
+        },
       );
       if (select) {
         select.classList.add('atlas-mobile-footer-select');
@@ -1239,6 +1298,8 @@
     suppression.type = 'button';
     suppression.className = 'btn btn-secondary btn-compact';
     suppression.textContent = finding.suppressed ? 'Restore' : 'Suppress';
+    suppression.disabled = !canTriageAtlasRows();
+    if (!canTriageAtlasRows()) suppression.title = triageDeniedReason('suppress Atlas rows');
     suppression.addEventListener('click', () => controller.updateSuppression(finding, !finding.suppressed));
     findingFooter.appendChild(suppression);
 
@@ -1246,6 +1307,8 @@
     del.type = 'button';
     del.className = 'btn btn-secondary btn-danger btn-compact';
     del.textContent = 'Delete';
+    del.disabled = !canDeleteAtlasRows();
+    if (!canDeleteAtlasRows()) del.title = triageDeniedReason('delete Atlas rows');
     del.addEventListener('click', () => controller.confirmDeleteFinding(finding));
     findingFooter.appendChild(del);
   }

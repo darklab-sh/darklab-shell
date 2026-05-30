@@ -36,6 +36,8 @@ function loadTabsFns({
   showConfirm = undefined,
   detachRunStreamForTab = undefined,
   markActiveRunDetachedForRestore = undefined,
+  activeTeamScopeCanImpl = () => true,
+  teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
   urlImpl = {
@@ -111,6 +113,8 @@ function loadTabsFns({
       ...(markActiveRunDetachedForRestore ? { markActiveRunDetachedForRestore } : {}),
       cancelWelcome: () => {},
       confirmPermalinkRedactionChoice,
+      activeTeamScopeCan: activeTeamScopeCanImpl,
+      teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
       apiFetch,
       location: { origin: 'https://example.test' },
       navigator,
@@ -923,6 +927,26 @@ describe('tabs helpers', () => {
     permalinkTab(id)
 
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to share yet')
+  })
+
+  it('permalinkTab blocks view-only team members before creating a snapshot', () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
+    )
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      activeTeamScopeCanImpl: capability => capability !== 'manage_history',
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(document.getElementById('permalink-toast').textContent).toBe(
+      "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.",
+    )
+    expect(document.querySelector('[data-action="permalink"][data-tab]')?.disabled).toBe(true)
   })
 
   it('permalinkTab shows a failure toast when the share request rejects', async () => {

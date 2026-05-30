@@ -74,6 +74,18 @@
       return String(ctx.getActiveTab?.() || 'ip');
     }
 
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
     function pageKey(projectId) {
       return `${String(projectId || '')}:${activeTab()}`;
     }
@@ -507,6 +519,10 @@
       const select = document.createElement('div');
       select.className = 'project-entity-select-actions';
       const toggle = ctx.makeProjectButton(selectMode() ? 'Done' : 'Select', 'toggle-project-entity-select', projectId);
+      if (!selectMode() && !activeTeamScopeCan('mutate_projects')) {
+        toggle.disabled = true;
+        toggle.title = teamScopeDeniedMessage('change team projects');
+      }
       select.appendChild(toggle);
       if (selectMode()) {
         const currentSelected = selectedIds();

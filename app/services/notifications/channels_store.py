@@ -151,19 +151,29 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
     return dict(parsed) if isinstance(parsed, dict) else {}
 
 
-def _channel_rows(conn, session_token: str) -> list[Any]:
+def _owner_where(session_token: str, team_id: str = "") -> tuple[str, tuple[str, ...]]:
+    if team_id:
+        return "team_id = ?", (team_id,)
+    return "(team_id IS NULL OR team_id = '') AND session_token = ?", (session_token,)
+
+
+def _channel_rows(conn, session_token: str, team_id: str = "") -> list[Any]:
+    owner_sql, owner_params = _owner_where(session_token, team_id)
     return conn.execute(
-        "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
-        "FROM notification_channels WHERE session_token = ? ORDER BY lower(label) ASC, created ASC, id ASC",
-        (session_token,),
+        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+        "muted, created, updated "
+        f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
+        owner_params,
     ).fetchall()
 
 
-def _get_channel(conn, session_token: str, channel_id: str) -> NotificationChannel:
+def _get_channel(conn, session_token: str, channel_id: str, team_id: str = "") -> NotificationChannel:
+    owner_sql, owner_params = _owner_where(session_token, team_id)
     row = conn.execute(
-        "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
-        "FROM notification_channels WHERE session_token = ? AND id = ?",
-        (session_token, channel_id),
+        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+        "muted, created, updated "
+        f"FROM notification_channels WHERE {owner_sql} AND id = ?",  # nosec
+        (*owner_params, channel_id),
     ).fetchone()
     if row is None:
         raise NotificationChannelError("not_found", "Notification channel not found.", status_code=404)
@@ -261,7 +271,7 @@ def _validate_channel(channel: NotificationChannel) -> None:
 
 def _serialize_channel(channel: NotificationChannel) -> dict[str, Any]:
     secret_fields = tuple(CHANNEL_SECRET_FIELDS[channel.kind])
-    return {
+    payload = {
         "id": channel.id,
         "kind": channel.kind,
         "label": channel.label,
@@ -275,10 +285,13 @@ def _serialize_channel(channel: NotificationChannel) -> dict[str, Any]:
         "created": channel.created,
         "updated": channel.updated,
     }
+    if channel.team_id:
+        payload["team_id"] = channel.team_id
+    return payload
 
 
 def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
-    return {
+    payload = {
         "id": event.id,
         "channel_id": event.channel_id,
         "trigger": event.trigger,
@@ -292,6 +305,9 @@ def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
         "created": event.created,
         "dead_at": event.dead_at,
     }
+    if event.team_id:
+        payload["team_id"] = event.team_id
+    return payload
 
 
 def _serialize_test_event(event: NotificationEvent) -> dict[str, Any]:
@@ -329,7 +345,7 @@ def _test_event_statuses(conn, event_ids: list[str]) -> list[dict[str, Any]]:
         return []
     placeholders = ", ".join("?" for _ in event_ids)
     rows = conn.execute(
-        "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
+        "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
         "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
         f"FROM notification_events WHERE id IN ({placeholders})",  # nosec
         event_ids,
@@ -342,10 +358,10 @@ def _test_event_statuses(conn, event_ids: list[str]) -> list[dict[str, Any]]:
     ]
 
 
-def list_notification_channels(session_token: str) -> list[dict[str, Any]]:
+def list_notification_channels(session_token: str, *, team_id: str = "") -> list[dict[str, Any]]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
-        return [_serialize_channel(NotificationChannel.from_row(row)) for row in _channel_rows(conn, session_token)]
+        return [_serialize_channel(NotificationChannel.from_row(row)) for row in _channel_rows(conn, session_token, team_id)]
 
 
 def list_notification_events(
@@ -356,6 +372,7 @@ def list_notification_events(
     status: str = "",
     channel_id: str = "",
     trigger: str = "",
+    team_id: str = "",
 ) -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     normalized_status = str(status or "").strip()
@@ -366,8 +383,9 @@ def list_notification_events(
     if normalized_trigger and normalized_trigger not in TRIGGERS:
         raise NotificationChannelError("invalid_trigger", "Choose a supported notification trigger.")
 
-    clauses = ["session_token = ?"]
-    params: list[Any] = [session_token]
+    owner_sql, owner_params = _owner_where(session_token, team_id)
+    clauses = [owner_sql]
+    params: list[Any] = list(owner_params)
     if normalized_status:
         clauses.append("status = ?")
         params.append(normalized_status)
@@ -385,7 +403,7 @@ def list_notification_events(
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0
         rows = conn.execute(
-            "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
+            "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
             "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
             f"FROM notification_events WHERE {where_sql} "  # nosec
             "ORDER BY created DESC, id DESC LIMIT ? OFFSET ?",
@@ -401,7 +419,7 @@ def list_notification_events(
     }
 
 
-def create_notification_channel(session_token: str, data: dict[str, Any]) -> dict[str, Any]:
+def create_notification_channel(session_token: str, data: dict[str, Any], *, team_id: str = "") -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     kind = _normalize_kind(data.get("kind"))
     channel_id = _channel_id()
@@ -410,6 +428,7 @@ def create_notification_channel(session_token: str, data: dict[str, Any]) -> dic
     channel = NotificationChannel(
         id=channel_id,
         session_token=session_token,
+        team_id=team_id,
         kind=kind,
         label=_normalize_label(data.get("label"), kind=kind),
         secrets=secrets,
@@ -422,14 +441,21 @@ def create_notification_channel(session_token: str, data: dict[str, Any]) -> dic
     _validate_channel(channel)
     audit_records = []
     with database.db_connect() as conn:
-        audit_records = _store_secret_values(conn, session_token, channel_id, kind, data.get("secret_values"))
+        audit_records = _store_secret_values(
+            conn,
+            channel.secret_owner_token,
+            channel_id,
+            kind,
+            data.get("secret_values"),
+        )
         conn.execute(
             "INSERT INTO notification_channels "
-            "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 channel.id,
                 channel.session_token,
+                channel.team_id,
                 channel.kind,
                 channel.label,
                 _json_param(channel.secrets),
@@ -441,14 +467,20 @@ def create_notification_channel(session_token: str, data: dict[str, Any]) -> dic
             ),
         )
         conn.commit()
-    emit_channel_secret_audits(session_token, audit_records)
+    emit_channel_secret_audits(channel.secret_owner_token, audit_records)
     return _serialize_channel(channel)
 
 
-def update_notification_channel(session_token: str, channel_id: str, data: dict[str, Any]) -> dict[str, Any]:
+def update_notification_channel(
+    session_token: str,
+    channel_id: str,
+    data: dict[str, Any],
+    *,
+    team_id: str = "",
+) -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
-        existing = _get_channel(conn, session_token, channel_id)
+        existing = _get_channel(conn, session_token, channel_id, team_id)
         kind = _normalize_kind(data.get("kind", existing.kind))
         if kind != existing.kind:
             raise NotificationChannelError("kind_locked", "Create a new channel to change the channel type.")
@@ -457,6 +489,7 @@ def update_notification_channel(session_token: str, channel_id: str, data: dict[
         channel = NotificationChannel(
             id=existing.id,
             session_token=existing.session_token,
+            team_id=existing.team_id,
             kind=existing.kind,
             label=_normalize_label(data.get("label", existing.label), kind=existing.kind),
             secrets=secrets,
@@ -467,11 +500,12 @@ def update_notification_channel(session_token: str, channel_id: str, data: dict[
             updated=_utc_now(),
         )
         _validate_channel(channel)
-        audit_records = _store_secret_values(conn, session_token, channel_id, kind, secret_values)
+        audit_records = _store_secret_values(conn, channel.secret_owner_token, channel_id, kind, secret_values)
+        owner_sql, owner_params = _owner_where(session_token, team_id)
         conn.execute(
             "UPDATE notification_channels "
             "SET label = ?, secrets_json = ?, config_json = ?, triggers_json = ?, muted = ?, updated = ? "
-            "WHERE session_token = ? AND id = ?",
+            f"WHERE {owner_sql} AND id = ?",  # nosec
             (
                 channel.label,
                 _json_param(channel.secrets),
@@ -479,30 +513,31 @@ def update_notification_channel(session_token: str, channel_id: str, data: dict[
                 _json_param(list(channel.triggers)),
                 dialect_for_backend(database.DB_BACKEND).boolean_param(channel.muted),
                 channel.updated,
-                session_token,
+                *owner_params,
                 channel.id,
             ),
         )
         conn.commit()
-    emit_channel_secret_audits(session_token, audit_records)
+    emit_channel_secret_audits(channel.secret_owner_token, audit_records)
     return _serialize_channel(channel)
 
 
-def delete_notification_channel(session_token: str, channel_id: str) -> bool:
+def delete_notification_channel(session_token: str, channel_id: str, *, team_id: str = "") -> bool:
     session_token = require_durable_session_token(session_token)
     removed = False
     with database.db_connect() as conn:
-        channel = _get_channel(conn, session_token, channel_id)
+        channel = _get_channel(conn, session_token, channel_id, team_id)
+        owner_sql, owner_params = _owner_where(session_token, team_id)
         cur = conn.execute(
-            "DELETE FROM notification_channels WHERE session_token = ? AND id = ?",
-            (session_token, channel_id),
+            f"DELETE FROM notification_channels WHERE {owner_sql} AND id = ?",  # nosec
+            (*owner_params, channel_id),
         )
         removed = int(getattr(cur, "rowcount", 0) or 0) > 0
         conn.commit()
     if removed:
         for secret_name in channel.secrets.values():
             try:
-                delete_secret(session_token, str(secret_name))
+                delete_secret(channel.secret_owner_token, str(secret_name))
             except (ValueError, MasterKeyError, SecretDecryptError):
                 continue
     return removed
@@ -523,10 +558,10 @@ def migrate_notification_channels_session(conn, from_session_id: str, to_session
     }
 
 
-def send_test_notification(session_token: str, channel_id: str) -> dict[str, Any]:
+def send_test_notification(session_token: str, channel_id: str, *, team_id: str = "") -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
-        _get_channel(conn, session_token, channel_id)
+        _get_channel(conn, session_token, channel_id, team_id)
         event_ids = dispatcher.enqueue(
             TRIGGER_TEST,
             build_test_payload(channel_id),
@@ -535,6 +570,7 @@ def send_test_notification(session_token: str, channel_id: str) -> dict[str, Any
             dispatch_sync=True,
             channel_ids=[channel_id],
             include_muted=True,
+            team_id=team_id,
         )
         events = _test_event_statuses(conn, event_ids)
         conn.commit()

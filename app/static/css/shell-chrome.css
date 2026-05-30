@@ -784,6 +784,52 @@
     white-space: nowrap;
   }
 
+  .hud-scope-cell {
+    min-width: 116px;
+  }
+
+  .hud-scope-trigger {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    justify-content: flex-start;
+    max-width: 150px;
+    min-height: 20px;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    text-align: left;
+  }
+
+  .hud-scope-trigger:hover,
+  .hud-scope-trigger:focus-visible {
+    color: var(--green);
+    outline: none;
+  }
+
+  .hud-scope-trigger.is-loading span {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .hud-scope-trigger.is-error span {
+    color: var(--red);
+  }
+
+  .hud-scope-trigger span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hud-scope-trigger::after {
+    color: var(--muted);
+    content: "›";
+    font-size: 11px;
+  }
+
   .hud-value-green {
     color: var(--green);
     text-shadow: 0 0 8px color-mix(in srgb, var(--green) 22%, transparent);

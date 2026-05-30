@@ -13,13 +13,14 @@ import sys
 from typing import Any, NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json
+from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json, save_config_value
 
 STREAM_INCOMPLETE_EXIT_CODE = 2
 STREAM_INTERRUPTED_EXIT_CODE = 130
 COMPLETION_SHELLS = ("bash", "zsh", "fish")
 COMPLETION_INSTALL_SHELLS = ("auto", *COMPLETION_SHELLS)
 NOTIFICATION_CHANNEL_KIND_CHOICES = ("webhook", "slack", "discord", "telegram", "pushover", "email")
+TEAM_ROLE_CHOICES = ("owner", "admin", "operator", "viewer")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,6 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--api-url", help="darklab_shell base URL")
     parser.add_argument("--token", help="tok_ session token")
+    parser.add_argument("--team", help="Team id for this request; DARKLAB_TEAM also works.")
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
@@ -43,6 +45,79 @@ def _parser() -> argparse.ArgumentParser:
 
     whoami = sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
     whoami.add_argument("--format", choices=("text", "json"), default="text")
+
+    team = sub.add_parser("team", help="Create, join, inspect, and manage teams.")
+    team_sub = team.add_subparsers(dest="team_command", required=True)
+
+    team_status = team_sub.add_parser("status", help="Show the active CLI team scope.")
+    team_status.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_list = team_sub.add_parser("list", help="List teams for the current token.")
+    team_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    team_create = team_sub.add_parser("create", help="Create a team and print its one-time recovery code.")
+    team_create.add_argument("name")
+    team_create.add_argument("--slug")
+    team_create.add_argument("--display-name")
+    team_create.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_switch = team_sub.add_parser("switch", help="Persist the default CLI team scope.")
+    team_switch.add_argument("team_ref", metavar="team-id|name|personal")
+    team_switch.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_info = team_sub.add_parser("info", help="Show one team with members and invites.")
+    team_info.add_argument("team_id")
+    team_info.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_members = team_sub.add_parser("members", help="List members for one team.")
+    team_members.add_argument("team_id")
+    team_members.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    team_invite = team_sub.add_parser("invite", help="Create or revoke team invites.")
+    team_invite_sub = team_invite.add_subparsers(dest="team_invite_command", required=True)
+    team_invite_create = team_invite_sub.add_parser("create", help="Create a team invite.")
+    team_invite_create.add_argument("team_id")
+    team_invite_create.add_argument("--role", choices=TEAM_ROLE_CHOICES, default="operator")
+    team_invite_create.add_argument("--label")
+    team_invite_create.add_argument("--expires-at")
+    team_invite_create.add_argument("--max-uses", type=int, default=1)
+    team_invite_create.add_argument("--format", choices=("text", "json"), default="text")
+    team_invite_revoke = team_invite_sub.add_parser("revoke", help="Revoke a team invite.")
+    team_invite_revoke.add_argument("team_id")
+    team_invite_revoke.add_argument("invite_id")
+    team_invite_revoke.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_join = team_sub.add_parser("join", help="Redeem a team invite code.")
+    team_join.add_argument("code")
+    team_join.add_argument("--display-name")
+    team_join.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_member = team_sub.add_parser("member", help="Update or remove team members.")
+    team_member_sub = team_member.add_subparsers(dest="team_member_command", required=True)
+    team_member_update = team_member_sub.add_parser("update", help="Update a team member role or display name.")
+    team_member_update.add_argument("team_id")
+    team_member_update.add_argument("member_id")
+    team_member_update.add_argument("--role", choices=TEAM_ROLE_CHOICES)
+    team_member_update.add_argument("--display-name")
+    team_member_update.add_argument("--format", choices=("text", "json"), default="text")
+    team_member_remove = team_member_sub.add_parser("remove", help="Remove a team member.")
+    team_member_remove.add_argument("team_id")
+    team_member_remove.add_argument("member_id")
+    team_member_remove.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_leave = team_sub.add_parser("leave", help="Leave a team.")
+    team_leave.add_argument("team_id")
+    team_leave.add_argument("--format", choices=("text", "json"), default="text")
+
+    team_recovery = team_sub.add_parser("recovery", help="Rotate or redeem team recovery codes.")
+    team_recovery_sub = team_recovery.add_subparsers(dest="team_recovery_command", required=True)
+    team_recovery_rotate = team_recovery_sub.add_parser("rotate", help="Rotate a team recovery code.")
+    team_recovery_rotate.add_argument("team_id")
+    team_recovery_rotate.add_argument("--format", choices=("text", "json"), default="text")
+    team_recovery_redeem = team_recovery_sub.add_parser("redeem", help="Redeem a recovery code as an owner.")
+    team_recovery_redeem.add_argument("code")
+    team_recovery_redeem.add_argument("--display-name")
+    team_recovery_redeem.add_argument("--format", choices=("text", "json"), default="text")
 
     run = sub.add_parser("run", help="Start a non-interactive command run.")
     run.add_argument("run_command")
@@ -419,6 +494,8 @@ def _completion_static_argument_choices(path: tuple[str, ...]) -> list[str]:
         return [*COMPLETION_SHELLS, "install"]
     if path == ("notify", "create"):
         return list(NOTIFICATION_CHANNEL_KIND_CHOICES)
+    if path == ("team", "invite", "create"):
+        return list(TEAM_ROLE_CHOICES)
     return []
 
 
@@ -709,6 +786,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
     match args.command:
         case "whoami":
             return _print_payload(client.request("GET", "/whoami"), args.format)
+        case "team":
+            return _team(client, args)
         case "run":
             return _run(client, args)
         case "active":
@@ -796,6 +875,198 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             print(target)
             return 0
     return die("unknown command")
+
+
+def _team(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.team_command:
+        case "status":
+            payload = {
+                "team": client.config.team,
+                "scope": "team" if client.config.team else "personal",
+            }
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            print(f"scope: {payload['scope']}")
+            print(f"team: {payload['team'] or '(none)'}")
+            return 0
+        case "list":
+            payload = client.request("GET", "/teams")
+            teams = payload.get("teams") if isinstance(payload, dict) else []
+            if isinstance(teams, list):
+                payload = {
+                    **payload,
+                    "teams": [
+                        {**team, "role": _team_role(team)}
+                        for team in teams
+                        if isinstance(team, dict)
+                    ],
+                }
+            return _print_collection(payload, "teams", args.format, fields=("id", "status", "role", "name"))
+        case "create":
+            payload = client.request("POST", "/teams", body={
+                "name": args.name,
+                "slug": args.slug,
+                "display_name": args.display_name,
+            })
+            return _print_team_created(payload, args.format)
+        case "switch":
+            team_id = _resolve_team_ref(client, args.team_ref)
+            save_config_value("team", team_id)
+            payload = {"scope": "team" if team_id else "personal", "team": team_id}
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            print(f"scope: {payload['scope']}")
+            if team_id:
+                print(f"team: {team_id}")
+            return 0
+        case "info":
+            return _print_team_detail(client.request("GET", f"/teams/{args.team_id}"), args.format)
+        case "members":
+            payload = client.request("GET", f"/teams/{args.team_id}")
+            members = {"members": payload.get("members", [])}
+            return _print_collection(members, "members", args.format, fields=("id", "role", "status", "display_name"))
+        case "invite":
+            return _team_invite(client, args)
+        case "join":
+            payload = client.request("POST", "/teams/join", body={
+                "code": args.code,
+                "display_name": args.display_name,
+            })
+            return _print_team_detail(payload, args.format)
+        case "member":
+            return _team_member(client, args)
+        case "leave":
+            return _print_payload(client.request("POST", f"/teams/{args.team_id}/leave"), args.format)
+        case "recovery":
+            return _team_recovery(client, args)
+    return die("unknown team command")
+
+
+def _team_invite(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.team_invite_command:
+        case "create":
+            payload = client.request("POST", f"/teams/{args.team_id}/invites", body={
+                "role": args.role,
+                "label": args.label,
+                "expires_at": args.expires_at,
+                "max_uses": args.max_uses,
+            })
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            invite = payload.get("invite") if isinstance(payload, dict) else {}
+            if isinstance(invite, dict):
+                print(f"invite: {invite.get('id')}")
+                print(f"role: {invite.get('role')}")
+                print(f"code: {invite.get('code')}")
+            return 0
+        case "revoke":
+            return _print_payload(
+                client.request("DELETE", f"/teams/{args.team_id}/invites/{args.invite_id}"),
+                args.format,
+            )
+    return die("unknown team invite command")
+
+
+def _team_member(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.team_member_command:
+        case "update":
+            body: dict[str, Any] = {}
+            if args.role is not None:
+                body["role"] = args.role
+            if args.display_name is not None:
+                body["display_name"] = args.display_name
+            if not body:
+                raise DarklabCliError("team member update needs --role or --display-name.")
+            payload = client.request("PATCH", f"/teams/{args.team_id}/members/{args.member_id}", body=body)
+            return _print_team_member(payload, args.format)
+        case "remove":
+            return _print_payload(
+                client.request("DELETE", f"/teams/{args.team_id}/members/{args.member_id}"),
+                args.format,
+            )
+    return die("unknown team member command")
+
+
+def _team_recovery(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.team_recovery_command:
+        case "rotate":
+            payload = client.request("POST", f"/teams/{args.team_id}/recovery/rotate")
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            print(f"recovery code: {payload.get('recovery_code')}")
+            print("Store this somewhere safe. It will not be shown again.")
+            return 0
+        case "redeem":
+            payload = client.request("POST", "/teams/recovery/redeem", body={
+                "code": args.code,
+                "display_name": args.display_name,
+            })
+            return _print_team_detail(payload, args.format)
+    return die("unknown team recovery command")
+
+
+def _resolve_team_ref(client: DarklabClient, team_ref: str) -> str:
+    ref = str(team_ref or "").strip()
+    if ref.lower() in {"", "personal", "none", "-"}:
+        return ""
+    payload = client.request("GET", "/teams")
+    teams = payload.get("teams") if isinstance(payload, dict) else []
+    if not isinstance(teams, list):
+        raise DarklabCliError("could not load teams for this token.")
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        values = {str(team.get("id") or ""), str(team.get("slug") or ""), str(team.get("name") or "")}
+        if ref in values:
+            return str(team.get("id") or ref)
+    raise DarklabCliError(f"team not found: {ref}")
+
+
+def _team_role(team: dict[str, Any]) -> str:
+    member = team.get("member")
+    if isinstance(member, dict):
+        return str(member.get("role") or "")
+    return str(team.get("role") or "")
+
+
+def _print_team_created(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    team = payload.get("team") if isinstance(payload, dict) else {}
+    if isinstance(team, dict):
+        _print_table([{**team, "role": _team_role(team)}], ("id", "status", "role", "name"))
+    recovery_code = payload.get("recovery_code") if isinstance(payload, dict) else ""
+    if recovery_code:
+        print(f"recovery code: {recovery_code}")
+        print("Store this somewhere safe. It will not be shown again.")
+    return 0
+
+
+def _print_team_detail(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    team = payload.get("team") if isinstance(payload, dict) else {}
+    if isinstance(team, dict):
+        _print_detail_section("Team", (
+            ("ID", team.get("id")),
+            ("Name", team.get("name")),
+            ("Slug", team.get("slug")),
+            ("Status", team.get("status")),
+            ("Role", _team_role(team)),
+        ))
+    members = payload.get("members") if isinstance(payload, dict) else []
+    if isinstance(members, list):
+        _print_collection({"members": members}, "members", "text", fields=("id", "role", "status", "display_name"))
+    return 0
+
+
+def _print_team_member(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    member = payload.get("member") if isinstance(payload, dict) else {}
+    if isinstance(member, dict):
+        _print_table([member], ("id", "role", "status", "display_name"))
+    return 0
 
 
 def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:

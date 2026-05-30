@@ -173,6 +173,41 @@
     if (typeof global.showToast === 'function') global.showToast(message, tone);
   }
 
+  function activeTeamScopeCan(capability) {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan(capability)
+      : true;
+  }
+
+  function teamScopeDeniedMessage(action) {
+    return typeof global.teamScopeDeniedMessage === 'function'
+      ? global.teamScopeDeniedMessage(action)
+      : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+  }
+
+  function canTriageAtlasRows() {
+    return activeTeamScopeCan('triage_findings');
+  }
+
+  function canDeleteAtlasRows() {
+    return canTriageAtlasRows();
+  }
+
+  function showAtlasPermissionDenied(action = 'delete Atlas rows') {
+    showToastSafe(teamScopeDeniedMessage(action), 'error');
+  }
+
+  async function atlasMutationError(resp, fallback, action = 'delete Atlas rows') {
+    let message = fallback;
+    try {
+      const data = typeof resp.json === 'function' ? await resp.json() : {};
+      if (data && data.error === 'team_forbidden') message = teamScopeDeniedMessage(action);
+      else if (data && typeof data.message === 'string' && data.message.trim()) message = data.message.trim();
+      else if (data && typeof data.error === 'string' && data.error.trim()) message = data.error.trim();
+    } catch (_) {}
+    return new Error(message || fallback);
+  }
+
   let intelRefreshOverlay = null;
 
   function entityLabelForId(entityId) {
@@ -518,7 +553,11 @@
       runFilterSelect.dataset.populated = '1';
     }
     syncSelectDisplay(findingStatusFilter);
-    syncSelectDisplay(findingBulkStatus);
+    if (findingBulkStatus) {
+      findingBulkStatus.disabled = state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      findingBulkStatus.title = canTriageAtlasRows() ? '' : teamScopeDeniedMessage('triage Atlas findings');
+      syncSelectDisplay(findingBulkStatus);
+    }
     syncSelectDisplay(runFilterSelect);
     syncSelectDisplay(orphanFilter);
     syncSelectDisplay(suppressionFilter);
@@ -587,15 +626,20 @@
       findingClearSelectionBtn.classList.toggle('u-hidden', !state.selectMode);
       findingClearSelectionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
     }
-    if (findingBulkApplyBtn) findingBulkApplyBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    if (findingBulkApplyBtn) {
+      findingBulkApplyBtn.disabled = !selectedCount || state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      findingBulkApplyBtn.title = canTriageAtlasRows() ? '' : teamScopeDeniedMessage('triage Atlas findings');
+    }
     if (bulkSuppressionBtn) {
       bulkSuppressionBtn.classList.toggle('u-hidden', !state.selectMode);
       bulkSuppressionBtn.textContent = state.suppressionFilter === 'only' ? 'Restore' : 'Suppress';
-      bulkSuppressionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+      bulkSuppressionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      bulkSuppressionBtn.title = canTriageAtlasRows() ? '' : teamScopeDeniedMessage('suppress Atlas rows');
     }
     if (bulkDeleteBtn) {
       bulkDeleteBtn.classList.toggle('u-hidden', !state.selectMode);
-      bulkDeleteBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+      bulkDeleteBtn.disabled = !selectedCount || state.loading || state.bulkInFlight || !canDeleteAtlasRows();
+      bulkDeleteBtn.title = canDeleteAtlasRows() ? '' : teamScopeDeniedMessage('delete Atlas rows');
     }
   }
 
@@ -967,14 +1011,20 @@
   function createSuppressionIconButton(item, noun, handler) {
     const btn = document.createElement('button');
     const label = suppressionIconLabel(item, noun);
+    const allowed = canTriageAtlasRows();
     btn.type = 'button';
     btn.className = 'btn btn-ghost btn-icon-only btn-compact atlas-row-suppression-action';
-    btn.title = label;
+    btn.title = allowed ? label : teamScopeDeniedMessage(`suppress Atlas ${noun}s`);
     btn.setAttribute('aria-label', label);
+    btn.disabled = !allowed;
     btn.textContent = item && item.suppressed ? '↺' : '⊘';
     btn.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (!canTriageAtlasRows()) {
+        showAtlasPermissionDenied(`suppress Atlas ${noun}s`);
+        return;
+      }
       handler?.();
     });
     return btn;
@@ -1147,6 +1197,10 @@
     if (currentTab().id === 'findings') {
       const finding = state.findings.find(item => String(item.id || '') === state.selectedFindingId);
       detailApi.renderFindingDetail?.(detailHost, finding, {
+        canTriageAtlasRows: canTriageAtlasRows(),
+        triageDisabledReason: teamScopeDeniedMessage('triage Atlas findings'),
+        canDeleteAtlasRows: canDeleteAtlasRows(),
+        deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
         onReviewState: (item, reviewState) => updateFindingReviewState(item, reviewState),
         onSeeRun: (item) => openSourceRun({
           id: item.run_id,
@@ -1165,6 +1219,10 @@
       : null;
     detailApi.renderDetail?.(detailHost, state.detail, {
       activeProject,
+      canTriageAtlasRows: canTriageAtlasRows(),
+      triageDisabledReason: teamScopeDeniedMessage('triage Atlas rows'),
+      canDeleteAtlasRows: canDeleteAtlasRows(),
+      deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
       isLinkedToActiveProject: (entity) => {
         const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
         return !!activeId && (Array.isArray(entity.project_links) ? entity.project_links : [])
@@ -1489,18 +1547,23 @@
   async function updateFindingReviewState(finding, reviewState) {
     const findingId = String(finding && finding.id || '');
     if (!findingId || !reviewState) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('triage Atlas findings');
+      renderDetail();
+      return;
+    }
     try {
       const resp = await api()(`/findings/${encodeURIComponent(findingId)}/review`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ review_state: reviewState }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update finding', 'triage Atlas findings');
       showToastSafe('Finding updated', 'success');
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas finding', err);
-      showToastSafe('Failed to update finding', 'error');
+      showToastSafe(err && err.message ? err.message : 'Failed to update finding', 'error');
     }
   }
 
@@ -1523,13 +1586,17 @@
     const reviewState = String(reviewStateOverride || findingBulkStatus?.value || '').trim();
     const findingIds = [...state.selectedFindingIds];
     if (!findingIds.length || !reviewState) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('triage Atlas findings');
+      return;
+    }
     try {
       const resp = await api()('/atlas/findings/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ finding_ids: findingIds, review_state: reviewState }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update findings', 'triage Atlas findings');
       const data = await resp.json().catch(() => ({}));
       const updated = Number(data?.counts?.updated || 0);
       const notFound = Number(data?.counts?.not_found || 0);
@@ -1541,7 +1608,7 @@
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to bulk update atlas findings', err);
-      showToastSafe('Failed to update findings', 'error');
+      showToastSafe(err && err.message ? err.message : 'Failed to update findings', 'error');
     }
   }
 
@@ -1550,6 +1617,10 @@
     const isFindings = tab.id === 'findings';
     const itemId = String(item && item.id || '');
     if (!itemId) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('suppress Atlas rows');
+      return;
+    }
     const url = isFindings
       ? `/atlas/findings/${encodeURIComponent(itemId)}/suppression`
       : `/atlas/entities/${encodeURIComponent(itemId)}/suppression`;
@@ -1559,12 +1630,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suppressed: !!suppressed }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update Atlas row', 'suppress Atlas rows');
       showToastSafe(suppressed ? 'Atlas row suppressed' : 'Atlas row restored', 'success');
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas suppression', err);
-      showToastSafe('Failed to update Atlas row', 'error');
+      showToastSafe(err && err.message ? err.message : 'Failed to update Atlas row', 'error');
     }
   }
 
@@ -1575,6 +1646,10 @@
     const selected = activeSelectionSet(tab);
     const ids = [...selected];
     if (!ids.length) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('suppress Atlas rows');
+      return;
+    }
     setBulkBusy(true);
     try {
       const url = isFindings ? '/atlas/findings/suppression' : '/atlas/entities/suppression';
@@ -1586,7 +1661,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update selected Atlas rows', 'update Atlas rows');
       const data = await resp.json().catch(() => ({}));
       selected.clear();
       const updated = Number(data?.counts?.updated || 0);
@@ -1629,6 +1704,10 @@
 
   async function bulkDeleteSelectedItems() {
     if (state.bulkInFlight) return;
+    if (!canDeleteAtlasRows()) {
+      showAtlasPermissionDenied('delete Atlas rows');
+      return;
+    }
     const tab = currentTab();
     const isFindings = tab.id === 'findings';
     const selected = activeSelectionSet(tab);
@@ -1671,7 +1750,7 @@
       await refreshAtlas({ resetOffset: state.offset >= state.total - ids.length });
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to bulk delete atlas rows', err);
-      showToastSafe('Failed to delete selected Atlas rows', 'error');
+      showToastSafe(err.message || 'Failed to delete selected Atlas rows', 'error');
     } finally {
       setBulkBusy(false);
     }
@@ -1824,6 +1903,10 @@
   async function confirmDeleteEntity() {
     const entityId = String(state.selectedId || '');
     if (!entityId || typeof global.showConfirm !== 'function') return;
+    if (!canDeleteAtlasRows()) {
+      showAtlasPermissionDenied('delete Atlas rows');
+      return;
+    }
     try {
       const previewResp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}/delete-preview`, { cache: 'no-store' });
       if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
@@ -1853,20 +1936,24 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prune_source_run: prune, prune_curated_source_run: pruneCurated }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to delete Atlas entity');
       showToastSafe(prune ? 'Entity and related Atlas items deleted' : 'Entity deleted', 'success');
       state.selectedId = '';
       state.detail = null;
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas entity', err);
-      showToastSafe('Failed to delete Atlas entity', 'error');
+      showToastSafe(err.message || 'Failed to delete Atlas entity', 'error');
     }
   }
 
   async function confirmDeleteFinding(finding) {
     const findingId = String(finding?.id || state.selectedFindingId || '');
     if (!findingId || typeof global.showConfirm !== 'function') return;
+    if (!canDeleteAtlasRows()) {
+      showAtlasPermissionDenied('delete Atlas rows');
+      return;
+    }
     try {
       const previewResp = await api()(`/atlas/findings/${encodeURIComponent(findingId)}/delete-preview`, { cache: 'no-store' });
       if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
@@ -1892,14 +1979,14 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prune_source_run: prune, prune_curated_source_run: pruneCurated }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to delete Atlas finding');
       showToastSafe(prune ? 'Finding and related Atlas items deleted' : 'Finding deleted', 'success');
       state.selectedFindingId = '';
       state.selectedFindingIds.delete(findingId);
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas finding', err);
-      showToastSafe('Failed to delete Atlas finding', 'error');
+      showToastSafe(err.message || 'Failed to delete Atlas finding', 'error');
     }
   }
 
@@ -2269,6 +2356,7 @@
     confirmCleanRunAtlas,
     updateFindingReviewState,
     updateSuppression,
+    canTriageAtlasRows,
     openEntityFromFinding,
     openSourceRun,
     exportEntities,

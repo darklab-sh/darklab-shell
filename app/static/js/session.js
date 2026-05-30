@@ -38,6 +38,9 @@ function updateSessionId(newId) {
   if (typeof refreshWorkspaceFileCache === 'function') {
     refreshWorkspaceFileCache().catch(() => {});
   }
+  if (typeof refreshTeamScopes === 'function') {
+    refreshTeamScopes().catch(() => {});
+  }
   if (typeof window.refreshActiveProjectContext === 'function') {
     window.refreshActiveProjectContext().catch(() => {});
   }
@@ -64,6 +67,7 @@ window.addEventListener('storage', (e) => {
     if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
     if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
     if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
+    if (typeof refreshTeamScopes === 'function') refreshTeamScopes().catch(() => {});
     if (typeof window.refreshActiveProjectContext === 'function') window.refreshActiveProjectContext().catch(() => {});
     if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
     if (typeof invalidateOptionsSecrets === 'function') invalidateOptionsSecrets();
@@ -83,7 +87,12 @@ function maskSessionToken(token) {
 // Wrapper around fetch that always includes the session ID header so every API
 // request stays scoped to the same anonymous browser session.
 function apiFetch(url, options = {}) {
-  return fetch(url, SessionCore.withSessionHeaders(options, SESSION_ID, CLIENT_ID));
+  const requestOptions = SessionCore.withSessionHeaders(options, SESSION_ID, CLIENT_ID);
+  const teamId = typeof getActiveTeamId === 'function' ? getActiveTeamId() : '';
+  if (teamId) {
+    requestOptions.headers = Object.assign({}, requestOptions.headers || {}, { 'X-Team-ID': teamId });
+  }
+  return fetch(url, requestOptions);
 }
 
 function describeFetchError(err, context = 'server') {

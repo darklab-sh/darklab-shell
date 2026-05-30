@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import config as _config
 from core.database import DB_BACKEND, db_connect, validate_project_entity_type
 from core.database_backend import dialect_for_backend
+from services.atlas.lookup import entity_exists_in_scope, finding_exists_in_scope, metadata_owner_id
 from services.projects.contracts import (
     ENTITY_METADATA_TYPES,
     MAX_ENTITY_ID_LEN,
@@ -19,6 +20,7 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
     ProjectWorkspaceQuotaExceeded,
 )
+from services.projects.scope import normalize_team_id, shared_owner_where
 from services.projects.utils import trim_text as _trim_text
 from services.workspace.files import WorkspaceError, resolve_workspace_path
 
@@ -87,29 +89,41 @@ def _row_to_entity_note(row):
     }
 
 
-def _count_entity_metadata_for_ids(conn, table, entity_type, entity_ids):
+def _count_entity_metadata_for_ids(conn, table, entity_type, entity_ids, *, session_id="", team_id=""):
     values = [str(value) for value in entity_ids if value]
     if not values:
         return 0
     placeholders = ",".join("?" for _ in values)
+    params = [entity_type, *values]
+    owner_sql = ""
+    metadata_session = _metadata_session_id(session_id, team_id) if session_id or team_id else ""
+    if metadata_session:
+        owner_sql = " AND session_id = ?"
+        params.append(metadata_session)
     row = conn.execute(
-        f"SELECT COUNT(*) AS count FROM {table} WHERE entity_type = ? AND entity_id IN ({placeholders})",  # nosec
-        [entity_type, *values],
+        f"SELECT COUNT(*) AS count FROM {table} "  # nosec
+        f"WHERE entity_type = ? AND entity_id IN ({placeholders}){owner_sql}",
+        params,
     ).fetchone()
     return int(row["count"] or 0) if row else 0
 
 
-def _entity_labels_by_id(conn, session_id, entity_type, entity_ids):
+def _metadata_session_id(session_id, team_id=""):
+    return metadata_owner_id(session_id, team_id)
+
+
+def _entity_labels_by_id(conn, session_id, entity_type, entity_ids, *, team_id=""):
     values = [str(value) for value in entity_ids if value]
     if not values:
         return {}
+    metadata_session = _metadata_session_id(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
         "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
         "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
         "ORDER BY " + _label_order_sql(),
-        [session_id, entity_type, *values],
+        [metadata_session, entity_type, *values],
     ).fetchall()
     grouped = {value: [] for value in values}
     for row in rows:
@@ -117,47 +131,48 @@ def _entity_labels_by_id(conn, session_id, entity_type, entity_ids):
     return grouped
 
 
-def _entity_notes_by_id(conn, session_id, entity_type, entity_ids):
+def _entity_notes_by_id(conn, session_id, entity_type, entity_ids, *, team_id=""):
     values = [str(value) for value in entity_ids if value]
     if not values:
         return {}
+    metadata_session = _metadata_session_id(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
         "SELECT id, session_id, entity_type, entity_id, body, created, updated "  # nosec
         "FROM entity_notes WHERE session_id = ? AND entity_type = ? "
         f"AND entity_id IN ({placeholders})",
-        [session_id, entity_type, *values],
+        [metadata_session, entity_type, *values],
     ).fetchall()
     return {str(row["entity_id"]): _row_to_entity_note(row) for row in rows}
 
 
-def _attach_project_notes(conn, session_id, projects):
+def _attach_project_notes(conn, session_id, projects, *, team_id=""):
     items = [project for project in projects if project]
     if not items:
         return items
-    note_map = _entity_notes_by_id(conn, session_id, "project", [project["id"] for project in items])
+    note_map = _entity_notes_by_id(conn, session_id, "project", [project["id"] for project in items], team_id=team_id)
     for project in items:
         project["note"] = note_map.get(str(project["id"]))
     return items
 
 
-def _attach_project_labels(conn, session_id, projects):
+def _attach_project_labels(conn, session_id, projects, *, team_id=""):
     items = [project for project in projects if project]
     if not items:
         return items
-    label_map = _entity_labels_by_id(conn, session_id, "project", [project["id"] for project in items])
+    label_map = _entity_labels_by_id(conn, session_id, "project", [project["id"] for project in items], team_id=team_id)
     for project in items:
         project["labels"] = label_map.get(str(project["id"]), [])
     return items
 
 
-def _attach_package_metadata(conn, session_id, packages):
+def _attach_package_metadata(conn, session_id, packages, *, team_id=""):
     items = [package for package in packages if package]
     if not items:
         return items
     package_ids = [package["id"] for package in items]
-    label_map = _entity_labels_by_id(conn, session_id, "package", package_ids)
-    note_map = _entity_notes_by_id(conn, session_id, "package", package_ids)
+    label_map = _entity_labels_by_id(conn, session_id, "package", package_ids, team_id=team_id)
+    note_map = _entity_notes_by_id(conn, session_id, "package", package_ids, team_id=team_id)
     for package in items:
         package_id = str(package["id"])
         package["labels"] = label_map.get(package_id, [])
@@ -165,15 +180,15 @@ def _attach_package_metadata(conn, session_id, packages):
     return items
 
 
-def _attach_target_metadata(conn, session_id, targets):
+def _attach_target_metadata(conn, session_id, targets, *, team_id=""):
     items = [target for target in targets if target]
     if not items:
         return items
     target_ids = [target["id"] for target in items]
-    label_map = _entity_labels_by_id(conn, session_id, "atlas_entity", target_ids)
-    legacy_label_map = _entity_labels_by_id(conn, session_id, "target", target_ids)
-    note_map = _entity_notes_by_id(conn, session_id, "atlas_entity", target_ids)
-    legacy_note_map = _entity_notes_by_id(conn, session_id, "target", target_ids)
+    label_map = _entity_labels_by_id(conn, session_id, "atlas_entity", target_ids, team_id=team_id)
+    legacy_label_map = _entity_labels_by_id(conn, session_id, "target", target_ids, team_id=team_id)
+    note_map = _entity_notes_by_id(conn, session_id, "atlas_entity", target_ids, team_id=team_id)
+    legacy_note_map = _entity_notes_by_id(conn, session_id, "target", target_ids, team_id=team_id)
     for target in items:
         target_id = str(target["id"])
         target["labels"] = [*label_map.get(target_id, []), *legacy_label_map.get(target_id, [])]
@@ -181,28 +196,29 @@ def _attach_target_metadata(conn, session_id, targets):
     return items
 
 
-def _save_project_note(conn, session_id, project_id, notes):
+def _save_project_note(conn, session_id, project_id, notes, *, team_id=""):
     body = _trim_text(notes, MAX_PROJECT_NOTES_LEN)
+    metadata_session = _metadata_session_id(session_id, team_id)
     now = _now()
     if not body:
         conn.execute(
             "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-            (session_id, project_id),
+            (metadata_session, project_id),
         )
         return
     existing = conn.execute(
         "SELECT id FROM entity_notes WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-        (session_id, project_id),
+        (metadata_session, project_id),
     ).fetchone()
     if existing:
         conn.execute(
             "UPDATE entity_notes SET body = ?, updated = ? WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-            (body, now, session_id, project_id),
+            (body, now, metadata_session, project_id),
         )
         return
     session_count = conn.execute(
         "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
-        (session_id,),
+        (metadata_session,),
     ).fetchone()
     if _quota_exceeded(
         int(session_count["count"] or 0) if session_count else 0,
@@ -217,7 +233,7 @@ def _save_project_note(conn, session_id, project_id, notes):
             "(id, session_id, entity_type, entity_id, body, created, updated) "
             "VALUES (?, ?, 'project', ?, ?, ?, ?) "
             "ON CONFLICT(id) DO NOTHING",
-            (note_id, session_id, project_id, body, now, now),
+            (note_id, metadata_session, project_id, body, now, now),
         )
         if result.rowcount:
             return
@@ -268,81 +284,86 @@ def _workspace_file_belongs_to_session(session_id, entity_id):
         return False
 
 
-def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+def _shared_record_exists(conn, session_id, table, entity_id, *, team_id=""):
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
+    row = conn.execute(
+        f"SELECT 1 FROM {table} WHERE {owner_sql} AND id = ?",  # nosec
+        (*owner_params, entity_id),
+    ).fetchone()
+    return row is not None
+
+
+def _entity_belongs_to_session(conn, session_id, entity_type, entity_id, *, team_id=""):
+    normalized_team_id = normalize_team_id(team_id)
     if entity_type == "workspace_file":
+        if normalized_team_id:
+            return False
         return _workspace_file_belongs_to_session(session_id, entity_id)
     if entity_type in {"atlas_entity", "target"}:
-        row = conn.execute(
-            "SELECT 1 FROM entities WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
+        return entity_exists_in_scope(conn, session_id, entity_id, team_id=normalized_team_id)
     elif entity_type == "project":
-        row = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
+        return _shared_record_exists(conn, session_id, "projects", entity_id, team_id=normalized_team_id)
     elif entity_type == "run":
-        row = conn.execute(
-            "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
+        return _shared_record_exists(conn, session_id, "runs", entity_id, team_id=normalized_team_id)
     elif entity_type == "snapshot":
-        row = conn.execute(
-            "SELECT 1 FROM snapshots WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
+        return _shared_record_exists(conn, session_id, "snapshots", entity_id, team_id=normalized_team_id)
     elif entity_type == "run_file_artifact":
+        if normalized_team_id:
+            return False
         row = conn.execute(
             "SELECT 1 FROM run_file_artifacts WHERE session_id = ? AND id = ?",
             (session_id, entity_id),
         ).fetchone()
+        return row is not None
     elif entity_type == "finding":
-        row = conn.execute(
-            "SELECT 1 FROM findings WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
+        return finding_exists_in_scope(conn, session_id, entity_id, team_id=normalized_team_id)
     elif entity_type == "package":
+        if normalized_team_id:
+            return False
         row = conn.execute(
             "SELECT 1 FROM evidence_packages WHERE session_id = ? AND id = ?",
             (session_id, entity_id),
         ).fetchone()
+        return row is not None
     else:
         return False
     return row is not None
 
 
-def list_entity_labels(session_id, entity_type, entity_id):
+def list_entity_labels(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    metadata_session = _metadata_session_id(session_id, team_id)
     with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         rows = conn.execute(
             "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec B608
             "FROM entity_labels WHERE session_id = ? AND entity_type = ? AND entity_id = ? "
             "ORDER BY " + _label_order_sql(),
-            (session_id, entity_type, entity_id),
+            (metadata_session, entity_type, entity_id),
         ).fetchall()
     return [_row_to_label(row) for row in rows]
 
 
-def add_entity_label(session_id, entity_type, entity_id, data):
+def add_entity_label(session_id, entity_type, entity_id, data, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     label = _normalize_label_payload(data)
+    metadata_session = _metadata_session_id(session_id, team_id)
     created = _now()
     with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         row = conn.execute(
             "SELECT id, session_id, entity_type, entity_id, label, source, created "
             "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
             "AND entity_id = ? AND label = ?",
-            [session_id, entity_type, entity_id, label],
+            [metadata_session, entity_type, entity_id, label],
         ).fetchone()
         if row:
             return _row_to_label(row)
         session_count = conn.execute(
             "SELECT COUNT(*) AS count FROM entity_labels WHERE session_id = ?",
-            [session_id],
+            [metadata_session],
         ).fetchone()
         if _quota_exceeded(
             int(session_count["count"] or 0) if session_count else 0,
@@ -353,7 +374,7 @@ def add_entity_label(session_id, entity_type, entity_id, data):
         entity_count = conn.execute(
             "SELECT COUNT(*) AS count FROM entity_labels "
             "WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            [session_id, entity_type, entity_id],
+            [metadata_session, entity_type, entity_id],
         ).fetchone()
         if _quota_exceeded(
             int(entity_count["count"] or 0) if entity_count else 0,
@@ -368,13 +389,13 @@ def add_entity_label(session_id, entity_type, entity_id, data):
                 "(id, session_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, ?, ?, ?, 'manual', ?) "
                 "ON CONFLICT(session_id, entity_type, entity_id, label) DO NOTHING",
-                (label_id, session_id, entity_type, entity_id, label, created),
+                (label_id, metadata_session, entity_type, entity_id, label, created),
             )
             row = conn.execute(
                 "SELECT id, session_id, entity_type, entity_id, label, source, created "
                 "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
                 "AND entity_id = ? AND label = ?",
-                [session_id, entity_type, entity_id, label],
+                [metadata_session, entity_type, entity_id, label],
             ).fetchone()
             if row:
                 conn.commit()
@@ -382,67 +403,70 @@ def add_entity_label(session_id, entity_type, entity_id, data):
         raise ProjectWorkspaceError("could not allocate an entity label id")
 
 
-def delete_entity_label(session_id, entity_type, entity_id, data):
+def delete_entity_label(session_id, entity_type, entity_id, data, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     label = _normalize_label_payload(data)
+    metadata_session = _metadata_session_id(session_id, team_id)
     with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         result = conn.execute(
             "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = ? "
             "AND entity_id = ? AND label = ?",
-            (session_id, entity_type, entity_id, label),
+            (metadata_session, entity_type, entity_id, label),
         )
         conn.commit()
     return result.rowcount > 0
 
 
-def entity_metadata_target_exists(session_id, entity_type, entity_id):
+def entity_metadata_target_exists(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     with db_connect() as conn:
-        return _entity_belongs_to_session(conn, session_id, entity_type, entity_id)
+        return _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id)
 
 
-def get_entity_note(session_id, entity_type, entity_id):
+def get_entity_note(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    metadata_session = _metadata_session_id(session_id, team_id)
     with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         row = conn.execute(
             "SELECT id, session_id, entity_type, entity_id, body, created, updated "
             "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
+            (metadata_session, entity_type, entity_id),
         ).fetchone()
     return _row_to_entity_note(row)
 
 
-def upsert_entity_note(session_id, entity_type, entity_id, data):
+def upsert_entity_note(session_id, entity_type, entity_id, data, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     payload = _normalize_entity_note_payload(data)
+    metadata_session = _metadata_session_id(session_id, team_id)
     now = _now()
     with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         existing = conn.execute(
             "SELECT id, session_id, entity_type, entity_id, body, created, updated "
             "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            [session_id, entity_type, entity_id],
+            [metadata_session, entity_type, entity_id],
         ).fetchone()
         if existing:
             conn.execute(
                 "UPDATE entity_notes SET body = ?, updated = ? WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-                (payload["body"], now, session_id, entity_type, entity_id),
+                (payload["body"], now, metadata_session, entity_type, entity_id),
             )
             row = conn.execute(
                 "SELECT id, session_id, entity_type, entity_id, body, created, updated "
                 "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-                [session_id, entity_type, entity_id],
+                [metadata_session, entity_type, entity_id],
             ).fetchone()
             conn.commit()
             return _row_to_entity_note(row)
         session_count = conn.execute(
             "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
-            [session_id],
+            [metadata_session],
         ).fetchone()
         if _quota_exceeded(
             int(session_count["count"] or 0) if session_count else 0,
@@ -459,7 +483,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
                 "ON CONFLICT(session_id, entity_type, entity_id) DO NOTHING",
                 (
                     note_id,
-                    session_id,
+                    metadata_session,
                     entity_type,
                     entity_id,
                     payload["body"],
@@ -470,7 +494,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
             row = conn.execute(
                 "SELECT id, session_id, entity_type, entity_id, body, created, updated "
                 "FROM entity_notes WHERE id = ? AND session_id = ?",
-                [note_id, session_id],
+                [note_id, metadata_session],
             ).fetchone()
             if row:
                 conn.commit()
@@ -478,14 +502,15 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
         raise ProjectWorkspaceError("could not allocate an entity note id")
 
 
-def delete_entity_note(session_id, entity_type, entity_id):
+def delete_entity_note(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    metadata_session = _metadata_session_id(session_id, team_id)
     with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         result = conn.execute(
             "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
+            (metadata_session, entity_type, entity_id),
         )
         conn.commit()
     return result.rowcount > 0

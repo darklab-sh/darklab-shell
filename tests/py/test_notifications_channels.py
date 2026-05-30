@@ -43,6 +43,7 @@ def _channel(kind: str, *, secrets=None, config=None) -> NotificationChannel:
     return NotificationChannel(
         id=f"ntc_{kind}",
         session_token="tok_notifications",
+        team_id="",
         kind=kind,
         label=kind.title(),
         secrets=secrets or {"url": f"{kind.upper()}_WEBHOOK_URL"},

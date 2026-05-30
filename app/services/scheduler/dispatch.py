@@ -38,6 +38,7 @@ def _schedule_log_payload(schedule: Schedule, **extra) -> dict[str, object]:
         "schedule_id": schedule.id,
         "owner_kind": schedule.owner_kind,
         "owner_id": schedule.owner_id,
+        "team_id": schedule.team_id,
         "session": get_log_session_id(schedule.session_token),
         "next_run_at": schedule.next_run_at,
         "last_run_id": schedule.last_run_id,
@@ -56,6 +57,13 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
     command as well.
     """
     log.debug("SCHEDULE_FIRE_DISPATCH", extra=_schedule_log_payload(schedule, fired_at=fired_at))
+    if _schedule_team_is_archived(conn, schedule):
+        _disable_archived_team_schedule(conn, schedule, fired_at=fired_at)
+        log.warning(
+            "SCHEDULE_FIRE_SKIPPED_ARCHIVED_TEAM",
+            extra=_schedule_log_payload(schedule, fired_at=fired_at),
+        )
+        return FIRE_STATUS_FAILED
     try:
         if schedule.owner_kind == OWNER_KIND_USER:
             status, run_id = _fire_user_schedule(conn, schedule, fired_at=fired_at)
@@ -85,6 +93,36 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
             ),
         )
         return FIRE_STATUS_FAILED
+
+
+def _schedule_team_is_archived(conn, schedule: Schedule) -> bool:
+    team_id = str(schedule.team_id or "").strip()
+    if not team_id:
+        return False
+    row = conn.execute("SELECT status FROM teams WHERE id = ? AND deleted_at = ''", (team_id,)).fetchone()
+    return row is None or str(row["status"] or "") != "active"
+
+
+def _disable_archived_team_schedule(conn, schedule: Schedule, *, fired_at: str) -> None:
+    reason = "team archived"
+    record_schedule_fire(conn, schedule, status=FIRE_STATUS_FAILED, fired_at=fired_at, reason=reason)
+    conn.execute(
+        """
+        UPDATE schedules
+        SET enabled = ?, last_run_at = ?, last_error = ?, paused_reason = ?, updated = ?
+        WHERE id = ?
+        """,
+        (_bool_param(False), fired_at, reason, "team_archived", fired_at, schedule.id),
+    )
+    if schedule.owner_kind == OWNER_KIND_WATCHER and schedule.owner_id:
+        conn.execute(
+            """
+            UPDATE watchers
+            SET state = 'paused', state_reason = ?
+            WHERE id = ? AND team_id = ?
+            """,
+            ("team_archived", schedule.owner_id, schedule.team_id),
+        )
 
 
 def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str, str]:
@@ -276,7 +314,7 @@ def _previous_run_is_active(schedule: Schedule) -> tuple[bool, int]:
     previous_run_id = str(schedule.last_run_id or "").strip()
     if not previous_run_id:
         return False, 0
-    active_runs = active_runs_for_session(schedule.session_token)
+    active_runs = active_runs_for_session(schedule.session_token, team_id=schedule.team_id)
     return any(
         str(active.get("run_id") or "") == previous_run_id
         for active in active_runs
@@ -336,6 +374,7 @@ def _enqueue_scheduled_fire_failed(conn, schedule: Schedule, error: str) -> None
             build_scheduled_run_failed_payload(schedule, error),
             schedule.session_token,
             conn=conn,
+            team_id=schedule.team_id,
         )
     except Exception:
         log.error("SCHEDULE_FAILURE_NOTIFICATION_ERROR", exc_info=True, extra={"schedule_id": schedule.id})
@@ -371,7 +410,15 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
 
     if resolves_exact_special_builtin_command(original_command):
         log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="builtin_exact"))
-        events, exit_code = execute_builtin_command(original_command, schedule.session_token, tab_id=owner_tab_id)
+        events, exit_code = execute_builtin_command(
+            original_command,
+            schedule.session_token,
+            tab_id=owner_tab_id,
+            team_id=schedule.team_id,
+        )
+        synthetic_kwargs = {"owner_tab_id": owner_tab_id}
+        if schedule.team_id:
+            synthetic_kwargs["team_id"] = schedule.team_id
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             run_blueprint._history_safe_command_for_storage(original_command),  # noqa: SLF001
             schedule.session_token,
@@ -379,7 +426,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             events,
             exit_code,
             cmd_type="builtin",
-            owner_tab_id=owner_tab_id,
+            **synthetic_kwargs,
         )
 
     try:
@@ -393,7 +440,15 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
 
     if resolve_builtin_command(prepared_input.execution_command):
         log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="builtin_rewritten"))
-        events, exit_code = execute_builtin_command(prepared_input.execution_command, schedule.session_token, tab_id=owner_tab_id)
+        events, exit_code = execute_builtin_command(
+            prepared_input.execution_command,
+            schedule.session_token,
+            tab_id=owner_tab_id,
+            team_id=schedule.team_id,
+        )
+        synthetic_kwargs = {"owner_tab_id": owner_tab_id}
+        if schedule.team_id:
+            synthetic_kwargs["team_id"] = schedule.team_id
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             run_blueprint._history_safe_command_for_storage(original_command),  # noqa: SLF001
             schedule.session_token,
@@ -405,7 +460,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             ),
             exit_code,
             cmd_type="builtin",
-            owner_tab_id=owner_tab_id,
+            **synthetic_kwargs,
         )
 
     try:
@@ -415,12 +470,16 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             schedule.session_token,
             client_ip,
             "",
+            team_id=schedule.team_id,
         )
     except run_blueprint._RunPreparationError as exc:  # noqa: SLF001
         raise ScheduleFireError(str(exc)) from exc
 
     if prepared_real.missing_runtime:
         log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="missing_runtime"))
+        synthetic_kwargs = {"owner_tab_id": owner_tab_id}
+        if schedule.team_id:
+            synthetic_kwargs["team_id"] = schedule.team_id
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             original_command,
             schedule.session_token,
@@ -428,7 +487,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             [{"type": "output", "text": runtime_missing_command_message(prepared_real.missing_runtime)}],
             127,
             cmd_type="missing",
-            owner_tab_id=owner_tab_id,
+            **synthetic_kwargs,
         )
 
     try:
@@ -439,6 +498,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             client_ip,
             prepared_real,
             owner_tab_id=owner_tab_id,
+            team_id=schedule.team_id,
         )
     except run_blueprint._RunSpawnError as exc:  # noqa: SLF001
         raise ScheduleFireError(str(exc)) from exc
@@ -450,6 +510,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             "run_id": started.run_id,
             "proc": started.proc,
             "session_id": schedule.session_token,
+            "team_id": schedule.team_id,
             "client_ip": client_ip,
             "original_command": original_command,
             "run_started": started.run_started,

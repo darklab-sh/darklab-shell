@@ -40,7 +40,11 @@ Part 6 — operator configuration docs:
   be represented in the checked-in app/conf/config.yaml reference and the
   CONFIGURATION.md "## Application Settings" table.
 
-Part 7 — related-doc navigation:
+Part 7 — team-mode scope predicates:
+  Team-visible run queries must use the shared owner-scope predicates instead
+  of directly combining a caller's session token with a team id.
+
+Part 8 — related-doc navigation:
   Every "## Related Docs" section must link to every tracked project Markdown
   file except release drafts and itself. README.md's "## Documentation Map"
   follows the same inventory.
@@ -67,6 +71,18 @@ _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
 _RELEASE_DRAFTS_DIR = _REPO_ROOT / "docs" / "release-drafts"
 
+_DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
+    r"\b(?:runs|r)\.session_id\s*=\s*\?.{0,240}\b(?:runs|r)\.team_id\s*=\s*\?"
+    r"|\b(?:runs|r)\.team_id\s*=\s*\?.{0,240}\b(?:runs|r)\.session_id\s*=\s*\?",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNQUALIFIED_TEAM_RUN_PREDICATE_RE = re.compile(
+    r"\bsession_id\s*=\s*\?.{0,240}\bteam_id\s*=\s*\?"
+    r"|\bteam_id\s*=\s*\?.{0,240}\bsession_id\s*=\s*\?",
+    re.IGNORECASE | re.DOTALL,
+)
+_RUN_SQL_RE = re.compile(r"\b(?:FROM|JOIN)\s+runs\b|\bruns\.", re.IGNORECASE)
+
 # This file lives in tests/py/ but has no appendix section of its own;
 # it is explicitly excluded from the "missing appendix" check below.
 _THIS_FILE = Path(__file__).name
@@ -82,6 +98,48 @@ _ROW_RE = re.compile(r"^\|\s+(``[^`]*(?:`[^`]+)*[^`]*``|`[^`]+`)\s+\|")
 def _append_unique(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
+
+
+def _stringish_source(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for part in node.values:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                parts.append(part.value)
+            else:
+                parts.append("{}")
+        return "".join(parts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _stringish_source(node.left) + _stringish_source(node.right)
+    return ""
+
+
+def _assignment_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _team_scope_sql_fragments(path: Path) -> list[tuple[int, str]]:
+    tree = ast.parse(path.read_text(), filename=str(path))
+    fragments: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            target_names = {_assignment_name(target) for target in node.targets}
+            if any(name.endswith(("_sql", "_query", "_clause")) or name in {"sql", "query"} for name in target_names):
+                source = _stringish_source(node.value)
+                if source:
+                    fragments.append((node.lineno, source))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in {"execute", "executemany"} and node.args:
+                source = _stringish_source(node.args[0])
+                if source:
+                    fragments.append((node.lineno, source))
+    return fragments
 
 
 def _run_pytest_collect() -> tuple[int, dict[str, list[str]]]:
@@ -1133,7 +1191,30 @@ class TestOperatorConfigurationDocs:
         )
 
 
-# ── Part 7: related-doc navigation ───────────────────────────────────────────
+# ── Part 7: team-mode scope predicates ───────────────────────────────────────
+
+class TestTeamModeScopePredicates:
+    def test_direct_team_run_predicates_use_owner_scope_helpers(self):
+        issues = []
+        for path in sorted((_REPO_ROOT / "app").rglob("*.py")):
+            relative = path.relative_to(_REPO_ROOT)
+            for line_number, source in _team_scope_sql_fragments(path):
+                qualified_match = _DIRECT_TEAM_RUN_PREDICATE_RE.search(source)
+                unqualified_match = _RUN_SQL_RE.search(source) and _UNQUALIFIED_TEAM_RUN_PREDICATE_RE.search(source)
+                if not (qualified_match or unqualified_match):
+                    continue
+                snippet = " ".join(source.split())[:180]
+                issues.append(f"  {relative}:{line_number}: {snippet}")
+
+        assert not issues, (
+            "Direct team run predicates can hide team-owned runs from other members. "
+            "Use owner_scope.predicate(), _run_owner_clause(), or another shared owner-scope helper "
+            "instead of combining session_id = ? with team_id = ? on runs:\n"
+            + "\n".join(issues)
+        )
+
+
+# ── Part 8: related-doc navigation ───────────────────────────────────────────
 
 class TestRelatedDocsNavigation:
     def test_related_docs_sections_list_project_markdown_files(self):

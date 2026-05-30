@@ -354,7 +354,29 @@ function _createTabActionButton(id, action, label, { hidden = false, danger = fa
   btn.dataset.tab = id;
   if (hidden) btn.hidden = true;
   btn.textContent = label;
+  if (action === 'permalink') _updateTabShareSnapshotActionButton(btn);
   return btn;
+}
+
+function _canCreateTabShareSnapshot() {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
+function _tabShareSnapshotDeniedTitle() {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage('create team history snapshots')
+    : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+}
+
+function _updateTabShareSnapshotActionButton(btn) {
+  if (!btn) return;
+  const allowed = _canCreateTabShareSnapshot();
+  btn.disabled = !allowed;
+  btn.title = allowed ? 'Share tab as permalink' : _tabShareSnapshotDeniedTitle();
+}
+
+function refreshShareSnapshotActions() {
+  document.querySelectorAll('[data-action="permalink"][data-tab]').forEach(_updateTabShareSnapshotActionButton);
 }
 
 function _getOutputFollowButton(id) {
@@ -855,3 +877,10 @@ function startTabRename(id, labelEl) {
     ensureActiveTabVisible(id);
   });
 }
+
+document.addEventListener('app:scope-changed', () => {
+  refreshShareSnapshotActions();
+});
+document.addEventListener('app:scope-capabilities-changed', () => {
+  refreshShareSnapshotActions();
+});

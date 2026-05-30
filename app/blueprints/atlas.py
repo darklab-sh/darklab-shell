@@ -30,6 +30,8 @@ from services.atlas.lookup import (
     atlas_entities_export_jsonl,
     atlas_summary,
     entity_detail,
+    entity_exists_in_scope,
+    finding_exists_in_scope,
     list_entities,
     list_findings,
     list_source_runs,
@@ -44,6 +46,9 @@ from services.projects.links import (
     link_project_entity,
     unlink_project_entity,
 )
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
+from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
 
 import logging
 
@@ -69,6 +74,24 @@ def _parse_int(value, default, *, minimum=0, maximum=200):
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _atlas_permission_error_response(exc):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _atlas_request_scope_response(session_id, required_capability=None):
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return None, (jsonify(payload), status)
+    if scope.is_team and required_capability is not None:
+        try:
+            require_capability(str((scope.member or {}).get("role") or ""), required_capability)
+        except TeamPermissionDenied as exc:
+            return None, _atlas_permission_error_response(exc)
+    return scope, None
 
 
 def _normalize_finding_ids(values):
@@ -240,10 +263,15 @@ def _save_saved_views(conn, session_id, preferences, views):
 @atlas_bp.route("/atlas")
 def atlas_index():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     with db_connect() as conn:
         return jsonify(atlas_summary(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             run_id=request.args.get("run_id") or "",
             project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
@@ -348,11 +376,16 @@ def atlas_saved_view_delete(view_id):
 @atlas_bp.route("/atlas/runs")
 def atlas_runs_list():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 30, minimum=1, maximum=50)
     with db_connect() as conn:
         return jsonify(list_source_runs(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             query=request.args.get("q") or "",
             run_id=request.args.get("run_id") or "",
             limit=limit,
@@ -362,12 +395,17 @@ def atlas_runs_list():
 @atlas_bp.route("/atlas/entities")
 def atlas_entities_list():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
     with db_connect() as conn:
         return jsonify(list_entities(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             entity_type=request.args.get("type") or "",
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
@@ -382,6 +420,10 @@ def atlas_entities_list():
 @atlas_bp.route("/atlas/entities/export")
 def atlas_entities_export_download():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     export_format = str(request.args.get("format") or "csv").strip().lower()
     if export_format not in {"csv", "jsonl"}:
         return jsonify({"error": "format must be csv or jsonl"}), 400
@@ -390,6 +432,7 @@ def atlas_entities_export_download():
         rows = atlas_entities_export(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             entity_type=request.args.get("type") or "",
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
@@ -424,12 +467,17 @@ def atlas_entities_export_download():
 @atlas_bp.route("/atlas/findings")
 def atlas_findings_list():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
     with db_connect() as conn:
         return jsonify(list_findings(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
             run_id=request.args.get("run_id") or "",
@@ -487,6 +535,10 @@ def atlas_run_cleanup(run_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_findings_bulk_review_update():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     finding_ids = _normalize_finding_ids(data.get("finding_ids"))
     review_state = _normalize_review_state(data.get("review_state"))
@@ -499,17 +551,13 @@ def atlas_findings_bulk_review_update():
     with db_connect() as conn:
         found_ids: set[str] = set()
         for finding_id in finding_ids:
-            row = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND id = ?",
-                (session_id, finding_id),
-            ).fetchone()
-            if row:
-                found_ids.add(str(row["id"] or ""))
+            if finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
+                found_ids.add(finding_id)
         if found_ids:
             updated_at = _now_for_review()
             conn.executemany(
-                "UPDATE findings SET status = ?, status_updated_at = ? WHERE session_id = ? AND id = ?",
-                [(review_state, updated_at, session_id, finding_id) for finding_id in sorted(found_ids)],
+                "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
+                [(review_state, updated_at, finding_id) for finding_id in sorted(found_ids)],
             )
             conn.commit()
     results = [
@@ -537,6 +585,10 @@ def atlas_findings_bulk_review_update():
 @atlas_bp.route("/atlas/entities/<entity_id>")
 def atlas_entity_detail(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     runs_offset = _parse_int(request.args.get("runs_offset"), 0, minimum=0, maximum=100000)
     findings_offset = _parse_int(request.args.get("findings_offset"), 0, minimum=0, maximum=100000)
     with db_connect() as conn:
@@ -544,6 +596,7 @@ def atlas_entity_detail(entity_id):
             conn,
             session_id,
             entity_id,
+            team_id=owner_scope.team_id,
             runs_offset=runs_offset,
             findings_offset=findings_offset,
         )
@@ -556,18 +609,18 @@ def atlas_entity_detail(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_suppression_update(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
     with db_connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-        if not row:
+        if not entity_exists_in_scope(conn, session_id, entity_id, team_id=owner_scope.team_id):
             return jsonify({"error": "entity not found"}), 404
         conn.execute(
             "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-            "WHERE session_id = ? AND id = ?",
-            (suppressed, reason, _suppression_timestamp(suppressed), session_id, entity_id),
+            "WHERE id = ?",
+            (suppressed, reason, _suppression_timestamp(suppressed), entity_id),
         )
         conn.commit()
     log.info("ATLAS_ENTITY_SUPPRESSION_UPDATED", extra={
@@ -584,6 +637,10 @@ def atlas_entity_suppression_update(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entities_bulk_suppression_update():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     entity_ids = _normalize_entity_ids(data.get("entity_ids"))
     suppressed, reason = _suppression_payload(data)
@@ -592,19 +649,17 @@ def atlas_entities_bulk_suppression_update():
     if len(entity_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
     with db_connect() as conn:
-        placeholders = ",".join("?" for _ in entity_ids)
-        rows = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? "  # nosec
-            f"AND id IN ({placeholders})",
-            [session_id, *entity_ids],
-        ).fetchall()
-        found_ids = {str(row["id"] or "") for row in rows}
+        found_ids = {
+            item_id
+            for item_id in entity_ids
+            if entity_exists_in_scope(conn, session_id, item_id, team_id=owner_scope.team_id)
+        }
         if found_ids:
             conn.executemany(
                 "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-                "WHERE session_id = ? AND id = ?",
+                "WHERE id = ?",
                 [
-                    (suppressed, reason, _suppression_timestamp(suppressed), session_id, item_id)
+                    (suppressed, reason, _suppression_timestamp(suppressed), item_id)
                     for item_id in sorted(found_ids)
                 ],
             )
@@ -761,18 +816,18 @@ def atlas_findings_bulk_delete():
 @limiter.limit(_atlas_write_limit)
 def atlas_finding_suppression_update(finding_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
     with db_connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? AND id = ?",
-            (session_id, finding_id),
-        ).fetchone()
-        if not row:
+        if not finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
             return jsonify({"error": "finding not found"}), 404
         conn.execute(
             "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-            "WHERE session_id = ? AND id = ?",
-            (suppressed, reason, _suppression_timestamp(suppressed), session_id, finding_id),
+            "WHERE id = ?",
+            (suppressed, reason, _suppression_timestamp(suppressed), finding_id),
         )
         conn.commit()
     log.info("ATLAS_FINDING_SUPPRESSION_UPDATED", extra={
@@ -789,6 +844,10 @@ def atlas_finding_suppression_update(finding_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_findings_bulk_suppression_update():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     finding_ids = _normalize_finding_ids(data.get("finding_ids"))
     suppressed, reason = _suppression_payload(data)
@@ -797,19 +856,17 @@ def atlas_findings_bulk_suppression_update():
     if len(finding_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
     with db_connect() as conn:
-        placeholders = ",".join("?" for _ in finding_ids)
-        rows = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? "  # nosec
-            f"AND id IN ({placeholders})",
-            [session_id, *finding_ids],
-        ).fetchall()
-        found_ids = {str(row["id"] or "") for row in rows}
+        found_ids = {
+            item_id
+            for item_id in finding_ids
+            if finding_exists_in_scope(conn, session_id, item_id, team_id=owner_scope.team_id)
+        }
         if found_ids:
             conn.executemany(
                 "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-                "WHERE session_id = ? AND id = ?",
+                "WHERE id = ?",
                 [
-                    (suppressed, reason, _suppression_timestamp(suppressed), session_id, item_id)
+                    (suppressed, reason, _suppression_timestamp(suppressed), item_id)
                     for item_id in sorted(found_ids)
                 ],
             )
@@ -887,8 +944,12 @@ def atlas_finding_delete(finding_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_intel_refresh(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
-        result = refresh_entity_intel(session_id, entity_id)
+        result = refresh_entity_intel(session_id, entity_id, team_id=owner_scope.team_id)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     if result is None:
@@ -906,16 +967,25 @@ def atlas_entity_intel_refresh(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_project_link_create(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.MUTATE_PROJECTS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     project_id = str(data.get("project_id") or "").strip()
     if not project_id:
         return jsonify({"error": "project_id is required"}), 400
     try:
-        link = link_project_entity(session_id, project_id, {
-            "entity_type": "atlas_entity",
-            "entity_id": entity_id,
-            "source": "manual",
-        })
+        link = link_project_entity(
+            session_id,
+            project_id,
+            {
+                "entity_type": "atlas_entity",
+                "entity_id": entity_id,
+                "source": "manual",
+            },
+            team_id=owner_scope.team_id,
+        )
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
     if link is None:
@@ -933,11 +1003,15 @@ def atlas_entity_project_link_create(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_project_link_delete(entity_id, project_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.MUTATE_PROJECTS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
         deleted = unlink_project_entity(session_id, project_id, {
             "entity_type": "atlas_entity",
             "entity_id": entity_id,
-        })
+        }, team_id=owner_scope.team_id)
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
     if deleted is None:

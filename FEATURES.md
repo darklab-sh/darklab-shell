@@ -44,6 +44,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
 - [Session Tokens](#session-tokens)
+- [Team-Mode](#team-mode)
 - [Encrypted Secrets](#encrypted-secrets)
 - [External Intel](#external-intel)
 - [Security and Process Isolation](#security-and-process-isolation)
@@ -270,10 +271,11 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Behavior:**
 
-- The bottom bar renders eleven live pills on desktop: the left cluster covers run state, connection, and identity; the right cluster carries the output actions (share, copy, save, clear, kill).
+- The bottom bar renders live run, connection, identity, scope, and environment context on desktop; the right cluster carries the output actions (share, copy, save, clear, kill).
 - Pills start with a muted `—` placeholder at page load and transition to live values on the first poll.
 - Server state is polled via `GET /status` on a visibility-aware cadence: every 3 seconds while the tab is visible and every 15 seconds while hidden. Uptime is interpolated locally between polls so the pill never looks frozen, and the clock ticks once per second in the browser.
 - Latency is measured client-side with `performance.now()` around the fetch call.
+- The scope cell shows the active personal/team scope and opens a compact selector instead of exposing a dropdown directly in the HUD.
 - On narrow desktop widths the pill row falls back to horizontal overflow scrolling so the right-side HUD actions never get pushed off-screen.
 - Mobile hides the HUD entirely; per-tab status and exit codes remain visible inline next to the prompt echo, and the run-notifications toggle in the Options modal covers the background-watch use case.
 
@@ -419,6 +421,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
 - Atlas search matches entity values plus Atlas labels and notes, so curated metadata is as findable as values copied from command output.
 - Atlas can be scoped to one source run from Run Details or from the Atlas run filter. The filter applies across the Findings queue, entity tabs, tab counts, and entity exports until you clear the visible run chip.
+- When a team scope is active, Atlas views follow team-owned source runs. Team members can review deduplicated team-owned entities, source runs, and findings produced by shared runs, add shared labels and notes, refresh cached intel, update finding review/suppression state, and link Atlas entities into team projects without pulling in their personal Atlas rows.
 - Run Details shows the source run's Atlas entity count and includes paged entity tabs for the same entity types, so you can inspect generated hosts, domains, hashes, CVEs, and URLs without leaving the run modal.
 - Entity details page through source runs and findings when an entity appears across more rows than fit in one view, so older evidence stays reachable without loading the whole collection at once.
 - Saved views remember useful Atlas filter sets for the active session token, including search text, source run, orphan filter, suppression filter, Findings review state, and project scope. Applying a saved view keeps you on the current Atlas tab, and **Clear filters** returns the visible filter controls and saved-view picker to their defaults while keeping a project-scoped Atlas launch anchored to that project.
@@ -478,6 +481,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button in History prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available and subscribes back to the brokered `/runs/<run_id>/stream` for replay plus live output when events are still retained. Active-run recovery is client-aware: another browser using the same session token can see the live run in Status Monitor without automatically creating a terminal tab or taking over the stream. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
+- If a restored or attached run belongs to a different personal/team scope, the terminal shows a scope-switch message instead of treating the run as missing.
 
 **Limits:** tab count capped by `max_tabs`; history surfaces paginate stored items rather than showing one unbounded list; brokered live replay is bounded by configured replay retention and `max_output_lines`, after which completed-run restore relies on persisted history/output artifacts. Snapshot search matches the snapshot label, not the full snapshot body content.
 
@@ -503,6 +507,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Accepted suggestions show a **Copy** action. If `AI_FEATURE_RUN_SUGGESTIONS` is enabled, they can also show **Run**, which submits through the normal composer path so command policy still gets the final say.
 - Rejected suggestions stay visible under **Blocked** with a rejection reason such as `target_absent`, `port_absent`, `unknown_root`, `invalid_flag`, or `redaction_sentinel`.
 - Refreshing an AI card queues new work or returns a cached result. While a request is queued or generating, the card shows status, progress text, and provider progress such as elapsed time and token counts when the provider reports them.
+- In an active team scope, AI cards for team-owned runs are visible to team members and reuse the team's cached assist rows. Personal scope never mixes in team-owned AI output.
 - Backend rate-limit, queue, provider, malformed-response, and no-context errors are shown in the matching AI card without clearing unrelated completed AI output.
 - Operators can point assists at an OpenAI-compatible provider, including the bundled llama.cpp Compose profile. The default posture requires a private provider URL unless an operator explicitly allows another CIDR range.
 - AI context is built from completed run metadata and bounded output sections. Share/export redaction rules run before provider calls, and target validation prevents suggestions from introducing unrelated hosts.
@@ -546,17 +551,17 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; user-created workflows appear above the built-in catalog under **My workflows**.
 - Clicking a step pre-fills the prompt with its `cmd`; each step can also be run directly, and `Run all` queues the rendered steps sequentially in the active tab.
-- The **New** workflow editor saves session-scoped workflows with a title, description, ordered command steps, optional notes, and `{{variables}}` inferred from the commands.
+- The **New** workflow editor saves personal workflows by default, or shared team workflows when a team scope is active, with a title, description, ordered command steps, optional notes, and `{{variables}}` inferred from the commands.
 - The terminal-native `workflow` command supports `workflow list`, `workflow show <name>`, and `workflow run <name> [--variable value ...]`; missing required variables are prompted transcript-style before the run is queued.
 - Each step can show a short `note` explaining what the command checks.
-- User-created workflows are stored with the active session and migrate with session tokens.
+- Personal workflows are stored with the active session and migrate with session tokens. Shared team workflows stay in that team scope; owners and admins can create, edit, and delete them, while other team members can use them when running commands.
 - Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, fast port/service triage, and Files-backed chained recon such as subdomain HTTP triage and crawl-and-scan.
 - Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
 - Workflows that depend on Files can declare `feature_required: workspace`; those entries are hidden when `workspace_enabled` is off.
 
 **Limits:** step commands still run through the command policy — a workflow step is only usable if its `cmd` is permitted by `commands.yaml`.
 
-**Configuration:** `conf/workflows.yaml` — operator-defined workflow entries use the same normalized shape as saved user workflows. User-created workflows store that shape in the session database, while `conf/workflows.yaml` keeps deployment-wide entries in YAML.
+**Configuration:** `conf/workflows.yaml` — operator-defined workflow entries use the same normalized shape as saved user workflows. User-created workflows store that shape in the session database, scoped to the active personal or team workspace, while `conf/workflows.yaml` keeps deployment-wide entries in YAML.
 
 ```yaml
 - title: "My Custom Check"
@@ -596,7 +601,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- The **Schedules** modal opens from the desktop rail or mobile menu and lists schedules owned by the active durable `tok_` session.
+- The **Schedules** modal opens from the desktop rail or mobile menu and lists schedules for the active personal or team scope.
 - Each schedule stores one command, an optional label, an enabled/paused state, an IANA timezone chosen from a dropdown, and either an hourly/daily/weekly preset or a five-field cron expression.
 - The editor previews the next three fire times before saving. Preview timing is computed by the server and displayed in the selected schedule timezone, so the browser uses the same cron rules as the worker.
 - Saved schedules can be edited, paused, resumed, deleted, refreshed, or fired immediately from the modal. Manual fires use the same audit path as worker-fired runs.
@@ -604,7 +609,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Fired runs appear in normal History with a `scheduled` badge. Clicking that badge, or the Schedule row in Run Details, reopens the schedule that created the run.
 - Run Details includes **Schedule this command**, which opens the Schedules modal with the completed run's command already filled in.
 - The schedule detail view shows recent fire audit rows. Fired rows can open the resulting Run Details modal, and rows with an older completed fire on the current page can compare against that previous fire.
-- If the owning session token is revoked, the worker disables the schedule and the browser shows it as paused instead of deleting it.
+- If the owning session token is revoked, the worker disables personal schedules owned by that token and the browser shows them as paused instead of deleting them. When a team is archived, team-owned schedules pause in place instead of moving into a member's personal scope. Reactivating the team keeps those schedules paused until someone resumes them.
 
 **Limits:** schedules require a durable session token. Anonymous sessions cannot create schedules because there is no durable owner for the worker to enforce after the browser closes. Cron support is strict five-field POSIX cron, and custom cron expressions cannot run more often than every five minutes. Workflow scheduling, blackout calendars, and per-target schedules are out of scope.
 
@@ -620,8 +625,8 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- The **Watchers** modal opens from the desktop rail, mobile menu, or Run Details.
-- Run Details and the History drawer action menu include **Create watcher from this baseline**, which opens the modal with the completed run already selected as the baseline.
+- The **Watchers** modal opens from the desktop rail, mobile menu, or Run Details and follows the active personal or team scope.
+- Run Details and the History drawer action menu include **Create watcher from this baseline**, which opens the modal with the completed run already selected as the baseline in the same scope as that run.
 - New watchers can use **First run** mode, which captures the first successful watcher fire as the baseline without needing an existing run id.
 - The Baseline run field includes a short helper card for operators who prefer to paste a run id manually in **Existing run** mode.
 - Each watcher owns a schedule, reruns the watched command on that cadence, and compares each completed watcher run against the current baseline.
@@ -631,6 +636,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Empty checks still appear in the fire audit as `diff_kind='none'`, so it's clear the watcher is still running even when nothing changed.
 - Operators can pause, resume, manually fire, delete, or accept the latest run as the new baseline from the modal. Accepting a baseline asks for confirmation because it discards the previous comparison point.
 - The modal asks before closing, refreshing, opening a watcher run, or switching watchers when the current form has unsaved changes.
+- Team-owned watchers pause when their team is archived. Reactivating the team restores access, but archive-paused watchers stay paused until someone resumes them.
 
 **Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. First-run watchers require a command because there is no completed run to inherit from yet. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
 
@@ -645,7 +651,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Behavior:**
 
 - **Tab snapshot** (`/share/<id>`) — **share snapshot** on any tab captures the current output and, when a full saved artifact exists, shares that full output as a snapshot. The resulting URL opens a styled HTML page with ANSI color rendering, a `save ▾` dropdown (txt, html, pdf), a **copy** button, a **view json** option, and a link back to the shell. Honors the browser's saved line-number and timestamp preferences on load. Uses the Web Share API where supported; otherwise copies the URL to the clipboard. Recommended sharing path.
-- **Single run** (`/history/<run_id>`) — the permalink button in the history drawer links to an individual run. Serves the full saved artifact when persistence is enabled; otherwise the capped preview stored in the configured database. Honors saved line-number and timestamp preferences on load.
+- **Single run** (`/history/<run_id>`) — the permalink button in the history drawer links to an individual run. Serves the full saved artifact when persistence is enabled; otherwise the capped preview stored in the configured database. Team-owned run permalinks still open as shareable bearer links; team-private labels, notes, findings, and Atlas counts only appear when the viewer also sends a valid active team scope. Honors saved line-number and timestamp preferences on load.
 - Both permalink types persist across container restarts through the configured database and any file-backed artifacts under `./data`.
 
 **Limits:** retained for `permalink_retention_days` only; the `./data` directory is the only writable path in an otherwise read-only container (created automatically on first run).
@@ -711,7 +717,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `wordlist`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `exit` / `quit`, `version`, and `whoami` are available in every session.
 - `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, session-variable count, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
-- `runs` prints app-native active-run metadata for the current session, including CPU percent derived from cumulative CPU seconds over run elapsed time, RSS-memory snapshot, and a hint that the desktop `STATUS` HUD pill opens real-time monitoring; `jobs` is a compatibility alias for the same terminal output. `runs -v` also prints full run IDs, started timestamps, cumulative CPU time, and active-run metadata source, while `runs --json` prints the active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Status Monitor modal, and `Option+M` / `Alt+M` toggles the same view. The monitor is also available from the desktop rail and mobile menu, stays useful when idle with system/resource/session cards and visual history widgets, lists active commands as divided rows, exposes Attach/Kill actions for visible active runs, and shows best-effort CPU and RSS memory telemetry as circular meters/sparklines with memory fill normalized against 1 GB when backend process stats are available.
+- `runs` prints app-native active-run metadata for the current personal or team scope, including CPU percent derived from cumulative CPU seconds over run elapsed time, RSS-memory snapshot, and a hint that the desktop `STATUS` HUD pill opens real-time monitoring; `jobs` is a compatibility alias for the same terminal output. `runs -v` also prints full run IDs, started timestamps, cumulative CPU time, and active-run metadata source, while `runs --json` prints the active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Status Monitor modal, and `Option+M` / `Alt+M` toggles the same view. The monitor is also available from the desktop rail and mobile menu, stays useful when idle with system/resource/session cards and visual history widgets, lists active commands as divided rows, exposes Attach/Kill actions for visible active runs, and shows best-effort CPU and RSS memory telemetry as circular meters/sparklines with memory fill normalized against 1 GB when backend process stats are available.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
 - `project` manages case folders from the terminal: list/create/use/rename/current/clear/archive/unarchive/delete, link or unlink runs, link the last eligible run, and list/add/quick-add/remove project targets.
 - `schedule` manages saved recurring commands, while `watch` turns a completed baseline run into a recurring change-detection monitor.
@@ -749,16 +755,16 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - `/api/v1` authenticates with existing `tok_...` session tokens and rejects anonymous browser UUID sessions.
 - API-started runs use the same command validation, registry rewrites, runtime checks, brokered stream, history persistence, Atlas capture, and project capture behavior as browser-started runs.
-- Scripts can start non-interactive runs, wait for final run status, stream broker events as SSE or NDJSON, cancel active current-session runs, read history/ranged output/artifacts, search saved output with line context, inspect Atlas entities and findings, download run artifacts by stable artifact id, inspect project data, manage scheduled commands and outbound notification channels, read notification delivery audits, and link or unlink completed external runs from active projects.
+- Scripts can start non-interactive runs, wait for final run status, stream broker events as SSE or NDJSON, cancel active personal/team-scope runs, read history/ranged output/artifacts, search saved output with line context, inspect Atlas entities and findings, download run artifacts by stable artifact id, inspect project data, manage scheduled commands and outbound notification channels, read notification delivery audits, and link or unlink completed external runs from active projects.
 - API streams start with a schema row and then send typed output rows with backward-compatible `type` and `text` fields; see [docs/api.md](docs/api.md#streaming) for the stream shape.
-- Saved schedules fire through the same brokered run path as manual runs. History rows and Run Details mark scheduled runs with their schedule id, and revoked tokens or overlapping prior runs leave clear fire-audit rows instead of failing silently.
+- Saved schedules fire through the same brokered run path as manual runs and keep the personal or team scope they were created in. History rows and Run Details mark scheduled runs with their schedule id, and revoked tokens, archived teams, or overlapping prior runs leave clear fire-audit rows instead of failing silently.
 - History responses include the same batched artifact, finding, Atlas entity, and Atlas finding counts shown in History and Run Details.
-- The bundled `darklab` CLI wraps the API with `whoami`, `run`, `active`, `tail`, `cancel`, `history`, `grep`, `show`, `output`, `artifacts`, `atlas`, `projects`, `project`, `project-findings`, `project-runs`, `project-entities`, `project-packages`, `schedule`, `notify`, `completion`, and `download` commands. `darklab run --wait` waits for final status for shell scripts, `darklab active` lists current jobs for the token, `darklab run --link-project NAME` resolves friendly project names before linking completed external runs, `darklab grep <pattern>` searches saved output across runs, `darklab atlas ...` reads Atlas summary, source runs, entities, and findings, `darklab schedule ...` manages saved recurring commands, `darklab notify ...` manages notification channels without accepting plaintext secrets on the command line, `darklab completion bash|zsh|fish` prints static shell completion, and `darklab completion install --shell auto` installs it into the current user's shell-completion directory. Live tailing fails clearly if a stream closes before the run reaches an exit, killed, or error event, and Ctrl+C while following output detaches without cancelling the server-side run.
-- CLI configuration uses flags first, then `DARKLAB_API_URL`, `DARKLAB_TOKEN`, and `DARKLAB_TIMEOUT`, then the TOML file at `~/.config/darklab/config.toml`.
+- The bundled `darklab` CLI wraps the API with `whoami`, `run`, `active`, `tail`, `cancel`, `history`, `grep`, `show`, `output`, `artifacts`, `atlas`, `projects`, `project`, `project-findings`, `project-runs`, `project-entities`, `project-packages`, `team`, `schedule`, `notify`, `completion`, and `download` commands. `darklab run --wait` waits for final status for shell scripts, `darklab active` lists current jobs for the token, `darklab run --link-project NAME` resolves friendly project names before linking completed external runs, `darklab grep <pattern>` searches saved output across runs, `darklab atlas ...` reads Atlas summary, source runs, entities, and findings, `darklab team ...` creates teams, manages members and invites, joins scopes, and saves the active CLI team, `darklab schedule ...` manages saved recurring commands, `darklab notify ...` manages notification channels without accepting plaintext secrets on the command line, `darklab completion bash|zsh|fish` prints static shell completion, and `darklab completion install --shell auto` installs it into the current user's shell-completion directory. Live tailing fails clearly if a stream closes before the run reaches an exit, killed, or error event, and Ctrl+C while following output detaches without cancelling the server-side run.
+- CLI configuration uses flags first, then `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, and `DARKLAB_TIMEOUT`, then the TOML file at `~/.config/darklab/config.toml`. CLI writes keep that file at `0600` because it can store a session token.
 
 **Limits:** API v1 is intentionally non-interactive. It does not expose Interactive PTY start/input/resize routes, general project mutation routes, workflow execution, API-only token scopes, or workspace ZIP downloads.
 
-**Configuration:** no server-side API-specific settings. CLI users can set `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TIMEOUT`, or `~/.config/darklab/config.toml`; see [docs/api.md](docs/api.md).
+**Configuration:** no server-side API-specific settings. CLI users can set `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, `DARKLAB_TIMEOUT`, or `~/.config/darklab/config.toml`; see [docs/api.md](docs/api.md).
 
 **Related files:** `app/blueprints/api_v1.py` (`/api/v1` routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
 
@@ -770,14 +776,14 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Durable `tok_` sessions can manage outbound channels from the Options **Notifications** tab, the terminal `notify` built-in, `/api/v1/notification-channels`, or `darklab notify`. Secret-valued channel creation stays in Options, the API, or the CLI's prompt/secret-file flow instead of accepting secrets in terminal command text.
+- Durable `tok_` sessions can manage personal outbound channels from the Options **Notifications** tab, the terminal `notify` built-in, `/api/v1/notification-channels`, or `darklab notify`. When a browser or API request is in an active team scope, owners and admins can manage team-owned channels, while other members can read the team's delivery audit history. Secret-valued channel creation stays in Options, the API, or the CLI's prompt/secret-file flow instead of accepting secrets in terminal command text.
 - Supported destinations are generic JSON webhooks, Slack incoming webhooks, Discord incoming webhooks, Telegram Bot API chats, Pushover, and SMTP email.
 - Channel secrets are write-only. Webhook URLs, bot tokens, Pushover tokens, and related secret values are stored through the encrypted vault; list responses only say whether each required secret is configured.
 - SMTP email uses operator-owned transport settings from `notifications.smtp.*`, while each email channel chooses its recipients and optional reply-to address.
 - External non-PTY run finalization queues a `run_complete` notification with the configured `app_name`, run id, command root, exit code, token hint, and summary counts. Built-in commands and PTY sessions do not send `run_complete` by default.
 - The trigger list also includes `pty_session_ended`, `scheduled_run_failed`, `watcher_changed`, `watcher_error`, `watcher_recovered`, and `test`; a channel sends only when a matching app source queues that trigger.
 - Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing. Muted channels skip normal deliveries but can still receive an explicit test send for troubleshooting.
-- Delivery events are queued, claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted. Sent delivery audit rows are pruned after the configured retention window.
+- Delivery events keep the personal or team scope that created them, are claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted. Sent delivery audit rows are pruned after the configured retention window.
 - Webhook-style channels reject non-public destinations by default, with an operator allowlist for trusted internal receivers.
 - Delivery audit rows are available from each channel's **Deliveries** control in the Options **Notifications** tab, through `/api/v1/notification-events`, the terminal `notify events` built-in, and `darklab notify events`; the terminal built-in and CLI can also update, mute, unmute, test, and delete channels.
 
@@ -811,15 +817,16 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Encrypted Secrets
 
-**Purpose:** store per-session API keys for approved tools without putting those values in terminal commands, transcripts, history, snapshots, or logs.
+**Purpose:** store personal or team API keys for approved tools without putting those values in terminal commands, transcripts, history, snapshots, or logs.
 
 **Behavior:**
 
-- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session. The add flow suggests the API key names declared by the command and provider registries first, with a custom option for local overlays.
-- **Provider Status** in the Secrets section shows which intel providers are usable now, which ones still need an API key, the app-facing secret names, supported lookup types or CLI uses, and broad account/free-tier notes. Clicking a secret name opens the add-secret prompt with that key selected.
+- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active personal or team scope. The add flow suggests the API key names declared by the command and provider registries first, with a custom option for local overlays.
+- **Provider Status** in the Secrets section shows which intel providers are usable in the active scope, which ones still need an API key, the app-facing secret names, supported lookup types or CLI uses, and broad account/free-tier notes. Clicking a secret name opens the add-secret prompt with that key selected.
+- Team secrets are separate from personal secrets. Personal keys are not inherited into a team, and only team owners and admins can add, replace, delete, or rotate team secrets; other members can consume matching team secrets through approved commands without reading values.
 - `secret set NAME` opens the same browser-owned value prompt from the terminal. The command line contains only the name; the value is entered in the modal and is not echoed.
 - `secret list` shows stored names and their consumer environment bindings. It never prints values.
-- `secret unset NAME` deletes one stored secret. `secret show-consumers` and its `providers` alias show intel provider readiness with the same usable versus needs-configuration summary as the Provider Status modal.
+- `secret unset NAME` deletes one stored secret in the active scope. `secret show-consumers` and its `providers` alias show intel provider readiness with the same usable versus needs-configuration summary as the Provider Status modal.
 - Command registry entries can declare `requires_secrets`. When a matching command runs, the backend decrypts the needed value in memory and passes it to the subprocess environment. Missing required secrets stop the run before launch with a clear message.
 - Secret declarations can also map a user-friendly secret name to a vendor-required environment name. For example, VirusTotal CLI runs accept either `VT_API_KEY` or the native `VTCLI_APIKEY` stored secret, and the app passes the value to `vt` as `VTCLI_APIKEY`.
 
@@ -890,10 +897,10 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Projects group top-level source records by link rather than copy. Current project links support completed runs and Atlas entities; Targets stay as the curated domain/IP/URL subset for scope tracking, while the Entities tab shows every linked Atlas entity type. Run-owned artifacts surface through linked runs, and findings surface through linked runs or linked Atlas entities. Project list rows show run, finding, artifact, and package counts before you open a project, and the Findings tab label can show prefetched new/high counts when that project has triage work waiting. Snapshots and manually selected workspace files stay in their history/files surfaces and are intentionally not project-linked.
+- Projects group top-level source records by link rather than copy. Current project links support completed runs and Atlas entities; Targets stay as the curated domain/IP/URL subset for scope tracking, while the Entities tab shows every linked Atlas entity type. Run-owned artifacts surface through linked runs, and findings surface through linked runs or linked Atlas entities. Project list rows show run, finding, artifact, and package counts before you open a project, and the Findings tab label can show prefetched new/high counts when that project has triage work waiting. When team scope is active, team-owned Projects and team-owned run links are visible to other members of that team. Snapshots and manually selected workspace files stay in their history/files surfaces and are intentionally not project-linked.
 - The desktop rail and mobile menu open the Projects modal for creating, selecting, clearing, archiving, deleting, and reviewing projects. The active-project HUD shows current project context, and project changes broadcast across same-session tabs.
 - Active projects can automatically link completed external command runs and, when enabled, the Atlas entities those runs produce. Manual run-link actions confirm first and can also add the Atlas entities found in those runs, with the entity count shown before anything is saved. When automatic entity linking reaches the project link limit, the run stream reports the skipped entity count. Removing a run from a project can also remove same-run disposable Atlas entity links, while curated entity links are counted separately and kept unless you opt in; the confirmation also shows how many related findings will stop appearing in the project. Built-in runs stay in history without project links or project-derived findings, and **Link last run** backfills the most recent eligible run when needed. In the terminal, `project link run last` resolves within the current tab so parallel tabs don't steal each other's latest run.
-- Project details expose project labels, project notes stored through `entity_notes` with `entity_type='project'`, editable Atlas-backed targets, linked Atlas entities, linked runs, findings, artifacts, and packages. Suppressed Atlas entities and findings stay hidden from default project views until they're restored in Atlas. The Findings tab pages through large result sets, shows each finding's source command, and keeps its tab count tied to the full server-side total, including findings attached through linked runs or linked Atlas entities. Command, severity, scope, run, target, review-state, label, and note filters help narrow busy projects without loading every finding at once. The list view keeps visible-page bulk review, the inline board groups the current filtered findings into review lanes, and the larger board modal gives the same project a roomier drag/drop triage surface. Labels and notes are also editable for linked runs, findings, Atlas entities, run file artifacts, workspace files, and packages through the shared entity metadata editor.
+- Project details expose project labels, project notes stored through `entity_notes` with `entity_type='project'`, editable Atlas-backed targets, linked Atlas entities, linked runs, findings, artifacts, and packages. Team-owned projects share linked-run artifacts and evidence packages with team members, while package and artifact rows keep creator/member context when it is available. Suppressed Atlas entities and findings stay hidden from default project views until they're restored in Atlas. The Findings tab pages through large result sets, shows each finding's source command, and keeps its tab count tied to the full server-side total, including findings attached through linked runs or linked Atlas entities. Command, severity, scope, run, target, review-state, label, and note filters help narrow busy projects without loading every finding at once. The list view keeps visible-page bulk review, the inline board groups the current filtered findings into review lanes, and the larger board modal gives the same project a roomier drag/drop triage surface. Labels and notes are also editable for linked runs, findings, Atlas entities, run file artifacts, workspace files, and packages through the shared entity metadata editor.
 - The Entities tab mirrors Atlas entity types for project-linked rows with compact type tabs, shows cached intel provider context, opens entities in Atlas for deeper intel review or refresh, links more session Atlas entities from a picker, bulk-unlinks visible entities from the project, and exports project-scoped entities as CSV or JSONL.
 - Finding review supports status updates, visible-page bulk review/delete, source-run restore with line highlighting, target attribution, orphan-source filtering, filtering, and sorting. Artifact rows show availability/checksum state and offer scoped preview/download actions for still-available workspace files.
 - Evidence packages are draft project manifests. The wizard records name/description, package labels/notes, transcript/finding/artifact/target selections, redaction mode, artifact inclusion, private-note inclusion, size estimates, and artifact warnings. Full Archive packages select transcript HTML for every selected run by default, and the Include step has compact select-all/clear menus for transcript HTML, findings, and targets. The preview shows a best-guess ZIP size, the expanded content size before compression, and the optional full-text fallback files for capped transcripts, using stored output byte counts when available so the estimate stays conservative without wildly overcounting text. Existing package rows support polled downloads with visible archive-preparation status, re-package, manifest preview, delete, and metadata edit actions.
@@ -902,7 +909,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Project run comparison uses the same canonical `/history/compare` flow as the History drawer. It can compare two linked runs directly or compare a selected run against the newest linked run with a chosen run label; the dedicated Run Comparison section covers the shared transcript, finding, and artifact comparison behavior.
 - History project filtering returns linked external runs for the selected project. Run-subtype filters can further split all runs, built-in runs, and external runs while snapshots remain available through the normal snapshot filter.
 
-**Limits:** projects are session-scoped and do not copy source history. Deleting a project removes its project metadata, targets, packages, and links, but not the underlying run history or workspace files. Entity notes are intentionally one note per supported entity rather than comment threads.
+**Limits:** projects are personal- or team-scoped and do not copy source history. Deleting a project removes its project metadata, targets, packages, and links, but not the underlying run history or workspace files. Entity notes are intentionally one note per supported entity rather than comment threads.
 
 **Configuration:** project, metadata, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
@@ -916,7 +923,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Package creation starts from the Projects modal's Packages tab. The wizard records name, description, labels, notes, redaction mode, artifact inclusion, private-note inclusion, and the selected runs, findings, artifacts, and targets.
+- Package creation starts from the Projects modal's Packages tab. The wizard records name, description, labels, notes, redaction mode, artifact inclusion, private-note inclusion, and the selected runs, findings, artifacts, and targets. Team-owned project packages are visible to members in that team scope and keep creator context when the creator is still known.
 - Package rows show preset/redaction/size summaries and offer polled downloads with visible archive-preparation status, re-package, manifest preview, metadata edit, and delete actions.
 - Downloaded archives include `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, full-text companions for capped transcripts, selected finding/target JSON and Markdown exports, selected label/private-note exports, note Markdown exports, optional raw artifacts for raw packages, and redacted text/JSON artifact derivatives for redacted packages.
 - Run transcript pages and full-text companions keep the captured output intact. The manifest's transcript index omits classified progress/status/boilerplate noise so package consumers can focus on useful lines first.
@@ -998,7 +1005,7 @@ wget -q -O /dev/null --server-response https://example.com
 **Behavior:**
 
 - Commands with registry-owned interactive metadata, currently `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, are reserved for the PTY route instead of normal `/runs`.
-- The browser opens a tab-scoped xterm.js modal, preloads the terminal assets, starts the PTY through `/pty/runs`, and sends keyboard input and terminal resizes through bounded POST routes.
+- The browser opens a tab-scoped xterm.js modal, preloads the terminal assets, starts the PTY through `/pty/runs`, and sends keyboard input and terminal resizes through bounded POST routes. When a team scope is active, the live PTY run is visible to team members and command-capable roles can attach, input, resize, or kill it while viewers remain read-only.
 - If the same PTY run is opened from another browser client, the previous live owner closes cleanly and adds an `[interactive PTY moved to another tab]` notice instead of leaving two live terminals fighting for the same run.
 - Completed PTY runs append a saved static transcript and exit status back into the parent shell tab, then persist through the normal history/search/finding path. Registry transcript modes decide whether a tool saves the final visible frame or scrollback-style findings.
 - Reload recovery and Status Monitor Attach use bounded ANSI snapshots and show when a restored snapshot was already stale. Redis-backed deployments can serve output streams, input/resize control, and reattach snapshots from any worker without sticky routing; single-worker local development can run without Redis when configured.
@@ -1186,7 +1193,7 @@ wget -q -O /dev/null --server-response https://example.com
 **Behavior:**
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
-- The modal has three tabs: **Preferences** for display, identity, run, and compare controls, **Secrets** for provider readiness plus stored API keys, and **Notifications** for outbound delivery channels. The last tab you used is remembered with the rest of your session preferences.
+- The modal has four tabs: **Preferences** for display, identity, run, and compare controls, **Secrets** for provider readiness plus stored API keys, **Teams** for shared team scopes, members, invites, and recovery codes, and **Notifications** for outbound delivery channels. The last tab you used is remembered with the rest of your session preferences.
 - Run `config`, `config list`, `config get <option>`, or `config set <option> <value>` in the terminal to inspect or update the same user options without opening the modal. Option names are suggested after `config get` or `config set`, and option values are suggested after a selected option.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
 - The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
@@ -1194,11 +1201,12 @@ wget -q -O /dev/null --server-response https://example.com
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - The project capture settings control whether completed external command runs are added to the active project and whether generated Atlas entities are added with those auto-linked runs.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
-- The **Notifications** tab lists outbound channels for durable session tokens. You can add, edit, mute, delete, and send a test notification for supported destinations without exposing write-only secret values after save.
+- The **Notifications** tab lists outbound channels for the active personal or team scope. You can add, edit, mute, delete, and send a test notification for supported destinations without exposing write-only secret values after save; team-scope channel changes are limited to owners and admins.
+- The **Teams** tab lists teams attached to the active session token, creates new teams, redeems invite or recovery codes, edits member display names and roles, revokes invites, rotates recovery codes, archives/reactivates teams, and can switch the active scope. `/api/v1/teams` covers the same team-management contract for API clients, `darklab team ...` exposes it for scripts, and the terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation. The desktop HUD and mobile menu also open the compact scope selector. Team read routes have their own token-keyed rate limit so normal Options-tab and scope-selector refreshes don't crowd out invite or recovery-code writes. Team scope shares team-owned runs, History, Run Details, Projects, project targets, finding review, labels, notes, cached Atlas intel, shared workflows, schedules, watchers, notification delivery history, completed-run AI assists, and explicit team secrets while personal work remains separate. Archived teams stay visible for review and reactivation, but they cannot be used for active team work, invites, membership edits, invite revocation, or recovery-code rotation until reactivated. Reactivating an archived team restores access, but schedules and watchers paused by archival stay paused until someone resumes them. Team roles keep viewers read-only while operators, admins, and owners handle the write actions their roles allow; desktop and mobile menus hide or disable write-only controls before they can open confirmations, and team payloads include capability names so the browser, API users, and CLI can show the same allowed actions the server enforces.
 - Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
 - The **Secrets** tab includes Provider Status, Add secret, Refresh, and the stored secret list so a long list of saved keys does not push the preference controls out of view.
 
-**Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences and outbound notification channels across devices. Blocked browser notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings. Email channels require operator SMTP settings before they can be saved or tested.
+**Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences, team memberships, and outbound notification channels across devices. Blocked browser notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings. Email channels require operator SMTP settings before they can be saved or tested.
 
 **Configuration:**
 
@@ -1216,7 +1224,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `command-outcome-summaries`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
 
-**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/services/commands/builtins_notify.py` (server-owned terminal `notify` command), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
+**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/static/js/features/preferences/teams_panel.js` (team list/detail, members, invites, recovery, and scope actions), `app/services/commands/builtins_notify.py` (server-owned terminal `notify` command), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 
 ---
 
@@ -1259,7 +1267,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 **Behavior:**
 
-- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, team memberships, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
 - Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
@@ -1294,6 +1302,30 @@ If a session has run history, workspace files, project workspace records, user w
 **Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent targets, active-project context, saved user options, and app-managed workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/core/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
+
+---
+
+## Team-Mode
+
+**Purpose:** shared workspaces for trusted operators who want to run scans, review results, and manage follow-up work together without mixing personal history into the team view.
+
+**Behavior:**
+
+- Durable session-token users can create teams, join with invite or recovery codes, manage members, and switch between personal and team scope from Options → Teams, the compact scope selector in the HUD/mobile menu, `/api/v1`, the terminal `team` built-in, or the bundled `darklab team ...` CLI commands.
+- Team scope is explicit. Personal scope shows only your own data, while team scope shows team-owned runs, History, Run Details, recent values, Projects, Project targets, linked-run artifacts, evidence packages, deduplicated Atlas entities and findings, Atlas labels and notes, finding review state, cached intel, workflows, schedules, watchers, notification channels and delivery history, AI assists, package builds, explicit team secrets, and provider readiness.
+- Team roles keep day-to-day collaboration simple: viewers can read shared team data, operators can run and triage, admins can manage most shared settings, and owners can manage the team itself. The server includes capability names in team responses, so the browser, API, and CLI all show actions that match what the server enforces. In view-only team scope, write, destructive, suppression, history metadata edit and delete, share snapshot, and finding-review controls are disabled before confirmation when possible, Projects select mode stays unavailable where selection only leads to write actions, Findings Board cards do not expose drag/drop triage, and stale denials explain that the current role cannot make the change.
+- Teams always keep at least one active owner. The Teams tab locks the current owner's role selector while they are the only active owner; after another owner exists, owners can step down normally.
+- Team secrets are separate from personal secrets. Personal provider keys are not inherited by teams, and team secret values stay write-only after save.
+- Archived teams stay visible for review and reactivation, but they cannot start new team-scoped work, accept invite/recovery redemption, edit members, rotate recovery codes, or dispatch stale schedules until reactivated. Schedules and watchers paused during archival stay paused until someone resumes them.
+- Team-owned Projects, Atlas rows, schedules, watchers, notification channels, workflows, AI assists, packages, and artifacts keep personal data out of the team scope while letting members work from the same shared evidence.
+- Live team runs and interactive PTY sessions can be watched by other team members with the right scope. Team-scoped kill and run-control actions use the same role checks as starting a command.
+- Team-aware API and CLI calls use `X-Team-ID`, `DARKLAB_TEAM`, or the saved CLI team config. `darklab team switch` validates the team before saving, preserves unknown config keys and comments, and keeps token-bearing config files owner-readable only.
+
+**Limits:** Team-Mode is for trusted operators on the same self-hosted instance. It is not SSO, billing, per-project ACLs, or a full multi-tenant product. Destructive Atlas cleanup/delete actions require a triage-capable team role and stay inside the active personal or team scope.
+
+**Configuration:** no global config switch. Team-Mode requires durable session tokens because anonymous browser sessions cannot safely identify team members across devices.
+
+**Related files:** `app/blueprints/teams.py` (browser team routes), `app/services/teams/` (team roles, storage, and request scope), `app/static/js/features/preferences/teams_panel.js` (Options Teams tab), `app/static/js/features/team_scope.js` (scope selector), `app/services/commands/builtins_team.py` (terminal `team` built-in), and `tools/darklab_cli/src/darklab_cli/` (CLI team commands).
 
 ---
 

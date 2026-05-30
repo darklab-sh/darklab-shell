@@ -82,6 +82,7 @@ from services.commands.builtins_system import (
     run_builtin_who as _run_builtin_who,
     run_builtin_whoami as _run_builtin_whoami,
 )
+from services.commands.builtins_team import run_builtin_team as _run_builtin_team
 from services.commands.builtins_workspace import (
     parse_workspace_list_command as _parse_workspace_list_command,
     run_builtin_workspace as _run_builtin_workspace,
@@ -338,6 +339,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "stats":     lambda cmd, sid: _run_builtin_stats(sid),
     "status":    lambda cmd, sid: _run_builtin_status(sid),
     "tail":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "team":      lambda cmd, sid: _run_builtin_team(cmd, sid),
     "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),
     "theme":     lambda cmd, sid: _run_builtin_client_side_command("theme"),
@@ -365,7 +367,14 @@ _BUILTIN_COMMAND_DISPATCH = {
 }
 
 
-def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") -> tuple[list[dict[str, object]], int]:
+def execute_builtin_command(
+    command: str,
+    session_id: str,
+    *,
+    tab_id: str = "",
+    team_id: str = "",
+    team_role: str = "",
+) -> tuple[list[dict[str, object]], int]:
     # Built-in commands still return the same [{text, class}, ...], exit_code shape
     # as real runs so the frontend path is identical.
     _sync_builtin_module_hooks()
@@ -375,6 +384,17 @@ def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") 
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
     if root == "project":
         result = _run_builtin_project(command, session_id, tab_id=tab_id)
+        return result, 0
+    if root == "secret":
+        result = _run_builtin_secret(command, session_id, team_id=team_id, team_role=team_role)
+        return result, 0
+    if root == "providers":
+        result = _run_builtin_secret("secret show-consumers", session_id, team_id=team_id, team_role=team_role)
+        return result, 0
+    if root == "intel":
+        return _run_builtin_intel(command, session_id, team_id=team_id)
+    if root == "team":
+        result = _run_builtin_team(command, session_id, team_id=team_id, team_role=team_role)
         return result, 0
     result = handler(command, session_id)
     if isinstance(result, tuple):

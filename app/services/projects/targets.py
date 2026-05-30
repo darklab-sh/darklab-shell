@@ -13,6 +13,7 @@ import config as _config
 from core.database import DB_BACKEND, db_connect, validate_project_link_source
 from core.database_backend import dialect_for_backend
 from services.atlas.materializer import upsert_entity
+from services.atlas.lookup import metadata_owner_id
 from services.intel.canonical import CanonicalizationError, canonical_entity, entity_signature
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
@@ -25,10 +26,10 @@ from services.projects.contracts import (
     PROJECT_TARGET_TYPES,
     ProjectWorkspaceError,
 )
-from services.projects.links import _entity_belongs_to_session, _insert_project_link
+from services.projects.links import _insert_project_link
 from services.projects.metadata import _attach_target_metadata
 from services.projects.models import row_to_target as _row_to_target
-from services.projects.queries import _project_atlas_entity_select_sql
+from services.projects.scope import shared_owner_where
 from services.projects.utils import (
     normalize_page_window as _normalize_page_window,
     now as _now,
@@ -171,7 +172,8 @@ def _canonical_target_payload(payload):
     return target_type, canonical_value
 
 
-def _select_project_target_row(conn, session_id, project_id, entity_id):
+def _select_project_target_row(conn, session_id, project_id, entity_id, *, team_id=""):
+    project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
     return conn.execute(
         "SELECT e.id, l.project_id, e.type, e.canonical_value, "
         "COALESCE(("
@@ -182,10 +184,12 @@ def _select_project_target_row(conn, session_id, project_id, entity_id):
         "), '') AS source_run_id, "
         "l.confidence, l.review_state, l.source, l.source_detail, "
         "e.occurrence_count, e.last_seen_at, e.created, COALESCE(NULLIF(l.updated, ''), l.created) AS updated "
-        "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+        "FROM project_links l "
+        "JOIN projects p ON p.id = l.project_id "
+        "JOIN entities e ON e.id = l.entity_id "
         "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
-        "AND e.session_id = ? AND e.id = ?",
-        (project_id, session_id, entity_id),
+        "AND " + project_owner_sql + " AND e.id = ?",  # nosec
+        (project_id, *project_owner_params, entity_id),
     ).fetchone()
 
 
@@ -213,13 +217,16 @@ def _source_detail_marks_project_target(source_detail):
     return bool(value)
 
 
-def _project_target_link_count(conn, session_id, project_id):
+def _project_target_link_count(conn, session_id, project_id, *, team_id=""):
+    project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
     rows = conn.execute(
         "SELECT l.source, l.source_detail "
-        "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+        "FROM project_links l "
+        "JOIN projects p ON p.id = l.project_id "
+        "JOIN entities e ON e.id = l.entity_id "
         "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
-        "AND e.session_id = ? AND e.type IN ('domain', 'ip', 'url')",
-        (project_id, session_id),
+        "AND " + project_owner_sql + " AND e.type IN ('domain', 'ip', 'url')",  # nosec
+        (project_id, *project_owner_params),
     ).fetchall()
     count = 0
     for row in rows:
@@ -227,6 +234,15 @@ def _project_target_link_count(conn, session_id, project_id):
         if source in {"auto_command", "auto_input_file"} or _source_detail_marks_project_target(row["source_detail"]):
             count += 1
     return count
+
+
+def _run_belongs_to_owner(conn, session_id, run_id, *, team_id=""):
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
+    row = conn.execute(
+        "SELECT 1 FROM runs WHERE " + owner_sql + " AND id = ?",  # nosec
+        (*owner_params, run_id),
+    ).fetchone()
+    return row is not None
 
 
 def _ensure_project_entity_link(
@@ -240,6 +256,7 @@ def _ensure_project_entity_link(
     confidence=1.0,
     review_state="confirmed",
     source_detail=None,
+    team_id="",
 ):
     source = validate_project_link_source(source)
     source_detail = _target_source_detail(source_detail)
@@ -249,6 +266,7 @@ def _ensure_project_entity_link(
         session_id,
         entity_type,
         canonical_value,
+        team_id=team_id,
         seen_at=_now(),
         occurrence_count=0,
     )
@@ -270,7 +288,7 @@ def _ensure_project_entity_link(
     ):
         _raise_quota("project entity quota exceeded for this project")
     if not row and _quota_exceeded(
-        _project_target_link_count(conn, session_id, project_id),
+        _project_target_link_count(conn, session_id, project_id, team_id=team_id),
         "max_project_targets_per_project",
         200,
     ):
@@ -385,12 +403,25 @@ def _project_target_page_payload(targets, total, limit, offset, counts_by_type=N
     )
 
 
-def list_project_targets(session_id, project_id, *, target_type="", query="", auto_discovered=False, limit=50, offset=0):
+def list_project_targets(
+    session_id,
+    project_id,
+    *,
+    target_type="",
+    query="",
+    auto_discovered=False,
+    limit=50,
+    offset=0,
+    team_id="",
+):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
+        run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="er")
+        metadata_session = metadata_owner_id(session_id, team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "SELECT 1 FROM projects p WHERE " + project_owner_sql + " AND p.id = ?",  # nosec
+            (*project_owner_params, project_id),
         ).fetchone()
         if not project:
             return None
@@ -404,41 +435,99 @@ def list_project_targets(session_id, project_id, *, target_type="", query="", au
         auto_filter_enabled = 1 if auto_discovered else 0
         counts_rows = conn.execute(
             "SELECT e.type, COUNT(*) AS count "
-            "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+            "FROM project_links l "
+            "JOIN projects p ON p.id = l.project_id "
+            "JOIN entities e ON e.id = l.entity_id "
             "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
-            "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            "AND " + project_owner_sql + " AND COALESCE(e.suppressed, FALSE) = FALSE "  # nosec
             "AND e.type IN ('domain', 'ip', 'url') "
             "AND (? = '' OR LOWER(e.canonical_value) LIKE ?) "
             "AND (? = 0 OR l.source IN ('auto_command', 'auto_input_file')) "
             "GROUP BY e.type",
-            (project_id, session_id, search, search_like, auto_filter_enabled),
+            (project_id, *project_owner_params, search, search_like, auto_filter_enabled),
         ).fetchall()
         counts_by_type = {str(row["type"] or ""): int(row["count"] or 0) for row in counts_rows}
         total = int(counts_by_type.get(normalized_type, 0)) if normalized_type else sum(counts_by_type.values())
-        params = [project_id, session_id]
+        type_filter = "AND e.type IN ('domain', 'ip', 'url') "
+        params: list[object] = [
+            *run_owner_params,
+            metadata_session,
+            metadata_session,
+            metadata_session,
+            project_id,
+            *project_owner_params,
+        ]
         if normalized_type:
+            type_filter += "AND e.type = ? "
             params.append(normalized_type)
+        dialect = dialect_for_backend(DB_BACKEND)
+        provider_list_expr = dialect.string_agg_distinct("eis.provider")
+        value_order_expr = dialect.case_insensitive_order("e.canonical_value")
         rows = conn.execute(
-            _project_atlas_entity_select_sql(target_only=True, entity_type=normalized_type, extra_where=extra_where)
+            "SELECT e.id, l.project_id, e.type, e.canonical_value, "  # nosec
+            "COALESCE(("
+            "SELECT erl.run_id FROM entity_run_links erl "
+            "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "
+            "WHERE erl.entity_id = e.id AND run_link.project_id = l.project_id "
+            "ORDER BY erl.last_seen_at DESC, erl.run_id DESC LIMIT 1"
+            "), '') AS source_run_id, "
+            "l.confidence, l.review_state, l.source, l.source_detail, "
+            "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, "
+            "e.last_seen_at, e.created, COALESCE(NULLIF(l.updated, ''), l.created) AS updated, "
+            "COALESCE(("
+            "SELECT COUNT(DISTINCT erl.run_id) FROM entity_run_links erl "
+            "JOIN runs er ON er.id = erl.run_id AND " + run_owner_sql + " "
+            "WHERE erl.entity_id = e.id"
+            "), 0) AS run_count, "
+            "COALESCE(("
+            "SELECT COUNT(DISTINCT eis.provider) FROM entity_intel_snapshots eis "
+            "WHERE eis.session_id = ? AND eis.entity_id = e.id "
+            "AND (eis.status = 'ok' OR eis.status = 'partial')"
+            "), 0) AS intel_provider_count, "
+            "COALESCE(("
+            "SELECT " + provider_list_expr + " FROM entity_intel_snapshots eis "
+            "WHERE eis.session_id = ? AND eis.entity_id = e.id "
+            "AND (eis.status = 'ok' OR eis.status = 'partial')"
+            "), '') AS intel_providers, "
+            "COALESCE(("
+            "SELECT MAX(eis.fetched_at) FROM entity_intel_snapshots eis "
+            "WHERE eis.session_id = ? AND eis.entity_id = e.id "
+            "AND (eis.status = 'ok' OR eis.status = 'partial')"
+            "), '') AS intel_last_refreshed "
+            "FROM project_links l "
+            "JOIN projects p ON p.id = l.project_id "
+            "JOIN entities e ON e.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND " + project_owner_sql + " "
+            "AND COALESCE(e.suppressed, FALSE) = FALSE "
+            + type_filter
+            + (extra_where + " " if extra_where else "")
+            + "ORDER BY e.type ASC, "
+            + value_order_expr
             + " LIMIT ? OFFSET ?",
             (*params, *filter_params, safe_limit, safe_offset),
         ).fetchall()
         targets = [_row_to_target(row) for row in rows]
-        _attach_target_metadata(conn, session_id, targets)
+        _attach_target_metadata(conn, session_id, targets, team_id=team_id)
     return _project_target_page_payload(targets, total, safe_limit, safe_offset, counts_by_type)
 
 
-def add_project_target(session_id, project_id, data):
+def add_project_target(session_id, project_id, data, *, team_id=""):
     payload = _normalize_target_payload(data)
     entity_type, canonical_value = _canonical_target_payload(payload)
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
-        if payload["source_run_id"] and not _entity_belongs_to_session(conn, session_id, "run", payload["source_run_id"]):
+        if payload["source_run_id"] and not _run_belongs_to_owner(
+            conn,
+            session_id,
+            payload["source_run_id"],
+            team_id=team_id,
+        ):
             raise ProjectWorkspaceError("source_run_id not found for this session")
         entity_id = _ensure_project_entity_link(
             conn,
@@ -450,6 +539,7 @@ def add_project_target(session_id, project_id, data):
             confidence=payload["confidence"],
             review_state=payload.get("review_state", "confirmed"),
             source_detail=payload.get("source_detail"),
+            team_id=team_id,
         )
         if payload["source_run_id"]:
             conn.execute(
@@ -459,9 +549,9 @@ def add_project_target(session_id, project_id, data):
                 "ON CONFLICT(entity_id, run_id) DO NOTHING",
                 (entity_id, payload["source_run_id"], _now(), _now()),
             )
-        row = _select_project_target_row(conn, session_id, project_id, entity_id)
+        row = _select_project_target_row(conn, session_id, project_id, entity_id, team_id=team_id)
         target = _row_to_target(row)
-        _attach_target_metadata(conn, session_id, [target])
+        _attach_target_metadata(conn, session_id, [target], team_id=team_id)
         conn.commit()
         return target
 
@@ -553,13 +643,13 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
     return recorded
 
 
-def update_project_target(session_id, project_id, target_id, data):
+def update_project_target(session_id, project_id, target_id, data, *, team_id=""):
     target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
     payload = _normalize_target_payload(data, partial=True)
     if not payload:
         raise ProjectWorkspaceError("target update payload is empty")
     with db_connect() as conn:
-        current = _select_project_target_row(conn, session_id, project_id, target_id)
+        current = _select_project_target_row(conn, session_id, project_id, target_id, team_id=team_id)
         if not current:
             return None
         if "review_state" in payload and payload["review_state"] == "dismissed":
@@ -576,7 +666,7 @@ def update_project_target(session_id, project_id, target_id, data):
         target_type = payload.get("type", current["type"])
         value = payload.get("value", current["canonical_value"])
         source_run_id = payload.get("source_run_id", current["source_run_id"])
-        if source_run_id and not _entity_belongs_to_session(conn, session_id, "run", source_run_id):
+        if source_run_id and not _run_belongs_to_owner(conn, session_id, source_run_id, team_id=team_id):
             raise ProjectWorkspaceError("source_run_id not found for this session")
         entity_type, canonical_value = _canonical_target_payload({"type": target_type, "value": value})
         entity_id = _ensure_project_entity_link(
@@ -589,6 +679,7 @@ def update_project_target(session_id, project_id, target_id, data):
             confidence=payload.get("confidence", current["confidence"]),
             review_state=payload.get("review_state", current["review_state"]),
             source_detail=payload.get("source_detail"),
+            team_id=team_id,
         )
         if entity_id != target_id:
             conn.execute(
@@ -603,31 +694,33 @@ def update_project_target(session_id, project_id, target_id, data):
                 "ON CONFLICT(entity_id, run_id) DO NOTHING",
                 (entity_id, source_run_id, _now(), _now()),
             )
-        row = _select_project_target_row(conn, session_id, project_id, entity_id)
+        row = _select_project_target_row(conn, session_id, project_id, entity_id, team_id=team_id)
         target = _row_to_target(row)
-        _attach_target_metadata(conn, session_id, [target])
+        _attach_target_metadata(conn, session_id, [target], team_id=team_id)
         conn.commit()
     return target
 
 
-def delete_project_target(session_id, project_id, target_id):
+def delete_project_target(session_id, project_id, target_id, *, team_id=""):
     target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
     if not target_id:
         raise ProjectWorkspaceError("target id is required")
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            (*project_owner_params, project_id),
         ).fetchone()
         if not project:
             return None
+        metadata_session = metadata_owner_id(session_id, team_id)
         conn.execute(
             "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-            (session_id, target_id),
+            (metadata_session, target_id),
         )
         conn.execute(
             "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-            (session_id, target_id),
+            (metadata_session, target_id),
         )
         result = conn.execute(
             "DELETE FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",

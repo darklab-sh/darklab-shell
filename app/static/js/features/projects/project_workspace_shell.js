@@ -60,6 +60,29 @@
       ctx.projectWorkspaceMessage.classList.toggle('is-error', !!error);
     }
 
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
+    function projectWriteDeniedMessage() {
+      return teamScopeDeniedMessage('change team projects');
+    }
+
+    function normalizeProjectError(err) {
+      if (String(err?.message || '') === 'team_forbidden') {
+        return new Error(projectWriteDeniedMessage());
+      }
+      return err;
+    }
+
     function scheduleExternalRefresh() {
       if (!isOpen()) return;
       if (externalRefreshTimer) clearTimeout(externalRefreshTimer);
@@ -114,9 +137,17 @@
     }
 
     async function request(url, options = {}) {
-      return ctx.EntityMetadataClient.entityMetadataRequest(url, options, {
-        onWrite: () => notifyChanged('write', ctx.selectedProjectId?.(), { local: false }),
-      });
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method !== 'GET' && method !== 'HEAD' && !activeTeamScopeCan('mutate_projects')) {
+        throw new Error(projectWriteDeniedMessage());
+      }
+      try {
+        return await ctx.EntityMetadataClient.entityMetadataRequest(url, options, {
+          onWrite: () => notifyChanged('write', ctx.selectedProjectId?.(), { local: false }),
+        });
+      } catch (err) {
+        throw normalizeProjectError(err);
+      }
     }
 
     async function responseError(resp, fallback) {
@@ -125,6 +156,7 @@
         const data = await resp.json();
         if (data && data.error) message = data.error;
       } catch (_) {}
+      if (message === 'team_forbidden') message = projectWriteDeniedMessage();
       return new Error(message || fallback);
     }
 

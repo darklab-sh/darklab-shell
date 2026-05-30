@@ -192,6 +192,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "status", "description": "Show the current session summary, limits, and backend health.", "root": "status"},
     {"name": "sort [-r|-n|-u] <file>", "description": "Sort a session file.", "root": "sort"},
     {"name": "tail [-n N] <file>", "description": "Show the last lines of a session file.", "root": "tail"},
+    {"name": "team", "description": "Create, join, inspect, and manage teams from the terminal.", "root": "team"},
     {"name": "theme", "description": "Show or apply the active shell theme from the terminal.", "root": "theme"},
     {"name": "tour", "description": "Print the onboarding tour inside the terminal.", "root": "tour"},
     {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},

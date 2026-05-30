@@ -362,6 +362,7 @@ describe('app helpers', () => {
       'project-entity-editor-modal',
       'schedules-modal',
       'watchers-modal',
+      'team-scope-modal',
     ].forEach((id) => {
       expect(document.getElementById(id)?.dataset.focusTrapBound).toBe('1')
     })
@@ -1055,6 +1056,10 @@ describe('app helpers', () => {
   })
 
   it('persists the selected options tab and keeps desktop-only controls in the preferences panel', async () => {
+    let createdTeam = null
+    let failScopeRefresh = false
+    let failInviteCreate = false
+    const ownerCapabilities = ['manage_owners', 'manage_members', 'manage_invites', 'manage_recovery', 'archive_team']
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/session/preferences' && opts.method === 'POST') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
@@ -1065,9 +1070,61 @@ describe('app helpers', () => {
       if (url === '/session/secrets') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
       }
+      if (url === '/session/teams' && opts.method === 'POST') {
+        createdTeam = {
+          id: 'team_options_1',
+          name: 'Ops team',
+          slug: 'ops-team',
+          status: 'active',
+          member: { id: 'tmem_1', role: 'owner', capabilities: ownerCapabilities, display_name: 'Nona' },
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ team: createdTeam, recovery_code: 'trec_once' }) })
+      }
+      if (url === '/session/teams') {
+        if (failScopeRefresh) return Promise.reject(new Error('scope offline'))
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ teams: createdTeam ? [createdTeam] : [] }) })
+      }
+      if (url === '/session/teams/team_options_1/invites' && opts.method === 'POST') {
+        if (failInviteCreate) {
+          return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({ message: 'invite denied' }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ invite: { code: 'tinv_once' } }) })
+      }
+      if (url === '/session/teams/team_options_1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            team: createdTeam,
+            members: [{
+              id: 'tmem_1',
+              role: 'owner',
+              capabilities: ownerCapabilities,
+              display_name: 'Nona',
+              status: 'active',
+              is_current: true,
+            }],
+            invites: [{
+              id: 'tinv_1',
+              role: 'operator',
+              label: 'Alice laptop',
+              use_count: 0,
+              max_uses: 1,
+              created_at: '2026-05-28T00:00:00+00:00',
+            }],
+            recovery_codes: [{ id: 'trec_1', created_at: '2026-05-28T00:00:00+00:00' }],
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference } = await loadAppFns({ apiFetch })
+    const bindMobileSheet = vi.fn()
+    const reloadSessionHistory = vi.fn(() => Promise.resolve())
+    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference, logClientError, storage } = await loadAppFns({
+      apiFetch,
+      bindMobileSheet,
+      reloadSessionHistory,
+      sessionId: 'tok_options_tab',
+    })
 
     activateOptionsTab('secrets')
 
@@ -1083,15 +1140,292 @@ describe('app helpers', () => {
       expect(payload.preferences.pref_options_modal_last_tab).toBe('secrets')
     })
 
+    activateOptionsTab('teams')
+
+    expect(document.getElementById('options-tab-teams').getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('options-panel-teams').hidden).toBe(false)
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(true)
+    expect(getOptionsModalLastTabPreference()).toBe('teams')
+    await vi.waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith('/session/teams', expect.objectContaining({ cache: 'no-store' }))
+    })
+    await vi.waitFor(() => expect(document.getElementById('options-team-create-btn').disabled).toBe(false))
+
+    document.getElementById('options-team-create-btn').click()
+    const createForm = document.querySelector('[data-team-form="create"]')
+    createForm.querySelector('[name="name"]').value = 'Ops team'
+    createForm.querySelector('[name="slug"]').value = 'ops-team'
+    createForm.querySelector('[name="display_name"]').value = 'Nona'
+    const teamListCallsBeforeCreate = apiFetch.mock.calls.filter(([url, opts = {}]) => (
+      url === '/session/teams' && (!opts.method || opts.method === 'GET')
+    )).length
+    createForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith('/session/teams', expect.objectContaining({ method: 'POST' }))
+      expect(document.getElementById('options-team-detail').textContent).toContain('Recovery code')
+      expect(document.getElementById('options-team-detail').textContent).toContain('trec_once')
+    })
+    const teamListCallsAfterCreate = apiFetch.mock.calls.filter(([url, opts = {}]) => (
+      url === '/session/teams' && (!opts.method || opts.method === 'GET')
+    )).length
+    expect(teamListCallsAfterCreate).toBe(teamListCallsBeforeCreate + 1)
+    ;[
+      '.options-team-member-row',
+      '.options-team-invite-row',
+      '.options-team-recovery-row',
+    ].forEach((selector) => {
+      expect(document.querySelector(selector)?.classList.contains('panel-row')).toBe(true)
+    })
+    expect(document.querySelector('#options-panel-teams .options-team-list')).not.toBeNull()
+    expect(document.querySelector('#options-panel-teams [class*="options-secret-"]')).toBeNull()
+    failInviteCreate = true
+    const inviteForm = document.querySelector('[data-team-invite-form]')
+    inviteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      const failureLog = logClientError.mock.calls.find(([context, error]) => (
+        String(context).startsWith('TEAM_ACTION_FAILED')
+        && String(context).includes('"action":"create_invite"')
+        && String(context).includes('"team_id":"team_options_1"')
+        && error.message === 'invite denied'
+      ))
+      expect(failureLog).toBeTruthy()
+    })
+    const originalSetActiveTeamId = window.setActiveTeamId
+    window.setActiveTeamId = vi.fn(() => { throw new Error('scope setter exploded') })
+    document.querySelector('#options-teams-list [data-team-action="switch-team"]').click()
+    await vi.waitFor(() => {
+      const failureLog = logClientError.mock.calls.find(([context, error]) => (
+        String(context).startsWith('TEAM_UI_ACTION_FAILED')
+        && String(context).includes('"action":"switch-team"')
+        && String(context).includes('"team_id":"team_options_1"')
+        && error.message === 'scope setter exploded'
+      ))
+      expect(failureLog).toBeTruthy()
+    })
+    window.setActiveTeamId = originalSetActiveTeamId
+    document.getElementById('team-scope-trigger').click()
+    expect(document.getElementById('team-scope-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('team-scope-overlay').hasAttribute('inert')).toBe(false)
+    expect(document.getElementById('team-scope-overlay').getAttribute('aria-hidden')).toBe('false')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-list').textContent).toContain('Ops team')
+    })
+    const personalScopeOption = document.querySelector('[data-team-scope-option="personal"]')
+    expect(personalScopeOption?.textContent).toContain('Personal')
+    expect(bindMobileSheet).toHaveBeenCalledWith(
+      document.getElementById('team-scope-modal'),
+      expect.objectContaining({ onClose: expect.any(Function) }),
+    )
+    const teamScopeOption = document.querySelector('[data-team-scope-option="team_options_1"]')
+    expect(teamScopeOption.classList.contains('dropdown-item')).toBe(true)
+    expect(teamScopeOption.classList.contains('dropdown-item-touch')).toBe(true)
+    document.querySelector('.team-scope-close').focus()
+    document.querySelector('[data-team-scope-option="team_options_1"]').click()
+    expect(document.getElementById('team-scope-overlay').hasAttribute('inert')).toBe(true)
+    expect(document.getElementById('team-scope-overlay').getAttribute('aria-hidden')).toBe('true')
+    expect(document.getElementById('team-scope-overlay').contains(document.activeElement)).toBe(false)
+    expect(document.getElementById('team-scope-label').textContent).toBe('Ops team')
+    expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Ops team')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-announcer').textContent).toBe('Active scope changed to Ops team.')
+    })
+    const scopeChangedLogs = () => apiFetch.mock.calls
+      .filter(([url, opts]) => url === '/log' && JSON.parse(opts.body).event === 'TEAM_SCOPE_CHANGED')
+      .map(([, opts]) => JSON.parse(opts.body))
+    const firstScopeChange = scopeChangedLogs().at(-1)
+    expect(firstScopeChange.level).toBe('debug')
+    expect(JSON.parse(firstScopeChange.message)).toEqual({
+      team_id: 'team_options_1',
+      scope: 'team',
+      persisted: true,
+      source: 'selector',
+    })
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(1)
+    await window.refreshTeamScopes()
+    document.getElementById('team-scope-trigger').click()
+    document.querySelector('[data-team-scope-option="personal"]').click()
+    expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-announcer').textContent).toBe('Active scope changed to Personal.')
+    })
+    expect(storage.getItem('active_team_id:tok_options_tab')).toBeNull()
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(2)
+    document.getElementById('team-scope-trigger').click()
+    document.querySelector('[data-team-scope-option="team_options_1"]').click()
+    expect(document.getElementById('team-scope-label').textContent).toBe('Ops team')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(3)
+    await window.refreshTeamScopes()
+
+    const dispatchScopeStorage = (value) => {
+      if (value) storage.setItem('active_team_id:tok_options_tab', value)
+      else storage.removeItem('active_team_id:tok_options_tab')
+      const event = new Event('storage')
+      Object.defineProperty(event, 'key', { value: 'active_team_id:tok_options_tab' })
+      Object.defineProperty(event, 'newValue', { value })
+      window.dispatchEvent(event)
+    }
+    dispatchScopeStorage('team_options_1')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(3)
+    dispatchScopeStorage('')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(4)
+    expect(JSON.parse(scopeChangedLogs().at(-1).message)).toEqual({
+      team_id: '',
+      scope: 'personal',
+      persisted: false,
+      source: 'storage',
+    })
+    dispatchScopeStorage('')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(4)
+    failScopeRefresh = true
+    dispatchScopeStorage('team_missing_1')
+    expect(document.getElementById('team-scope-label').textContent).toBe('Loading...')
+    expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Loading...')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-label').textContent).toBe('Team unavailable')
+      expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Team unavailable')
+      expect(document.getElementById('team-scope-current').textContent).toBe('Team unavailable')
+      expect(document.getElementById('team-scope-trigger').classList.contains('is-error')).toBe(true)
+      expect(document.querySelector('[data-menu-action="scope"]').classList.contains('is-error')).toBe(true)
+    })
+    const refreshLog = logClientError.mock.calls.find(([context]) => (
+      String(context).startsWith('TEAM_SCOPE_REFRESH_FAILED')
+      && String(context).includes('"surface":"teams"')
+      && String(context).includes('"team_id":"team_missing_1"')
+    ))
+    expect(refreshLog?.[1]?.message).toBe('scope offline')
+
+    failScopeRefresh = false
+    const originalGetItem = storage.getItem.bind(storage)
+    storage.getItem = vi.fn(() => { throw new Error('blocked storage read') })
+    await window.refreshTeamScopes()
+    storage.getItem = originalGetItem
+    const storageLog = apiFetch.mock.calls
+      .filter(([url, opts]) => url === '/log' && JSON.parse(opts.body).event === 'TEAM_SCOPE_STORAGE_UNAVAILABLE')
+      .map(([, opts]) => JSON.parse(opts.body))
+      .at(-1)
+    expect(storageLog.level).toBe('debug')
+    const storagePayload = JSON.parse(storageLog.message)
+    expect(storagePayload.operation).toBe('read')
+    expect(storagePayload.key_suffix).not.toContain('tok_options_tab')
+    expect(storagePayload.message).toBe('blocked storage read')
+
     activateOptionsTab('preferences')
 
     expect(document.getElementById('options-tab-preferences').getAttribute('aria-selected')).toBe('true')
     expect(document.querySelectorAll('#options-panel-preferences .options-desktop-only')).toHaveLength(2)
     expect(document.getElementById('options-panel-secrets').hidden).toBe(true)
 
-    expect(cycleOptionsTab(-1)).toBe(true)
+    expect(cycleOptionsTab(1)).toBe(true)
     expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement?.matches('[data-options-tab]')).toBe(false)
+
+    const offlineApiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/session/preferences') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      if (url === '/session/teams') {
+        return Promise.reject(new Error('team API unreachable'))
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    await loadAppFns({
+      apiFetch: offlineApiFetch,
+      sessionId: 'tok_options_offline',
+      localStorageEntries: { 'active_team_id:tok_options_offline': 'team_cached_1' },
+    })
+    document.dispatchEvent(new Event('DOMContentLoaded'))
+    await vi.waitFor(() => {
+      expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Team unavailable')
+      expect(document.querySelector('[data-menu-action="scope"]').classList.contains('is-error')).toBe(true)
+      expect(document.getElementById('team-scope-label').textContent).toBe('Team unavailable')
+    })
+  })
+
+  it('explains that reactivated teams keep archived automation paused', async () => {
+    const adminCapabilities = ['manage_members', 'manage_invites', 'archive_team']
+    let archivedTeam = {
+      id: 'team_archived_1',
+      name: 'Archive ops',
+      slug: 'archive-ops',
+      status: 'archived',
+      member: { id: 'tmem_archived_1', role: 'admin', capabilities: adminCapabilities, display_name: 'Nona' },
+    }
+    const showConfirm = vi.fn(async () => 'confirm')
+    const showToast = vi.fn()
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/session/preferences') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      if (url === '/session/teams') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ teams: [archivedTeam] }) })
+      }
+      if (url === '/session/teams/team_archived_1' && opts.method === 'PATCH') {
+        expect(JSON.parse(opts.body)).toEqual({ status: 'active' })
+        archivedTeam = { ...archivedTeam, status: 'active' }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ team: archivedTeam }) })
+      }
+      if (url === '/session/teams/team_archived_1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            team: archivedTeam,
+            members: [{
+              id: 'tmem_archived_1',
+              role: 'admin',
+              capabilities: adminCapabilities,
+              display_name: 'Nona',
+              status: 'active',
+              is_current: true,
+            }],
+            invites: [],
+            recovery_codes: [{
+              id: 'trec_archived_1',
+              created_at: '2026-05-28T00:00:00+00:00',
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { activateOptionsTab } = await loadAppFns({
+      apiFetch,
+      sessionId: 'tok_options_team_reactivate',
+      showConfirm,
+      showToast,
+    })
+
+    activateOptionsTab('teams')
+    await vi.waitFor(() => expect(document.getElementById('options-teams-list').textContent).toContain('Archive ops'))
+    document.querySelector('[data-team-action="select-team"]').click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('options-team-detail').textContent).toContain('automation stays paused')
+    })
+
+    document.querySelector('[data-team-action="reactivate-team"]').click()
+
+    await vi.waitFor(() => {
+      expect(showConfirm).toHaveBeenCalled()
+      expect(showConfirm.mock.calls[0][0].body.note)
+        .toContain('schedules and watchers paused by archival stay paused')
+      expect(showToast).toHaveBeenCalledWith('Team reactivated; schedules and watchers remain paused', 'success')
+    })
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/session/teams/team_archived_1',
+      expect.objectContaining({ method: 'PATCH' })
+    )
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -4534,7 +4868,7 @@ describe('app helpers', () => {
     expect(activateTab).not.toHaveBeenCalled()
 
     const activateTabForOptions = vi.fn()
-    const { handleTabShortcut: handleOptionsTabShortcut } = await loadAppFns({
+    const { activateOptionsTab, handleTabShortcut: handleOptionsTabShortcut } = await loadAppFns({
       activateTab: activateTabForOptions,
       activeTabId: 'tab-1',
       tabs: [
@@ -4542,6 +4876,7 @@ describe('app helpers', () => {
         { id: 'tab-2', st: 'idle' },
       ],
     })
+    activateOptionsTab('teams', { persist: false })
     document.getElementById('options-overlay').classList.add('open')
     const preventDefault = vi.fn()
 

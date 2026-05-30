@@ -609,18 +609,29 @@ def _diag_db_stats() -> dict:
 
 @assets_bp.route("/log", methods=["POST"])
 def client_log():
-    """Receive client-side error reports and emit them as server log entries."""
+    """Receive client-side reports and emit them as server log entries."""
     data = request.get_json(silent=True) or {}
     context = str(data.get("context") or "")[:200]
     message = str(data.get("message") or "")[:500]
+    event = str(data.get("event") or "CLIENT_ERROR").strip().upper()[:80]
+    if not event.replace("_", "").isalnum():
+        event = "CLIENT_ERROR"
+    level = str(data.get("level") or "warning").strip().lower()
     from services import metrics as app_metrics  # noqa: PLC0415
-    app_metrics.record_client_error(context or "unknown")
-    log.warning("CLIENT_ERROR", extra={
+    extra = {
         "ip": get_client_ip(),
         "session": get_log_session_id(),
         "context": context,
         "client_message": message,
-    })
+    }
+    if level == "debug":
+        log.debug(event, extra=extra)
+    elif level == "error":
+        app_metrics.record_client_error(context or event or "unknown")
+        log.error(event, extra=extra)
+    else:
+        app_metrics.record_client_error(context or event or "unknown")
+        log.warning(event, extra=extra)
     return jsonify({"ok": True})
 
 

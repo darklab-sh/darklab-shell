@@ -78,6 +78,8 @@ from services.projects.targets import (
     list_project_targets,
     update_project_target,
 )
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
 from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
@@ -89,6 +91,12 @@ from services.workspace.files import (
     WorkspaceQuotaExceeded,
     open_workspace_file_for_download,
     read_workspace_text_file,
+)
+from services.teams.request_scope import (
+    RequestScopeError,
+    current_request_scope,
+    requested_team_id,
+    scope_error_payload,
 )
 
 log = logging.getLogger("shell")
@@ -148,6 +156,27 @@ def _project_json_or_404(value, *, key=None, error="project not found"):
     return jsonify(value)
 
 
+def _team_permission_error_response(exc):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _project_owner(required_capability=None):
+    session_id = get_session_id()
+    if not requested_team_id(request):
+        return session_id, "", None
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return session_id, "", (jsonify(payload), status)
+    if required_capability is not None:
+        try:
+            require_capability(str((scope.member or {}).get("role") or ""), required_capability)
+        except TeamPermissionDenied as exc:
+            return session_id, "", _team_permission_error_response(exc)
+    return session_id, scope.team_id, None
+
+
 def _project_bulk_too_many_response():
     return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
 
@@ -188,7 +217,9 @@ def _workspace_project_artifact_error_response(exc):
 
 @projects_bp.route("/projects")
 def projects_list():
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     include_archived = str(request.args.get("include_archived") or "").lower() in {"1", "true", "yes"}
     include_counts = str(request.args.get("include_counts") or "").lower() in {"1", "true", "yes"}
     if "limit" in request.args or "offset" in request.args or include_counts:
@@ -200,6 +231,7 @@ def projects_list():
             limit=limit,
             offset=offset,
             include_counts=include_counts,
+            team_id=team_id,
         )
         log.debug("PROJECTS_VIEWED", extra={
             "ip": get_client_ip(),
@@ -209,7 +241,7 @@ def projects_list():
             "include_archived": include_archived,
         })
         return jsonify(page)
-    projects = list_projects(session_id, include_archived=include_archived)
+    projects = list_projects(session_id, include_archived=include_archived, team_id=team_id)
     log.debug("PROJECTS_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -222,9 +254,11 @@ def projects_list():
 @projects_bp.route("/projects", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_create():
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     try:
-        project = create_project(session_id, request.get_json(silent=True) or {})
+        project = create_project(session_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     log.info("PROJECT_CREATED", extra={
@@ -237,18 +271,22 @@ def projects_create():
 
 @projects_bp.route("/projects/active")
 def projects_active_get():
-    session_id = get_session_id()
-    project = get_active_project(session_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    project = get_active_project(session_id, team_id=team_id)
     return jsonify({"project": project})
 
 
 @projects_bp.route("/projects/active", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_active_set():
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     data = request.get_json(silent=True) or {}
     try:
-        project = set_active_project(session_id, data.get("project_id"))
+        project = set_active_project(session_id, data.get("project_id"), team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if not project:
@@ -264,8 +302,10 @@ def projects_active_set():
 @projects_bp.route("/projects/active", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def projects_active_clear():
-    session_id = get_session_id()
-    cleared = clear_active_project(session_id)
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    cleared = clear_active_project(session_id, team_id=team_id)
     log.info("PROJECT_ACTIVE_CLEARED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -276,24 +316,30 @@ def projects_active_clear():
 
 @projects_bp.route("/projects/<project_id>")
 def projects_get(project_id):
-    session_id = get_session_id()
-    project = get_project(session_id, project_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    project = get_project(session_id, project_id, team_id=team_id)
     return _project_json_or_404(project, key="project")
 
 
 @projects_bp.route("/projects/<project_id>/summary")
 def projects_summary(project_id):
-    session_id = get_session_id()
-    summary = get_project_summary(session_id, project_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    summary = get_project_summary(session_id, project_id, team_id=team_id)
     return _project_json_or_404(summary)
 
 
 @projects_bp.route("/projects/<project_id>", methods=["PUT"])
 @limiter.limit(_project_write_limit)
 def projects_update(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     try:
-        project = update_project(session_id, project_id, request.get_json(silent=True) or {})
+        project = update_project(session_id, project_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if not project:
@@ -310,8 +356,10 @@ def projects_update(project_id):
 @projects_bp.route("/projects/<project_id>", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def projects_delete(project_id):
-    session_id = get_session_id()
-    deleted = delete_project(session_id, project_id)
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    deleted = delete_project(session_id, project_id, team_id=team_id)
     if not deleted:
         return _project_not_found()
     log.info("PROJECT_DELETED", extra={
@@ -324,26 +372,33 @@ def projects_delete(project_id):
 
 @projects_bp.route("/projects/<project_id>/links")
 def projects_links_list(project_id):
-    session_id = get_session_id()
-    links = list_project_links(session_id, project_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    links = list_project_links(session_id, project_id, team_id=team_id)
     return _project_json_or_404(links, key="links")
 
 
 @projects_bp.route("/projects/<project_id>/runs")
 def projects_runs_list(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     runs = list_project_runs(
         session_id,
         project_id,
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        team_id=team_id,
     )
     return _project_json_or_404(runs)
 
 
 @projects_bp.route("/projects/<project_id>/entities")
 def projects_entities_list(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
@@ -355,6 +410,7 @@ def projects_entities_list(project_id):
         entity_type=request.args.get("type") or "",
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        team_id=team_id,
     )
     return _project_json_or_404(entities)
 
@@ -362,11 +418,13 @@ def projects_entities_list(project_id):
 @projects_bp.route("/projects/<project_id>/links", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_links_create(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     data = request.get_json(silent=True) or {}
     if isinstance(data, dict) and "entity_ids" in data:
         try:
-            result = link_project_entities(session_id, project_id, data)
+            result = link_project_entities(session_id, project_id, data, team_id=team_id)
         except ProjectWorkspaceError as exc:
             if str(exc) == "too_many":
                 return _project_bulk_too_many_response()
@@ -388,12 +446,13 @@ def projects_links_create(project_id):
                 project_id,
                 [str(run_id or "") for run_id in data.get("entity_ids") or []],
                 data.get("source") or "manual",
+                team_id=team_id,
             )
             if linked_entities is not None:
                 result["linked_entities"] = linked_entities
         return jsonify(result)
     try:
-        link = link_project_entity(session_id, project_id, data)
+        link = link_project_entity(session_id, project_id, data, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if link is None:
@@ -412,6 +471,7 @@ def projects_links_create(project_id):
             project_id,
             [str(data.get("entity_id") or "")],
             data.get("source") or "manual",
+            team_id=team_id,
         )
         if linked_entities is not None:
             body["linked_entities"] = linked_entities
@@ -420,10 +480,12 @@ def projects_links_create(project_id):
 
 @projects_bp.route("/projects/<project_id>/links/run-entities/preview", methods=["POST"])
 def projects_run_entity_link_preview(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     data = request.get_json(silent=True) or {}
     try:
-        preview = preview_project_run_entity_links(session_id, project_id, data)
+        preview = preview_project_run_entity_links(session_id, project_id, data, team_id=team_id)
     except ProjectWorkspaceError as exc:
         if str(exc) == "too_many":
             return _project_bulk_too_many_response()
@@ -435,10 +497,12 @@ def projects_run_entity_link_preview(project_id):
 
 @projects_bp.route("/projects/<project_id>/links/run-entities/remove-preview", methods=["POST"])
 def projects_run_entity_unlink_preview(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     data = request.get_json(silent=True) or {}
     try:
-        preview = preview_project_run_entity_unlinks(session_id, project_id, data)
+        preview = preview_project_run_entity_unlinks(session_id, project_id, data, team_id=team_id)
     except ProjectWorkspaceError as exc:
         if str(exc) == "too_many":
             return _project_bulk_too_many_response()
@@ -451,11 +515,13 @@ def projects_run_entity_unlink_preview(project_id):
 @projects_bp.route("/projects/<project_id>/links", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def projects_links_delete(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     data = request.get_json(silent=True) or {}
     if isinstance(data, dict) and "entity_ids" in data:
         try:
-            result = unlink_project_entities(session_id, project_id, data)
+            result = unlink_project_entities(session_id, project_id, data, team_id=team_id)
         except ProjectWorkspaceError as exc:
             if str(exc) == "too_many":
                 return _project_bulk_too_many_response()
@@ -473,7 +539,7 @@ def projects_links_delete(project_id):
         })
         return jsonify(result)
     try:
-        deleted = unlink_project_entity(session_id, project_id, data)
+        deleted = unlink_project_entity(session_id, project_id, data, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
@@ -491,6 +557,7 @@ def projects_links_delete(project_id):
             project_id,
             [str(data.get("entity_id") or "")],
             include_curated=bool(data.get("include_curated_entities")),
+            team_id=team_id,
         )
         if unlinked_entities is not None:
             body["unlinked_entities"] = unlinked_entities
@@ -508,7 +575,9 @@ def projects_links_delete(project_id):
 
 @projects_bp.route("/projects/<project_id>/targets")
 def projects_targets_list(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     auto_discovered = str(request.args.get("auto_discovered") or "").strip().lower() in {"1", "true", "yes", "on"}
     targets = list_project_targets(
         session_id,
@@ -518,6 +587,7 @@ def projects_targets_list(project_id):
         auto_discovered=auto_discovered,
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=100),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        team_id=team_id,
     )
     return _project_json_or_404(targets)
 
@@ -525,9 +595,11 @@ def projects_targets_list(project_id):
 @projects_bp.route("/projects/<project_id>/targets", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_targets_create(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     try:
-        target = add_project_target(session_id, project_id, request.get_json(silent=True) or {})
+        target = add_project_target(session_id, project_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if target is None:
@@ -544,9 +616,11 @@ def projects_targets_create(project_id):
 @projects_bp.route("/projects/<project_id>/targets/<target_id>", methods=["PUT"])
 @limiter.limit(_project_write_limit)
 def projects_targets_update(project_id, target_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     try:
-        target = update_project_target(session_id, project_id, target_id, request.get_json(silent=True) or {})
+        target = update_project_target(session_id, project_id, target_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if target is None:
@@ -563,9 +637,11 @@ def projects_targets_update(project_id, target_id):
 @projects_bp.route("/projects/<project_id>/targets/<target_id>", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def projects_targets_delete(project_id, target_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     try:
-        deleted = delete_project_target(session_id, project_id, target_id)
+        deleted = delete_project_target(session_id, project_id, target_id, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
@@ -583,17 +659,21 @@ def projects_targets_delete(project_id, target_id):
 
 @projects_bp.route("/projects/<project_id>/packages")
 def projects_packages_list(project_id):
-    session_id = get_session_id()
-    packages = list_evidence_packages(session_id, project_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    packages = list_evidence_packages(session_id, project_id, team_id=team_id)
     return _project_json_or_404(packages, key="packages")
 
 
 @projects_bp.route("/projects/<project_id>/packages", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_packages_create(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
     try:
-        package = create_evidence_package(session_id, project_id, request.get_json(silent=True) or {})
+        package = create_evidence_package(session_id, project_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if package is None:
@@ -611,8 +691,10 @@ def projects_packages_create(project_id):
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>")
 def projects_packages_get(project_id, package_id):
-    session_id = get_session_id()
-    package = get_evidence_package(session_id, project_id, package_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    package = get_evidence_package(session_id, project_id, package_id, team_id=team_id)
     if package is None:
         return _project_not_found("package not found")
     log.info("EVIDENCE_PACKAGE_VIEWED", extra={
@@ -627,10 +709,12 @@ def projects_packages_get(project_id, package_id):
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download")
 @limiter.limit(_evidence_package_download_limit)
 def projects_packages_download(project_id, package_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     build_started = time.perf_counter()
     try:
-        archive = build_evidence_package_archive(session_id, project_id, package_id)
+        archive = build_evidence_package_archive(session_id, project_id, package_id, team_id=team_id)
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - build_started)
         return jsonify({"error": str(exc)}), 413
@@ -704,14 +788,33 @@ def projects_packages_download(project_id, package_id):
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs", methods=["POST"])
 @limiter.limit(_evidence_package_download_limit)
 def projects_packages_download_job_create(project_id, package_id):
-    session_id = get_session_id()
-    if get_evidence_package(session_id, project_id, package_id) is None:
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    if get_evidence_package(session_id, project_id, package_id, team_id=team_id) is None:
         return _project_not_found("package not found")
-    job = start_evidence_package_archive_job(session_id, project_id, package_id, cfg=CFG)
+    actor_member_id = ""
+    if team_id:
+        try:
+            scope = current_request_scope(session_id, request)
+            actor_member_id = str((scope.member or {}).get("id") or "")
+        except RequestScopeError as exc:
+            payload, status = scope_error_payload(exc)
+            return jsonify(payload), status
+    job = start_evidence_package_archive_job(
+        session_id,
+        project_id,
+        package_id,
+        cfg=CFG,
+        team_id=team_id,
+        actor_member_id=actor_member_id,
+    )
     job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
     log.info("EVIDENCE_PACKAGE_BUILD_JOB_STARTED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "actor_member_id": actor_member_id,
         "project_id": project_id,
         "package_id": package_id,
         "job_id": job_id,
@@ -721,16 +824,20 @@ def projects_packages_download_job_create(project_id, package_id):
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>")
 def projects_packages_download_job_get(project_id, package_id, job_id):
-    session_id = get_session_id()
-    job = get_evidence_package_archive_job(session_id, project_id, package_id, job_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    job = get_evidence_package_archive_job(session_id, project_id, package_id, job_id, team_id=team_id)
     return _project_json_or_404(job, key="job", error="package build job not found")
 
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download")
 @limiter.limit(_evidence_package_download_limit)
 def projects_packages_download_job_file(project_id, package_id, job_id):
-    session_id = get_session_id()
-    archive = evidence_package_archive_for_job(session_id, project_id, package_id, job_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    archive = evidence_package_archive_for_job(session_id, project_id, package_id, job_id, team_id=team_id)
     if archive is None:
         return _project_not_found("package build job not found")
     status = archive.get("status")
@@ -780,8 +887,10 @@ def projects_packages_download_job_file(project_id, package_id, job_id):
 @projects_bp.route("/projects/<project_id>/packages/<package_id>", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def projects_packages_delete(project_id, package_id):
-    session_id = get_session_id()
-    deleted = delete_evidence_package(session_id, project_id, package_id)
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    deleted = delete_evidence_package(session_id, project_id, package_id, team_id=team_id)
     if not deleted:
         return _project_not_found("package not found")
     log.info("EVIDENCE_PACKAGE_DELETED", extra={
@@ -795,7 +904,9 @@ def projects_packages_delete(project_id, package_id):
 
 @projects_bp.route("/projects/<project_id>/artifacts")
 def projects_artifacts_list(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
@@ -806,14 +917,17 @@ def projects_artifacts_list(project_id):
         filters,
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        team_id=team_id,
     )
     return _project_json_or_404(artifacts)
 
 
 @projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/preview")
 def projects_artifacts_preview(project_id, artifact_id):
-    session_id = get_session_id()
-    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id, team_id=team_id)
     if artifact is None:
         return _project_not_found("artifact not found")
     if not artifact.get("file_available"):
@@ -823,7 +937,8 @@ def projects_artifacts_preview(project_id, artifact_id):
             "artifact": artifact,
         }), status
     try:
-        text = read_workspace_text_file(session_id, artifact["workspace_path"], CFG)
+        artifact_session_id = str(artifact.get("session_id") or session_id)
+        text = read_workspace_text_file(artifact_session_id, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
         return _workspace_project_artifact_error_response(exc)
     return jsonify({"artifact": artifact, "text": text})
@@ -831,8 +946,10 @@ def projects_artifacts_preview(project_id, artifact_id):
 
 @projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/download")
 def projects_artifacts_download(project_id, artifact_id):
-    session_id = get_session_id()
-    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id)
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id, team_id=team_id)
     if artifact is None:
         return _project_not_found("artifact not found")
     if not artifact.get("file_available"):
@@ -842,7 +959,8 @@ def projects_artifacts_download(project_id, artifact_id):
             "artifact": artifact,
         }), status
     try:
-        handle = open_workspace_file_for_download(session_id, artifact["workspace_path"], CFG)
+        artifact_session_id = str(artifact.get("session_id") or session_id)
+        handle = open_workspace_file_for_download(artifact_session_id, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
         return _workspace_project_artifact_error_response(exc)
     download_name = artifact.get("display_name") or artifact["workspace_path"].split("/")[-1] or "artifact"
@@ -856,7 +974,9 @@ def projects_artifacts_download(project_id, artifact_id):
 
 @projects_bp.route("/projects/<project_id>/findings")
 def projects_findings_list(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     paginated = "limit" in request.args or "offset" in request.args
     filters = {
         "run_id": request.args.getlist("run_id"),
@@ -883,9 +1003,10 @@ def projects_findings_list(project_id):
                 limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
                 offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
                 include_total=include_total,
+                team_id=team_id,
             )
         else:
-            findings = list_project_findings(session_id, project_id, filters)
+            findings = list_project_findings(session_id, project_id, filters, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_json_error(str(exc), 400)
     if findings is None:
@@ -898,12 +1019,15 @@ def projects_findings_list(project_id):
 @projects_bp.route("/projects/<project_id>/findings/review", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_findings_bulk_review_update(project_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
     try:
         result = bulk_update_project_finding_review_states(
             session_id,
             project_id,
             request.get_json(silent=True) or {},
+            team_id=team_id,
         )
     except ProjectWorkspaceError as exc:
         if str(exc) == "too_many":
@@ -924,7 +1048,9 @@ def projects_findings_bulk_review_update(project_id):
 
 @projects_bp.route("/entities/run/<run_id>/findings")
 def run_findings_list(run_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     paginated = "limit" in request.args or "offset" in request.args
     if paginated:
         findings = list_run_findings(
@@ -933,9 +1059,10 @@ def run_findings_list(run_id):
             limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
             offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
             include_total=True,
+            team_id=team_id,
         )
     else:
-        findings = list_run_findings(session_id, run_id)
+        findings = list_run_findings(session_id, run_id, team_id=team_id)
     if findings is None:
         return _project_not_found("run not found")
     if paginated:
@@ -946,9 +1073,11 @@ def run_findings_list(run_id):
 @projects_bp.route("/findings/<finding_id>/review", methods=["PUT"])
 @limiter.limit(_project_write_limit)
 def findings_review_update(finding_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
     try:
-        finding = update_finding_review_state(session_id, finding_id, request.get_json(silent=True) or {})
+        finding = update_finding_review_state(session_id, finding_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if finding is None:
@@ -963,9 +1092,11 @@ def findings_review_update(finding_id):
 
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/labels")
 def entity_labels_list(entity_type, entity_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     try:
-        labels = list_entity_labels(session_id, entity_type, entity_id)
+        labels = list_entity_labels(session_id, entity_type, entity_id, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_json_error(str(exc), 400)
     if labels is None:
@@ -976,9 +1107,11 @@ def entity_labels_list(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/labels", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def entity_labels_create(entity_type, entity_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
     try:
-        label = add_entity_label(session_id, entity_type, entity_id, request.get_json(silent=True) or {})
+        label = add_entity_label(session_id, entity_type, entity_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if label is None:
@@ -994,9 +1127,11 @@ def entity_labels_create(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/labels", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def entity_labels_delete(entity_type, entity_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
     try:
-        deleted = delete_entity_label(session_id, entity_type, entity_id, request.get_json(silent=True) or {})
+        deleted = delete_entity_label(session_id, entity_type, entity_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
@@ -1014,11 +1149,13 @@ def entity_labels_delete(entity_type, entity_id):
 
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/note")
 def entity_note_get(entity_type, entity_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
     try:
-        if not entity_metadata_target_exists(session_id, entity_type, entity_id):
+        if not entity_metadata_target_exists(session_id, entity_type, entity_id, team_id=team_id):
             return _project_not_found("entity not found")
-        note = get_entity_note(session_id, entity_type, entity_id)
+        note = get_entity_note(session_id, entity_type, entity_id, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_json_error(str(exc), 400)
     return jsonify({"note": note})
@@ -1027,9 +1164,11 @@ def entity_note_get(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/note", methods=["PUT"])
 @limiter.limit(_project_write_limit)
 def entity_note_update(entity_type, entity_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
     try:
-        note = upsert_entity_note(session_id, entity_type, entity_id, request.get_json(silent=True) or {})
+        note = upsert_entity_note(session_id, entity_type, entity_id, request.get_json(silent=True) or {}, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if note is None:
@@ -1045,9 +1184,11 @@ def entity_note_update(entity_type, entity_id):
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/note", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def entity_note_delete(entity_type, entity_id):
-    session_id = get_session_id()
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
     try:
-        deleted = delete_entity_note(session_id, entity_type, entity_id)
+        deleted = delete_entity_note(session_id, entity_type, entity_id, team_id=team_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:

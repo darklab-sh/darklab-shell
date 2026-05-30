@@ -59,6 +59,7 @@ def build_run_context(
     run_id: str,
     *,
     session_id: str | None = None,
+    team_id: str = "",
     cfg: dict | None = None,
     variant: str = "default",
 ) -> AIContextResult:
@@ -76,11 +77,17 @@ def build_run_context(
             raise ValueError("run not found")
         run = dict(run_row)
         owner_session_id = str(run.get("session_id") or "")
-        if session_id is not None and str(session_id) != owner_session_id:
+        owner_team_id = str(run.get("team_id") or "")
+        requested_team_id = str(team_id or "").strip()
+        if requested_team_id:
+            if owner_team_id != requested_team_id:
+                raise PermissionError("run does not belong to this team")
+        elif session_id is not None and (str(session_id) != owner_session_id or owner_team_id):
             raise PermissionError("run does not belong to this session")
-        findings = _load_findings(conn, owner_session_id, run_id)
-        entities = _load_entities(conn, owner_session_id, run_id)
-        project_context = _load_project_context(conn, owner_session_id, entities)
+        context_session_id = str(session_id or owner_session_id)
+        findings = _load_findings(conn, context_session_id, run_id, team_id=requested_team_id)
+        entities = _load_entities(conn, context_session_id, run_id, team_id=requested_team_id)
+        project_context = _load_project_context(conn, context_session_id, entities, team_id=requested_team_id)
         output_summary = _load_output_summary(conn, run_id)
 
     output_result = load_run_output_events_for_run(
@@ -411,13 +418,24 @@ def _strip_redaction_markers(value: Any) -> tuple[Any, int, int]:
     return walk(value), pre_bytes, redacted_bytes
 
 
-def _load_findings(conn, session_id: str, run_id: str) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT severity, kind, title, raw_line, line_number, status "
-        "FROM findings WHERE session_id = ? AND run_id = ? AND COALESCE(suppressed, FALSE) = FALSE "
-        "ORDER BY line_number, created LIMIT 200",
-        (session_id, run_id),
-    ).fetchall()
+def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
+    if team_id:
+        rows = conn.execute(
+            "SELECT f.severity, f.kind, f.title, f.raw_line, f.line_number, f.status "
+            "FROM findings f "
+            "WHERE (f.run_id = ? OR EXISTS ("
+            "  SELECT 1 FROM findings_occurrences fo WHERE fo.finding_id = f.id AND fo.run_id = ?"
+            ")) AND COALESCE(f.suppressed, FALSE) = FALSE "
+            "ORDER BY f.line_number, f.created LIMIT 200",
+            (run_id, run_id),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT severity, kind, title, raw_line, line_number, status "
+            "FROM findings WHERE session_id = ? AND run_id = ? AND COALESCE(suppressed, FALSE) = FALSE "
+            "ORDER BY line_number, created LIMIT 200",
+            (session_id, run_id),
+        ).fetchall()
     return [{
         "severity": row["severity"],
         "kind": row["kind"],
@@ -428,14 +446,23 @@ def _load_findings(conn, session_id: str, run_id: str) -> list[dict[str, Any]]:
     } for row in rows]
 
 
-def _load_entities(conn, session_id: str, run_id: str) -> dict[str, list[str]]:
-    rows = conn.execute(
-        "SELECT e.type, e.canonical_value FROM entities e "
-        "JOIN entity_run_links erl ON erl.entity_id = e.id "
-        "WHERE e.session_id = ? AND erl.run_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
-        "ORDER BY e.type, e.canonical_value",
-        (session_id, run_id),
-    ).fetchall()
+def _load_entities(conn, session_id: str, run_id: str, *, team_id: str = "") -> dict[str, list[str]]:
+    if team_id:
+        rows = conn.execute(
+            "SELECT e.type, e.canonical_value FROM entities e "
+            "JOIN entity_run_links erl ON erl.entity_id = e.id "
+            "WHERE erl.run_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            "ORDER BY e.type, e.canonical_value",
+            (run_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT e.type, e.canonical_value FROM entities e "
+            "JOIN entity_run_links erl ON erl.entity_id = e.id "
+            "WHERE e.session_id = ? AND erl.run_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            "ORDER BY e.type, e.canonical_value",
+            (session_id, run_id),
+        ).fetchall()
     grouped: dict[str, list[str]] = defaultdict(list)
     for row in rows:
         values = grouped[str(row["type"])]
@@ -444,18 +471,30 @@ def _load_entities(conn, session_id: str, run_id: str) -> dict[str, list[str]]:
     return dict(grouped)
 
 
-def _load_project_context(conn, session_id: str, entities: dict[str, list[str]]) -> list[dict[str, Any]]:
+def _load_project_context(
+    conn,
+    session_id: str,
+    entities: dict[str, list[str]],
+    *,
+    team_id: str = "",
+) -> list[dict[str, Any]]:
     if not entities:
         return []
     values = [value for items in entities.values() for value in items]
     placeholders = ",".join("?" for _ in values)
+    if team_id:
+        project_scope_sql = "p.team_id = ?"
+        project_scope_params: tuple[str, ...] = (team_id,)
+    else:
+        project_scope_sql = "p.session_id = ? AND (p.team_id IS NULL OR p.team_id = '')"
+        project_scope_params = (session_id,)
     rows = conn.execute(
         "SELECT DISTINCT p.name, p.slug, pl.entity_type, e.canonical_value "
         "FROM projects p JOIN project_links pl ON pl.project_id = p.id "
         "JOIN entities e ON e.id = pl.entity_id "
-        f"WHERE p.session_id = ? AND e.canonical_value IN ({placeholders}) "  # nosec
+        f"WHERE {project_scope_sql} AND e.canonical_value IN ({placeholders}) "  # nosec
         "ORDER BY p.name, e.canonical_value LIMIT 100",
-        (session_id, *values),
+        (*project_scope_params, *values),
     ).fetchall()
     return [{
         "project": row["name"],

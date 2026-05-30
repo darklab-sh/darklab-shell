@@ -391,6 +391,11 @@ function _historyRunActionButton(label, action, { disabled = false, tone = 'seco
   return btn;
 }
 
+function _historyRunCanEditMetadata() {
+  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
 function _historyRunAiSummaryEnabled() {
   return !!(
     APP_CONFIG
@@ -593,8 +598,8 @@ function _historyRunActionMenu() {
     ['copy-command', 'Copy command'],
     ['schedule-command', 'Schedule this command'],
     ['watch-command', 'Create watcher from this baseline'],
-    ['edit-metadata', 'Edit metadata'],
   ];
+  if (_historyRunCanEditMetadata()) items.push(['edit-metadata', 'Edit metadata']);
   if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
   const projectLinks = typeof _historyRunProjectLinks === 'function'
     ? _historyRunProjectLinks(_historyRunPrimary())
@@ -967,7 +972,7 @@ function _renderHistoryRunSummary(body, run) {
   metadata.className = 'history-run-section';
   metadata.appendChild(_historyRunSectionHeader(
     'Metadata',
-    _historyRunActionButton('Edit', 'edit-metadata'),
+    _historyRunCanEditMetadata() ? _historyRunActionButton('Edit', 'edit-metadata') : null,
   ));
 
   const metadataFields = document.createElement('div');
@@ -1032,9 +1037,16 @@ function _renderHistoryRunSummary(body, run) {
 
   const actions = document.createElement('div');
   actions.className = 'history-run-actions history-run-primary-actions';
+  const deleteDisabled = typeof _historyCanManageHistory === 'function' && !_historyCanManageHistory();
+  const deleteButton = _historyRunActionButton('Delete', 'delete', { disabled: deleteDisabled });
+  if (deleteDisabled) {
+    deleteButton.title = typeof _historyScopeDeniedMessage === 'function'
+      ? _historyScopeDeniedMessage('delete team history')
+      : 'View-only team members cannot delete team history.';
+  }
   actions.append(
     _historyRunActionButton('Restore', 'restore'),
-    _historyRunActionButton('Delete', 'delete'),
+    deleteButton,
     _historyRunActionButton('Permalink', 'permalink'),
     _historyRunActionButton('Compare', 'compare'),
   );

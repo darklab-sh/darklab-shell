@@ -9,12 +9,13 @@ from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
 def test_run_complete_hook_enqueues_external_run_summary(monkeypatch):
     captured = {}
 
-    def fake_enqueue(trigger, payload, session_token, *, conn=None, dispatch_sync=False, run_id=None):
+    def fake_enqueue(trigger, payload, session_token, *, conn=None, dispatch_sync=False, run_id=None, team_id=""):
         captured.update({
             "trigger": trigger,
             "payload": payload,
             "session_token": session_token,
             "run_id": run_id,
+            "team_id": team_id,
             "dispatch_sync": dispatch_sync,
         })
         return ["nte_1"]
@@ -35,6 +36,7 @@ def test_run_complete_hook_enqueues_external_run_summary(monkeypatch):
     assert captured["trigger"] == "run_complete"
     assert captured["session_token"] == "tok_notifications"
     assert captured["run_id"] == "run-1"
+    assert captured["team_id"] == ""
     assert captured["dispatch_sync"] is False
     assert captured["payload"]["run_id"] == "run-1"
     assert captured["payload"]["command_root"] == "nmap"

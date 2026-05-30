@@ -123,21 +123,37 @@ def upsert_secret_with_connection(conn, session_token: str, name: str, value: st
     }, created
 
 
-def emit_secret_upsert_audit(session_token: str, metadata: dict, created: bool) -> None:
+def emit_secret_upsert_audit(
+    session_token: str,
+    metadata: dict,
+    created: bool,
+    *,
+    audit_session_id: str = "",
+    team_id: str = "",
+) -> None:
     emit_secret_event(
         "SECRET_STORED",
-        session_token,
+        audit_session_id or session_token,
         name=str(metadata["name"]),
         consumer_envs=metadata["consumer_envs"],
         is_new_secret=created,
+        team_id=team_id,
     )
 
 
-def upsert_secret(session_token: str, name: str, value: str, consumer_envs=None) -> tuple[dict, bool]:
+def upsert_secret(
+    session_token: str,
+    name: str,
+    value: str,
+    consumer_envs=None,
+    *,
+    audit_session_id: str = "",
+    team_id: str = "",
+) -> tuple[dict, bool]:
     with db_connect() as conn:
         metadata, created = upsert_secret_with_connection(conn, session_token, name, value, consumer_envs)
         conn.commit()
-    emit_secret_upsert_audit(session_token, metadata, created)
+    emit_secret_upsert_audit(session_token, metadata, created, audit_session_id=audit_session_id, team_id=team_id)
     return metadata, created
 
 
@@ -152,7 +168,13 @@ def delete_secret(session_token: str, name: str) -> bool:
     return cur.rowcount > 0
 
 
-def get_secret_value_for_env(session_token: str, env_name: str) -> str | None:
+def get_secret_value_for_env(
+    session_token: str,
+    env_name: str,
+    *,
+    audit_session_id: str = "",
+    team_id: str = "",
+) -> str | None:
     normalized_env = normalize_secret_name(env_name)
     with db_connect() as conn:
         rows = conn.execute(
@@ -164,12 +186,17 @@ def get_secret_value_for_env(session_token: str, env_name: str) -> str | None:
         envs = json.loads(row["consumer_envs"] or "[]")
         if normalized_env in envs:
             value = decrypt_secret(row["ciphertext"], row["nonce"])
-            emit_secret_event("SECRET_RETRIEVED", session_token, consumer_envs=[normalized_env])
+            emit_secret_event(
+                "SECRET_RETRIEVED",
+                audit_session_id or session_token,
+                consumer_envs=[normalized_env],
+                team_id=team_id,
+            )
             return value
     return None
 
 
-def rewrap_session_secrets(session_token: str) -> int:
+def rewrap_session_secrets(session_token: str, *, audit_session_id: str = "", team_id: str = "") -> int:
     """Re-encrypt all secrets for a session under the currently active key."""
     with db_connect() as conn:
         rows = conn.execute(
@@ -188,7 +215,7 @@ def rewrap_session_secrets(session_token: str) -> int:
             )
             updated += 1
         conn.commit()
-    emit_secret_event("VAULT_KEY_ROTATION_COMPLETED", session_token, count=updated)
+    emit_secret_event("VAULT_KEY_ROTATION_COMPLETED", audit_session_id or session_token, count=updated, team_id=team_id)
     return updated
 
 

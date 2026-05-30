@@ -119,14 +119,22 @@ def _channel_rows_for_trigger(
     session_token: str,
     trigger: str,
     *,
+    team_id: str = "",
     channel_ids: Iterable[str] | None = None,
     include_muted: bool = False,
 ) -> list[Any]:
     selected_channel_ids = {str(channel_id) for channel_id in channel_ids or () if str(channel_id or "").strip()}
+    if team_id:
+        owner_sql = "team_id = ?"
+        owner_params = (team_id,)
+    else:
+        owner_sql = "(team_id IS NULL OR team_id = '') AND session_token = ?"
+        owner_params = (session_token,)
     rows = conn.execute(
-        "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
-        "FROM notification_channels WHERE session_token = ? ORDER BY lower(label) ASC, created ASC, id ASC",
-        (session_token,),
+        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+        "muted, created, updated "
+        f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
+        owner_params,
     ).fetchall()
     channels = []
     for row in rows:
@@ -150,6 +158,7 @@ def enqueue(
     run_id: str | None = None,
     channel_ids: Iterable[str] | None = None,
     include_muted: bool = False,
+    team_id: str = "",
 ) -> list[str]:
     """Queue one notification event for every matching channel."""
     normalized_trigger = _normalize_trigger(trigger)
@@ -161,6 +170,7 @@ def enqueue(
             active_conn,
             session_token,
             normalized_trigger,
+            team_id=team_id,
             channel_ids=channel_ids,
             include_muted=include_muted,
         ):
@@ -168,12 +178,13 @@ def enqueue(
             queued_ids.append(event_id)
             active_conn.execute(
                 "INSERT INTO notification_events "
-                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
                 "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event_id,
                     session_token,
+                    team_id,
                     channel_row["id"],
                     normalized_trigger,
                     _json_param(event_payload),
@@ -202,6 +213,7 @@ def enqueue(
             "queued": len(queued_ids),
             "run_id": run_id or str(event_payload.get("run_id") or ""),
             "session": get_log_session_id(session_token),
+            "team_id": team_id,
         },
     )
     return queued_ids
@@ -219,7 +231,7 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
     if event_ids is not None:
         where_sql, params = _where_ids("id", event_ids)
         return conn.execute(
-            "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
+            "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
             "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
             "FROM notification_events "
             f"WHERE {where_sql} AND status IN (?, ?) "  # nosec
@@ -228,7 +240,7 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
             [*params, STATUS_PENDING, STATUS_RETRY_WAIT, now, int(limit)],
         ).fetchall()
     return conn.execute(
-        "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
+        "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
         "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
         "FROM notification_events WHERE status IN (?, ?) "
         "AND (next_attempt_at = '' OR next_attempt_at <= ?) "
@@ -261,7 +273,7 @@ def _channel_sends_this_minute(conn, channel_id: str, *, now: str, exclude_event
 
 def _load_channel(conn, channel_id: str) -> NotificationChannel | None:
     row = conn.execute(
-        "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
+        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
         "FROM notification_channels WHERE id = ?",
         (channel_id,),
     ).fetchone()

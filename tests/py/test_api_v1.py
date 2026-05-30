@@ -1,5 +1,7 @@
+import inspect
 import json
 import sqlite3
+import stat
 import sys
 import uuid
 from dataclasses import fields
@@ -41,19 +43,21 @@ def _seed_run(
     run_id: str | None = None,
     command: str = "echo api",
     output: str | list[str] = "ok",
+    team_id: str = "",
 ) -> str:
     run_id = run_id or "api_run_" + session_id[-8:]
     output_lines = output if isinstance(output, list) else [str(output)]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO runs "
-            "(id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
+            "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, output_search_text) "
-            "VALUES (?, ?, 'external', ?, '2026-05-19T00:00:00+00:00', "
+            "VALUES (?, ?, ?, 'external', ?, '2026-05-19T00:00:00+00:00', "
             "'2026-05-19T00:00:01+00:00', 0, '', ?, 0, ?, 0, 0, ?)",
             (
                 run_id,
                 session_id,
+                team_id,
                 command,
                 json.dumps([{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in output_lines]),
                 len(output_lines),
@@ -74,6 +78,149 @@ def _create_project(client, token, *, name="API Project"):
     resp = client.post("/projects", json={"name": name}, headers={"X-Session-ID": token})
     assert resp.status_code == 201
     return json.loads(resp.data)["project"]
+
+
+def _create_api_team(client, owner_token: str, *, name: str = "API Team") -> str:
+    resp = client.post(
+        "/api/v1/teams",
+        headers=_headers(owner_token),
+        json={"name": f"{name} {uuid.uuid4().hex[:8]}", "display_name": "API owner"},
+    )
+    assert resp.status_code == 201
+    return str(json.loads(resp.data)["team"]["id"])
+
+
+def _add_api_team_member(client, owner_token: str, member_token: str, team_id: str, *, role: str = "viewer") -> None:
+    invite = client.post(
+        f"/api/v1/teams/{team_id}/invites",
+        headers=_headers(owner_token),
+        json={"role": role, "label": f"API {role}"},
+    )
+    assert invite.status_code == 201
+    joined = client.post(
+        "/api/v1/teams/join",
+        headers=_headers(member_token),
+        json={"code": json.loads(invite.data)["invite"]["code"], "display_name": f"API {role}"},
+    )
+    assert joined.status_code == 201
+
+
+def _team_headers(token: str, team_id: str) -> dict[str, str]:
+    return {**_headers(token), "X-Team-ID": team_id}
+
+
+_API_V1_TEAM_SCOPED_READ_ROUTES = (
+    "api_history",
+    "api_history_search",
+    "api_atlas_summary",
+    "api_atlas_runs",
+    "api_atlas_entities",
+    "api_atlas_entity",
+    "api_atlas_findings",
+    "api_atlas_finding",
+    "api_history_run",
+    "api_history_run_output",
+    "api_history_run_artifacts",
+    "api_history_run_artifact_download",
+    "api_projects",
+    "api_project",
+    "api_project_findings",
+    "api_project_runs",
+    "api_project_entities",
+    "api_project_packages",
+    "api_schedules",
+    "api_schedule",
+    "api_schedule_fires",
+    "api_watchers",
+    "api_watcher",
+    "api_watcher_fires",
+    "api_notification_channels",
+    "api_notification_events",
+    "api_active_runs",
+    "api_run_status",
+    "api_run_wait",
+    "api_run_ai_assists",
+    "api_run_stream",
+)
+
+
+_API_V1_TEAM_SCOPED_WRITE_ROUTES = {
+    "api_schedule_create": "Capability.MANAGE_AUTOMATION",
+    "api_schedule_update": "Capability.MANAGE_AUTOMATION",
+    "api_schedule_delete": "Capability.MANAGE_AUTOMATION",
+    "api_schedule_run_now": "Capability.MANAGE_AUTOMATION",
+    "api_watcher_create": "Capability.MANAGE_AUTOMATION",
+    "api_watcher_update": "Capability.MANAGE_AUTOMATION",
+    "api_watcher_delete": "Capability.MANAGE_AUTOMATION",
+    "api_watcher_run_now": "Capability.MANAGE_AUTOMATION",
+    "api_watcher_accept_baseline": "Capability.MANAGE_AUTOMATION",
+    "api_notification_channel_create": "_require_notification_manage_scope(",
+    "api_notification_channel_update": "_require_notification_manage_scope(",
+    "api_notification_channel_delete": "_require_notification_manage_scope(",
+    "api_notification_channel_test": "_require_notification_manage_scope(",
+    "api_runs_start": "Capability.RUN_COMMANDS",
+    "api_run_ai_summary": "Capability.RUN_COMMANDS",
+    "api_run_ai_next_commands": "Capability.RUN_COMMANDS",
+    "api_run_cancel": "Capability.RUN_COMMANDS",
+    "api_run_project_link": "Capability.MUTATE_PROJECTS",
+    "api_run_project_unlink": "Capability.MUTATE_PROJECTS",
+}
+
+
+_TEAM_MANAGEMENT_CAPABILITY_ROUTES = {
+    ("blueprints.api_v1", "api_teams_update"): ("Capability.ARCHIVE_TEAM",),
+    ("blueprints.api_v1", "api_teams_invites_create"): (
+        "Capability.MANAGE_OWNERS",
+        "Capability.MANAGE_INVITES",
+    ),
+    ("blueprints.api_v1", "api_teams_invites_revoke"): ("Capability.MANAGE_INVITES",),
+    ("blueprints.api_v1", "api_teams_members_update"): (
+        "Capability.MANAGE_OWNERS",
+        "Capability.MANAGE_MEMBERS",
+    ),
+    ("blueprints.api_v1", "api_teams_members_remove"): (
+        "Capability.MANAGE_OWNERS",
+        "Capability.MANAGE_MEMBERS",
+    ),
+    ("blueprints.api_v1", "api_teams_recovery_rotate"): ("Capability.MANAGE_RECOVERY",),
+    ("blueprints.teams", "session_teams_update"): ("Capability.ARCHIVE_TEAM",),
+    ("blueprints.teams", "session_teams_invites_create"): (
+        "Capability.MANAGE_OWNERS",
+        "Capability.MANAGE_INVITES",
+    ),
+    ("blueprints.teams", "session_teams_invites_revoke"): ("Capability.MANAGE_INVITES",),
+    ("blueprints.teams", "session_teams_members_update"): (
+        "Capability.MANAGE_OWNERS",
+        "Capability.MANAGE_MEMBERS",
+    ),
+    ("blueprints.teams", "session_teams_members_remove"): (
+        "Capability.MANAGE_OWNERS",
+        "Capability.MANAGE_MEMBERS",
+    ),
+    ("blueprints.teams", "session_teams_recovery_rotate"): ("Capability.MANAGE_RECOVERY",),
+}
+
+
+def test_api_v1_team_scoped_route_contracts_are_explicit():
+    import blueprints.api_v1 as api_blueprint
+
+    for route_name in _API_V1_TEAM_SCOPED_READ_ROUTES:
+        source = inspect.getsource(getattr(api_blueprint, route_name))
+        assert "_api_request_scope(" in source, route_name
+
+    for route_name, capability_token in _API_V1_TEAM_SCOPED_WRITE_ROUTES.items():
+        source = inspect.getsource(getattr(api_blueprint, route_name))
+        assert "_api_request_scope(" in source or "_require_notification_manage_scope(" in source, route_name
+        assert capability_token in source, route_name
+
+
+def test_team_management_route_capability_contracts_are_explicit():
+    for module_name, route_name in _TEAM_MANAGEMENT_CAPABILITY_ROUTES:
+        module = import_module(module_name)
+        source = inspect.getsource(getattr(module, route_name))
+        assert "require_capability(" in source, route_name
+        for capability_token in _TEAM_MANAGEMENT_CAPABILITY_ROUTES[(module_name, route_name)]:
+            assert capability_token in source, route_name
 
 
 def test_api_v1_rejects_missing_and_anonymous_auth():
@@ -144,6 +291,57 @@ def test_api_v1_read_routes_use_api_rate_limit(monkeypatch):
     assert json.loads(second.data)["error"]["code"] == "rate_limited"
 
 
+def test_api_v1_team_routes_use_team_rate_limit_per_token(monkeypatch):
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 100)
+    monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1000)
+
+    first = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
+    second = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
+    other = client.get("/api/v1/teams", headers=_headers(other_token), environ_base={"REMOTE_ADDR": remote_addr})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert json.loads(second.data)["error"]["code"] == "rate_limited"
+    assert other.status_code == 200
+
+
+def test_api_v1_team_write_routes_use_separate_team_rate_limit(monkeypatch):
+    client = get_client()
+    token = _token(client)
+    remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1)
+
+    first = client.post(
+        "/api/v1/teams",
+        headers=_headers(token),
+        json={"name": "Rate Team " + uuid.uuid4().hex[:8]},
+        environ_base={"REMOTE_ADDR": remote_addr},
+    )
+    second = client.post(
+        "/api/v1/teams",
+        headers=_headers(token),
+        json={"name": "Rate Team " + uuid.uuid4().hex[:8]},
+        environ_base={"REMOTE_ADDR": remote_addr},
+    )
+    read_after_write = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
+
+    assert first.status_code == 201
+    assert second.status_code == 429
+    assert json.loads(second.data)["error"]["code"] == "rate_limited"
+    assert read_after_write.status_code == 200
+
+
 def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
     client = get_client()
     token = _token(client)
@@ -192,6 +390,546 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
     assert invalid_until.status_code == 400
     assert json.loads(invalid_since.data)["error"]["code"] == "invalid_since"
     assert json.loads(invalid_until.data)["error"]["code"] == "invalid_until"
+
+
+def test_api_v1_history_honors_team_scope_header(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+    member_token = _token(client)
+    outsider_token = _token(client)
+    team_resp = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": token},
+        json={"name": "API Scope Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+    )
+    team_id = json.loads(team_resp.data)["team"]["id"]
+    invite = client.post(
+        f"/api/v1/teams/{team_id}/invites",
+        headers=_headers(token),
+        json={"role": "operator", "label": "History teammate"},
+    )
+    join = client.post(
+        "/api/v1/teams/join",
+        headers=_headers(member_token),
+        json={"code": json.loads(invite.data)["invite"]["code"], "display_name": "History teammate"},
+    )
+    personal_run_id = _seed_run(
+        token,
+        run_id="api-team-scope-personal",
+        command="echo personal scope",
+        output="personal scope output",
+    )
+    team_run_id = _seed_run(
+        token,
+        run_id="api-team-scope-team",
+        command="echo team scope",
+        output="team scope output",
+        team_id=team_id,
+    )
+
+    personal = client.get("/api/v1/history?limit=20", headers=_headers(token))
+    team = client.get("/api/v1/history?limit=20", headers={**_headers(token), "X-Team-ID": team_id})
+    outsider = client.get(
+        "/api/v1/history?limit=20",
+        headers={**_headers(outsider_token), "X-Team-ID": team_id},
+    )
+    member_team = client.get("/api/v1/history?limit=20", headers={**_headers(member_token), "X-Team-ID": team_id})
+    team_detail = client.get(
+        f"/api/v1/history/{team_run_id}",
+        headers={**_headers(token), "X-Team-ID": team_id},
+    )
+    member_detail = client.get(
+        f"/api/v1/history/{team_run_id}",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    member_output = client.get(
+        f"/api/v1/runs/{team_run_id}/output?format=json",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    member_search = client.get(
+        "/api/v1/history/search?q=team%20scope&limit=20",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    member_status = client.get(
+        f"/api/v1/runs/{team_run_id}",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    member_wait = client.post(
+        f"/api/v1/runs/{team_run_id}/wait?timeout=0",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    monkeypatch.setattr(api_blueprint, "stream_run_events", lambda *_args, **_kwargs: iter(["data: allowed\n\n"]))
+    member_stream = client.get(
+        f"/api/v1/runs/{team_run_id}/stream",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    personal_detail_blocked = client.get(f"/api/v1/history/{team_run_id}", headers=_headers(token))
+
+    assert team_resp.status_code == 201
+    assert invite.status_code == 201
+    assert join.status_code == 201
+    assert personal.status_code == 200
+    personal_ids = {item["id"] for item in json.loads(personal.data)["runs"]}
+    assert personal_run_id in personal_ids
+    assert team_run_id not in personal_ids
+    assert team.status_code == 200
+    team_ids = {item["id"] for item in json.loads(team.data)["runs"]}
+    assert team_run_id in team_ids
+    assert personal_run_id not in team_ids
+    assert member_team.status_code == 200
+    member_team_ids = {item["id"] for item in json.loads(member_team.data)["runs"]}
+    assert team_run_id in member_team_ids
+    assert personal_run_id not in member_team_ids
+    assert outsider.status_code == 403
+    assert json.loads(outsider.data)["error"]["code"] == "team_forbidden"
+    assert team_detail.status_code == 200
+    assert json.loads(team_detail.data)["run"]["id"] == team_run_id
+    assert member_detail.status_code == 200
+    assert json.loads(member_detail.data)["run"]["id"] == team_run_id
+    assert member_output.status_code == 200
+    assert json.loads(member_output.data)["lines"] == ["team scope output"]
+    assert member_search.status_code == 200
+    assert [item["run_id"] for item in json.loads(member_search.data)["matches"]] == [team_run_id]
+    assert member_status.status_code == 200
+    assert json.loads(member_status.data)["run"]["id"] == team_run_id
+    assert member_wait.status_code == 200
+    assert json.loads(member_wait.data)["run"]["id"] == team_run_id
+    assert member_stream.status_code == 200
+    assert member_stream.get_data(as_text=True) == "data: allowed\n\n"
+    assert personal_detail_blocked.status_code == 404
+
+
+def test_api_v1_team_viewers_cannot_run_commands_or_mutate_project_links(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    owner_token = _token(client)
+    operator_token = _token(client)
+    viewer_token = _token(client)
+    team_resp = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": owner_token},
+        json={"name": "API Capability Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+    )
+    team_id = json.loads(team_resp.data)["team"]["id"]
+    operator_invite = client.post(
+        f"/session/teams/{team_id}/invites",
+        headers={"X-Session-ID": owner_token},
+        json={"role": "operator", "label": "API capability operator"},
+    )
+    viewer_invite = client.post(
+        f"/session/teams/{team_id}/invites",
+        headers={"X-Session-ID": owner_token},
+        json={"role": "viewer", "label": "API capability viewer"},
+    )
+    assert client.post(
+        "/session/teams/join",
+        headers={"X-Session-ID": operator_token},
+        json={"code": json.loads(operator_invite.data)["invite"]["code"], "display_name": "Operator"},
+    ).status_code == 201
+    assert client.post(
+        "/session/teams/join",
+        headers={"X-Session-ID": viewer_token},
+        json={"code": json.loads(viewer_invite.data)["invite"]["code"], "display_name": "Viewer"},
+    ).status_code == 201
+
+    project_resp = client.post(
+        "/projects",
+        headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        json={"name": "API Capability Review"},
+    )
+    project_id = json.loads(project_resp.data)["project"]["id"]
+    run_id = _seed_run(
+        owner_token,
+        run_id="api-team-capability-run",
+        command="httpx capability.example",
+        output="team output",
+        team_id=team_id,
+    )
+    monkeypatch.setattr(api_blueprint, "broker_available", lambda: True)
+    monkeypatch.setattr(
+        api_blueprint,
+        "_start_brokered_run_service",
+        mock.Mock(side_effect=AssertionError("viewer should be blocked before API run start")),
+    )
+    monkeypatch.setattr(
+        api_blueprint,
+        "active_runs_for_session",
+        lambda *_args, **_kwargs: [{"run_id": "api-team-capability-active"}],
+    )
+    monkeypatch.setattr(api_blueprint, "pid_for_session", lambda *_args, **_kwargs: 1234)
+    monkeypatch.setattr(
+        api_blueprint,
+        "_signal_process_group",
+        mock.Mock(side_effect=AssertionError("viewer should be blocked before API run cancel")),
+    )
+
+    viewer_run = client.post(
+        "/api/v1/runs",
+        json={"command": "echo blocked"},
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+    )
+    viewer_link = client.post(
+        f"/api/v1/runs/{run_id}/projects/{project_id}",
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+    )
+    viewer_cancel = client.post(
+        "/api/v1/runs/api-team-capability-active/cancel",
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+    )
+    operator_link = client.post(
+        f"/api/v1/runs/{run_id}/projects/{project_id}",
+        headers={**_headers(operator_token), "X-Team-ID": team_id},
+    )
+
+    assert team_resp.status_code == 201
+    assert project_resp.status_code == 201
+    assert viewer_run.status_code == 403
+    assert json.loads(viewer_run.data)["error"]["code"] == "team_forbidden"
+    assert viewer_link.status_code == 403
+    assert json.loads(viewer_link.data)["error"]["code"] == "team_forbidden"
+    assert viewer_cancel.status_code == 403
+    assert json.loads(viewer_cancel.data)["error"]["code"] == "team_forbidden"
+    assert operator_link.status_code == 201
+    assert json.loads(operator_link.data)["link"]["entity_id"] == run_id
+
+
+def test_api_v1_team_routes_manage_members_invites_and_recovery():
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    owner_token = _token(client)
+    operator_token = _token(client)
+
+    with mock.patch.object(api_blueprint.log, "info") as mock_info, \
+         mock.patch.object(api_blueprint.log, "warning") as mock_warning:
+        created = client.post(
+            "/api/v1/teams",
+            headers=_headers(owner_token),
+            json={"name": "API Team " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+        )
+        payload = json.loads(created.data)
+        team_id = payload["team"]["id"]
+        recovery_code = payload["recovery_code"]
+
+        listed = client.get("/api/v1/teams", headers=_headers(owner_token))
+        detail = client.get(f"/api/v1/teams/{team_id}", headers=_headers(owner_token))
+        invite = client.post(
+            f"/api/v1/teams/{team_id}/invites",
+            headers=_headers(owner_token),
+            json={"role": "operator", "label": "API operator"},
+        )
+        invite_payload = json.loads(invite.data)["invite"]
+        joined = client.post(
+            "/api/v1/teams/join",
+            headers=_headers(operator_token),
+            json={"code": invite_payload["code"], "display_name": "API operator"},
+        )
+        operator_member = next(
+            item for item in json.loads(joined.data)["members"]
+            if item["display_name"] == "API operator"
+        )
+        denied_owner_invite = client.post(
+            f"/api/v1/teams/{team_id}/invites",
+            headers=_headers(operator_token),
+            json={"role": "owner"},
+        )
+        promoted = client.patch(
+            f"/api/v1/teams/{team_id}/members/{operator_member['id']}",
+            headers=_headers(owner_token),
+            json={"role": "admin"},
+        )
+        revoked = client.delete(
+            f"/api/v1/teams/{team_id}/invites/{invite_payload['id']}",
+            headers=_headers(owner_token),
+        )
+        rotated = client.post(f"/api/v1/teams/{team_id}/recovery/rotate", headers=_headers(owner_token))
+        rotated_code = json.loads(rotated.data)["recovery_code"]
+        recovery_token = _token(client)
+        recovered = client.post(
+            "/api/v1/teams/recovery/redeem",
+            headers=_headers(recovery_token),
+            json={"code": rotated_code, "display_name": "Recovered owner"},
+        )
+
+    assert created.status_code == 201
+    assert payload["team"]["member"]["role"] == "owner"
+    assert "archive_team" in payload["team"]["member"]["capabilities"]
+    assert recovery_code.startswith("trec_")
+    assert listed.status_code == 200
+    assert json.loads(listed.data)["teams"][0]["id"] == team_id
+    assert detail.status_code == 200
+    detail_payload = json.loads(detail.data)
+    assert detail_payload["members"][0]["role"] == "owner"
+    assert "manage_invites" in detail_payload["members"][0]["capabilities"]
+    assert invite.status_code == 201
+    assert invite_payload["code"].startswith("tinv_")
+    assert joined.status_code == 201
+    assert denied_owner_invite.status_code == 403
+    assert json.loads(denied_owner_invite.data)["error"]["code"] == "team_forbidden"
+    assert promoted.status_code == 200
+    assert json.loads(promoted.data)["member"]["role"] == "admin"
+    assert revoked.status_code == 200
+    assert json.loads(revoked.data)["removed"] is True
+    assert rotated.status_code == 200
+    assert json.loads(rotated.data)["recovery_code"].startswith("trec_")
+    assert recovered.status_code == 200
+    assert any(item["display_name"] == "Recovered owner" for item in json.loads(recovered.data)["members"])
+    team_actions = [
+        call.kwargs["extra"]
+        for call in mock_info.call_args_list
+        if call.args and call.args[0] == "TEAM_ACTION"
+    ]
+    assert [event["action"] for event in team_actions] == [
+        "create",
+        "invite_create",
+        "invite_redeem",
+        "member_update",
+        "invite_revoke",
+        "recovery_rotate",
+        "recovery_redeem",
+    ]
+    assert {event["source"] for event in team_actions} == {"api_v1"}
+    assert team_actions[0]["team_id"] == team_id
+    assert team_actions[0]["actor_member_id"] == payload["team"]["member"]["id"]
+    assert team_actions[0]["actor_role"] == "owner"
+    assert team_actions[3]["actor_member_id"] == payload["team"]["member"]["id"]
+    assert team_actions[3]["target_member_id"] == operator_member["id"]
+    assert team_actions[4]["target_invite_id"] == invite_payload["id"]
+    rejected = [
+        call.kwargs["extra"]
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "TEAM_ACTION_REJECTED"
+    ]
+    assert [event["action"] for event in rejected] == ["invite_create"]
+    assert rejected[0]["reason"] == "team_forbidden"
+    assert rejected[0]["actor_role"] == "operator"
+
+    with mock.patch.object(api_blueprint.log, "error") as mock_error, mock.patch(
+        "services.teams.storage.rotate_team_recovery_code",
+        side_effect=RuntimeError("recovery unavailable"),
+    ):
+        failed = client.post(
+            "/api/v1/teams",
+            headers=_headers(owner_token),
+            json={"name": "API Team Rollback " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+        )
+    assert failed.status_code == 500
+    assert json.loads(failed.data)["error"]["code"] == "team_route_failed"
+    assert mock_error.call_args.args[0] == "TEAM_ACTION_FAILED"
+    assert mock_error.call_args.kwargs["exc_info"] is True
+    error_extra = mock_error.call_args.kwargs["extra"]
+    assert error_extra["action"] == "create"
+    assert error_extra["status"] == 500
+    assert team_actions[-1]["result"] == "ok"
+
+    rollback_name = "API Rollback Team " + uuid.uuid4().hex[:8]
+    rollback_slug = rollback_name.lower().replace(" ", "-")
+    with mock.patch(
+        "services.teams.storage.rotate_team_recovery_code",
+        side_effect=api_blueprint.TeamError("recovery unavailable"),
+    ):
+        failed_create = client.post(
+            "/api/v1/teams",
+            headers=_headers(owner_token),
+            json={"name": rollback_name, "display_name": "API owner"},
+        )
+    with sqlite3.connect(DB_PATH) as conn:
+        team_count = conn.execute(
+            "SELECT COUNT(*) FROM teams WHERE slug = ?",
+            (rollback_slug,),
+        ).fetchone()[0]
+        member_count = conn.execute(
+            "SELECT COUNT(*) FROM team_members WHERE team_id IN "
+            "(SELECT id FROM teams WHERE slug = ?)",
+            (rollback_slug,),
+        ).fetchone()[0]
+    assert failed_create.status_code == 400
+    assert json.loads(failed_create.data)["error"]["code"] == "invalid_team_request"
+    assert team_count == 0
+    assert member_count == 0
+
+
+def test_api_v1_archived_team_rejects_invite_and_recovery_redeem():
+    client = get_client()
+    owner_token = _token(client)
+    invited_token = _token(client)
+    recovery_token = _token(client)
+
+    created = client.post(
+        "/api/v1/teams",
+        headers=_headers(owner_token),
+        json={"name": "Archived API Team " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+    )
+    payload = json.loads(created.data)
+    team_id = payload["team"]["id"]
+    recovery_code = payload["recovery_code"]
+    invite = client.post(
+        f"/api/v1/teams/{team_id}/invites",
+        headers=_headers(owner_token),
+        json={"role": "operator", "label": "Archived API operator"},
+    )
+    invite_code = json.loads(invite.data)["invite"]["code"]
+    archived = client.patch(
+        f"/api/v1/teams/{team_id}",
+        headers=_headers(owner_token),
+        json={"status": "archived"},
+    )
+
+    invited_join = client.post(
+        "/api/v1/teams/join",
+        headers=_headers(invited_token),
+        json={"code": invite_code, "display_name": "Late API operator"},
+    )
+    recovery_join = client.post(
+        "/api/v1/teams/recovery/redeem",
+        headers=_headers(recovery_token),
+        json={"code": recovery_code, "display_name": "Late API owner"},
+    )
+    scoped_run = client.post(
+        "/api/v1/runs",
+        headers={**_headers(owner_token), "X-Team-ID": team_id},
+        json={"command": "echo archived"},
+    )
+    blocked_invite = client.post(
+        f"/api/v1/teams/{team_id}/invites",
+        headers=_headers(owner_token),
+        json={"role": "operator", "label": "Blocked archived API invite"},
+    )
+    blocked_recovery_rotate = client.post(
+        f"/api/v1/teams/{team_id}/recovery/rotate",
+        headers=_headers(owner_token),
+    )
+
+    assert created.status_code == 201
+    assert invite.status_code == 201
+    assert archived.status_code == 200
+    assert scoped_run.status_code == 409
+    assert json.loads(scoped_run.data)["error"]["code"] == "team_archived"
+    assert "archived" in json.loads(scoped_run.data)["error"]["message"]
+    assert blocked_invite.status_code == 409
+    assert json.loads(blocked_invite.data)["error"]["code"] == "team_archived"
+    assert "archived" in json.loads(blocked_invite.data)["error"]["message"]
+    assert blocked_recovery_rotate.status_code == 409
+    assert json.loads(blocked_recovery_rotate.data)["error"]["code"] == "team_archived"
+    assert "archived" in json.loads(blocked_recovery_rotate.data)["error"]["message"]
+    assert invited_join.status_code == 409
+    assert json.loads(invited_join.data)["error"]["code"] == "team_archived"
+    assert "archived" in json.loads(invited_join.data)["error"]["message"]
+    assert recovery_join.status_code == 409
+    assert json.loads(recovery_join.data)["error"]["code"] == "team_archived"
+    assert "archived" in json.loads(recovery_join.data)["error"]["message"]
+
+
+def test_api_v1_team_project_readers_include_cross_member_entities_and_findings():
+    client = get_client()
+    owner_token = _token(client)
+    operator_token = _token(client)
+    team_resp = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": owner_token},
+        json={"name": "API Cross Project " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+    )
+    team_id = json.loads(team_resp.data)["team"]["id"]
+    invite_resp = client.post(
+        f"/session/teams/{team_id}/invites",
+        headers={"X-Session-ID": owner_token},
+        json={"role": "operator", "label": "API cross operator"},
+    )
+    join_resp = client.post(
+        "/session/teams/join",
+        headers={"X-Session-ID": operator_token},
+        json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "API operator"},
+    )
+    project_resp = client.post(
+        "/projects",
+        headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        json={"name": "API Cross Member Project"},
+    )
+    project_id = json.loads(project_resp.data)["project"]["id"]
+    suffix = uuid.uuid4().hex[:12]
+    run_id = "api-team-cross-project-run-" + suffix
+    entity_id = "ent_api_team_cross_" + suffix
+    finding_id = "fnd_api_team_cross_" + suffix
+    seen_at = "2026-05-28T14:30:00+00:00"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, output_line_count, output_search_text) "
+            "VALUES (?, ?, ?, 'external', 'httpx api-cross.example', ?, ?, 0, '[]', 0, '')",
+            (run_id, owner_token, team_id, seen_at, seen_at),
+        )
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, 'domain', 'api-cross.example', ?, ?, ?, ?)",
+            (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
+        )
+        conn.execute(
+            "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+            "VALUES (?, ?, ?, ?, 1)",
+            (entity_id, run_id, seen_at, seen_at),
+        )
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+            (
+                finding_id,
+                owner_token,
+                run_id,
+                entity_id,
+                entity_id,
+                "sig_" + finding_id,
+                run_id,
+                run_id,
+                seen_at,
+                seen_at,
+                "API cross-member finding",
+                "API cross-member finding",
+                seen_at,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+            "VALUES (?, ?, 1, 'API cross-member finding', ?)",
+            (finding_id, run_id, seen_at),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'manual', ?)",
+            ("plr_api_team_cross_" + suffix, project_id, run_id, seen_at),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', ?)",
+            ("ple_api_team_cross_" + suffix, project_id, entity_id, seen_at),
+        )
+        conn.commit()
+
+    headers = {**_headers(operator_token), "X-Team-ID": team_id}
+    projects = client.get("/api/v1/projects?limit=20", headers=headers)
+    entities = client.get(f"/api/v1/projects/{project_id}/entities?entity_type=domain", headers=headers)
+    findings = client.get(f"/api/v1/projects/{project_id}/findings", headers=headers)
+    personal_projects = client.get("/api/v1/projects?limit=20", headers=_headers(operator_token))
+
+    assert team_resp.status_code == 201
+    assert join_resp.status_code == 201
+    assert project_resp.status_code == 201
+    assert projects.status_code == 200
+    project_payload = next(item for item in json.loads(projects.data)["projects"] if item["id"] == project_id)
+    assert project_payload["counts"]["entities"] == 1
+    assert project_payload["counts"]["findings"] == 1
+    assert project_payload["finding_summary"]["severities"] == {"high": 1}
+    assert entities.status_code == 200
+    assert [item["id"] for item in json.loads(entities.data)["entities"]] == [entity_id]
+    assert findings.status_code == 200
+    assert [item["id"] for item in json.loads(findings.data)["findings"]] == [finding_id]
+    assert json.loads(personal_projects.data)["projects"] == []
 
 
 def test_api_v1_history_detail_output_and_cross_session_404():
@@ -356,6 +1094,7 @@ def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
     monkeypatch.setitem(config.CFG, "ai_feature_next_commands", True)
     monkeypatch.setitem(config.CFG, "ai_model", "llama3.1:8b")
     monkeypatch.setitem(config.CFG, "ai_max_input_chars", 8000)
+    monkeypatch.setitem(config.CFG, "ai_max_queue_depth", 1000)
     monkeypatch.setitem(config.CFG, "ai_rate_limit_per_session_hour", 1)
     monkeypatch.setitem(config.CFG, "ai_rate_limit_global_per_minute", 20)
     monkeypatch.setitem(config.CFG, "diagnostics_allowed_cidrs", ["127.0.0.1/32"])
@@ -374,6 +1113,7 @@ def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
         "ai_feature_next_commands": True,
         "ai_model": "llama3.1:8b",
         "ai_max_input_chars": 8000,
+        "ai_max_queue_depth": 1000,
         "ai_rate_limit_per_session_hour": 20,
         "ai_rate_limit_global_per_minute": 20,
         "diagnostics_allowed_cidrs": [],
@@ -450,14 +1190,123 @@ def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
     assert _ai_assist_count_for_run(guard_run_id) == 1
 
 
+def test_api_v1_ai_assists_honor_team_scope(monkeypatch):
+    client = get_client()
+    owner_token = _token(client)
+    viewer_token = _token(client)
+    team_resp = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": owner_token},
+        json={"name": "API AI Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+    )
+    team_id = json.loads(team_resp.data)["team"]["id"]
+    invite_resp = client.post(
+        f"/session/teams/{team_id}/invites",
+        headers={"X-Session-ID": owner_token},
+        json={"role": "viewer", "label": "API AI viewer"},
+    )
+    join_resp = client.post(
+        "/session/teams/join",
+        headers={"X-Session-ID": viewer_token},
+        json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "API viewer"},
+    )
+    run_id = _seed_run(
+        owner_token,
+        run_id="api-team-ai-assist-" + uuid.uuid4().hex[:8],
+        command="nmap -sV darklab.sh",
+        output=[
+            "Starting scan for darklab.sh with enough context for a team summary.",
+            "443/tcp open https and 80/tcp open http were detected.",
+            "Inspect TLS and response headers next if the operator wants more detail.",
+        ],
+        team_id=team_id,
+    )
+
+    monkeypatch.setitem(config.CFG, "ai_enabled", True)
+    monkeypatch.setitem(config.CFG, "ai_feature_summary", True)
+    monkeypatch.setitem(config.CFG, "ai_feature_next_commands", True)
+    monkeypatch.setitem(config.CFG, "ai_model", "llama3.1:8b")
+    monkeypatch.setitem(config.CFG, "ai_max_input_chars", 8000)
+    monkeypatch.setitem(config.CFG, "ai_rate_limit_per_session_hour", 20)
+    monkeypatch.setitem(config.CFG, "ai_rate_limit_global_per_minute", 20)
+    monkeypatch.setitem(config.CFG, "ai_max_queue_depth", 1000)
+    monkeypatch.setitem(config.CFG, "share_redaction_enabled", False)
+    monkeypatch.setattr(process, "redis_client", process._FakeRedisClient())
+
+    queued = client.post(
+        f"/api/v1/runs/{run_id}/ai-summary",
+        json={},
+        headers={**_headers(owner_token), "X-Team-ID": team_id},
+    )
+    listed = client.get(
+        f"/api/v1/runs/{run_id}/ai-assists",
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+    )
+    viewer_summary = client.post(
+        f"/api/v1/runs/{run_id}/ai-summary",
+        json={},
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+    )
+    viewer_next = client.post(
+        f"/api/v1/runs/{run_id}/ai-next-commands",
+        json={},
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+    )
+    personal_blocked = client.get(f"/api/v1/runs/{run_id}/ai-assists", headers=_headers(owner_token))
+
+    queued_payload = json.loads(queued.data)
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT session_id, team_id FROM ai_run_assists WHERE id = ?",
+            (queued_payload["assist"]["id"],),
+        ).fetchone()
+
+    assert team_resp.status_code == 201
+    assert join_resp.status_code == 201
+    assert queued.status_code == 202
+    assert row == (owner_token, team_id)
+    assert listed.status_code == 200
+    assert [item["id"] for item in json.loads(listed.data)["assists"]] == [queued_payload["assist"]["id"]]
+    for response in (viewer_summary, viewer_next):
+        assert response.status_code == 403
+        assert json.loads(response.data)["error"]["code"] == "team_forbidden"
+    assert personal_blocked.status_code == 404
+    assert json.loads(personal_blocked.data)["error"]["code"] == "not_found"
+
+
 def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_path):
     from services.workspace.files import ensure_session_workspace
 
     client = get_client()
     token = _token(client)
+    member_token = _token(client)
     other_token = _token(client)
+    team_resp = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": token},
+        json={"name": "API Artifact Operators " + uuid.uuid4().hex[:8], "display_name": "Artifact owner"},
+    )
+    team_id = json.loads(team_resp.data)["team"]["id"]
+    invite = client.post(
+        f"/api/v1/teams/{team_id}/invites",
+        headers=_headers(token),
+        json={"role": "operator", "label": "Artifact teammate"},
+    )
+    join = client.post(
+        "/api/v1/teams/join",
+        headers=_headers(member_token),
+        json={"code": json.loads(invite.data)["invite"]["code"], "display_name": "Artifact teammate"},
+    )
     run_id = _seed_run(token, command="echo artifact", output="artifact")
+    team_run_id = _seed_run(
+        token,
+        run_id="api_team_artifact_" + uuid.uuid4().hex[:8],
+        command="echo team artifact",
+        output="team artifact",
+        team_id=team_id,
+    )
     artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+    team_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
     monkeypatch.setitem(shell_app.CFG, "workspace_enabled", True)
     monkeypatch.setitem(shell_app.CFG, "workspace_backend", "tmpfs")
     monkeypatch.setitem(shell_app.CFG, "workspace_root", str(tmp_path))
@@ -467,6 +1316,7 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
     workspace_dir = ensure_session_workspace(token, shell_app.CFG)
     (workspace_dir / "reports").mkdir()
     (workspace_dir / "reports" / "artifact.txt").write_text("artifact body", encoding="utf-8")
+    (workspace_dir / "reports" / "team-artifact.txt").write_text("team artifact body", encoding="utf-8")
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO run_file_artifacts "
@@ -475,19 +1325,55 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
             "'2026-05-19T00:00:01+00:00')",
             (artifact_id, token, run_id),
         )
+        conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+            "VALUES (?, ?, ?, 'reports/team-artifact.txt', 'team-artifact.txt', 'output', 18, 'test', "
+            "'2026-05-19T00:00:02+00:00')",
+            (team_artifact_id, token, team_run_id),
+        )
         conn.commit()
 
     owner_list = client.get(f"/api/v1/history/{run_id}/artifacts", headers=_headers(token))
     cross_list = client.get(f"/api/v1/history/{run_id}/artifacts", headers=_headers(other_token))
+    team_list = client.get(
+        f"/api/v1/history/{team_run_id}/artifacts",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    team_scope_personal_list = client.get(
+        f"/api/v1/history/{run_id}/artifacts",
+        headers={**_headers(token), "X-Team-ID": team_id},
+    )
     owner_download = client.get(f"/api/v1/history/{run_id}/artifacts/{artifact_id}", headers=_headers(token))
     cross_download = client.get(f"/api/v1/history/{run_id}/artifacts/{artifact_id}", headers=_headers(other_token))
+    team_download = client.get(
+        f"/api/v1/history/{team_run_id}/artifacts/{team_artifact_id}",
+        headers={**_headers(member_token), "X-Team-ID": team_id},
+    )
+    team_scope_personal_download = client.get(
+        f"/api/v1/history/{run_id}/artifacts/{artifact_id}",
+        headers={**_headers(token), "X-Team-ID": team_id},
+    )
+    personal_scope_team_download = client.get(
+        f"/api/v1/history/{team_run_id}/artifacts/{team_artifact_id}",
+        headers=_headers(token),
+    )
 
+    assert team_resp.status_code == 201
+    assert join.status_code == 201
     assert owner_list.status_code == 200
     assert json.loads(owner_list.data)["artifacts"][0]["id"] == artifact_id
     assert cross_list.status_code == 404
+    assert team_list.status_code == 200
+    assert json.loads(team_list.data)["artifacts"][0]["id"] == team_artifact_id
+    assert team_scope_personal_list.status_code == 404
     assert owner_download.status_code == 200
     assert owner_download.data == b"artifact body"
     assert cross_download.status_code == 404
+    assert team_download.status_code == 200
+    assert team_download.data == b"team artifact body"
+    assert team_scope_personal_download.status_code == 404
+    assert personal_scope_team_download.status_code == 404
 
 
 def test_api_v1_artifact_download_rejects_cross_run_artifact_id():
@@ -626,6 +1512,8 @@ def test_api_v1_project_readers_are_token_scoped():
 
 
 def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
     client = get_client()
     token = _token(client)
     monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
@@ -649,6 +1537,22 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
         for event in events
     )
     assert any(event.get("type") == "exit" and event.get("event_id") for event in events)
+
+    def broken_stream():
+        yield 'id: 1-0\nevent: output\ndata: {"type":"output","text":"before"}\n\n'
+        raise RuntimeError("stream broke")
+
+    with mock.patch("blueprints.api_v1.stream_run_events", return_value=broken_stream()), \
+         mock.patch.object(api_blueprint.log, "error") as mock_error:
+        broken = client.get(f"/api/v1/runs/{run_id}/stream?format=ndjson", headers=_headers(token))
+        broken_events = [json.loads(line) for line in broken.get_data(as_text=True).splitlines() if line]
+        assert broken_events[-1]["code"] == "stream_error"
+        assert mock_error.call_args.args[0] == "API_RUN_STREAM_ERROR"
+        assert mock_error.call_args.kwargs["exc_info"] is True
+        stream_extra = mock_error.call_args.kwargs["extra"]
+    assert stream_extra["run_id"] == run_id
+    assert stream_extra["team_id"] == ""
+    assert stream_extra["format"] == "ndjson"
 
 
 def test_api_v1_sse_stream_emits_idle_heartbeat(monkeypatch):
@@ -890,7 +1794,7 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     monkeypatch.setattr(
         api_blueprint,
         "active_runs_for_session",
-        lambda session_id: [{"run_id": run_id, "command": "sleep 30"}] if session_id == token else [],
+        lambda session_id, **_kwargs: [{"run_id": run_id, "command": "sleep 30"}] if session_id == token else [],
     )
     monkeypatch.setattr(
         api_blueprint,
@@ -959,6 +1863,7 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
     link = _save_completed_run(
         run_id,
         token,
+        "",
         "echo linked",
         "2026-05-19T00:00:00+00:00",
         "2026-05-19T00:00:01+00:00",
@@ -1086,6 +1991,46 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     assert fires["fires"][0]["status"] == "fired"
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
+
+    team_owner = _token(client)
+    team_viewer = _token(client)
+    team_id = _create_api_team(client, team_owner, name="API Schedule Operators")
+    _add_api_team_member(client, team_owner, team_viewer, team_id, role="viewer")
+    owner_headers = _team_headers(team_owner, team_id)
+    viewer_headers = _team_headers(team_viewer, team_id)
+    team_created = client.post(
+        "/api/v1/schedules",
+        headers=owner_headers,
+        json={"command": "echo team schedule", "cadence_preset": "hourly", "timezone": "UTC"},
+    )
+    team_schedule = json.loads(team_created.data)["schedule"]
+    team_fired = client.post(f"/api/v1/schedules/{team_schedule['id']}/run-now", headers=owner_headers)
+    viewer_list = json.loads(client.get("/api/v1/schedules", headers=viewer_headers).data)
+    viewer_detail = client.get(f"/api/v1/schedules/{team_schedule['id']}", headers=viewer_headers)
+    viewer_fires = client.get(f"/api/v1/schedules/{team_schedule['id']}/fires", headers=viewer_headers)
+    viewer_create = client.post(
+        "/api/v1/schedules",
+        headers=viewer_headers,
+        json={"command": "echo viewer schedule", "cadence_preset": "hourly"},
+    )
+    viewer_patch = client.patch(f"/api/v1/schedules/{team_schedule['id']}", headers=viewer_headers, json={"enabled": False})
+    viewer_run_now = client.post(f"/api/v1/schedules/{team_schedule['id']}/run-now", headers=viewer_headers)
+    viewer_delete = client.delete(f"/api/v1/schedules/{team_schedule['id']}", headers=viewer_headers)
+    team_deleted = client.delete(f"/api/v1/schedules/{team_schedule['id']}", headers=owner_headers)
+
+    assert team_created.status_code == 201
+    assert team_schedule["team_id"] == team_id
+    assert team_fired.status_code == 200
+    assert viewer_list["total"] == 1
+    assert viewer_list["schedules"][0]["id"] == team_schedule["id"]
+    assert viewer_detail.status_code == 200
+    assert json.loads(viewer_detail.data)["schedule"]["id"] == team_schedule["id"]
+    assert viewer_fires.status_code == 200
+    assert json.loads(viewer_fires.data)["fires"][0]["team_id"] == team_id
+    for response in (viewer_create, viewer_patch, viewer_run_now, viewer_delete):
+        assert response.status_code == 403
+        assert json.loads(response.data)["error"]["code"] == "team_forbidden"
+    assert json.loads(team_deleted.data) == {"removed": True}
 
 
 def test_api_v1_schedules_reject_invalid_body_and_disallowed_command(monkeypatch):
@@ -1232,6 +2177,56 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert accepted["baseline_run_id"] == "run_api_watcher"
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
+
+    team_owner = _token(client)
+    team_viewer = _token(client)
+    team_id = _create_api_team(client, team_owner, name="API Watcher Operators")
+    _add_api_team_member(client, team_owner, team_viewer, team_id, role="viewer")
+    team_baseline_run_id = _seed_run(
+        team_owner,
+        run_id="api_watcher_team_baseline_" + team_id[-8:],
+        team_id=team_id,
+        command="nmap -sV darklab.sh",
+        output="443/tcp open https",
+    )
+    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_team_watcher")
+    owner_headers = _team_headers(team_owner, team_id)
+    viewer_headers = _team_headers(team_viewer, team_id)
+    team_created = client.post(
+        "/api/v1/watchers",
+        headers=owner_headers,
+        json={"baseline_run_id": team_baseline_run_id, "cadence_preset": "hourly", "label": "Team API Watcher"},
+    )
+    team_watcher = json.loads(team_created.data)["watcher"]
+    team_fired = client.post(f"/api/v1/watchers/{team_watcher['id']}/run-now", headers=owner_headers)
+    viewer_list = json.loads(client.get("/api/v1/watchers", headers=viewer_headers).data)
+    viewer_detail = client.get(f"/api/v1/watchers/{team_watcher['id']}", headers=viewer_headers)
+    viewer_fires = client.get(f"/api/v1/watchers/{team_watcher['id']}/fires", headers=viewer_headers)
+    viewer_create = client.post(
+        "/api/v1/watchers",
+        headers=viewer_headers,
+        json={"baseline_run_id": team_baseline_run_id, "cadence_preset": "hourly"},
+    )
+    viewer_patch = client.patch(f"/api/v1/watchers/{team_watcher['id']}", headers=viewer_headers, json={"state": "paused"})
+    viewer_run_now = client.post(f"/api/v1/watchers/{team_watcher['id']}/run-now", headers=viewer_headers)
+    viewer_accept = client.post(f"/api/v1/watchers/{team_watcher['id']}/accept-baseline", headers=viewer_headers)
+    viewer_delete = client.delete(f"/api/v1/watchers/{team_watcher['id']}", headers=viewer_headers)
+    team_deleted = client.delete(f"/api/v1/watchers/{team_watcher['id']}", headers=owner_headers)
+
+    assert team_created.status_code == 201
+    assert team_watcher["team_id"] == team_id
+    assert team_watcher["schedule"]["team_id"] == team_id
+    assert team_fired.status_code == 200
+    assert viewer_list["total"] == 1
+    assert viewer_list["watchers"][0]["id"] == team_watcher["id"]
+    assert viewer_detail.status_code == 200
+    assert json.loads(viewer_detail.data)["watcher"]["id"] == team_watcher["id"]
+    assert viewer_fires.status_code == 200
+    assert json.loads(viewer_fires.data)["fires"][0]["team_id"] == team_id
+    for response in (viewer_create, viewer_patch, viewer_run_now, viewer_accept, viewer_delete):
+        assert response.status_code == 403
+        assert json.loads(response.data)["error"]["code"] == "team_forbidden"
+    assert json.loads(team_deleted.data) == {"removed": True}
 
 
 def test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline(monkeypatch):
@@ -1402,6 +2397,68 @@ def test_api_v1_notification_channels_are_token_scoped(monkeypatch):
     assert other_list == {"channels": []}
     assert other_delete.status_code == 404
     assert json.loads(other_delete.data)["error"]["code"] == "not_found"
+
+
+def test_api_v1_notification_channels_honor_team_scope(monkeypatch):
+    from services.notifications import dispatcher
+    from services.notifications.models import TRIGGER_RUN_COMPLETE
+    from services.secrets import vault as secrets_vault
+
+    client = get_client()
+    owner_token = _token(client)
+    viewer_token = _token(client)
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    secrets_vault.reset_master_key_cache_for_tests()
+    team_resp = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": owner_token},
+        json={"name": "API Notification Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
+    )
+    team_id = json.loads(team_resp.data)["team"]["id"]
+    invite_resp = client.post(
+        f"/session/teams/{team_id}/invites",
+        headers={"X-Session-ID": owner_token},
+        json={"role": "viewer", "label": "API notification viewer"},
+    )
+    join_resp = client.post(
+        "/session/teams/join",
+        headers={"X-Session-ID": viewer_token},
+        json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "API viewer"},
+    )
+    create_resp = client.post(
+        "/api/v1/notification-channels",
+        headers={**_headers(owner_token), "X-Team-ID": team_id},
+        json={"kind": "webhook", "secret_values": {"url": "https://hooks.example.test/team"}},
+    )
+    channel = json.loads(create_resp.data)["channel"]
+    viewer_create = client.post(
+        "/api/v1/notification-channels",
+        headers={**_headers(viewer_token), "X-Team-ID": team_id},
+        json={"kind": "webhook", "secret_values": {"url": "https://hooks.example.test/blocked"}},
+    )
+    event_ids = dispatcher.enqueue(
+        TRIGGER_RUN_COMPLETE,
+        {"run_id": "api-team-notification"},
+        owner_token,
+        run_id="api-team-notification",
+        team_id=team_id,
+    )
+
+    team_list = client.get("/api/v1/notification-channels", headers={**_headers(viewer_token), "X-Team-ID": team_id})
+    personal_list = client.get("/api/v1/notification-channels", headers=_headers(owner_token))
+    team_events = client.get("/api/v1/notification-events", headers={**_headers(viewer_token), "X-Team-ID": team_id})
+
+    assert team_resp.status_code == 201
+    assert join_resp.status_code == 201
+    assert create_resp.status_code == 201
+    assert channel["team_id"] == team_id
+    assert viewer_create.status_code == 403
+    assert json.loads(viewer_create.data)["error"]["code"] == "team_forbidden"
+    assert [item["id"] for item in json.loads(team_list.data)["channels"]] == [channel["id"]]
+    assert json.loads(personal_list.data)["channels"] == []
+    events = json.loads(team_events.data)["events"]
+    assert [item["id"] for item in events] == event_ids
+    assert events[0]["team_id"] == team_id
 
 
 def test_api_v1_notification_channel_rejections_are_logged():
@@ -1577,6 +2634,117 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
         "/notification-events",
         "/notification-channels/ntc_cli",
     ]
+
+
+def test_darklab_cli_team_commands_manage_api_teams(monkeypatch, capsys, tmp_path):
+    cli_main = import_module("darklab_cli.__main__")
+
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+
+        def request(self, method, path, *, params=None, body=None, stream=False):
+            del params, stream
+            if path == "/teams" and method == "GET":
+                return {
+                    "teams": [{
+                        "id": "team_cli",
+                        "name": "CLI Team",
+                        "slug": "cli-team",
+                        "status": "active",
+                        "member": {"id": "tmem_owner", "role": "owner", "display_name": "Owner", "joined_at": ""},
+                    }]
+                }
+            if path == "/teams" and method == "POST":
+                assert body == {"name": "CLI Team", "slug": "cli-team", "display_name": "Owner"}
+                return {
+                    "team": {
+                        "id": "team_cli",
+                        "name": "CLI Team",
+                        "slug": "cli-team",
+                        "status": "active",
+                        "member": {"role": "owner"},
+                    },
+                    "recovery_code": "trec_cli",
+                }
+            if path == "/teams/team_cli":
+                return {
+                    "team": {
+                        "id": "team_cli",
+                        "name": "CLI Team",
+                        "slug": "cli-team",
+                        "status": "active",
+                        "member": {"role": "owner"},
+                    },
+                    "members": [{"id": "tmem_owner", "role": "owner", "status": "active", "display_name": "Owner"}],
+                    "invites": [],
+                    "recovery_codes": [],
+                }
+            if path == "/teams/team_cli/invites" and method == "POST":
+                assert body == {"role": "operator", "label": "Ops", "expires_at": None, "max_uses": 1}
+                return {
+                    "invite": {
+                        "id": "tinv_cli",
+                        "team_id": "team_cli",
+                        "role": "operator",
+                        "label": "Ops",
+                        "code": "tinv_code",
+                    }
+                }
+            if path == "/teams/team_cli/invites/tinv_cli" and method == "DELETE":
+                return {"removed": True}
+            if path == "/teams/join" and method == "POST":
+                assert body == {"code": "tinv_code", "display_name": "Operator"}
+                return {
+                    "team": {
+                        "id": "team_cli",
+                        "name": "CLI Team",
+                        "slug": "cli-team",
+                        "status": "active",
+                        "member": {"role": "operator"},
+                    },
+                    "members": [{"id": "tmem_operator", "role": "operator", "status": "active", "display_name": "Operator"}],
+                    "invites": [],
+                    "recovery_codes": [],
+                }
+            if path == "/teams/team_cli/members/tmem_operator" and method == "PATCH":
+                assert body == {"role": "admin"}
+                return {"member": {"id": "tmem_operator", "role": "admin", "status": "active", "display_name": "Operator"}}
+            if path == "/teams/team_cli/recovery/rotate" and method == "POST":
+                return {"recovery_code": "trec_rotated", "recovery": {"id": "trec_cli", "team_id": "team_cli"}}
+            if path == "/teams/team_cli/leave" and method == "POST":
+                return {"removed": True}
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["team", "create", "CLI Team", "--slug", "cli-team", "--display-name", "Owner"]) == 0
+    assert "recovery code: trec_cli" in capsys.readouterr().out
+    assert cli_main.main(["team", "list"]) == 0
+    assert "CLI Team" in capsys.readouterr().out
+    assert cli_main.main(["team", "switch", "cli-team"]) == 0
+    assert "team: team_cli" in capsys.readouterr().out
+    config_path = tmp_path / ".config" / "darklab" / "config.toml"
+    assert 'team = "team_cli"' in config_path.read_text(encoding="utf-8")
+    assert cli_main.main(["team", "switch", "missing-team"]) == 1
+    assert "team not found: missing-team" in capsys.readouterr().err
+    assert 'team = "team_cli"' in config_path.read_text(encoding="utf-8")
+    assert cli_main.main(["team", "info", "team_cli"]) == 0
+    assert "Owner" in capsys.readouterr().out
+    assert cli_main.main(["team", "invite", "create", "team_cli", "--role", "operator", "--label", "Ops"]) == 0
+    assert "code: tinv_code" in capsys.readouterr().out
+    assert cli_main.main(["team", "join", "tinv_code", "--display-name", "Operator"]) == 0
+    assert "Operator" in capsys.readouterr().out
+    assert cli_main.main(["team", "member", "update", "team_cli", "tmem_operator", "--role", "admin"]) == 0
+    assert "admin" in capsys.readouterr().out
+    assert cli_main.main(["team", "recovery", "rotate", "team_cli"]) == 0
+    assert "trec_rotated" in capsys.readouterr().out
+    assert cli_main.main(["team", "invite", "revoke", "team_cli", "tinv_cli", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] is True
+    assert cli_main.main(["team", "leave", "team_cli", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] is True
 
 
 def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys):
@@ -1939,6 +3107,21 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "ScheduleResponse",
         "ScheduleRunNowResponse",
         "ScheduleUpdateRequest",
+        "Team",
+        "TeamCreateRequest",
+        "TeamCreateResponse",
+        "TeamDetail",
+        "TeamInvite",
+        "TeamInviteCreateRequest",
+        "TeamInviteResponse",
+        "TeamJoinRequest",
+        "TeamList",
+        "TeamMember",
+        "TeamMemberResponse",
+        "TeamMemberUpdateRequest",
+        "TeamMembership",
+        "TeamRecoveryCode",
+        "TeamRecoveryRotateResponse",
         "Watcher",
         "WatcherAcceptBaselineRequest",
         "WatcherCreateRequest",
@@ -1960,6 +3143,22 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/runs/{run_id}/stream"]["get"]["responses"]["200"]["content"]["application/x-ndjson"]["schema"] == {
         "$ref": "#/components/schemas/NdjsonStream"
     }
+    assert spec["paths"]["/teams"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/TeamList"
+    }
+    assert spec["paths"]["/teams"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/TeamCreateRequest"
+    }
+    assert spec["paths"]["/teams/{team_id}/invites"]["post"]["responses"]["403"]["description"] == (
+        "Role lacks required team capability"
+    )
+    assert spec["paths"]["/teams/{team_id}/members/{member_id}"]["patch"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/TeamMemberUpdateRequest"}
+    assert "capabilities" in schemas["TeamMembership"]["required"]
+    assert schemas["TeamMembership"]["properties"]["capabilities"]["items"] == {"type": "string"}
+    assert "capabilities" in schemas["TeamMember"]["required"]
+    assert schemas["TeamMember"]["properties"]["capabilities"]["items"] == {"type": "string"}
     stream_schema = schemas["RunStreamEvent"]
     assert {
         "tsC",
@@ -2136,12 +3335,163 @@ def test_darklab_cli_config_flags_win_over_environment(monkeypatch):
 
     monkeypatch.setenv("DARKLAB_API_URL", "http://env.example")
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_env")
+    monkeypatch.setenv("DARKLAB_TEAM", "team_env")
 
-    config = load_config(Namespace(api_url="http://flag.example/", token="tok_flag", timeout=2))
+    config = load_config(Namespace(api_url="http://flag.example/", token="tok_flag", team="team_flag", timeout=2))
 
     assert config.api_url == "http://flag.example"
     assert config.token == "tok_flag"
+    assert config.team == "team_flag"
     assert config.timeout == 2
+
+
+def test_darklab_cli_team_member_update_requires_a_change(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, *_args, **_kwargs):
+            raise AssertionError("CLI should reject empty member updates before making a request")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["team", "member", "update", "team_cli", "tmem_cli"]) == 1
+    assert "team member update needs --role or --display-name" in capsys.readouterr().err
+
+
+def test_darklab_cli_team_mutation_errors_surface(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    failures = {
+        ("POST", "/teams/team_cli/invites"): "invite forbidden",
+        ("POST", "/teams/team_cli/recovery/rotate"): "recovery forbidden",
+        ("PATCH", "/teams/team_cli/members/tmem_cli"): "member update forbidden",
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, stream=False):
+            del params, body, stream
+            message = failures.get((method, path))
+            if message:
+                raise cli_main.DarklabCliError(message)
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    cases = (
+        (["team", "invite", "create", "team_cli"], "invite forbidden"),
+        (["team", "recovery", "rotate", "team_cli"], "recovery forbidden"),
+        (["team", "member", "update", "team_cli", "tmem_cli", "--role", "admin"], "member update forbidden"),
+    )
+    for argv, message in cases:
+        assert cli_main.main(argv) == 1
+        assert message in capsys.readouterr().err
+
+
+def test_darklab_cli_team_json_and_ndjson_shapes_are_stable(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    team = {
+        "id": "team_cli",
+        "name": "CLI Team",
+        "slug": "cli-team",
+        "status": "active",
+        "member": {"id": "tmem_owner", "role": "owner", "display_name": "Owner"},
+    }
+    detail = {
+        "team": team,
+        "members": [{"id": "tmem_owner", "role": "owner", "status": "active", "display_name": "Owner"}],
+        "invites": [{"id": "tinv_cli", "role": "operator", "label": "Ops"}],
+        "recovery_codes": [{"id": "trec_cli", "created_at": "2026-05-28T00:00:00Z"}],
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, stream=False):
+            del params, body, stream
+            if method == "GET" and path == "/teams":
+                return {"teams": [team], "total": 1}
+            if method == "GET" and path == "/teams/team_cli":
+                return detail
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["team", "list", "--format", "ndjson"]) == 0
+    team_row = json.loads(capsys.readouterr().out)
+    assert team_row["id"] == "team_cli"
+    assert team_row["role"] == "owner"
+    assert "teams" not in team_row
+
+    assert cli_main.main(["team", "members", "team_cli", "--format", "ndjson"]) == 0
+    member_row = json.loads(capsys.readouterr().out)
+    assert member_row == {"id": "tmem_owner", "role": "owner", "status": "active", "display_name": "Owner"}
+
+    assert cli_main.main(["team", "info", "team_cli", "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["team"]["id"] == "team_cli"
+    assert payload["members"][0]["id"] == "tmem_owner"
+    assert payload["invites"][0]["id"] == "tinv_cli"
+
+
+def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys, tmp_path):
+    cli_main = import_module("darklab_cli.__main__")
+    seen: list[tuple[str, str, str]] = []
+
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+
+        def request(self, method, path, *, params=None, body=None, stream=False):
+            del params, body, stream
+            seen.append((self.config.team, method, path))
+            if method == "POST" and path == "/runs":
+                return {"id": "run_cli", "status": "started", "stream_url": "/runs/run_cli/stream"}
+            if method == "GET" and path == "/history":
+                return {"runs": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
+            if method == "GET" and path == "/watchers":
+                return {"watchers": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
+            if method == "GET" and path == "/notification-channels":
+                return {"channels": []}
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["--team", "team_flag", "run", "echo hi", "--no-follow", "--format", "json"]) == 0
+    json.loads(capsys.readouterr().out)
+
+    monkeypatch.setenv("DARKLAB_TEAM", "team_env")
+    assert cli_main.main(["history", "--format", "json"]) == 0
+    json.loads(capsys.readouterr().out)
+
+    monkeypatch.delenv("DARKLAB_TEAM")
+    config_path = tmp_path / ".config" / "darklab" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text('team = "team_saved"\n', encoding="utf-8")
+    assert cli_main.main(["watch", "list", "--format", "json"]) == 0
+    json.loads(capsys.readouterr().out)
+
+    assert cli_main.main(["--team", "team_notify", "notify", "list", "--format", "json"]) == 0
+    json.loads(capsys.readouterr().out)
+
+    assert seen == [
+        ("team_flag", "POST", "/runs"),
+        ("team_env", "GET", "/history"),
+        ("team_saved", "GET", "/watchers"),
+        ("team_notify", "GET", "/notification-channels"),
+    ]
 
 
 def test_darklab_cli_client_builds_authenticated_api_urls():
@@ -2175,6 +3525,7 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
 
     def fake_urlopen(req, *, timeout):
         seen["authorization"] = req.get_header("Authorization")
+        seen["team"] = req.get_header("X-team-id")
         seen["timeout"] = timeout
         if req.full_url.endswith("/missing"):
             raise urllib.error.HTTPError(
@@ -2187,10 +3538,10 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
         return FakeResponse()
 
     monkeypatch.setattr(client_module.urllib.request, "urlopen", fake_urlopen)
-    client = DarklabClient(DarklabConfig("http://example.test", "tok_cli", 2))
+    client = DarklabClient(DarklabConfig("http://example.test", "tok_cli", 2, team="team_cli"))
 
     assert client.request("GET", "/whoami") == {"ok": True}
-    assert seen == {"authorization": "Bearer tok_cli", "timeout": 2}
+    assert seen == {"authorization": "Bearer tok_cli", "team": "team_cli", "timeout": 2}
     try:
         client.request("GET", "/missing")
     except DarklabCliError as exc:
@@ -2223,6 +3574,7 @@ def test_darklab_cli_config_file_uses_toml(monkeypatch, tmp_path):
         """
 api_url = "http://config.example:9999" # inline comments are TOML
 token = "tok_config"
+team = "team_config"
 timeout = 2.5
 ignored = "value"
 
@@ -2237,7 +3589,35 @@ ignored = true
 
     assert config.api_url == "http://config.example:9999"
     assert config.token == "tok_config"
+    assert config.team == "team_config"
     assert config.timeout == 2.5
+
+
+def test_darklab_cli_config_save_enforces_owner_only_permissions(monkeypatch, tmp_path):
+    client_module = import_module("darklab_cli.client")
+    save_config_value = client_module.save_config_value
+    path = tmp_path / ".config" / "darklab" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '# local darklab settings\n'
+        'token = "tok_existing" # keep this comment\n'
+        'unknown = "preserved"\n'
+        '\n'
+        '[nested]\n'
+        'ignored = true\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o644)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    save_config_value("team", "team_cli")
+    saved = path.read_text(encoding="utf-8")
+
+    assert '# local darklab settings\n' in saved
+    assert 'token = "tok_existing" # keep this comment\n' in saved
+    assert 'unknown = "preserved"\n' in saved
+    assert 'team = "team_cli"\n[nested]\nignored = true\n' in saved
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_darklab_cli_config_requires_explicit_http_scheme():

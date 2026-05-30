@@ -47,6 +47,7 @@ def _channel(*, config=None) -> NotificationChannel:
     return NotificationChannel(
         id="ntc_email",
         session_token="tok_notifications",
+        team_id="",
         kind=CHANNEL_KIND_EMAIL,
         label="Email",
         secrets={},

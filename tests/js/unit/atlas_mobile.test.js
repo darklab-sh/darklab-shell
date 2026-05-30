@@ -370,6 +370,36 @@ describe('Mobile Atlas controller', () => {
     expect(controller.bulkDeleteSelectedItems).toHaveBeenCalledTimes(1)
   })
 
+  it('locks select mode and delete actions when team scope cannot triage', () => {
+    const { controller, render } = createController({
+      controller: {
+        canTriageAtlasRows: vi.fn(() => false),
+      },
+    })
+    loadMobileAtlas(controller)
+
+    render()
+    document.querySelector('.atlas-mobile-overflow-btn')?.click()
+    const selectMode = [...document.querySelectorAll('.action-sheet-item')]
+      .find(button => button.textContent === 'Select mode')
+    expect(selectMode?.disabled).toBe(true)
+    selectMode?.click()
+    expect(controller.setSelectMode).not.toHaveBeenCalled()
+    window.closeActionSheet?.({ restoreFocus: false })
+
+    document.querySelector('.atlas-mobile-row')?.click()
+    const footerButtons = [...document.querySelectorAll('#atlas-mobile-entity-footer button')]
+    expect(footerButtons.find(button => button.textContent === 'Suppress')?.disabled).toBe(true)
+    expect(footerButtons.find(button => button.textContent === 'Delete')?.disabled).toBe(true)
+    footerButtons.find(button => button.textContent === 'Delete')?.click()
+    document.querySelector('.atlas-mobile-detail-more')?.click()
+    const detailButtons = [...document.querySelectorAll('.action-sheet-item')]
+    expect(detailButtons.find(button => button.textContent === 'Suppress')?.disabled).toBe(true)
+    expect(detailButtons.find(button => button.textContent === 'Delete')?.disabled).toBe(true)
+    detailButtons.find(button => button.textContent === 'Delete')?.click()
+    expect(controller.confirmDeleteEntity).not.toHaveBeenCalled()
+  })
+
   it('opens finding detail and keeps review updates in the sticky footer', () => {
     const { controller, render } = createController({ state: { activeTab: 'findings' } })
     const { mobile } = loadMobileAtlas(controller)

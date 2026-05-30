@@ -11,7 +11,14 @@ from core import database
 from core.database_backend import dialect_for_backend
 from services.notifications.models import require_durable_session_token
 from services.scheduler.models import OWNER_KIND_WATCHER
-from services.scheduler.service import create_schedule, delete_schedule, pause_schedule, resume_schedule, update_schedule
+from services.scheduler.service import (
+    create_schedule,
+    delete_schedule,
+    pause_schedule,
+    pause_team_schedules,
+    resume_schedule,
+    update_schedule,
+)
 from services.watchers.models import (
     DIFF_KIND_NONE,
     DIFF_KINDS,
@@ -92,6 +99,7 @@ def row_to_watcher(row: Any) -> Watcher:
     return Watcher(
         id=str(_value(row, "id")),
         session_token=str(_value(row, "session_token")),
+        team_id=str(_value(row, "team_id")),
         label=str(_value(row, "label")),
         command_text=str(_value(row, "command_text")),
         schedule_id=str(_value(row, "schedule_id")),
@@ -114,6 +122,7 @@ def row_to_watcher_fire(row: Any) -> WatcherFire:
     return WatcherFire(
         id=str(_value(row, "id")),
         watcher_id=str(_value(row, "watcher_id")),
+        team_id=str(_value(row, "team_id")),
         baseline_run_id=str(_value(row, "baseline_run_id")),
         run_id=str(_value(row, "run_id")),
         diff_summary=_dialect().decode_json_dict(_value(row, "diff_summary_json", {})),
@@ -141,10 +150,19 @@ def _max_watchers_per_session() -> int:
     return max(1, configured)
 
 
-def _watcher_count(conn, session_token: str) -> int:
+def _owner_watcher_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
+    prefix = f"{table_alias}." if table_alias else ""
+    normalized_team_id = str(team_id or "").strip()
+    if normalized_team_id:
+        return f"{prefix}team_id = ?", (normalized_team_id,)
+    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_token = ?", (session_token,)
+
+
+def _watcher_count(conn, session_token: str, *, team_id: str = "") -> int:
+    owner_sql, owner_params = _owner_watcher_clause(session_token, team_id)
     row = conn.execute(
-        "SELECT COUNT(*) AS count FROM watchers WHERE session_token = ?",
-        (session_token,),
+        f"SELECT COUNT(*) AS count FROM watchers WHERE {owner_sql}",  # nosec
+        owner_params,
     ).fetchone()
     return int(_value(row, "count", 0) or 0)
 
@@ -165,6 +183,12 @@ def get_watcher(watcher_id: str, *, conn=None) -> Watcher | None:
 
 def list_for_session(session_token: str, *, conn=None) -> list[Watcher]:
     session = require_durable_session_token(session_token)
+    return list_for_owner(session, team_id="", conn=conn)
+
+
+def list_for_owner(session_token: str, *, team_id: str = "", conn=None) -> list[Watcher]:
+    session = require_durable_session_token(session_token)
+    owner_sql, owner_params = _owner_watcher_clause(session, team_id)
     ctx = None
     if conn is None:
         ctx = database.db_connect()
@@ -172,8 +196,8 @@ def list_for_session(session_token: str, *, conn=None) -> list[Watcher]:
     assert conn is not None
     try:
         rows = conn.execute(
-            "SELECT * FROM watchers WHERE session_token = ? ORDER BY updated DESC",
-            (session,),
+            f"SELECT * FROM watchers WHERE {owner_sql} ORDER BY updated DESC",  # nosec
+            owner_params,
         ).fetchall()
         return [row_to_watcher(row) for row in rows]
     finally:
@@ -211,6 +235,7 @@ def list_watcher_fires(watcher_id: str, *, limit: int = 50, offset: int = 0, con
 def create_watcher(
     session_token: str,
     *,
+    team_id: str = "",
     command_text: str,
     baseline_run_id: str = "",
     cron_expr: str | None = None,
@@ -222,6 +247,7 @@ def create_watcher(
     conn=None,
 ) -> Watcher:
     session = require_durable_session_token(session_token)
+    normalized_team_id = str(team_id or "").strip()
     command = str(command_text or "").strip()
     baseline = str(baseline_run_id or "").strip()
     if not command:
@@ -234,10 +260,11 @@ def create_watcher(
         conn = ctx.__enter__()
     assert conn is not None
     try:
-        if _watcher_count(conn, session) >= _max_watchers_per_session():
-            raise WatcherError("watcher quota exceeded for this session")
+        if _watcher_count(conn, session, team_id=normalized_team_id) >= _max_watchers_per_session():
+            raise WatcherError("watcher quota exceeded for this scope")
         schedule = create_schedule(
             session,
+            team_id=normalized_team_id,
             command_text=command,
             cron_expr=cron_expr,
             cadence_preset=cadence_preset,
@@ -254,15 +281,16 @@ def create_watcher(
         conn.execute(
             """
             INSERT INTO watchers (
-                id, session_token, label, command_text, schedule_id, baseline_run_id,
+                id, session_token, team_id, label, command_text, schedule_id, baseline_run_id,
                 last_run_id, last_diff_summary_json, state, state_reason, last_error,
                 options_json, consecutive_no_change, consecutive_changed, consecutive_failures,
                 created, updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 watcher_id,
                 session,
+                normalized_team_id,
                 str(label or "").strip(),
                 command,
                 schedule.id,
@@ -465,10 +493,10 @@ def record_watcher_fire(
     created = _utc_now()
     # The conflict clause comes from hardcoded column names via the dialect helper.
     insert_sql = (
-        "INSERT INTO watcher_fires "  # nosec B608
+        "INSERT INTO watcher_fires "  # nosec
         "(id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind, "
-        "truncated, notification_event_ids_json, state_at_fire, created) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "truncated, notification_event_ids_json, state_at_fire, created, team_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         + _dialect().insert_or_ignore_clause(("watcher_id", "run_id"))
     )
     conn.execute(
@@ -484,6 +512,7 @@ def record_watcher_fire(
             _dialect().json_param(notification_event_ids or []),
             state_at_fire or watcher.state,
             created,
+            watcher.team_id,
         ),
     )
     row = conn.execute(
@@ -635,6 +664,41 @@ def pause_watchers_for_deleted_baselines(conn, run_ids: list[str]) -> int:
                 "session": str(_value(row, "session_token") or ""),
             })
     return count
+
+
+def pause_team_watchers_and_schedules(conn, team_id: str, *, reason: str = "team_archived") -> dict[str, int]:
+    normalized_team_id = str(team_id or "").strip()
+    if not normalized_team_id:
+        return {"watchers": 0, "schedules": 0}
+    rows = conn.execute(
+        "SELECT id FROM watchers WHERE team_id = ? AND state != ?",
+        (normalized_team_id, WATCHER_STATE_PAUSED),
+    ).fetchall()
+    count = 0
+    for row in rows:
+        watcher_id = str(_value(row, "id") or "")
+        if set_watcher_state(
+            watcher_id,
+            state=WATCHER_STATE_PAUSED,
+            state_reason=reason,
+            schedule_enabled=False,
+            conn=conn,
+        ) is not None:
+            count += 1
+    # Schedules without a watcher row are still paused by the scheduler service.
+    paused_schedules = pause_team_schedules(conn, normalized_team_id, reason=reason)
+    paused = {"watchers": count, "schedules": paused_schedules}
+    log.info("TEAM_AUTOMATION_PAUSED", extra={
+        "team_id": normalized_team_id,
+        "reason": reason,
+        "paused_watchers": paused["watchers"],
+        "paused_schedules": paused["schedules"],
+    })
+    return paused
+
+
+def pause_team_watchers(conn, team_id: str, *, reason: str = "team_archived") -> int:
+    return pause_team_watchers_and_schedules(conn, team_id, reason=reason)["watchers"]
 
 
 def failure_disable_threshold() -> int:

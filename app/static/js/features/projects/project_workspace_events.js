@@ -29,6 +29,22 @@
       return ctx.selectedFindingIds?.() || new Set();
     }
 
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
+    function denyTeamScopeAction(action) {
+      ctx.setProjectWorkspaceMessage(teamScopeDeniedMessage(action), { error: true });
+    }
+
     function projectFromRowsOrSummary(projectId) {
       const summary = ctx.projectSummary?.(projectId);
       return (summary && summary.project && typeof summary.project === 'object')
@@ -270,6 +286,10 @@
         const projectId = String(bulkReview.dataset.projectId || selectedProjectId() || '');
         const reviewState = String(bulkReview.value || '');
         if (!projectId || !reviewState || !selectedFindingIds().size) return;
+        if (!activeTeamScopeCan('triage_findings')) {
+          denyTeamScopeAction('triage team findings');
+          return;
+        }
         const findingIds = [...selectedFindingIds()];
         try {
           const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/findings/review`, {
@@ -305,6 +325,11 @@
       const reviewState = String(control.value || 'new');
       const previousReviewState = String(control.dataset.previousReviewState || 'new');
       ctx.setProjectWorkspaceMessage('');
+      if (!activeTeamScopeCan('triage_findings')) {
+        control.value = previousReviewState;
+        denyTeamScopeAction('triage team findings');
+        return;
+      }
       ctx.setCachedFindingReviewState(projectId, findingId, reviewState);
       ctx.renderProjectExplorer();
       if (mobileView() === 'detail' && workspaceTab() === 'findings' && selectedProjectId() === projectId) {
@@ -839,11 +864,19 @@
           return;
         } else if (action === 'toggle-project-entity-select') {
           const nextMode = !ctx.entitySelectMode();
+          if (nextMode && !activeTeamScopeCan('mutate_projects')) {
+            denyTeamScopeAction('change team projects');
+            return;
+          }
           ctx.entitiesController?.().setSelectMode(nextMode);
           if (!nextMode) ctx.entitiesController?.().clearSelection();
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'select-all-project-entities') {
+          if (!activeTeamScopeCan('mutate_projects')) {
+            denyTeamScopeAction('change team projects');
+            return;
+          }
           ctx.entitiesController?.().selectAllForActiveTab(ctx.projectSummary?.(projectId));
           ctx.renderProjectExplorer();
           return;
@@ -896,6 +929,10 @@
           return;
         } else if (action === 'toggle-project-finding-select') {
           const nextMode = !ctx.findingSelectMode();
+          if (nextMode && !activeTeamScopeCan('triage_findings')) {
+            denyTeamScopeAction('triage team findings');
+            return;
+          }
           ctx.setFindingSelectMode(nextMode);
           if (!nextMode) selectedFindingIds().clear();
           ctx.renderProjectExplorer();
@@ -909,6 +946,10 @@
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'select-all-project-findings') {
+          if (!activeTeamScopeCan('triage_findings')) {
+            denyTeamScopeAction('triage team findings');
+            return;
+          }
           ctx.filteredProjectFindings(projectId, ctx.projectSummary?.(projectId)).forEach((finding) => {
             if (finding && finding.id) selectedFindingIds().add(String(finding.id));
           });

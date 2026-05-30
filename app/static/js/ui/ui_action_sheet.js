@@ -75,7 +75,7 @@
     if (item.tone === 'danger') btn.classList.add('is-danger', 'btn-danger');
     if (item.disabled) btn.disabled = true;
     if (item.action) btn.dataset.actionSheetAction = String(item.action);
-    if (item.title) btn.title = item.title;
+    if (item.title || item.hint) btn.title = item.title || item.hint;
     if (item.icon) {
       const icon = document.createElement('span');
       icon.className = 'action-sheet-item-icon';

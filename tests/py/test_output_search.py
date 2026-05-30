@@ -266,7 +266,7 @@ class TestOutputSearch:
         conn = sqlite3.connect(no_fts_path)
         conn.execute("""
             CREATE TABLE runs (
-                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, command TEXT NOT NULL,
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT NOT NULL DEFAULT '', command TEXT NOT NULL,
                 started TEXT NOT NULL, finished TEXT, exit_code INTEGER,
                 output TEXT, output_preview TEXT,
                 preview_truncated INTEGER NOT NULL DEFAULT 0,

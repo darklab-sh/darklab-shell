@@ -609,6 +609,16 @@
       .then(() => global.showToast && global.showToast('Command copied'))
       .catch(() => global.showToast && global.showToast('Failed to copy command', 'error'));
   }
+  function _recentsCanManageHistory() {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan('manage_history')
+      : true;
+  }
+  function _recentsCanMutateProjects() {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan('mutate_projects')
+      : true;
+  }
   function _recentsRunActionMenu(run) {
     const wrap = document.createElement('div');
     wrap.className = 'sheet-item-action-menu-wrap save-menu-wrap save-menu-down';
@@ -649,21 +659,25 @@
         closeRecentsSheet();
       }
     });
-    addItem('edit', () => {
-      if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
-    });
-    addItem('add to active project', () => {
-      if (typeof global._historyAddRunToActiveProject === 'function') {
-        global._historyAddRunToActiveProject(run)
-          .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
-      }
-    });
-    addItem('add to project', () => {
-      if (typeof global._historyAddRunToProject === 'function') {
-        global._historyAddRunToProject(run)
-          .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
-      }
-    });
+    if (_recentsCanManageHistory()) {
+      addItem('edit', () => {
+        if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
+      });
+    }
+    if (_recentsCanMutateProjects()) {
+      addItem('add to active project', () => {
+        if (typeof global._historyAddRunToActiveProject === 'function') {
+          global._historyAddRunToActiveProject(run)
+            .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
+        }
+      });
+      addItem('add to project', () => {
+        if (typeof global._historyAddRunToProject === 'function') {
+          global._historyAddRunToProject(run)
+            .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
+        }
+      });
+    }
     addItem('copy run id', () => {
       if (typeof global.copyTextToClipboard === 'function') {
         global.copyTextToClipboard(run.id)
@@ -671,11 +685,13 @@
           .catch(() => global.showToast && global.showToast('Failed to copy run ID', 'error'));
       }
     });
-    addItem('delete', () => {
-      if (run.id && typeof global.confirmHistAction === 'function') {
-        global.confirmHistAction('delete', run.id, run.command, 'run');
-      }
-    });
+    if (_recentsCanManageHistory()) {
+      addItem('delete', () => {
+        if (run.id && typeof global.confirmHistAction === 'function') {
+          global.confirmHistAction('delete', run.id, run.command, 'run');
+        }
+      });
+    }
     bindPressable(trigger, {
       refocusComposer: false,
       clearPressStyle: true,
@@ -843,12 +859,14 @@
         }));
       }
       if (!isRun) {
-        actions.appendChild(_recentsMakeAction('delete', () => {
-          if (!entryData.id) return;
-          if (typeof global.confirmHistAction === 'function') {
-            global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
-          }
-        }));
+        if (_recentsCanManageHistory()) {
+          actions.appendChild(_recentsMakeAction('delete', () => {
+            if (!entryData.id) return;
+            if (typeof global.confirmHistAction === 'function') {
+              global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
+            }
+          }));
+        }
       }
 
       item.appendChild(head);
@@ -976,6 +994,7 @@
       refocusComposer: false,
       clearPressStyle: true,
       onActivate: () => {
+        if (!_recentsCanManageHistory()) return;
         if (typeof global.confirmHistAction === 'function') {
           global.confirmHistAction('clear');
         }
@@ -1090,7 +1109,11 @@
 
   function _recentsSyncFilterUI() {
     const runOnlyEnabled = _recentsFilterState.type !== 'snapshots';
-    if (recentsSheetClearBtn) recentsSheetClearBtn.classList.toggle('u-hidden', !runOnlyEnabled);
+    if (recentsSheetClearBtn) {
+      const showClear = runOnlyEnabled && _recentsCanManageHistory();
+      recentsSheetClearBtn.classList.toggle('u-hidden', !showClear);
+      recentsSheetClearBtn.disabled = !showClear;
+    }
     if (recentsFilterRoot) {
       recentsFilterRoot.value = _recentsFilterState.root;
       recentsFilterRoot.closest('.sheet-filter-row')?.classList.toggle('active', !!_recentsFilterState.root.trim());

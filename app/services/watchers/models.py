@@ -35,6 +35,7 @@ WATCHER_OPTION_DEFAULTS: dict[str, bool] = {
 class Watcher:
     id: str
     session_token: str
+    team_id: str
     label: str
     command_text: str
     schedule_id: str
@@ -56,6 +57,7 @@ class Watcher:
 class WatcherFire:
     id: str
     watcher_id: str
+    team_id: str
     baseline_run_id: str
     run_id: str
     diff_summary: dict[str, Any]

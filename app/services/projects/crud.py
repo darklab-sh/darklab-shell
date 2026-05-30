@@ -8,6 +8,7 @@ from core.database import db_connect
 from services.projects.models import normalize_project_payload
 from services.projects.preferences import clear_active_project_preference
 from services.projects.queries import get_project
+from services.projects.scope import shared_owner_where
 from services.projects.slugs import allocate_slug
 from services.projects.utils import (
     new_project_id,
@@ -19,27 +20,29 @@ from services.projects.contracts import ProjectWorkspaceError
 from services.projects.metadata import _save_project_note
 
 
-def create_project(session_id, data):
+def create_project(session_id, data, *, team_id=""):
     payload = normalize_project_payload(data)
     created = now()
     with db_connect() as conn:
+        owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         row = conn.execute(
-            "SELECT COUNT(*) AS count FROM projects WHERE session_id = ?",
-            [session_id],
+            "SELECT COUNT(*) AS count FROM projects WHERE " + owner_sql,  # nosec
+            owner_params,
         ).fetchone()
         if quota_exceeded(int(row["count"] or 0) if row else 0, "max_projects_per_session", 100):
             raise_quota("project quota exceeded for this session")
         for _ in range(10):
             project_id = new_project_id()
-            slug = allocate_slug(conn, session_id, payload["name"])
+            slug = allocate_slug(conn, session_id, payload["name"], team_id=team_id)
             result = conn.execute(
                 "INSERT INTO projects "
-                "(id, session_id, name, slug, description, status, color, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?) "
+                "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",
                 (
                     project_id,
                     session_id,
+                    team_id,
                     payload["name"],
                     slug,
                     payload["description"],
@@ -52,20 +55,21 @@ def create_project(session_id, data):
                 if "notes" in payload:
                     _save_project_note(conn, session_id, project_id, payload["notes"])
                 conn.commit()
-                return get_project(session_id, project_id)
+                return get_project(session_id, project_id, team_id=team_id)
         raise ProjectWorkspaceError("could not allocate a project id")
 
 
-def update_project(session_id, project_id, data):
+def update_project(session_id, project_id, data, *, team_id=""):
     payload = normalize_project_payload(data, partial=True)
     if not payload:
         raise ProjectWorkspaceError("project update payload is empty")
     updated = now()
     with db_connect() as conn:
+        owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         current = conn.execute(
             "SELECT id, name, slug, description, status, color "
-            "FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
+            (*owner_params, project_id),
         ).fetchone()
         if not current:
             return None
@@ -76,7 +80,7 @@ def update_project(session_id, project_id, data):
         color = current["color"]
         if "name" in payload:
             name = payload["name"]
-            slug = allocate_slug(conn, session_id, payload["name"], project_id=project_id)
+            slug = allocate_slug(conn, session_id, payload["name"], project_id=project_id, team_id=team_id)
         if "description" in payload:
             description = payload["description"]
         if "status" in payload:
@@ -86,20 +90,21 @@ def update_project(session_id, project_id, data):
         conn.execute(
             "UPDATE projects "
             "SET name = ?, slug = ?, description = ?, status = ?, color = ?, updated = ? "
-            "WHERE session_id = ? AND id = ?",
-            (name, slug, description, status, color, updated, session_id, project_id),
+            "WHERE " + owner_sql + " AND id = ?",  # nosec
+            (name, slug, description, status, color, updated, *owner_params, project_id),
         )
         if "notes" in payload:
             _save_project_note(conn, session_id, project_id, payload["notes"])
         conn.commit()
-    return get_project(session_id, project_id)
+    return get_project(session_id, project_id, team_id=team_id)
 
 
-def delete_project(session_id, project_id):
+def delete_project(session_id, project_id, *, team_id=""):
     with db_connect() as conn:
+        owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT id FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "SELECT id FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
+            (*owner_params, project_id),
         ).fetchone()
         if not project:
             return False
@@ -152,8 +157,8 @@ def delete_project(session_id, project_id):
         )
         clear_active_project_preference(conn, session_id, project_id=project_id)
         conn.execute(
-            "DELETE FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "DELETE FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
+            (*owner_params, project_id),
         )
         conn.commit()
     return True

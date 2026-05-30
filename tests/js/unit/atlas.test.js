@@ -114,6 +114,8 @@ function loadAtlas({
   apiFetchImpl = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   useRealSelectEnhancer = false,
+  activeTeamScopeCanImpl = () => true,
+  teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
 } = {}) {
   const showToast = vi.fn()
   const syncAppSelect = vi.fn()
@@ -292,6 +294,8 @@ function loadAtlas({
         },
         refocusComposerAfterAction: vi.fn(),
         downloadBlobAsAttachment,
+        activeTeamScopeCan: activeTeamScopeCanImpl,
+        teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
       },
       `{
         apiFetch,
@@ -315,6 +319,8 @@ function loadAtlas({
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
+        window.activeTeamScopeCan = activeTeamScopeCan;
+        window.teamScopeDeniedMessage = teamScopeDeniedMessage;
       `,
     ),
     apiFetch,
@@ -690,6 +696,38 @@ describe('Atlas overlay', () => {
     expect(curatedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
     expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
     expect(curatedContent.textContent).toContain('1 curated entity and 1 curated finding will be kept unless this is checked.')
+  })
+
+  it('disables Atlas delete actions when active team scope cannot triage findings', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('delete'))
+    const { openAtlas, showToast } = loadAtlas({
+      showConfirmImpl: showConfirm,
+      activeTeamScopeCanImpl: capability => capability !== 'triage_findings',
+    })
+
+    await openAtlas({ source: 'test', tab: 'ip' })
+    document.querySelector('.atlas-entity-row')?.click()
+    await flushPromises()
+    document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const detailButtons = [...document.querySelectorAll('#atlas-detail .atlas-detail-action-menu-list button')]
+    const suppressButton = detailButtons.find(button => button.textContent === 'Suppress entity')
+    const deleteButton = detailButtons.find(button => button.textContent === 'Delete entity')
+
+    expect(document.querySelector('.atlas-row-suppression-action')?.disabled).toBe(true)
+    expect(suppressButton?.disabled).toBe(true)
+    expect(deleteButton?.disabled).toBe(true)
+    suppressButton?.click()
+    deleteButton?.click()
+    await Promise.resolve()
+
+    expect(showConfirm).not.toHaveBeenCalled()
+    document.getElementById('atlas-select-toggle').checked = true
+    document.getElementById('atlas-select-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    document.querySelector('.atlas-entity-row')?.click()
+    expect(document.getElementById('atlas-bulk-delete')?.disabled).toBe(true)
+    document.getElementById('atlas-bulk-delete')?.click()
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), expect.anything())
   })
 
   it('applies the project filter when opened from a project', async () => {

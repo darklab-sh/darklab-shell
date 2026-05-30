@@ -15,6 +15,7 @@ export async function loadAppFns({
   tabs: tabsOverride = [],
   confirmKill: confirmKillOverride = vi.fn(),
   bindOutsideClickClose: bindOutsideClickCloseOverride = undefined,
+  bindMobileSheet: bindMobileSheetOverride = undefined,
   interruptPromptLine: interruptPromptLineOverride = vi.fn(),
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
@@ -65,10 +66,14 @@ export async function loadAppFns({
   mobileViewport = null,
   mobileTouch = true,
   Notification: NotificationOverride = undefined,
+  localStorageEntries = {},
   showToast: showToastOverride = vi.fn(),
   updateSessionId: updateSessionIdOverride = vi.fn(),
   copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
   reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
+  loadRecentValues: loadRecentValuesOverride = undefined,
+  refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
+  refreshActiveRuns: refreshActiveRunsOverride = undefined,
   seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
   setTimeout: setTimeoutOverride = (fn) => {
     fn()
@@ -128,6 +133,7 @@ export async function loadAppFns({
           <button data-menu-action="search"></button>
           <button data-menu-action="clear"></button>
           <button data-menu-action="history"></button>
+          <button class="mobile-scope-row" data-menu-action="scope"><span id="mobile-team-scope-label">Personal</span></button>
           <button data-menu-action="status-monitor"></button>
           <button data-menu-action="command-registry"></button>
           <button data-menu-action="options"></button>
@@ -137,6 +143,17 @@ export async function loadAppFns({
       </div>
     </div>
     <div class="terminal-wrap">
+      <button id="team-scope-trigger" type="button"><span id="team-scope-label">Personal</span></button>
+      <div id="team-scope-overlay" class="u-hidden" aria-hidden="true" inert>
+        <section id="team-scope-modal">
+          <button class="team-scope-close" type="button"></button>
+          <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close scope selector"></div>
+          <div id="team-scope-current"></div>
+          <div id="team-scope-status" class="team-scope-status u-hidden" role="status" aria-live="polite"></div>
+          <div id="team-scope-list"></div>
+        </section>
+      </div>
+      <div id="team-scope-announcer" class="team-scope-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
       <div id="history-row" class="history-row" style="display:none">
         <span class="history-label">Recent:</span>
       </div>
@@ -237,6 +254,8 @@ export async function loadAppFns({
         <div id="options-tabs" role="tablist">
           <button id="options-tab-preferences" data-options-tab="preferences" class="is-active" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
           <button id="options-tab-secrets" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+          <button id="options-tab-teams" data-options-tab="teams" role="tab" aria-selected="false" aria-controls="options-panel-teams">Teams</button>
+          <button id="options-tab-notifications" data-options-tab="notifications" role="tab" aria-selected="false" aria-controls="options-panel-notifications">Notifications</button>
         </div>
         <div id="options-panel-preferences" data-options-panel="preferences" role="tabpanel" aria-labelledby="options-tab-preferences">
           <select id="options-ts-select">
@@ -296,6 +315,22 @@ export async function loadAppFns({
           <div id="options-secrets-msg"></div>
           <div id="options-secrets-list"></div>
         </div>
+        <div id="options-panel-teams" data-options-panel="teams" role="tabpanel" aria-labelledby="options-tab-teams" hidden>
+          <button id="options-teams-refresh-btn"></button>
+          <button id="options-team-create-btn"></button>
+          <button id="options-team-join-btn"></button>
+          <button id="options-team-recover-btn"></button>
+          <div id="options-teams-msg"></div>
+          <div id="options-team-form"></div>
+          <div id="options-teams-list" class="options-team-list"></div>
+          <div id="options-team-detail"></div>
+        </div>
+        <div id="options-panel-notifications" data-options-panel="notifications" role="tabpanel" aria-labelledby="options-tab-notifications" hidden>
+          <button id="options-notification-refresh-btn"></button>
+          <button id="options-notification-new-btn"></button>
+          <div id="options-notification-msg"></div>
+          <div id="options-notification-list"></div>
+        </div>
       </div>
     </div>
     <div id="provider-status-overlay" class="u-hidden" aria-hidden="true">
@@ -321,6 +356,9 @@ export async function loadAppFns({
   const tabsState = tabsOverride
   let activeTabState = activeTabId
   if (theme !== null) storage.setItem('theme', theme)
+  for (const [key, value] of Object.entries(localStorageEntries || {})) {
+    storage.setItem(key, value)
+  }
   for (const [name, value] of Object.entries(cookies)) {
     document.cookie = `${name}=${encodeURIComponent(value)}; path=/`
   }
@@ -362,6 +400,9 @@ export async function loadAppFns({
       }
       if (url === '/session/secrets') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      if (url === '/session/teams') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ teams: [] }) })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
@@ -530,11 +571,13 @@ export async function loadAppFns({
       'app/static/js/core/output_core.js',
       'app/static/js/output.js',
       'app/static/js/core/app_preferences_core.js',
+      'app/static/js/features/team_scope.js',
       'app/static/js/app.js',
       'app/static/js/features/mobile/mobile_shell_layout.js',
       'app/static/js/features/tabs/tab_session_state.js',
       'app/static/js/features/preferences/preferences.js',
       'app/static/js/features/preferences/secrets_panel.js',
+      'app/static/js/features/preferences/teams_panel.js',
       'app/static/js/features/preferences/session_token_controls.js',
       'app/static/js/features/command-registry/command_registry.js',
       'app/static/js/features/theme/theme.js',
@@ -565,6 +608,9 @@ export async function loadAppFns({
       updateSessionId: updateSessionIdOverride,
       copyTextToClipboard: copyTextToClipboardOverride,
       reloadSessionHistory: reloadSessionHistoryOverride,
+      ...(loadRecentValuesOverride ? { loadRecentValues: loadRecentValuesOverride } : {}),
+      ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
+      ...(refreshActiveRunsOverride ? { refreshActiveRuns: refreshActiveRunsOverride } : {}),
       _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
       hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
       cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
@@ -689,6 +735,7 @@ export async function loadAppFns({
       doKill: doKillOverride,
       Event,
       showToast: showToastOverride,
+      bindMobileSheet: bindMobileSheetOverride,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
       setTimeout: setTimeoutOverride,
       clearTimeout: clearTimeoutOverride,
@@ -739,6 +786,7 @@ export async function loadAppFns({
     applyCompareViewModePreference,
     applyCompareContextPreference,
     applyPromptUsernamePreference,
+    openTeamScopeSelector,
     activateOptionsTab,
     cycleOptionsTab,
     syncOptionsControls,
@@ -770,7 +818,8 @@ export async function loadAppFns({
     _getAcIndex: () => acIndex,
     _getWelcomeBootPending: () => _welcomeBootPending,
   }`,
-    'setTabs(tabs); setActiveTabId(activeTabId);',
+    `setTabs(tabs); setActiveTabId(activeTabId);
+     if (typeof bindMobileSheet === 'function') window.bindMobileSheet = bindMobileSheet;`,
   )
 
   await Promise.resolve()

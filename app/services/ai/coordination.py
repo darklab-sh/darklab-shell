@@ -113,12 +113,14 @@ def enqueue_lock(
     *,
     model: str,
     prompt_version: str,
+    team_id: str = "",
     redis_client: Any | None = None,
 ) -> Iterator[bool]:
     """Hold a short cross-worker lock while an assist row is inserted."""
     store = _redis_store(redis_client)
     token = uuid.uuid4().hex
-    key = f"{_KEY_PREFIX}:assist:inflight:{_dedupe_hash(session_id, run_id, variant, model, prompt_version)}"
+    owner_key = f"team:{team_id}" if team_id else f"session:{session_id}"
+    key = f"{_KEY_PREFIX}:assist:inflight:{_dedupe_hash(owner_key, run_id, variant, model, prompt_version)}"
     acquired = bool(store.set(key, token, ex=_ENQUEUE_LOCK_TTL_SECONDS, nx=True))
     try:
         yield acquired

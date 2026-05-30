@@ -122,6 +122,9 @@ ARTIFACT_ID_PARAM = _path_param("artifact_id", "Artifact id")
 NOTIFICATION_CHANNEL_ID_PARAM = _path_param("channel_id", "Notification channel id")
 SCHEDULE_ID_PARAM = _path_param("schedule_id", "Schedule id")
 WATCHER_ID_PARAM = _path_param("watcher_id", "Watcher id")
+TEAM_ID_PARAM = _path_param("team_id", "Team id")
+TEAM_MEMBER_ID_PARAM = _path_param("member_id", "Team member id")
+TEAM_INVITE_ID_PARAM = _path_param("invite_id", "Team invite id")
 
 
 OPENAPI_SPEC: dict = {
@@ -157,6 +160,171 @@ OPENAPI_SPEC: dict = {
                         },
                     },
                 },
+            },
+            "TeamMember": {
+                "type": "object",
+                "required": ["id", "team_id", "role", "capabilities", "display_name", "status"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "team_id": {"type": "string"},
+                    "role": {"type": "string", "enum": ["owner", "admin", "operator", "viewer"]},
+                    "capabilities": {"type": "array", "items": {"type": "string"}},
+                    "display_name": {"type": "string"},
+                    "status": {"type": "string", "enum": ["active", "removed"]},
+                    "joined_at": {"type": "string"},
+                    "last_seen_at": {"type": "string"},
+                    "removed_at": {"type": "string"},
+                    "is_current": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamMembership": {
+                "type": "object",
+                "required": ["id", "role", "capabilities", "display_name", "joined_at"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "role": {"type": "string", "enum": ["owner", "admin", "operator", "viewer"]},
+                    "capabilities": {"type": "array", "items": {"type": "string"}},
+                    "display_name": {"type": "string"},
+                    "joined_at": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "Team": {
+                "type": "object",
+                "required": ["id", "name", "slug", "status", "member"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "slug": {"type": "string"},
+                    "status": {"type": "string", "enum": ["active", "archived", "deleted"]},
+                    "created_at": {"type": "string"},
+                    "updated_at": {"type": "string"},
+                    "archived_at": {"type": "string"},
+                    "deleted_at": {"type": "string"},
+                    "member": _ref("TeamMembership"),
+                },
+                "additionalProperties": False,
+            },
+            "TeamInvite": {
+                "type": "object",
+                "required": ["id", "team_id", "role", "label"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "team_id": {"type": "string"},
+                    "role": {"type": "string", "enum": ["owner", "admin", "operator", "viewer"]},
+                    "label": {"type": "string"},
+                    "created_by_member_id": {"type": "string"},
+                    "expires_at": {"type": "string"},
+                    "max_uses": {"type": "integer"},
+                    "use_count": {"type": "integer"},
+                    "revoked_at": {"type": "string"},
+                    "created_at": {"type": "string"},
+                    "code": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamRecoveryCode": {
+                "type": "object",
+                "required": ["id", "team_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "team_id": {"type": "string"},
+                    "created_by_member_id": {"type": "string"},
+                    "created_at": {"type": "string"},
+                    "rotated_at": {"type": "string"},
+                    "revoked_at": {"type": "string"},
+                    "used_at": {"type": "string"},
+                    "code": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamList": {
+                "type": "object",
+                "required": ["teams"],
+                "properties": {"teams": {"type": "array", "items": _ref("Team")}},
+                "additionalProperties": False,
+            },
+            "TeamDetail": {
+                "type": "object",
+                "required": ["team", "members", "invites", "recovery_codes"],
+                "properties": {
+                    "team": _ref("Team"),
+                    "members": {"type": "array", "items": _ref("TeamMember")},
+                    "invites": {"type": "array", "items": _ref("TeamInvite")},
+                    "recovery_codes": {"type": "array", "items": _ref("TeamRecoveryCode")},
+                },
+                "additionalProperties": False,
+            },
+            "TeamCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "slug": {"type": "string"},
+                    "display_name": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamCreateResponse": {
+                "type": "object",
+                "required": ["team", "recovery_code"],
+                "properties": {
+                    "team": _ref("Team"),
+                    "recovery_code": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamUpdateRequest": {
+                "type": "object",
+                "properties": {"status": {"type": "string", "enum": ["active", "archived"]}},
+                "additionalProperties": False,
+            },
+            "TeamInviteCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string", "enum": ["owner", "admin", "operator", "viewer"]},
+                    "label": {"type": "string"},
+                    "expires_at": {"type": "string"},
+                    "max_uses": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamInviteResponse": {
+                "type": "object",
+                "required": ["invite"],
+                "properties": {"invite": _ref("TeamInvite")},
+                "additionalProperties": False,
+            },
+            "TeamJoinRequest": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"},
+                    "display_name": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamMemberUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string", "enum": ["owner", "admin", "operator", "viewer"]},
+                    "display_name": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "TeamMemberResponse": {
+                "type": "object",
+                "required": ["member"],
+                "properties": {"member": _ref("TeamMember")},
+                "additionalProperties": False,
+            },
+            "TeamRecoveryRotateResponse": {
+                "type": "object",
+                "required": ["recovery_code", "recovery"],
+                "properties": {
+                    "recovery_code": {"type": "string"},
+                    "recovery": _ref("TeamRecoveryCode"),
+                },
+                "additionalProperties": False,
             },
             "Label": {
                 "type": "object",
@@ -743,6 +911,7 @@ OPENAPI_SPEC: dict = {
                     "id",
                     "owner_kind",
                     "owner_id",
+                    "team_id",
                     "kind",
                     "command_text",
                     "cron_expr",
@@ -763,6 +932,7 @@ OPENAPI_SPEC: dict = {
                     "id": {"type": "string"},
                     "owner_kind": {"type": "string", "enum": ["user", "watcher"]},
                     "owner_id": {"type": "string"},
+                    "team_id": {"type": "string"},
                     "kind": {"type": "string", "enum": ["command"]},
                     "command_text": {"type": "string"},
                     "cron_expr": {"type": "string"},
@@ -830,12 +1000,23 @@ OPENAPI_SPEC: dict = {
             },
             "ScheduleFire": {
                 "type": "object",
-                "required": ["id", "schedule_id", "owner_kind", "owner_id", "fired_at", "run_id", "status", "reason"],
+                "required": [
+                    "id",
+                    "schedule_id",
+                    "owner_kind",
+                    "owner_id",
+                    "team_id",
+                    "fired_at",
+                    "run_id",
+                    "status",
+                    "reason",
+                ],
                 "properties": {
                     "id": {"type": "string"},
                     "schedule_id": {"type": "string"},
                     "owner_kind": {"type": "string"},
                     "owner_id": {"type": "string"},
+                    "team_id": {"type": "string"},
                     "fired_at": {"type": "string", "nullable": True},
                     "run_id": {"type": "string"},
                     "status": {
@@ -883,6 +1064,7 @@ OPENAPI_SPEC: dict = {
                 "additionalProperties": False,
                 "required": [
                     "id",
+                    "team_id",
                     "label",
                     "command_text",
                     "schedule_id",
@@ -901,6 +1083,7 @@ OPENAPI_SPEC: dict = {
                 ],
                 "properties": {
                     "id": {"type": "string"},
+                    "team_id": {"type": "string"},
                     "label": {"type": "string"},
                     "command_text": {"type": "string"},
                     "schedule_id": {"type": "string"},
@@ -975,6 +1158,7 @@ OPENAPI_SPEC: dict = {
                 "type": "object",
                 "required": [
                     "id",
+                    "team_id",
                     "watcher_id",
                     "baseline_run_id",
                     "run_id",
@@ -987,6 +1171,7 @@ OPENAPI_SPEC: dict = {
                 ],
                 "properties": {
                     "id": {"type": "string"},
+                    "team_id": {"type": "string"},
                     "watcher_id": {"type": "string"},
                     "baseline_run_id": {"type": "string"},
                     "run_id": {"type": "string"},
@@ -1079,6 +1264,7 @@ OPENAPI_SPEC: dict = {
                 "required": ["id", "kind", "label", "config", "triggers", "secret_fields", "muted", "created", "updated"],
                 "properties": {
                     "id": {"type": "string"},
+                    "team_id": {"type": "string"},
                     "kind": {
                         "type": "string",
                         "enum": ["webhook", "slack", "discord", "telegram", "pushover", "email"],
@@ -1177,6 +1363,7 @@ OPENAPI_SPEC: dict = {
                 "required": ["id", "channel_id", "trigger", "payload", "status", "attempts", "created"],
                 "properties": {
                     "id": {"type": "string"},
+                    "team_id": {"type": "string"},
                     "channel_id": {"type": "string"},
                     "trigger": {"type": "string"},
                     "payload": {"type": "object", "additionalProperties": True},
@@ -1381,6 +1568,147 @@ OPENAPI_SPEC: dict = {
                 "responses": {
                     "200": _json_response("Current API token metadata", _ref("Whoami")),
                     **_common_errors(),
+                },
+            },
+        },
+        "/teams": {
+            "get": {
+                "responses": {
+                    "200": _json_response("Teams for the current token", _ref("TeamList")),
+                    **_common_errors(),
+                },
+            },
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("TeamCreateRequest")}},
+                },
+                "responses": {
+                    "201": _json_response("Team created", _ref("TeamCreateResponse")),
+                    "400": _error_response("Invalid team request"),
+                    "409": _error_response("Team slug unavailable"),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/teams/join": {
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("TeamJoinRequest")}},
+                },
+                "responses": {
+                    "201": _json_response("Invite redeemed", _ref("TeamDetail")),
+                    "400": _error_response("Invalid invite code"),
+                    "409": _error_response("Team is archived"),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/teams/recovery/redeem": {
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("TeamJoinRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Recovery code redeemed", _ref("TeamDetail")),
+                    "400": _error_response("Invalid recovery code"),
+                    "409": _error_response("Team is archived"),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/teams/{team_id}": {
+            "get": {
+                "parameters": [TEAM_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Team detail", _ref("TeamDetail")),
+                    **_common_errors(not_found="Team not found"),
+                },
+            },
+            "patch": {
+                "parameters": [TEAM_ID_PARAM],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("TeamUpdateRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Team updated", _ref("TeamDetail")),
+                    "403": _error_response("Role lacks required team capability"),
+                    "409": _error_response("Team state conflict"),
+                    **_common_errors(not_found="Team not found"),
+                },
+            },
+        },
+        "/teams/{team_id}/invites": {
+            "post": {
+                "parameters": [TEAM_ID_PARAM],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("TeamInviteCreateRequest")}},
+                },
+                "responses": {
+                    "201": _json_response("Team invite created", _ref("TeamInviteResponse")),
+                    "403": _error_response("Role lacks required team capability"),
+                    "409": _error_response("Team is archived"),
+                    **_common_errors(not_found="Team not found"),
+                },
+            },
+        },
+        "/teams/{team_id}/invites/{invite_id}": {
+            "delete": {
+                "parameters": [TEAM_ID_PARAM, TEAM_INVITE_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Team invite revoked", _ref("DeleteResponse")),
+                    "403": _error_response("Role lacks required team capability"),
+                    "409": _error_response("Team is archived"),
+                    **_common_errors(not_found="Team not found"),
+                },
+            },
+        },
+        "/teams/{team_id}/members/{member_id}": {
+            "patch": {
+                "parameters": [TEAM_ID_PARAM, TEAM_MEMBER_ID_PARAM],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("TeamMemberUpdateRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Team member updated", _ref("TeamMemberResponse")),
+                    "403": _error_response("Role lacks required team capability"),
+                    "409": _error_response("Team is archived or must retain an owner"),
+                    **_common_errors(not_found="Team member not found"),
+                },
+            },
+            "delete": {
+                "parameters": [TEAM_ID_PARAM, TEAM_MEMBER_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Team member removed", _ref("DeleteResponse")),
+                    "403": _error_response("Role lacks required team capability"),
+                    "409": _error_response("Team is archived or must retain an owner"),
+                    **_common_errors(not_found="Team member not found"),
+                },
+            },
+        },
+        "/teams/{team_id}/leave": {
+            "post": {
+                "parameters": [TEAM_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Left team", _ref("DeleteResponse")),
+                    "409": _error_response("Team must retain an owner"),
+                    **_common_errors(not_found="Team not found"),
+                },
+            },
+        },
+        "/teams/{team_id}/recovery/rotate": {
+            "post": {
+                "parameters": [TEAM_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Recovery code rotated", _ref("TeamRecoveryRotateResponse")),
+                    "403": _error_response("Role lacks required team capability"),
+                    "409": _error_response("Team is archived"),
+                    **_common_errors(not_found="Team not found"),
                 },
             },
         },
@@ -2114,7 +2442,7 @@ OPENAPI_SPEC: dict = {
                     "200": _json_response("Cached summary assist", _ref("AIAssistResponse")),
                     "202": _json_response("Queued or in-progress summary assist", _ref("AIAssistResponse")),
                     "401": _error_response("Missing, invalid, or revoked token"),
-                    "403": _error_response("AI disabled"),
+                    "403": _error_response("AI disabled or team role denied"),
                     "404": _error_response("Run not found"),
                     "409": _error_response("Run still active"),
                     "422": _error_response("No useful AI context"),
@@ -2134,7 +2462,7 @@ OPENAPI_SPEC: dict = {
                     "200": _json_response("Cached next-command assist", _ref("AIAssistResponse")),
                     "202": _json_response("Queued or in-progress next-command assist", _ref("AIAssistResponse")),
                     "401": _error_response("Missing, invalid, or revoked token"),
-                    "403": _error_response("AI disabled"),
+                    "403": _error_response("AI disabled or team role denied"),
                     "404": _error_response("Run not found"),
                     "409": _error_response("Run still active"),
                     "422": _error_response("No useful AI context"),

@@ -358,7 +358,7 @@
     return wrap;
   }
 
-  function reviewStateSelect(value, onChange) {
+  function reviewStateSelect(value, onChange, options = {}) {
     const select = document.createElement('select');
     select.className = 'form-select form-control-compact atlas-finding-review';
     select.setAttribute('aria-label', 'Finding review state');
@@ -375,6 +375,8 @@
       select.appendChild(option);
     });
     select.value = text(value, 'new');
+    select.disabled = !!options.disabled;
+    if (options.disabledReason) select.title = options.disabledReason;
     select.addEventListener('change', () => onChange?.(select.value));
     return select;
   }
@@ -397,7 +399,13 @@
       button.className = `dropdown-item dropdown-item-compact${item.destructive ? ' is-destructive' : ''}`;
       button.setAttribute('role', 'menuitem');
       button.textContent = item.label;
+      button.disabled = !!item.disabled;
+      if (item.disabled) {
+        button.setAttribute('aria-disabled', 'true');
+        if (item.disabledReason) button.title = item.disabledReason;
+      }
       button.addEventListener('click', () => {
+        if (item.disabled) return;
         wrap.classList.remove('open');
         trigger.setAttribute('aria-expanded', 'false');
         item.onSelect();
@@ -441,9 +449,14 @@
     container.append(header);
     if (!handlers.hideInlineActions) {
       const actions = node('div', 'atlas-detail-actions');
-      actions.appendChild(reviewStateSelect(finding.review_state || finding.status, (reviewState) => {
-        handlers.onReviewState?.(finding, reviewState);
-      }));
+      actions.appendChild(reviewStateSelect(
+        finding.review_state || finding.status,
+        (reviewState) => handlers.onReviewState?.(finding, reviewState),
+        {
+          disabled: handlers.canTriageAtlasRows === false,
+          disabledReason: handlers.triageDisabledReason || '',
+        },
+      ));
       if (finding.run_id) {
         const run = document.createElement('button');
         run.type = 'button';
@@ -462,11 +475,15 @@
       menuItems.push(
         {
           label: finding.suppressed ? 'Restore finding' : 'Suppress finding',
+          disabled: handlers.canTriageAtlasRows === false,
+          disabledReason: handlers.triageDisabledReason || '',
           onSelect: () => handlers.onSuppressFinding?.(finding),
         },
         {
           label: 'Delete finding',
           destructive: true,
+          disabled: handlers.canDeleteAtlasRows === false,
+          disabledReason: handlers.deleteDisabledReason || '',
           onSelect: () => handlers.onDeleteFinding?.(finding),
         },
       );
@@ -557,11 +574,15 @@
       const menu = detailActionMenu([
         {
           label: entity.suppressed ? 'Restore entity' : 'Suppress entity',
+          disabled: handlers.canTriageAtlasRows === false,
+          disabledReason: handlers.triageDisabledReason || '',
           onSelect: () => handlers.onSuppressEntity?.(entity),
         },
         {
           label: 'Delete entity',
           destructive: true,
+          disabled: handlers.canDeleteAtlasRows === false,
+          disabledReason: handlers.deleteDisabledReason || '',
           onSelect: () => handlers.onDeleteEntity?.(entity),
         },
       ]);

@@ -1115,8 +1115,23 @@ def cleanup_inactive_workspaces(
             continue
         if skip_name and child.name == skip_name:
             continue
-        if child.stat().st_mtime < cutoff:
-            shutil.rmtree(child)
+        try:
+            expired = child.stat().st_mtime < cutoff
+        except OSError as exc:
+            log.warning(
+                "WORKSPACE_CLEANUP_SKIP",
+                extra={"path": str(child), "reason": exc.__class__.__name__},
+            )
+            continue
+        if expired:
+            try:
+                shutil.rmtree(child)
+            except OSError as exc:
+                log.warning(
+                    "WORKSPACE_CLEANUP_SKIP",
+                    extra={"path": str(child), "reason": exc.__class__.__name__},
+                )
+                continue
             removed += 1
     app_metrics.record_workspace_evictions(removed, "inactive")
     return removed

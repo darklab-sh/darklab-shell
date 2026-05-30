@@ -294,6 +294,7 @@ function setupModalFocusTraps() {
     'workflow-editor-form',
     'schedules-modal',
     'watchers-modal',
+    'team-scope-modal',
   ];
   ids.forEach((id) => {
     const card = document.getElementById(id);

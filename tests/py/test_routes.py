@@ -351,6 +351,2104 @@ class TestSecretsRoutes:
                 patcher.stop()
 
 
+class TestTeamRoutes:
+    def _team_client(self, tmp_path):
+        db_path = str(tmp_path / "team-routes.db")
+        lock_path = str(tmp_path / "team-routes.lock")
+        patchers = [
+            mock.patch("core.database.DB_PATH", db_path),
+            mock.patch("core.database.DB_INIT_LOCK_PATH", lock_path),
+        ]
+        for patcher in patchers:
+            patcher.start()
+        db_init()
+        return get_client(), patchers
+
+    def _register_session_token(self, session_id):
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (session_id, datetime.now(timezone.utc).isoformat(), ""),
+            )
+            conn.commit()
+
+    def _create_team(self, client, session_id, name="Darklab Operators"):
+        self._register_session_token(session_id)
+        return client.post(
+            "/session/teams",
+            headers={"X-Session-ID": session_id},
+            json={"name": name, "display_name": "Owner"},
+        )
+
+    def test_team_create_list_and_detail(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            session_id = "tok_team_owner"
+            created = self._create_team(client, session_id)
+
+            assert created.status_code == 201
+            payload = created.get_json()
+            assert payload["team"]["name"] == "Darklab Operators"
+            assert payload["team"]["member"]["role"] == "owner"
+            assert "archive_team" in payload["team"]["member"]["capabilities"]
+            assert "manage_recovery" in payload["team"]["member"]["capabilities"]
+            assert payload["recovery_code"].startswith("trec_")
+            assert "created_by_session_token_hash" not in created.get_data(as_text=True)
+            assert "code_hash" not in created.get_data(as_text=True)
+
+            listed = client.get("/session/teams", headers={"X-Session-ID": session_id})
+            assert listed.status_code == 200
+            assert listed.get_json()["teams"][0]["id"] == payload["team"]["id"]
+
+            detail = client.get(f"/session/teams/{payload['team']['id']}", headers={"X-Session-ID": session_id})
+            assert detail.status_code == 200
+            detail_payload = detail.get_json()
+            assert detail_payload["members"][0]["role"] == "owner"
+            assert "manage_invites" in detail_payload["members"][0]["capabilities"]
+            assert detail_payload["recovery_codes"][0]["used_at"] == ""
+            assert "code_hash" not in detail.get_data(as_text=True)
+
+            with mock.patch.object(shell_app.log, "error") as mock_error, mock.patch(
+                "services.teams.storage.rotate_team_recovery_code",
+                side_effect=RuntimeError("recovery unavailable"),
+            ):
+                failed = self._create_team(client, session_id, name="Rollback Operators")
+            assert failed.status_code == 500
+            assert failed.get_json()["error"] == "team_route_failed"
+            assert mock_error.call_args.args[0] == "TEAM_ROUTE_FAILED"
+            assert mock_error.call_args.kwargs["exc_info"] is True
+            error_extra = mock_error.call_args.kwargs["extra"]
+            assert error_extra["action"] == "create"
+            assert error_extra["status"] == 500
+            assert error_extra["route"] == "/session/teams"
+            with db_connect() as conn:
+                team_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM teams WHERE slug = ?",
+                    ("rollback-operators",),
+                ).fetchone()["count"]
+                member_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM team_members WHERE team_id IN "
+                    "(SELECT id FROM teams WHERE slug = ?)",
+                    ("rollback-operators",),
+                ).fetchone()["count"]
+            assert team_count == 0
+            assert member_count == 0
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_browser_read_routes_have_dedicated_token_limit(self, monkeypatch, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            session_id = "tok_team_read_rate"
+            other_session_id = "tok_team_read_rate_other"
+            self._register_session_token(session_id)
+            self._register_session_token(other_session_id)
+            monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
+            monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
+            monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1)
+            monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 100)
+            monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1000)
+
+            first = client.get("/session/teams", headers={"X-Session-ID": session_id})
+            second = client.get("/session/teams", headers={"X-Session-ID": session_id})
+            other = client.get("/session/teams", headers={"X-Session-ID": other_session_id})
+
+            assert first.status_code == 200
+            assert second.status_code == 429
+            assert second.get_json()["error"] == "Rate limit exceeded. Please slow down."
+            assert other.status_code == 200
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_uses_explicit_team_secrets_for_providers_and_commands(self, monkeypatch, tmp_path):
+        from blueprints import run as run_routes
+        from blueprints import secrets as secrets_routes
+        from services.commands import builtins_secrets
+        from services.secrets.storage import get_secret_value_for_env
+
+        key = base64.b64encode(b"s" * 32).decode("ascii")
+        monkeypatch.setenv("SECRETS_MASTER_KEY", key)
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path / "team-secrets"))
+        secrets_vault.reset_master_key_cache_for_tests()
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_secrets_owner"
+            operator_token = "tok_team_secrets_operator"
+            self._register_session_token(operator_token)
+            created = self._create_team(client, owner_token, name="Secret Operators")
+            team_id = created.get_json()["team"]["id"]
+            owner_member_id = created.get_json()["team"]["member"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Secret operator"},
+            )
+            assert invite.status_code == 201
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Secret operator"},
+            )
+            assert joined.status_code == 201
+            operator_member_id = next(
+                member["id"] for member in joined.get_json()["members"] if member["role"] == "operator"
+            )
+
+            route_secret_events = []
+            builtin_secret_events = []
+            with mock.patch.object(
+                secrets_routes,
+                "emit_secret_event",
+                side_effect=lambda event, session_id, **extra: route_secret_events.append((event, session_id, extra)),
+            ), mock.patch.object(
+                builtins_secrets,
+                "emit_secret_event",
+                side_effect=lambda event, session_id, **extra: builtin_secret_events.append((event, session_id, extra)),
+            ):
+                personal_secret = client.post(
+                    "/session/secrets",
+                    headers={"X-Session-ID": owner_token},
+                    json={"name": "SHODAN_API_KEY", "value": "personal-shodan"},
+                )
+                team_secret = client.post(
+                    "/session/secrets",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    json={"name": "SHODAN_API_KEY", "value": "team-shodan"},
+                )
+                operator_denied = client.post(
+                    "/session/secrets",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    json={"name": "VT_API_KEY", "value": "operator-secret"},
+                )
+                team_list = client.get(
+                    "/session/secrets",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+                personal_list = client.get("/session/secrets", headers={"X-Session-ID": operator_token})
+
+                assert personal_secret.status_code == 201
+                assert team_secret.status_code == 201
+                assert team_secret.get_json()["scope"] == "team"
+                assert operator_denied.status_code == 403
+                assert operator_denied.get_json()["error"] == "team_forbidden"
+                assert team_list.status_code == 200
+                team_payload = team_list.get_json()
+                assert team_payload["scope"] == "team"
+                assert team_payload["can_manage"] is False
+                assert [secret["name"] for secret in team_payload["secrets"]] == ["SHODAN_API_KEY"]
+                assert "team-shodan" not in team_list.get_data(as_text=True)
+                assert personal_list.status_code == 200
+                assert personal_list.get_json()["secrets"] == []
+                assert get_secret_value_for_env(team_id, "SHODAN_API_KEY") == "team-shodan"
+                assert get_secret_value_for_env(operator_token, "SHODAN_API_KEY") is None
+
+                provider_lines, provider_exit_code = execute_builtin_command(
+                    "providers",
+                    operator_token,
+                    team_id=team_id,
+                    team_role="operator",
+                )
+                provider_text = _builtin_lines_text(provider_lines)
+                env_overrides, secret_env_names = run_routes._resolve_secret_environment(
+                    "shodan host 8.8.8.8",
+                    owner_token,
+                    team_id=team_id,
+                )
+
+                assert provider_exit_code == 0
+                assert "Shodan" in provider_text
+                assert "configured" in provider_text
+                assert env_overrides == {"SHODAN_API_KEY": "team-shodan"}
+                assert secret_env_names == ["SHODAN_API_KEY"]
+
+                unset_lines, _ = execute_builtin_command(
+                    "secret unset SHODAN_API_KEY",
+                    owner_token,
+                    team_id=team_id,
+                    team_role="owner",
+                )
+                noop_lines, _ = execute_builtin_command(
+                    "secret unset SHODAN_API_KEY",
+                    owner_token,
+                    team_id=team_id,
+                    team_role="owner",
+                )
+                assert "SHODAN_API_KEY removed." in _builtin_lines_text(unset_lines)
+                assert "SHODAN_API_KEY was not set." in _builtin_lines_text(noop_lines)
+
+            team_created_event = next(
+                event for event in route_secret_events
+                if event[0] == "SECRET_CREATED" and event[2].get("team_id") == team_id
+            )
+            denied_event = next(event for event in route_secret_events if event[0] == "SECRET_ACTION_REJECTED")
+            assert team_created_event[2]["actor_member_id"] == owner_member_id
+            assert team_created_event[2]["actor_role"] == "owner"
+            assert team_created_event[2]["surface"] == "browser"
+            assert denied_event[1] == operator_token
+            assert denied_event[2]["actor_member_id"] == operator_member_id
+            assert denied_event[2]["actor_role"] == "operator"
+            assert denied_event[2]["surface"] == "browser"
+            assert denied_event[2]["reason"] == "team_forbidden"
+            assert denied_event[2]["level"] == logging.WARNING
+
+            assert [event[0] for event in builtin_secret_events] == ["SECRET_DELETED", "SECRET_DELETE_NOOP"]
+            assert builtin_secret_events[0][1] == owner_token
+            assert builtin_secret_events[0][2]["name"] == "SHODAN_API_KEY"
+            assert builtin_secret_events[0][2]["team_id"] == team_id
+            assert builtin_secret_events[0][2]["actor_role"] == "owner"
+            assert builtin_secret_events[0][2]["surface"] == "terminal_builtin"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_invite_join_role_update_and_revoke(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_invite_owner"
+            operator_token = "tok_team_invite_operator"
+            late_operator_token = "tok_team_invite_late_operator"
+            self._register_session_token(operator_token)
+            self._register_session_token(late_operator_token)
+            created = self._create_team(client, owner_token)
+            team_id = created.get_json()["team"]["id"]
+
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Operator invite"},
+            )
+            assert invite.status_code == 201
+            invite_payload = invite.get_json()["invite"]
+            assert invite_payload["code"].startswith("tinv_")
+            assert "code_hash" not in invite.get_data(as_text=True)
+
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite_payload["code"], "display_name": "Operator"},
+            )
+            assert joined.status_code == 201
+            members = joined.get_json()["members"]
+            operator_member = next(item for item in members if item["display_name"] == "Operator")
+            assert operator_member["role"] == "operator"
+
+            late_join = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": late_operator_token},
+                json={"code": invite_payload["code"], "display_name": "Late operator"},
+            )
+            assert late_join.status_code == 400
+            assert late_join.get_json()["message"] == "Invite code has already been used"
+
+            with mock.patch.object(shell_app.log, "warning") as mock_warn:
+                denied = client.post(
+                    f"/session/teams/{team_id}/invites",
+                    headers={"X-Session-ID": operator_token},
+                    json={"role": "viewer"},
+                )
+            assert denied.status_code == 403
+            assert denied.get_json()["error"] == "team_forbidden"
+            rejected_extra = mock_warn.call_args.kwargs["extra"]
+            assert mock_warn.call_args.args[0] == "TEAM_ACTION_REJECTED"
+            assert rejected_extra["action"] == "invite_create"
+            assert rejected_extra["reason"] == "team_forbidden"
+            assert rejected_extra["actor_role"] == "operator"
+
+            promoted = client.patch(
+                f"/session/teams/{team_id}/members/{operator_member['id']}",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "admin"},
+            )
+            assert promoted.status_code == 200
+            assert promoted.get_json()["member"]["role"] == "admin"
+
+            admin_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": operator_token},
+                json={"role": "viewer"},
+            )
+            assert admin_invite.status_code == 201
+
+            revoked = client.delete(
+                f"/session/teams/{team_id}/invites/{invite_payload['id']}",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert revoked.status_code == 200
+            assert revoked.get_json()["removed"] is True
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_owner_guard_and_recovery_redeem(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_recovery_owner"
+            recovery_token = "tok_team_recovery_second"
+            late_recovery_token = "tok_team_recovery_late"
+            self._register_session_token(recovery_token)
+            self._register_session_token(late_recovery_token)
+            created = self._create_team(client, owner_token)
+            payload = created.get_json()
+            team_id = payload["team"]["id"]
+            owner_member_id = payload["team"]["member"]["id"]
+            recovery_code = payload["recovery_code"]
+
+            blocked_leave = client.post(
+                f"/session/teams/{team_id}/leave",
+                headers={"X-Session-ID": owner_token},
+                json={},
+            )
+            assert blocked_leave.status_code == 409
+            assert blocked_leave.get_json()["error"] == "team_owner_required"
+
+            blocked_self_demote = client.patch(
+                f"/session/teams/{team_id}/members/{owner_member_id}",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator"},
+            )
+            assert blocked_self_demote.status_code == 409
+            assert blocked_self_demote.get_json()["error"] == "team_owner_required"
+
+            redeemed = client.post(
+                "/session/teams/recovery/redeem",
+                headers={"X-Session-ID": recovery_token},
+                json={"code": recovery_code, "display_name": "Second owner"},
+            )
+            assert redeemed.status_code == 200
+            second_owner = next(item for item in redeemed.get_json()["members"] if item["display_name"] == "Second owner")
+            assert second_owner["role"] == "owner"
+
+            late_redeem = client.post(
+                "/session/teams/recovery/redeem",
+                headers={"X-Session-ID": late_recovery_token},
+                json={"code": recovery_code, "display_name": "Late owner"},
+            )
+            assert late_redeem.status_code == 400
+            assert late_redeem.get_json()["message"] == "Recovery code is not active"
+
+            allowed_self_demote = client.patch(
+                f"/session/teams/{team_id}/members/{owner_member_id}",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator"},
+            )
+            assert allowed_self_demote.status_code == 200
+            assert allowed_self_demote.get_json()["member"]["role"] == "operator"
+
+            leave = client.post(
+                f"/session/teams/{team_id}/leave",
+                headers={"X-Session-ID": owner_token},
+                json={},
+            )
+            assert leave.status_code == 200
+            assert leave.get_json()["removed"] is True
+
+            blocked_second_leave = client.post(
+                f"/session/teams/{team_id}/leave",
+                headers={"X-Session-ID": recovery_token},
+                json={},
+            )
+            assert blocked_second_leave.status_code == 409
+            assert blocked_second_leave.get_json()["error"] == "team_owner_required"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_archived_team_rejects_invite_and_recovery_redeem(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_archived_owner"
+            invited_token = "tok_team_archived_invited"
+            recovery_token = "tok_team_archived_recovery"
+            self._register_session_token(invited_token)
+            self._register_session_token(recovery_token)
+            created = self._create_team(client, owner_token, name="Archived Operators")
+            payload = created.get_json()
+            team_id = payload["team"]["id"]
+            recovery_code = payload["recovery_code"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Archived invite"},
+            )
+            invite_code = invite.get_json()["invite"]["code"]
+            archived = client.patch(
+                f"/session/teams/{team_id}",
+                headers={"X-Session-ID": owner_token},
+                json={"status": "archived"},
+            )
+
+            invited_join = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": invited_token},
+                json={"code": invite_code, "display_name": "Late operator"},
+            )
+            recovery_join = client.post(
+                "/session/teams/recovery/redeem",
+                headers={"X-Session-ID": recovery_token},
+                json={"code": recovery_code, "display_name": "Late owner"},
+            )
+            scoped_run = client.post(
+                "/runs",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"command": "echo archived"},
+            )
+            blocked_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Blocked archived invite"},
+            )
+            blocked_recovery_rotate = client.post(
+                f"/session/teams/{team_id}/recovery/rotate",
+                headers={"X-Session-ID": owner_token},
+            )
+
+            assert created.status_code == 201
+            assert invite.status_code == 201
+            assert archived.status_code == 200
+            assert scoped_run.status_code == 409
+            assert scoped_run.get_json()["error"] == "team_archived"
+            assert "archived" in scoped_run.get_json()["message"]
+            assert blocked_invite.status_code == 409
+            assert blocked_invite.get_json()["error"] == "team_archived"
+            assert "archived" in blocked_invite.get_json()["message"]
+            assert blocked_recovery_rotate.status_code == 409
+            assert blocked_recovery_rotate.get_json()["error"] == "team_archived"
+            assert "archived" in blocked_recovery_rotate.get_json()["message"]
+            assert invited_join.status_code == 409
+            assert invited_join.get_json()["error"] == "team_archived"
+            assert "archived" in invited_join.get_json()["message"]
+            assert recovery_join.status_code == 409
+            assert recovery_join.get_json()["error"] == "team_archived"
+            assert "archived" in recovery_join.get_json()["message"]
+            from services.teams.storage import token_hash
+            with db_connect() as conn:
+                invited_member = conn.execute(
+                    "SELECT 1 FROM team_members WHERE team_id = ? AND session_token_hash = ?",
+                    (team_id, token_hash(invited_token)),
+                ).fetchone()
+                recovery_member = conn.execute(
+                    "SELECT 1 FROM team_members WHERE team_id = ? AND session_token_hash = ?",
+                    (team_id, token_hash(recovery_token)),
+                ).fetchone()
+                invite_row = conn.execute(
+                    "SELECT use_count FROM team_invites WHERE team_id = ?",
+                    (team_id,),
+                ).fetchone()
+                recovery_row = conn.execute(
+                    "SELECT used_at FROM team_recovery_codes WHERE team_id = ?",
+                    (team_id,),
+                ).fetchone()
+            assert invited_member is None
+            assert recovery_member is None
+            assert invite_row["use_count"] == 0
+            assert recovery_row["used_at"] == ""
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_isolates_history_runs_and_recent_values(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_scope_owner"
+            outsider_token = "tok_team_scope_outsider"
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="Scope Operators")
+            team_id = created.get_json()["team"]["id"]
+            personal_run_id = "run-team-scope-personal"
+            team_run_id = "run-team-scope-team"
+
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, '', 'external', 'echo personal', ?, ?, 0, ?, 1, 'personal output')",
+                    (
+                        personal_run_id,
+                        owner_token,
+                        "2026-05-28T10:00:00+00:00",
+                        "2026-05-28T10:00:01+00:00",
+                        json.dumps([{"text": "personal output", "cls": "", "tsC": "", "tsE": ""}]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'echo team', ?, ?, 0, ?, 1, 'team output')",
+                    (
+                        team_run_id,
+                        owner_token,
+                        team_id,
+                        "2026-05-28T10:01:00+00:00",
+                        "2026-05-28T10:01:01+00:00",
+                        json.dumps([{"text": "team output", "cls": "", "tsC": "", "tsE": ""}]),
+                    ),
+                )
+                conn.commit()
+
+            personal_history = client.get("/history?type=runs", headers={"X-Session-ID": owner_token})
+            team_history = client.get(
+                "/history?type=runs",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+            outsider_history = client.get(
+                "/history?type=runs",
+                headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+            )
+            personal_permalink = client.get(
+                f"/history/{team_run_id}?json",
+                headers={"X-Session-ID": owner_token},
+            )
+            team_detail = client.get(
+                f"/history/{team_run_id}?json",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+
+            assert personal_history.status_code == 200
+            personal_ids = {item["id"] for item in json.loads(personal_history.data)["runs"]}
+            assert personal_run_id in personal_ids
+            assert team_run_id not in personal_ids
+            assert team_history.status_code == 200
+            team_ids = {item["id"] for item in json.loads(team_history.data)["runs"]}
+            assert team_run_id in team_ids
+            assert personal_run_id not in team_ids
+            assert outsider_history.status_code == 403
+            assert outsider_history.get_json()["error"] == "team_forbidden"
+            assert personal_permalink.status_code == 200
+            assert personal_permalink.get_json()["id"] == team_run_id
+            assert personal_permalink.get_json()["label_count"] == 0
+            assert team_detail.status_code == 200
+            assert team_detail.get_json()["id"] == team_run_id
+
+            personal_recent = client.post(
+                "/session/recent-values",
+                headers={"X-Session-ID": owner_token},
+                json={"values": [{"kind": "domain", "value": "personal.example"}]},
+            )
+            team_recent = client.post(
+                "/session/recent-values",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"values": [{"kind": "domain", "value": "team.example"}]},
+            )
+            assert personal_recent.status_code == 200
+            assert team_recent.status_code == 200
+            assert client.get(
+                "/session/recent-values?kind=domain",
+                headers={"X-Session-ID": owner_token},
+            ).get_json()["values"]["domain"] == ["personal.example"]
+            assert client.get(
+                "/session/recent-values?kind=domain",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            ).get_json()["values"]["domain"] == ["team.example"]
+
+            saved = client.post(
+                "/run/client",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={
+                    "command": "theme list",
+                    "exit_code": 0,
+                    "lines": [{"text": "Theme output", "cls": ""}],
+                },
+            )
+            saved_id = saved.get_json()["run_id"]
+            with db_connect() as conn:
+                saved_row = conn.execute(
+                    "SELECT team_id FROM runs WHERE id = ?",
+                    (saved_id,),
+                ).fetchone()
+            assert saved.status_code == 200
+            assert saved_row["team_id"] == team_id
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_history_bulk_delete_and_clear_respect_active_team_scope(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_clear_owner"
+            viewer_token = "tok_team_clear_viewer"
+            self._register_session_token(viewer_token)
+            created = self._create_team(client, owner_token, name="History Clear Operators")
+            team_id = created.get_json()["team"]["id"]
+            viewer_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "History viewer"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
+            ).status_code == 201
+            personal_bulk_id = "run-team-history-personal-bulk"
+            personal_clear_id = "run-team-history-personal-clear"
+            team_bulk_id = "run-team-history-team-bulk"
+            team_clear_id = "run-team-history-team-clear"
+            now = "2026-05-29T10:00:00+00:00"
+            with db_connect() as conn:
+                rows = [
+                    (personal_bulk_id, owner_token, "", "echo personal bulk"),
+                    (personal_clear_id, owner_token, "", "echo personal clear"),
+                    (team_bulk_id, owner_token, team_id, "echo team bulk"),
+                    (team_clear_id, owner_token, team_id, "echo team clear"),
+                ]
+                for run_id, session_id, run_team_id, command in rows:
+                    conn.execute(
+                        "INSERT INTO runs "
+                        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                        "output_preview, output_line_count) "
+                        "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, ?, 1)",
+                        (
+                            run_id,
+                            session_id,
+                            run_team_id,
+                            command,
+                            now,
+                            now,
+                            json.dumps([{"text": command, "cls": "", "tsC": "", "tsE": ""}]),
+                        ),
+                    )
+                conn.commit()
+
+            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            viewer_single = client.delete(f"/history/{team_bulk_id}", headers=viewer_headers)
+            viewer_bulk = client.post(
+                "/history/bulk-delete",
+                headers=viewer_headers,
+                json={"run_ids": [team_bulk_id]},
+            )
+            viewer_snapshot = client.post(
+                "/share",
+                headers=viewer_headers,
+                json={
+                    "label": "viewer snapshot",
+                    "content": [{"text": "blocked", "cls": ""}],
+                    "apply_redaction": True,
+                },
+            )
+            viewer_clear = client.delete("/history", headers=viewer_headers)
+            personal_bulk = client.post(
+                "/history/bulk-delete",
+                headers={"X-Session-ID": owner_token},
+                json={"run_ids": [personal_bulk_id, team_bulk_id]},
+            )
+            personal_clear = client.delete("/history", headers={"X-Session-ID": owner_token})
+            team_bulk = client.post(
+                "/history/bulk-delete",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"run_ids": [team_bulk_id, personal_clear_id]},
+            )
+            team_clear = client.delete(
+                "/history",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+
+            assert viewer_single.status_code == 403
+            assert viewer_single.get_json()["error"] == "team_forbidden"
+            assert viewer_bulk.status_code == 403
+            assert viewer_bulk.get_json()["error"] == "team_forbidden"
+            assert viewer_snapshot.status_code == 403
+            assert viewer_snapshot.get_json()["error"] == "team_forbidden"
+            assert viewer_clear.status_code == 403
+            assert viewer_clear.get_json()["error"] == "team_forbidden"
+            assert personal_bulk.status_code == 200
+            assert personal_bulk.get_json()["counts"] == {"deleted": 1, "not_found": 1, "rejected": 0}
+            assert personal_bulk.get_json()["results"] == [
+                {"run_id": personal_bulk_id, "status": "deleted"},
+                {"run_id": team_bulk_id, "status": "not_found"},
+            ]
+            assert personal_clear.status_code == 200
+            assert personal_clear.get_json()["ok"] is True
+            assert team_bulk.status_code == 200
+            assert team_bulk.get_json()["counts"] == {"deleted": 1, "not_found": 1, "rejected": 0}
+            assert team_bulk.get_json()["results"] == [
+                {"run_id": team_bulk_id, "status": "deleted"},
+                {"run_id": personal_clear_id, "status": "not_found"},
+            ]
+            assert team_clear.status_code == 200
+            assert team_clear.get_json()["ok"] is True
+            with db_connect() as conn:
+                remaining = {
+                    row["id"]
+                    for row in conn.execute(
+                        "SELECT id FROM runs WHERE id IN (?, ?, ?, ?)",
+                        (personal_bulk_id, personal_clear_id, team_bulk_id, team_clear_id),
+                    ).fetchall()
+                }
+                snapshot = conn.execute(
+                    "SELECT id FROM snapshots WHERE label = ?",
+                    ("viewer snapshot",),
+                ).fetchone()
+            assert remaining == set()
+            assert snapshot is None
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_viewers_cannot_run_commands_or_mutate_projects_and_findings(self, monkeypatch, tmp_path):
+        from blueprints import run as run_routes
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_caps_owner"
+            operator_token = "tok_team_caps_operator"
+            viewer_token = "tok_team_caps_viewer"
+            self._register_session_token(operator_token)
+            self._register_session_token(viewer_token)
+            created = self._create_team(client, owner_token, name="Capability Operators")
+            team_id = created.get_json()["team"]["id"]
+            operator_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Capability operator"},
+            )
+            viewer_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "Capability viewer"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Operator"},
+            ).status_code == 201
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
+            ).status_code == 201
+
+            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+
+            project_created = client.post("/projects", headers=owner_headers, json={"name": "Capability Review"})
+            project_id = project_created.get_json()["project"]["id"]
+            run_id = "run-team-capability"
+            entity_id = "ent_team_capability"
+            finding_id = "fnd_team_capability"
+            seen_at = "2026-05-28T15:00:00+00:00"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'httpx capability.example', ?, ?, 0, '[]', 0, '')",
+                    (run_id, owner_token, team_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "VALUES (?, ?, 'domain', 'capability.example', ?, ?, ?, ?)",
+                    (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                    (
+                        finding_id,
+                        owner_token,
+                        run_id,
+                        entity_id,
+                        entity_id,
+                        "sig_" + finding_id,
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        "capability finding",
+                        "capability finding",
+                        seen_at,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                    "VALUES (?, ?, 1, 'capability finding', ?)",
+                    (finding_id, run_id, seen_at),
+                )
+                conn.commit()
+
+            monkeypatch.setattr(run_routes, "broker_available", lambda: True)
+            monkeypatch.setattr(
+                run_routes,
+                "_start_brokered_run_service",
+                mock.Mock(side_effect=AssertionError("viewer should be blocked before run start")),
+            )
+            viewer_brokered_run = client.post("/runs", headers=viewer_headers, json={"command": "echo blocked"})
+            viewer_client_run = client.post(
+                "/run/client",
+                headers=viewer_headers,
+                json={"command": "theme list", "exit_code": 0, "lines": []},
+            )
+            operator_client_run = client.post(
+                "/run/client",
+                headers=operator_headers,
+                json={"command": "theme list", "exit_code": 0, "lines": []},
+            )
+
+            viewer_project_create = client.post("/projects", headers=viewer_headers, json={"name": "Blocked"})
+            viewer_project_update = client.put(
+                f"/projects/{project_id}",
+                headers=viewer_headers,
+                json={"name": "Blocked edit"},
+            )
+            operator_target_create = client.post(
+                f"/projects/{project_id}/targets",
+                headers=operator_headers,
+                json={"type": "domain", "value": "capability.example"},
+            )
+            viewer_target_create = client.post(
+                f"/projects/{project_id}/targets",
+                headers=viewer_headers,
+                json={"type": "domain", "value": "blocked.example"},
+            )
+            operator_label_create = client.post(
+                f"/entities/atlas_entity/{entity_id}/labels",
+                headers=operator_headers,
+                json={"label": "reviewed-by-operator"},
+            )
+            viewer_label_create = client.post(
+                f"/entities/atlas_entity/{entity_id}/labels",
+                headers=viewer_headers,
+                json={"label": "blocked"},
+            )
+            viewer_finding_review = client.put(
+                f"/findings/{finding_id}/review",
+                headers=viewer_headers,
+                json={"review_state": "reviewed"},
+            )
+            viewer_atlas_review = client.post(
+                "/atlas/findings/review",
+                headers=viewer_headers,
+                json={"finding_ids": [finding_id], "review_state": "reviewed"},
+            )
+            viewer_intel_refresh = client.post(
+                f"/atlas/entities/{entity_id}/refresh_intel",
+                headers=viewer_headers,
+                json={},
+            )
+
+            assert project_created.status_code == 201
+            assert viewer_brokered_run.status_code == 403
+            assert viewer_client_run.status_code == 403
+            assert operator_client_run.status_code == 200
+            assert viewer_project_create.status_code == 403
+            assert viewer_project_update.status_code == 403
+            assert operator_target_create.status_code == 201
+            assert viewer_target_create.status_code == 403
+            assert operator_label_create.status_code == 201
+            assert viewer_label_create.status_code == 403
+            assert viewer_finding_review.status_code == 403
+            assert viewer_atlas_review.status_code == 403
+            assert viewer_intel_refresh.status_code == 403
+            assert viewer_brokered_run.get_json()["error"] == "team_forbidden"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_user_workflows_with_role_gated_writes(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_workflows_owner"
+            admin_token = "tok_team_workflows_admin"
+            operator_token = "tok_team_workflows_operator"
+            outsider_token = "tok_team_workflows_outsider"
+            self._register_session_token(admin_token)
+            self._register_session_token(operator_token)
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="Workflow Operators")
+            team_id = created.get_json()["team"]["id"]
+            admin_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "admin", "label": "Workflow admin"},
+            )
+            operator_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Workflow operator"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": admin_token},
+                json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Workflow admin"},
+            ).status_code == 201
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Workflow operator"},
+            ).status_code == 201
+
+            payload = {
+                "title": "Team DNS",
+                "description": "shared workflow",
+                "inputs": [
+                    {
+                        "id": "domain",
+                        "label": "Domain",
+                        "type": "domain",
+                        "required": True,
+                        "placeholder": "example.com",
+                    },
+                ],
+                "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
+            }
+            team_headers = {"X-Session-ID": admin_token, "X-Team-ID": team_id}
+            created_workflow = client.post("/session/workflows", json=payload, headers=team_headers)
+            workflow = created_workflow.get_json()["workflow"]
+
+            operator_list = client.get(
+                "/session/workflows",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            catalog = client.get(
+                "/workflows",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            personal_list = client.get("/session/workflows", headers={"X-Session-ID": operator_token})
+            outsider_list = client.get(
+                "/session/workflows",
+                headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+            )
+            operator_update = client.put(
+                f"/session/workflows/{workflow['id']}",
+                json={**payload, "title": "Operator edit"},
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            admin_update = client.put(
+                f"/session/workflows/{workflow['id']}",
+                json={**payload, "title": "Updated team DNS"},
+                headers=team_headers,
+            )
+            admin_delete = client.delete(f"/session/workflows/{workflow['id']}", headers=team_headers)
+
+            assert created_workflow.status_code == 201
+            assert workflow["team_id"] == team_id
+            assert operator_list.status_code == 200
+            assert [item["id"] for item in operator_list.get_json()["items"]] == [workflow["id"]]
+            assert catalog.status_code == 200
+            assert catalog.get_json()["items"][0]["id"] == workflow["id"]
+            assert personal_list.status_code == 200
+            assert personal_list.get_json()["items"] == []
+            assert outsider_list.status_code == 403
+            assert operator_update.status_code == 403
+            assert operator_update.get_json()["error"] == "team_forbidden"
+            assert admin_update.status_code == 200
+            assert admin_update.get_json()["workflow"]["title"] == "Updated team DNS"
+            assert admin_delete.status_code == 200
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_projects_and_team_run_links(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_project_owner"
+            operator_token = "tok_team_project_operator"
+            outsider_token = "tok_team_project_outsider"
+            self._register_session_token(operator_token)
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="Project Operators")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Project operator"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Project operator"},
+            )
+            assert joined.status_code == 201
+
+            project_created = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Shared recon"},
+            )
+            assert project_created.status_code == 201
+            project_id = project_created.get_json()["project"]["id"]
+            assert project_created.get_json()["project"]["team_id"] == team_id
+            operator_personal_project = client.post(
+                "/projects",
+                headers={"X-Session-ID": operator_token},
+                json={"name": "Personal recon"},
+            )
+            assert operator_personal_project.status_code == 201
+            operator_personal_project_id = operator_personal_project.get_json()["project"]["id"]
+
+            personal_list = client.get("/projects", headers={"X-Session-ID": owner_token})
+            operator_list = client.get(
+                "/projects",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            active_set = client.post(
+                "/projects/active",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"project_id": project_id},
+            )
+            active_personal = client.get("/projects/active", headers={"X-Session-ID": operator_token})
+            active_team = client.get(
+                "/projects/active",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            outsider_list = client.get(
+                "/projects",
+                headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+            )
+            assert personal_list.status_code == 200
+            assert project_id not in {item["id"] for item in personal_list.get_json()["projects"]}
+            assert operator_list.status_code == 200
+            assert project_id in {item["id"] for item in operator_list.get_json()["projects"]}
+            assert active_set.status_code == 200
+            assert active_personal.status_code == 200
+            assert active_personal.get_json()["project"] is None
+            assert active_team.status_code == 200
+            assert active_team.get_json()["project"]["id"] == project_id
+            assert outsider_list.status_code == 403
+            assert outsider_list.get_json()["error"] == "team_forbidden"
+
+            personal_run_id = "run-team-project-personal"
+            team_run_id = "run-team-project-shared"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, '', 'external', 'nmap personal.example', ?, ?, 0, ?, 1, 'personal output')",
+                    (
+                        personal_run_id,
+                        owner_token,
+                        "2026-05-28T11:00:00+00:00",
+                        "2026-05-28T11:00:01+00:00",
+                        json.dumps([{"text": "personal output", "cls": "", "tsC": "", "tsE": ""}]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'nmap team.example', ?, ?, 0, ?, 1, 'team output')",
+                    (
+                        team_run_id,
+                        owner_token,
+                        team_id,
+                        "2026-05-28T11:01:00+00:00",
+                        "2026-05-28T11:01:01+00:00",
+                        json.dumps([{"text": "team output", "cls": "", "tsC": "", "tsE": ""}]),
+                    ),
+                )
+                conn.commit()
+
+            personal_link_denied = client.post(
+                f"/projects/{project_id}/links",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"entity_type": "run", "entity_id": personal_run_id},
+            )
+            team_linked = client.post(
+                f"/projects/{project_id}/links",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"entity_type": "run", "entity_id": team_run_id},
+            )
+            team_runs = client.get(
+                f"/projects/{project_id}/runs",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            team_projects_with_counts = client.get(
+                "/projects?include_counts=1",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            personal_project_detail = client.get(
+                f"/projects/{project_id}",
+                headers={"X-Session-ID": owner_token},
+            )
+
+            assert personal_link_denied.status_code == 404
+            assert personal_link_denied.get_json()["error"] == "run not found for this session"
+            assert team_linked.status_code == 201
+            assert team_linked.get_json()["link"]["entity_id"] == team_run_id
+            assert team_runs.status_code == 200
+            assert [item["id"] for item in team_runs.get_json()["runs"]] == [team_run_id]
+            assert team_projects_with_counts.status_code == 200
+            counted_project = next(
+                item for item in team_projects_with_counts.get_json()["projects"] if item["id"] == project_id
+            )
+            assert counted_project["counts"]["runs"] == 1
+            assert personal_project_detail.status_code == 404
+
+            from blueprints import run as run_routes
+            from services.runs.output_model import line_event_from_legacy
+
+            def save_finalized_team_run(run_id, *, link_project_id="", link_active_project=True):
+                capture = run_routes._run_output_capture(run_id)
+                capture.add_event(line_event_from_legacy("team finalizer output"))
+                run_routes._save_completed_run(
+                    run_id,
+                    operator_token,
+                    team_id,
+                    "nmap finalized.example",
+                    "2026-05-28T11:02:00+00:00",
+                    "2026-05-28T11:02:01+00:00",
+                    0,
+                    capture,
+                    link_project_id=link_project_id,
+                    link_active_project=link_active_project,
+                )
+
+            explicit_team_run_id = "run-team-project-finalized-explicit"
+            explicit_personal_run_id = "run-team-project-finalized-personal"
+            active_team_run_id = "run-team-project-finalized-active"
+            save_finalized_team_run(
+                explicit_team_run_id,
+                link_project_id=project_id,
+                link_active_project=False,
+            )
+            save_finalized_team_run(
+                explicit_personal_run_id,
+                link_project_id=operator_personal_project_id,
+                link_active_project=False,
+            )
+            save_finalized_team_run(active_team_run_id)
+            with db_connect() as conn:
+                explicit_team_link = conn.execute(
+                    "SELECT project_id, source FROM project_links WHERE entity_type = 'run' AND entity_id = ?",
+                    (explicit_team_run_id,),
+                ).fetchone()
+                explicit_personal_link = conn.execute(
+                    "SELECT project_id, source FROM project_links WHERE entity_type = 'run' AND entity_id = ?",
+                    (explicit_personal_run_id,),
+                ).fetchone()
+                active_team_link = conn.execute(
+                    "SELECT project_id, source FROM project_links WHERE entity_type = 'run' AND entity_id = ?",
+                    (active_team_run_id,),
+                ).fetchone()
+
+            assert dict(explicit_team_link) == {"project_id": project_id, "source": "manual"}
+            assert explicit_personal_link is None
+            assert dict(active_team_link) == {"project_id": project_id, "source": "active_project"}
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_project_slugs_are_unique_inside_personal_and_team_scopes(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_project_slug_owner"
+            team_id = self._create_team(client, owner_token, name="Slug Operators").get_json()["team"]["id"]
+
+            personal_first = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token},
+                json={"name": "Case"},
+            )
+            personal_second = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token},
+                json={"name": "Case"},
+            )
+            team_first = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Case"},
+            )
+            team_second = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Case"},
+            )
+
+            assert personal_first.status_code == 201
+            assert personal_second.status_code == 201
+            assert team_first.status_code == 201
+            assert team_second.status_code == 201
+            assert personal_first.get_json()["project"]["slug"] == "case"
+            assert personal_second.get_json()["project"]["slug"] == "case-2"
+            assert team_first.get_json()["project"]["slug"] == "case"
+            assert team_second.get_json()["project"]["slug"] == "case-2"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_cross_member_project_entities_and_findings(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_project_cross_owner"
+            operator_token = "tok_team_project_cross_operator"
+            self._register_session_token(operator_token)
+            created = self._create_team(client, owner_token, name="Cross Member Operators")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Cross member operator"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Cross member operator"},
+            )
+            assert joined.status_code == 201
+
+            project_created = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Cross member project"},
+            )
+            assert project_created.status_code == 201
+            project_id = project_created.get_json()["project"]["id"]
+            run_id = "run-team-project-cross"
+            entity_id = "ent_team_project_cross"
+            finding_id = "fnd_team_project_cross"
+            seen_at = "2026-05-28T14:00:00+00:00"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'httpx cross-member.example', ?, ?, 0, '[]', 0, '')",
+                    (run_id, owner_token, team_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "VALUES (?, ?, 'domain', 'cross-member.example', ?, ?, ?, ?)",
+                    (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, "
+                    "raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                    (
+                        finding_id,
+                        owner_token,
+                        run_id,
+                        entity_id,
+                        entity_id,
+                        "sig_" + finding_id,
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        "cross-member finding",
+                        "cross-member finding",
+                        seen_at,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                    "VALUES (?, ?, 1, 'cross-member finding', ?)",
+                    (finding_id, run_id, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', ?)",
+                    ("pln_team_cross_run", project_id, run_id, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'atlas_entity', ?, 'manual', ?)",
+                    ("pln_team_cross_entity", project_id, entity_id, seen_at),
+                )
+                conn.commit()
+
+            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            label_created = client.post(
+                f"/entities/atlas_entity/{entity_id}/labels",
+                headers=operator_headers,
+                json={"label": "cross-member"},
+            )
+            note_saved = client.put(
+                f"/entities/finding/{finding_id}/note",
+                headers=operator_headers,
+                json={"body": "visible to the team"},
+            )
+            projects = client.get("/projects?include_counts=1", headers=operator_headers)
+            summary = client.get(f"/projects/{project_id}/summary", headers=operator_headers)
+            entities = client.get(f"/projects/{project_id}/entities?type=domain", headers=operator_headers)
+            findings = client.get(f"/projects/{project_id}/findings", headers=operator_headers)
+            personal_summary = client.get(
+                f"/projects/{project_id}/summary",
+                headers={"X-Session-ID": operator_token},
+            )
+
+            assert label_created.status_code == 201
+            assert note_saved.status_code == 200
+            assert projects.status_code == 200
+            counted_project = next(item for item in projects.get_json()["projects"] if item["id"] == project_id)
+            assert counted_project["counts"]["runs"] == 1
+            assert counted_project["counts"]["entities"] == 1
+            assert counted_project["counts"]["targets"] == 1
+            assert counted_project["counts"]["findings"] == 1
+            assert counted_project["finding_summary"]["review_states"] == {"new": 1}
+            assert counted_project["finding_summary"]["severities"] == {"high": 1}
+            assert summary.status_code == 200
+            summary_payload = summary.get_json()
+            assert summary_payload["counts"]["entities"] == 1
+            assert summary_payload["counts"]["findings"] == 1
+            assert summary_payload["counts"]["labels"] == 1
+            assert summary_payload["counts"]["notes"] == 1
+            assert [item["id"] for item in summary_payload["targets"]] == [entity_id]
+            assert entities.status_code == 200
+            assert [item["id"] for item in entities.get_json()["entities"]] == [entity_id]
+            assert entities.get_json()["entities"][0]["labels"][0]["label"] == "cross-member"
+            assert findings.status_code == 200
+            assert [item["id"] for item in findings.get_json()["findings"]] == [finding_id]
+            assert findings.get_json()["findings"][0]["note"]["body"] == "visible to the team"
+            assert personal_summary.status_code == 404
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_project_artifacts_and_packages(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
+        try:
+            owner_token = "tok_team_artifacts_owner"
+            operator_token = "tok_team_artifacts_operator"
+            self._register_session_token(operator_token)
+            created = self._create_team(client, owner_token, name="Artifact Operators")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Artifact operator"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Artifact operator"},
+            )
+            assert joined.status_code == 201
+            from services.teams.storage import token_hash
+            with db_connect() as conn:
+                operator_member = conn.execute(
+                    "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
+                    (team_id, token_hash(operator_token)),
+                ).fetchone()
+            operator_member_id = operator_member["id"]
+
+            project_created = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Shared artifacts"},
+            )
+            assert project_created.status_code == 201
+            project_id = project_created.get_json()["project"]["id"]
+
+            run_id = "run-team-artifact-shared"
+            artifact_id = "rfa_team_artifact_shared"
+            artifact_body = b"team artifact body\n"
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                artifact_path = resolve_workspace_path(
+                    owner_token,
+                    "reports/team-artifact.txt",
+                    shell_app.CFG,
+                    ensure_parent=True,
+                )
+                artifact_path.write_bytes(artifact_body)
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'cat reports/team-artifact.txt', ?, ?, 0, ?, 1, ?)",
+                    (
+                        run_id,
+                        owner_token,
+                        team_id,
+                        "2026-05-28T13:00:00+00:00",
+                        "2026-05-28T13:00:01+00:00",
+                        json.dumps([{"text": "team artifact body", "cls": "", "line_index": 0}]),
+                        "team artifact body",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', ?)",
+                    ("pln_team_artifact_shared", project_id, run_id, "2026-05-28T13:00:02+00:00"),
+                )
+                conn.execute(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                    "content_type, preview_type, content_sha256, created) "
+                    "VALUES (?, ?, ?, 'reports/team-artifact.txt', 'team-artifact.txt', 'output', ?, "
+                    "'workspace_flag', 'text/plain', 'text', ?, ?)",
+                    (
+                        artifact_id,
+                        owner_token,
+                        run_id,
+                        len(artifact_body),
+                        hashlib.sha256(artifact_body).hexdigest(),
+                        "2026-05-28T13:00:03+00:00",
+                    ),
+                )
+                conn.commit()
+
+            team_artifacts = client.get(
+                f"/projects/{project_id}/artifacts",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                artifact_preview = client.get(
+                    f"/projects/{project_id}/artifacts/{artifact_id}/preview",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+            personal_artifacts = client.get(
+                f"/projects/{project_id}/artifacts",
+                headers={"X-Session-ID": operator_token},
+            )
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                package_created = client.post(
+                    f"/projects/{project_id}/packages",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    json={
+                        "name": "Team Evidence",
+                        "labels": ["handoff"],
+                        "notes": "Team package note",
+                        "include_artifacts": True,
+                        "selection": {
+                            "run_ids": [run_id],
+                            "artifact_ids": [artifact_id],
+                        },
+                    },
+                )
+
+            assert team_artifacts.status_code == 200
+            artifacts_payload = team_artifacts.get_json()
+            assert [item["id"] for item in artifacts_payload["artifacts"]] == [artifact_id]
+            assert artifacts_payload["artifacts"][0]["created_by"]["display_name"] == "Owner"
+            assert artifact_preview.status_code == 200
+            assert artifact_preview.get_json()["text"] == artifact_body.decode("utf-8")
+            assert personal_artifacts.status_code == 404
+            assert package_created.status_code == 201
+            package = package_created.get_json()["package"]
+            assert package["include_artifacts"] is True
+            assert package["created_by"]["display_name"] == "Artifact operator"
+            assert [item["label"] for item in package["labels"]] == ["handoff"]
+            assert package["note"]["body"] == "Team package note"
+
+            owner_packages = client.get(
+                f"/projects/{project_id}/packages",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                package_download = client.get(
+                    f"/projects/{project_id}/packages/{package['id']}/download",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+                package_job_started = client.post(
+                    f"/projects/{project_id}/packages/{package['id']}/download-jobs",
+                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                )
+
+            assert owner_packages.status_code == 200
+            assert [item["id"] for item in owner_packages.get_json()["packages"]] == [package["id"]]
+            assert owner_packages.get_json()["packages"][0]["created_by"]["display_name"] == "Artifact operator"
+            assert package_download.status_code == 200
+            with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
+                names = set(archive.namelist())
+                assert "artifacts/reports/team-artifact.txt" in names
+                assert archive.read("artifacts/reports/team-artifact.txt") == artifact_body
+            assert package_job_started.status_code == 202
+            package_job = package_job_started.get_json()["job"]
+            deadline = time.time() + 5
+            while package_job["status"] not in {"complete", "failed"} and time.time() < deadline:
+                time.sleep(0.02)
+                package_job_status = client.get(
+                    f"/projects/{project_id}/packages/{package['id']}/download-jobs/{package_job['id']}",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                )
+                assert package_job_status.status_code == 200
+                package_job = package_job_status.get_json()["job"]
+            assert package_job["status"] == "complete"
+            package_job_download = client.get(
+                f"/projects/{project_id}/packages/{package['id']}/download-jobs/{package_job['id']}/download",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+            assert package_job_download.status_code == 200
+            package_job_download.close()
+            from services.projects import package_jobs
+            job_record = package_jobs._read_job(package_job["id"])
+            assert job_record is not None
+            assert job_record["session_id"] == operator_token
+            assert job_record["team_id"] == team_id
+            assert job_record["actor_member_id"] == operator_member_id
+            with db_connect() as conn:
+                package_row = conn.execute(
+                    "SELECT session_id FROM evidence_packages WHERE id = ?",
+                    (package["id"],),
+                ).fetchone()
+                metadata_row = conn.execute(
+                    "SELECT session_id FROM entity_labels WHERE entity_type = 'package' AND entity_id = ?",
+                    (package["id"],),
+                ).fetchone()
+            assert package_row["session_id"] == operator_token
+            assert metadata_row["session_id"] == team_id
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_notification_channels_and_events(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.models import TRIGGER_RUN_COMPLETE
+        from services.notifications.secrets import channel_secret_name, get_channel_secret
+
+        key = base64.b64encode(b"n" * 32).decode("ascii")
+        monkeypatch.setenv("SECRETS_MASTER_KEY", key)
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path / "secrets"))
+        secrets_vault.reset_master_key_cache_for_tests()
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_notifications_owner"
+            admin_token = "tok_team_notifications_admin"
+            viewer_token = "tok_team_notifications_viewer"
+            self._register_session_token(admin_token)
+            self._register_session_token(viewer_token)
+            created = self._create_team(client, owner_token, name="Notification Operators")
+            team_id = created.get_json()["team"]["id"]
+            admin_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "admin", "label": "Notification admin"},
+            )
+            viewer_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "Notification viewer"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": admin_token},
+                json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Notification admin"},
+            ).status_code == 201
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Notification viewer"},
+            ).status_code == 201
+
+            team_headers = {"X-Session-ID": admin_token, "X-Team-ID": team_id}
+            created_channel = client.post(
+                "/session/notification-channels",
+                headers=team_headers,
+                json={
+                    "kind": "webhook",
+                    "label": "Team webhook",
+                    "secret_values": {"url": "https://team.example.invalid/hook"},
+                    "triggers": ["run_complete"],
+                },
+            )
+            assert created_channel.status_code == 201
+            channel = created_channel.get_json()["channel"]
+            secret_name = channel_secret_name(channel["id"], "url")
+            assert get_channel_secret(team_id, secret_name) == "https://team.example.invalid/hook"
+            assert get_channel_secret(admin_token, secret_name) is None
+
+            viewer_team_channels = client.get(
+                "/session/notification-channels",
+                headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+            )
+            admin_personal_channels = client.get(
+                "/session/notification-channels",
+                headers={"X-Session-ID": admin_token},
+            )
+            viewer_create = client.post(
+                "/session/notification-channels",
+                headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                json={"kind": "webhook", "secret_values": {"url": "https://blocked.invalid/hook"}},
+            )
+            with db_connect() as conn:
+                event_ids = dispatcher.enqueue(
+                    TRIGGER_RUN_COMPLETE,
+                    {"run_id": "run-team-notification"},
+                    admin_token,
+                    conn=conn,
+                    run_id="run-team-notification",
+                    team_id=team_id,
+                )
+                conn.commit()
+                channel_row = conn.execute(
+                    "SELECT session_token, team_id FROM notification_channels WHERE id = ?",
+                    (channel["id"],),
+                ).fetchone()
+                event_row = conn.execute(
+                    "SELECT session_token, team_id FROM notification_events WHERE id = ?",
+                    (event_ids[0],),
+                ).fetchone()
+
+            viewer_team_events = client.get(
+                "/session/notification-events?limit=5",
+                headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+            )
+            admin_personal_events = client.get(
+                "/session/notification-events?limit=5",
+                headers={"X-Session-ID": admin_token},
+            )
+
+            assert viewer_team_channels.status_code == 200
+            assert [item["id"] for item in viewer_team_channels.get_json()["channels"]] == [channel["id"]]
+            assert admin_personal_channels.status_code == 200
+            assert admin_personal_channels.get_json()["channels"] == []
+            assert viewer_create.status_code == 403
+            assert viewer_create.get_json()["error"] == "team_forbidden"
+            assert dict(channel_row) == {"session_token": admin_token, "team_id": team_id}
+            assert dict(event_row) == {"session_token": admin_token, "team_id": team_id}
+            assert viewer_team_events.status_code == 200
+            assert viewer_team_events.get_json()["total"] == 1
+            assert viewer_team_events.get_json()["events"][0]["team_id"] == team_id
+            assert admin_personal_events.status_code == 200
+            assert admin_personal_events.get_json()["total"] == 0
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_ai_assists_for_team_runs(self, tmp_path):
+        from services.ai import assists as ai_assists
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_ai_owner"
+            operator_token = "tok_team_ai_operator"
+            viewer_token = "tok_team_ai_viewer"
+            outsider_token = "tok_team_ai_outsider"
+            self._register_session_token(operator_token)
+            self._register_session_token(viewer_token)
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="AI Operators")
+            team_id = created.get_json()["team"]["id"]
+            operator_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "AI operator"},
+            )
+            viewer_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "AI viewer"},
+            )
+            assert operator_invite.status_code == 201
+            assert viewer_invite.status_code == 201
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "AI operator"},
+            ).status_code == 201
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "AI viewer"},
+            ).status_code == 201
+
+            run_id = "run-team-ai-assist"
+            output_rows = [
+                {
+                    "text": "Starting web scan for darklab.sh with enough detail for a useful assist.",
+                    "cls": "",
+                    "tsC": "",
+                    "tsE": "",
+                },
+                {
+                    "text": "443/tcp open https, 80/tcp open http, and several response headers were detected.",
+                    "cls": "",
+                    "tsC": "",
+                    "tsE": "",
+                },
+                {
+                    "text": "The next useful step is to inspect TLS, redirects, and exposed response metadata.",
+                    "cls": "",
+                    "tsC": "",
+                    "tsE": "",
+                },
+            ]
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count) "
+                    "VALUES (?, ?, ?, 'external', 'nmap -sV darklab.sh', ?, ?, 0, ?, ?)",
+                    (
+                        run_id,
+                        owner_token,
+                        team_id,
+                        "2026-05-28T19:00:00+00:00",
+                        "2026-05-28T19:00:03+00:00",
+                        json.dumps(output_rows),
+                        len(output_rows),
+                    ),
+                )
+                conn.commit()
+
+            team_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            owner_team_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+            viewer_team_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            ai_cfg_patch = {
+                "ai_enabled": True,
+                "ai_feature_summary": True,
+                "ai_feature_next_commands": True,
+                "ai_model": "llama3.1:8b",
+                "ai_max_input_chars": 8000,
+                "ai_max_queue_depth": 1000,
+                "ai_rate_limit_per_session_hour": 20,
+                "ai_rate_limit_global_per_minute": 20,
+                "share_redaction_enabled": False,
+            }
+            with mock.patch.dict(config.CFG, ai_cfg_patch), \
+                 mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+                queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers=team_headers)
+                listed_for_owner = client.get(f"/runs/{run_id}/ai-assists", headers=owner_team_headers)
+                listed_for_viewer = client.get(f"/runs/{run_id}/ai-assists", headers=viewer_team_headers)
+                viewer_summary = client.post(f"/runs/{run_id}/ai-summary", json={}, headers=viewer_team_headers)
+                viewer_next = client.post(f"/runs/{run_id}/ai-next-commands", json={}, headers=viewer_team_headers)
+                personal_operator = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": operator_token})
+                outsider_team = client.get(
+                    f"/runs/{run_id}/ai-assists",
+                    headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                )
+
+                queued_payload = queued.get_json()
+                with db_connect() as conn:
+                    assist_row = conn.execute(
+                        "SELECT session_id, team_id FROM ai_run_assists WHERE id = ?",
+                        (queued_payload["assist"]["id"],),
+                    ).fetchone()
+                    conn.execute(
+                        "UPDATE ai_run_assists SET status = 'completed', payload = ? WHERE id = ?",
+                        (json.dumps({"summary": "cached team summary"}), queued_payload["assist"]["id"]),
+                    )
+                    conn.commit()
+
+                with mock.patch.object(ai_assists.log, "info") as reuse_log:
+                    cached_for_owner = client.post(
+                        f"/runs/{run_id}/ai-summary",
+                        json={},
+                        headers=owner_team_headers,
+                    )
+
+            assert queued.status_code == 202
+            assert queued_payload["assist"]["status"] == "queued"
+            assert assist_row["session_id"] == operator_token
+            assert assist_row["team_id"] == team_id
+            assert listed_for_owner.status_code == 200
+            assert [item["id"] for item in listed_for_owner.get_json()["assists"]] == [queued_payload["assist"]["id"]]
+            assert listed_for_viewer.status_code == 200
+            assert [item["id"] for item in listed_for_viewer.get_json()["assists"]] == [queued_payload["assist"]["id"]]
+            for response in (viewer_summary, viewer_next):
+                assert response.status_code == 403
+                assert response.get_json()["error"] == "team_forbidden"
+            assert personal_operator.status_code == 404
+            assert personal_operator.get_json()["error"] == "not_found"
+            assert outsider_team.status_code == 403
+            assert outsider_team.get_json()["error"] == "team_forbidden"
+            assert cached_for_owner.status_code == 200
+            assert cached_for_owner.get_json()["assist"]["id"] == queued_payload["assist"]["id"]
+            reuse_events = [
+                call.kwargs["extra"]
+                for call in reuse_log.call_args_list
+                if call.args and call.args[0] == "AI_ASSIST_ENQUEUE_RESULT"
+            ]
+            assert reuse_events[0]["inserted"] is False
+            assert reuse_events[0]["session"].startswith("tok_team")
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_atlas_reads_for_team_runs(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_atlas_owner"
+            operator_token = "tok_team_atlas_operator"
+            outsider_token = "tok_team_atlas_outsider"
+            self._register_session_token(operator_token)
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="Atlas Operators")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Atlas operator"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Atlas operator"},
+            )
+            assert joined.status_code == 201
+
+            personal_run_id = "run-team-atlas-personal"
+            team_run_id = "run-team-atlas-shared"
+            personal_entity_id = "ent_team_atlas_personal"
+            team_entity_id = "ent_team_atlas_shared"
+            personal_finding_id = "fnd_team_atlas_personal"
+            team_finding_id = "fnd_team_atlas_shared"
+            seen_at = "2026-05-28T12:00:00+00:00"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, '', 'external', 'httpx personal.example', ?, ?, 0, '[]', 0, '')",
+                    (personal_run_id, owner_token, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'httpx shared.example', ?, ?, 0, '[]', 0, '')",
+                    (team_run_id, owner_token, team_id, seen_at, seen_at),
+                )
+                for entity_id, value, run_id in (
+                    (personal_entity_id, "personal.example", personal_run_id),
+                    (team_entity_id, "shared.example", team_run_id),
+                ):
+                    conn.execute(
+                        "INSERT INTO entities "
+                        "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                        "VALUES (?, ?, 'domain', ?, ?, ?, ?, ?)",
+                        (entity_id, owner_token, value, "sig_" + entity_id, seen_at, seen_at, seen_at),
+                    )
+                    conn.execute(
+                        "INSERT INTO entity_run_links "
+                        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                        "VALUES (?, ?, ?, ?, 1)",
+                        (entity_id, run_id, seen_at, seen_at),
+                    )
+                for finding_id, entity_id, run_id, title in (
+                    (personal_finding_id, personal_entity_id, personal_run_id, "personal finding"),
+                    (team_finding_id, team_entity_id, team_run_id, "shared finding"),
+                ):
+                    conn.execute(
+                        "INSERT INTO findings "
+                        "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, "
+                        "kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, "
+                        "occurrence_count, status, title, raw_line, created) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                        (
+                            finding_id,
+                            owner_token,
+                            run_id,
+                            entity_id,
+                            entity_id,
+                            "sig_" + finding_id,
+                            run_id,
+                            run_id,
+                            seen_at,
+                            seen_at,
+                            title,
+                            title,
+                            seen_at,
+                        ),
+                    )
+                    conn.execute(
+                        "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                        "VALUES (?, ?, 1, ?, ?)",
+                        (finding_id, run_id, title, seen_at),
+                    )
+                conn.commit()
+
+            personal_summary = client.get("/atlas", headers={"X-Session-ID": owner_token})
+            team_summary = client.get("/atlas", headers={"X-Session-ID": operator_token, "X-Team-ID": team_id})
+            team_runs = client.get("/atlas/runs", headers={"X-Session-ID": operator_token, "X-Team-ID": team_id})
+            team_entities = client.get(
+                "/atlas/entities?type=domain",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            team_entity_detail = client.get(
+                f"/atlas/entities/{team_entity_id}",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            team_findings = client.get("/atlas/findings", headers={"X-Session-ID": operator_token, "X-Team-ID": team_id})
+            api_team_entity = client.get(
+                f"/api/v1/atlas/entities/{team_entity_id}",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            operator_personal_entity = client.get(f"/atlas/entities/{team_entity_id}", headers={"X-Session-ID": operator_token})
+            outsider_summary = client.get("/atlas", headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id})
+
+            assert personal_summary.status_code == 200
+            assert personal_summary.get_json()["counts"]["domain"] == 1
+            assert team_summary.status_code == 200
+            assert team_summary.get_json()["counts"]["domain"] == 1
+            assert team_summary.get_json()["findings"] == 1
+            assert [item["id"] for item in team_runs.get_json()["runs"]] == [team_run_id]
+            assert [item["id"] for item in team_entities.get_json()["entities"]] == [team_entity_id]
+            assert team_entity_detail.status_code == 200
+            assert [item["run_id"] for item in team_entity_detail.get_json()["runs"]] == [team_run_id]
+            assert [item["id"] for item in team_findings.get_json()["findings"]] == [team_finding_id]
+            assert api_team_entity.status_code == 200
+            assert api_team_entity.get_json()["entity"]["id"] == team_entity_id
+            assert operator_personal_entity.status_code == 404
+            assert outsider_summary.status_code == 403
+            assert outsider_summary.get_json()["error"] == "team_forbidden"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_active_team_scope_shares_atlas_metadata_and_targets(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_atlas_metadata_owner"
+            operator_token = "tok_team_atlas_metadata_operator"
+            self._register_session_token(operator_token)
+            created = self._create_team(client, owner_token, name="Atlas Metadata Operators")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Atlas metadata operator"},
+            )
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Atlas metadata operator"},
+            )
+            assert joined.status_code == 201
+
+            run_id = "run-team-atlas-metadata"
+            entity_id = "ent_team_atlas_metadata"
+            finding_id = "fnd_team_atlas_metadata"
+            seen_at = "2026-05-28T12:15:00+00:00"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "output_preview, output_line_count, output_search_text) "
+                    "VALUES (?, ?, ?, 'external', 'httpx metadata.example', ?, ?, 0, '[]', 0, '')",
+                    (run_id, owner_token, team_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "VALUES (?, ?, 'domain', 'metadata.example', ?, ?, ?, ?)",
+                    (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                    (
+                        finding_id,
+                        owner_token,
+                        run_id,
+                        entity_id,
+                        entity_id,
+                        "sig_" + finding_id,
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        "metadata finding",
+                        "metadata finding",
+                        seen_at,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                    "VALUES (?, ?, 1, 'metadata finding', ?)",
+                    (finding_id, run_id, seen_at),
+                )
+                conn.commit()
+
+            project_created = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Team Atlas Metadata"},
+            )
+            project_id = project_created.get_json()["project"]["id"]
+            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+
+            label_created = client.post(
+                f"/entities/atlas_entity/{entity_id}/labels",
+                headers=operator_headers,
+                json={"label": "shared-review"},
+            )
+            note_saved = client.put(
+                f"/entities/finding/{finding_id}/note",
+                headers=operator_headers,
+                json={"body": "review this finding as a team"},
+            )
+            finding_reviewed = client.put(
+                f"/findings/{finding_id}/review",
+                headers=operator_headers,
+                json={"review_state": "reviewed"},
+            )
+            intel_refreshed = client.post(
+                f"/atlas/entities/{entity_id}/refresh_intel",
+                headers=operator_headers,
+                json={},
+            )
+            target_created = client.post(
+                f"/projects/{project_id}/targets",
+                headers=operator_headers,
+                json={"type": "domain", "value": "metadata.example", "source_run_id": run_id},
+            )
+
+            owner_labels = client.get(f"/entities/atlas_entity/{entity_id}/labels", headers=owner_headers)
+            owner_note = client.get(f"/entities/finding/{finding_id}/note", headers=owner_headers)
+            searched_entities = client.get("/atlas/entities?q=shared-review", headers=owner_headers)
+            reviewed_findings = client.get("/atlas/findings?review_state=reviewed", headers=owner_headers)
+            owner_targets = client.get(f"/projects/{project_id}/targets", headers=owner_headers)
+            operator_personal_labels = client.get(
+                f"/entities/atlas_entity/{entity_id}/labels",
+                headers={"X-Session-ID": operator_token},
+            )
+
+            assert label_created.status_code == 201
+            assert note_saved.status_code == 200
+            assert finding_reviewed.status_code == 200
+            assert intel_refreshed.status_code == 200
+            assert target_created.status_code == 201
+            assert [item["label"] for item in owner_labels.get_json()["labels"]] == ["shared-review"]
+            assert owner_note.get_json()["note"]["body"] == "review this finding as a team"
+            assert [item["id"] for item in searched_entities.get_json()["entities"]] == [entity_id]
+            assert [item["id"] for item in reviewed_findings.get_json()["findings"]] == [finding_id]
+            assert [item["canonical_value"] for item in owner_targets.get_json()["targets"]] == ["metadata.example"]
+            assert operator_personal_labels.status_code == 404
+            with db_connect() as conn:
+                metadata_rows = conn.execute(
+                    "SELECT session_id FROM entity_labels WHERE entity_id = ?",
+                    (entity_id,),
+                ).fetchall()
+                finding_status = conn.execute(
+                    "SELECT status FROM findings WHERE id = ?",
+                    (finding_id,),
+                ).fetchone()
+            assert {row["session_id"] for row in metadata_rows} == {team_id}
+            assert finding_status["status"] == "reviewed"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+
 class TestNotificationChannelRoutes:
     def _notification_client(self, monkeypatch, tmp_path):
         key = base64.b64encode(b"c" * 32).decode("ascii")
@@ -3582,6 +5680,20 @@ class TestClientLogRoute:
         extra = mock_warning.call_args.kwargs["extra"]
         assert extra["context"] == "session-token set"
         assert extra["client_message"] == "ReferenceError: global is not defined"
+
+        with mock.patch.object(shell_assets.log, "debug") as mock_debug:
+            debug_resp = client.post("/log", json={
+                "event": "TEAM_SCOPE_CHANGED",
+                "level": "debug",
+                "context": "TEAM_SCOPE_CHANGED",
+                "message": '{"scope":"team"}',
+            })
+        assert debug_resp.status_code == 200
+        mock_debug.assert_called_once()
+        assert mock_debug.call_args[0][0] == "TEAM_SCOPE_CHANGED"
+        debug_extra = mock_debug.call_args.kwargs["extra"]
+        assert debug_extra["context"] == "TEAM_SCOPE_CHANGED"
+        assert debug_extra["client_message"] == '{"scope":"team"}'
 
 
 # ── /status ───────────────────────────────────────────────────────────────────
@@ -7834,6 +9946,35 @@ class TestRunRoute:
         assert thread.kwargs["original_command"] == "ping darklab.sh"
         assert thread.kwargs["rewrite_notice"] == "rewritten"
 
+    def test_interactive_pty_start_persists_team_scope(self):
+        client = get_client()
+        team_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "operator"})
+        fake_run = mock.Mock(run_id="pty-team-run", rows=24, cols=100)
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
+             mock.patch(
+                 "blueprints.run._prepare_interactive_pty_command",
+                 return_value=(
+                     ["mtr", "darklab.sh"],
+                     "mtr --interactive darklab.sh",
+                     {"allow_input": True},
+                 ),
+             ), \
+             mock.patch("blueprints.run._active_interactive_pty_count", return_value=0), \
+             mock.patch("blueprints.run._interactive_pty_concurrency_limit", return_value=4), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start:
+            resp = client.post(
+                "/pty/runs",
+                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1"},
+                json={"command": "mtr --interactive darklab.sh", "tab_id": "tab-1"},
+            )
+
+        assert resp.status_code == 202
+        assert json.loads(resp.data)["run_id"] == "pty-team-run"
+        assert start.call_args.kwargs["session_id"] == "member-session"
+        assert start.call_args.kwargs["team_id"] == "team-1"
+
     def test_brokered_run_events_returns_session_scoped_backfill(self):
         client = get_client()
         fake_event = mock.Mock(event_id="10-0", payload={"type": "output", "text": "hello"})
@@ -7850,6 +9991,20 @@ class TestRunRoute:
             "events": [{"event_id": "10-0", "type": "output", "text": "hello"}],
         }
         get_events.assert_called_once_with("run-1", after_id="9-0", limit=25)
+
+        team_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
+        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
+             mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=False), \
+             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]), \
+             mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as team_get_events:
+            team_resp = client.get(
+                "/runs/run-team/events?after=9-0&limit=25",
+                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1"},
+            )
+
+        assert team_resp.status_code == 200
+        assert json.loads(team_resp.data)["events"] == [{"event_id": "10-0", "type": "output", "text": "hello"}]
+        team_get_events.assert_called_once_with("run-team", after_id="9-0", limit=25)
 
     def test_brokered_run_events_rejects_runs_outside_session(self):
         client = get_client()
@@ -7878,9 +10033,25 @@ class TestRunRoute:
         assert body == "data: one\n\n"
         touch.assert_called_once_with("run-1", "client-1", "tab-1")
 
+        team_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
+        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
+             mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=False), \
+             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]), \
+             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: team\n\n"])), \
+             mock.patch("blueprints.run.active_run_touch_owner") as team_touch:
+            team_resp = client.get(
+                "/runs/run-team/stream?after=9-0&tab_id=tab-1",
+                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1", "X-Client-ID": "client-1"},
+            )
+            team_body = team_resp.get_data(as_text=True)
+
+        assert team_resp.status_code == 200
+        assert team_body == "data: team\n\n"
+        team_touch.assert_called_once_with("run-team", "client-1", "tab-1")
+
     def test_brokered_run_stream_allows_registered_run_that_exited_before_persistence(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_run_belongs_to_session", return_value=True), \
+        with mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=True), \
              mock.patch("blueprints.run.active_runs_for_session") as active_runs, \
              mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: fast-exit\n\n"])):
             resp = client.get(
@@ -7913,6 +10084,43 @@ class TestRunRoute:
         assert extra["active_match"] is False
         assert extra["db_match"] is False
 
+    def test_brokered_run_events_and_stream_report_scope_mismatch(self):
+        client = get_client()
+        active_sequences = [
+            [],
+            [{"run_id": "run-team-scope", "team_id": "team_scope"}],
+            [],
+            [{"run_id": "run-team-scope", "team_id": "team_scope"}],
+        ]
+        with mock.patch("blueprints.run.active_runs_for_session", side_effect=active_sequences), \
+             mock.patch("blueprints.run.get_run_events") as get_events, \
+             mock.patch("blueprints.run.stream_run_events") as stream_events, \
+             mock.patch("blueprints.run.log.warning") as warn:
+            events_resp = client.get(
+                "/runs/run-team-scope/events",
+                headers={"X-Session-ID": "session-1"},
+            )
+            stream_resp = client.get(
+                "/runs/run-team-scope/stream",
+                headers={"X-Session-ID": "session-1"},
+            )
+
+        expected = {
+            "error": "run_scope_mismatch",
+            "message": "Run exists in a different team scope. Switch to that team scope to view it.",
+            "scope": "team",
+            "team_id": "team_scope",
+        }
+        assert events_resp.status_code == 409
+        assert stream_resp.status_code == 409
+        assert json.loads(events_resp.data) == expected
+        assert json.loads(stream_resp.data) == expected
+        get_events.assert_not_called()
+        stream_events.assert_not_called()
+        extra = warn.call_args.kwargs["extra"]
+        assert extra["scope_mismatch"] is True
+        assert extra["actual_team_id"] == "team_scope"
+
     def test_brokered_run_owner_takeover_route_is_retired(self):
         client = get_client()
         resp = client.post(
@@ -7942,6 +10150,31 @@ class TestRunRoute:
         })
         killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
 
+        team_scope = mock.Mock(team_id="team-1", is_team=True, member={"id": "tmem-killer", "role": "operator"})
+        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
+             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]), \
+             mock.patch("blueprints.run.pid_for_team", return_value=8765) as team_pid_lookup, \
+             mock.patch("blueprints.run.publish_run_event") as team_publish, \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
+             mock.patch("blueprints.run.os.killpg") as team_killpg, \
+             mock.patch.object(shell_app.log, "info") as team_info:
+            team_resp = client.post(
+                "/kill",
+                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1", "X-Client-ID": "client-2"},
+                json={"run_id": "run-team", "tab_id": "tab-2"},
+            )
+        assert team_resp.status_code == 200
+        team_pid_lookup.assert_called_once_with("run-team", "team-1")
+        team_publish.assert_called_once_with("run-team", "killed", {
+            "killer_client_id": "client-2",
+            "killer_tab_id": "tab-2",
+        })
+        team_killpg.assert_called_once_with(8765, shell_app.signal.SIGTERM)
+        kill_extra = next(c.kwargs["extra"] for c in team_info.call_args_list if c.args and c.args[0] == "RUN_KILL")
+        assert kill_extra["team_id"] == "team-1"
+        assert kill_extra["actor_member_id"] == "tmem-killer"
+        assert kill_extra["team_role"] == "operator"
+
     def test_kill_rejects_runs_outside_session(self):
         client = get_client()
         with mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup, \
@@ -7955,6 +10188,19 @@ class TestRunRoute:
         assert json.loads(resp.data) == {"error": "No such process"}
         pid_lookup.assert_called_once_with("run-1", "session-1")
         publish.assert_not_called()
+
+        viewer_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
+        with mock.patch("blueprints.run.current_request_scope", return_value=viewer_scope), \
+             mock.patch("blueprints.run.pid_for_team") as team_pid_lookup:
+            viewer_resp = client.post(
+                "/kill",
+                headers={"X-Session-ID": "viewer-session", "X-Team-ID": "team-1"},
+                json={"run_id": "run-team"},
+            )
+
+        assert viewer_resp.status_code == 403
+        assert json.loads(viewer_resp.data)["error"] == "team_forbidden"
+        team_pid_lookup.assert_not_called()
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
@@ -8890,7 +11136,10 @@ class TestHistoryRoute:
 
     def test_get_run_nonexistent_returns_404(self):
         client = get_client()
-        resp = client.get("/history/nonexistent-run-id")
+        resp = client.get(
+            "/history/nonexistent-run-id",
+            headers={"X-Session-ID": "history-missing-run-session"},
+        )
         assert resp.status_code == 404
 
     def test_ai_summary_routes_enqueue_and_list_session_scoped_assists(self):
@@ -8961,6 +11210,7 @@ class TestHistoryRoute:
                 "ai_feature_next_commands": True,
                 "ai_model": "llama3.1:8b",
                 "ai_max_input_chars": 8000,
+                "ai_max_queue_depth": 1000,
                 "ai_rate_limit_per_session_hour": 20,
                 "ai_rate_limit_global_per_minute": 20,
                 "share_redaction_enabled": False,
@@ -9000,6 +11250,7 @@ class TestHistoryRoute:
                     "ai_feature_next_commands": True,
                     "ai_model": "llama3.1:8b",
                     "ai_max_input_chars": 8000,
+                    "ai_max_queue_depth": 1000,
                     "ai_rate_limit_per_session_hour": 20,
                     "ai_rate_limit_global_per_minute": 20,
                     "diagnostics_allowed_cidrs": [],
@@ -9763,7 +12014,7 @@ class TestHistoryRoute:
 
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"runs": active_runs}
-        active_mock.assert_called_once_with(session, client_id="client-1")
+        active_mock.assert_called_once_with(session, client_id="client-1", team_id="")
 
     def test_compare_candidates_rank_exact_command_before_same_target(self):
         client = get_client()
@@ -11575,14 +13826,18 @@ class TestRunPermalinkRoute:
         full_output_truncated=0,
         full_output_lines=None,
         artifacts=None,
+        session_id="test-session",
+        team_id="",
     ):
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, output_preview, preview_truncated, "
+            "INSERT INTO runs (id, session_id, team_id, command, started, output_preview, preview_truncated, "
             "output_line_count, full_output_available, full_output_truncated) "
-            "VALUES (?, 'test-session', ?, datetime('now'), ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)",
             (
                 run_id,
+                session_id,
+                team_id,
                 command,
                 json.dumps(output or []),
                 preview_truncated,
@@ -11607,9 +13862,10 @@ class TestRunPermalinkRoute:
             conn.execute(
                 "INSERT INTO run_file_artifacts "
                 "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
-                "VALUES (?, 'test-session', ?, ?, ?, ?, ?, ?, datetime('now'))",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
                 (
                     artifact["id"],
+                    session_id,
                     run_id,
                     artifact["workspace_path"],
                     artifact.get("display_name", ""),
@@ -11758,6 +14014,85 @@ class TestRunPermalinkRoute:
             assert data["command"] == "dig google.com"
             assert "answer section" in data["output"]
         finally:
+            self._delete_run(run_id)
+
+    def test_team_owned_permalink_loads_without_active_team_scope(self):
+        run_id = "permalink-team-owned-test-run"
+        owner_token = "tok_permalink_team_owner"
+        client = get_client()
+        team_id = f"team_permalink_{uuid.uuid4().hex[:12]}"
+        member_id = f"tmem_permalink_{uuid.uuid4().hex[:12]}"
+        created = datetime.now(timezone.utc).isoformat()
+        from services.teams.storage import token_hash
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (owner_token, created, ""),
+            )
+            conn.execute(
+                "INSERT INTO teams "
+                "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
+                (
+                    team_id,
+                    "Permalink Team",
+                    f"permalink-team-{uuid.uuid4().hex[:8]}",
+                    member_id,
+                    token_hash(owner_token),
+                    created,
+                    created,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO team_members "
+                "(id, team_id, session_token, session_token_hash, role, display_name, status, joined_at) "
+                "VALUES (?, ?, ?, ?, 'owner', 'Owner', 'active', ?)",
+                (member_id, team_id, owner_token, token_hash(owner_token), created),
+            )
+            conn.commit()
+        self._insert_run(
+            run_id,
+            "dig team.example",
+            ["team answer section"],
+            session_id=owner_token,
+            team_id=team_id,
+        )
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO entity_labels "
+            "(id, session_id, entity_type, entity_id, label, created) "
+            "VALUES (?, ?, 'run', ?, 'team-private', datetime('now'))",
+            ("permalink-team-label", owner_token, run_id),
+        )
+        conn.commit()
+        conn.close()
+        try:
+            public_resp = client.get(f"/history/{run_id}", headers={"X-Session-ID": owner_token})
+            assert public_resp.status_code == 200
+            assert b"dig team.example" in public_resp.data
+
+            public_json = json.loads(
+                client.get(f"/history/{run_id}?json", headers={"X-Session-ID": owner_token}).data
+            )
+            assert public_json["command"] == "dig team.example"
+            assert "team answer section" in public_json["output"]
+            assert public_json["label_count"] == 0
+
+            team_json = json.loads(
+                client.get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                ).data
+            )
+            assert team_json["label_count"] == 1
+            assert team_json["labels"][0]["label"] == "team-private"
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM entity_labels WHERE entity_id=?", (run_id,))
+                conn.execute("DELETE FROM team_members WHERE team_id=?", (team_id,))
+                conn.execute("DELETE FROM teams WHERE id=?", (team_id,))
+                conn.execute("DELETE FROM session_tokens WHERE token=?", (owner_token,))
+                conn.commit()
             self._delete_run(run_id)
 
     def test_json_view_returns_full_output_when_artifact_exists(self):

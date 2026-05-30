@@ -166,6 +166,9 @@ function _closeMajorOverlays() {
   if (typeof isFindingsBoardOpen === 'function' && isFindingsBoardOpen()) {
     if (typeof closeFindingsBoard === 'function') closeFindingsBoard({ refocus: false });
   }
+  if (typeof isTeamScopeSelectorOpen === 'function' && isTeamScopeSelectorOpen()) {
+    if (typeof closeTeamScopeSelector === 'function') closeTeamScopeSelector({ refocus: false });
+  }
   if (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen()) {
     if (typeof closeHistoryRunOverlay === 'function') closeHistoryRunOverlay();
   }

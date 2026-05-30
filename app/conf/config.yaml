@@ -432,6 +432,21 @@
 # Server default if unset: 5
 # rate_limit_per_second: 5
 
+# Team management read routes are used by the Options Teams tab, the desktop
+# HUD scope selector, the mobile menu scope selector, and `/api/v1/teams`.
+# These routes are keyed by durable session token when one is available.
+# Server defaults if unset:
+#   team_read_rate_limit_per_minute: 180
+#   team_read_rate_limit_per_second: 20
+# team_read_rate_limit_per_minute: 180
+# team_read_rate_limit_per_second: 20
+
+# Team management write routes include create, join, invite, membership,
+# archive/reactivate, leave, and recovery-code changes. They stay tighter than
+# reads because several of them create or redeem one-time codes.
+# Server default if unset: 30
+# team_write_rate_limit_per_minute: 30
+
 # ── External Intel Provider Defaults ─────────────────────────────────────────
 #
 # These defaults define the cache and quota contract for app-owned intel

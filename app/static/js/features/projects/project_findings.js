@@ -31,15 +31,30 @@
         .filter(Boolean);
     }
 
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
     function reviewControl(finding, projectId) {
       const control = document.createElement('select');
       const reviewState = String(finding.review_state || 'new');
+      const allowed = activeTeamScopeCan('triage_findings');
       control.className = `form-select form-control-compact project-finding-review review-${reviewState}`;
       control.dataset.projectReviewState = '1';
       control.dataset.projectId = String(projectId || '');
       control.dataset.findingId = String(finding.id || '');
       control.dataset.previousReviewState = reviewState;
       control.setAttribute('aria-label', 'Finding review state');
+      control.disabled = !allowed;
+      if (!allowed) control.title = teamScopeDeniedMessage('triage team findings');
       (ctx.findingReviewStates || []).forEach(({ value, label }) => {
         const option = document.createElement('option');
         option.value = value;
@@ -76,6 +91,10 @@
       const toolbar = document.createElement('div');
       toolbar.className = 'project-finding-bulk-toolbar';
       const selectToggle = ctx.makeProjectButton(ctx.findingSelectMode() ? 'Done' : 'Select', 'toggle-project-finding-select', projectId);
+      if (!ctx.findingSelectMode() && !activeTeamScopeCan('triage_findings')) {
+        selectToggle.disabled = true;
+        selectToggle.title = teamScopeDeniedMessage('triage team findings');
+      }
       toolbar.appendChild(selectToggle);
       if (ctx.findingSelectMode()) {
         const count = document.createElement('span');
@@ -99,9 +118,10 @@
           const option = document.createElement('option');
           option.value = value;
           option.textContent = label;
-          apply.appendChild(option);
-        });
-        apply.disabled = !selectedFindingIds.size;
+        apply.appendChild(option);
+      });
+        apply.disabled = !selectedFindingIds.size || !activeTeamScopeCan('triage_findings');
+        if (!activeTeamScopeCan('triage_findings')) apply.title = teamScopeDeniedMessage('triage team findings');
         const del = ctx.makeProjectButton('Delete', 'bulk-delete-project-findings', projectId, 'destructive');
         del.disabled = !selectedFindingIds.size;
         toolbar.append(count, selectAll, clear, apply, del);

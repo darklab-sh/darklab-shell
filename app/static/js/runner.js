@@ -752,6 +752,7 @@ async function _readRunErrorMessage(res) {
   try {
     if (contentType.includes('application/json') && typeof res.json === 'function') {
       const data = await res.json();
+      if (data && typeof data.message === 'string' && data.message.trim()) return data.message.trim();
       if (data && typeof data.error === 'string' && data.error.trim()) return data.error.trim();
     } else if (typeof res.text === 'function') {
       const text = (await res.text()).trim();
@@ -761,6 +762,20 @@ async function _readRunErrorMessage(res) {
     _logRunnerError('failed to parse run error response', err);
   }
   return '';
+}
+
+function _runActiveTeamScopeCan(capability) {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan(capability) : true;
+}
+
+function _runTeamScopeDeniedMessage(action) {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage(action)
+    : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+}
+
+function _runStartDeniedMessage() {
+  return _runTeamScopeDeniedMessage('run commands in team scope');
 }
 
 function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
@@ -3078,6 +3093,14 @@ function submitCommand(rawCmd) {
     return true;
   }
 
+  if (!_runActiveTeamScopeCan('run_commands')) {
+    appendCommandEcho(cmd);
+    appendLine(`[denied] ${_runStartDeniedMessage()}`, 'denied', activeTabId);
+    setStatus('fail');
+    setTabStatus(activeTabId, 'fail');
+    return true;
+  }
+
   // Re-lookup the active tab after the potential createTab() call above, which
   // may have changed activeTabId to point at the newly created tab.
   const _runTab = getActiveTab();
@@ -3118,7 +3141,10 @@ function submitCommand(rawCmd) {
   }).then(res => {
     if (res.status === 403) {
       return res.json().then(data => {
-        appendLine('[denied] ' + (data.error || 'Command not allowed.'), 'denied', tabId);
+        const message = data && data.error === 'team_forbidden'
+          ? _runStartDeniedMessage()
+          : (data.error || data.message || 'Command not allowed.');
+        appendLine('[denied] ' + message, 'denied', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
         stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });

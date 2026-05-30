@@ -11,6 +11,7 @@ from typing import Any
 
 from core.database import db_connect
 from core.output_signals import strip_ansi_codes
+from services.atlas.lookup import finding_exists_in_scope, metadata_owner_id
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.atlas.materializer import (
     canonicalize_entity_record,
@@ -26,6 +27,7 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
 )
 from services.projects.metadata import _entity_labels_by_id, _entity_notes_by_id
+from services.projects.scope import shared_owner_where
 from services.projects.targets import _canonical_target_payload, _target_payload_from_candidate
 from services.projects.utils import (
     normalize_page_window as _normalize_page_window,
@@ -55,6 +57,7 @@ def row_to_finding(row):
     return {
         "id": value("id"),
         "session_id": value("session_id"),
+        "team_id": value("team_id"),
         "run_id": run_id,
         "target_id": target_id,
         "entity_id": target_id,
@@ -211,7 +214,7 @@ def _run_finding_page_payload(findings, total, limit, offset, occurrence_total=0
     )
 
 
-def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total=False):
+def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total=False, team_id=""):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     paginated = limit is not None or include_total
     safe_limit, safe_offset = _normalize_page_window(limit, offset, enabled=paginated)
@@ -230,9 +233,10 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
         ") "
     )
     with db_connect() as conn:
+        run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id)
         run = conn.execute(
-            "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
-            (session_id, run_id),
+            "SELECT 1 FROM runs WHERE " + run_owner_sql + " AND id = ?",  # nosec
+            (*run_owner_params, run_id),
         ).fetchone()
         if not run:
             return None
@@ -241,13 +245,13 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
         if paginated:
             total_row = conn.execute(
                 base_sql
-                + "SELECT COUNT(*) AS count, COALESCE(SUM(d.run_occurrence_count), 0) AS occurrence_total "  # nosec B608
-                "FROM deduped d JOIN findings f ON f.id = d.finding_id WHERE f.session_id = ?",
-                (run_id, session_id),
+                + "SELECT COUNT(*) AS count, COALESCE(SUM(d.run_occurrence_count), 0) AS occurrence_total "  # nosec
+                "FROM deduped d JOIN findings f ON f.id = d.finding_id",
+                (run_id,),
             ).fetchone()
             total = int(total_row["count"] or 0) if total_row else 0
             occurrence_total = int(total_row["occurrence_total"] or 0) if total_row else 0
-        query_params = [run_id, session_id]
+        query_params: list[object] = [run_id]
         page_sql = ""
         if paginated:
             page_sql = " LIMIT ? OFFSET ?"
@@ -259,7 +263,6 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "d.run_id, d.line_number, d.snippet, d.run_occurrence_count "
             "FROM deduped d JOIN findings f ON f.id = d.finding_id "
-            "WHERE f.session_id = ? "
             "ORDER BY d.line_number ASC, d.seen_at ASC, f.id ASC"
             + page_sql,
             query_params,
@@ -276,29 +279,31 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
     return findings
 
 
-def update_finding_review_state(session_id, finding_id, data):
+def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
     finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
     if not finding_id:
         raise ProjectWorkspaceError("finding id is required")
     review_state = _normalize_finding_review_payload(data)
     with db_connect() as conn:
+        if not finding_exists_in_scope(conn, session_id, finding_id, team_id=team_id):
+            return None
         result = conn.execute(
-            "UPDATE findings SET status = ?, status_updated_at = ? WHERE session_id = ? AND id = ?",
-            (review_state, _now(), session_id, finding_id),
+            "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
+            (review_state, _now(), finding_id),
         )
         if result.rowcount <= 0:
             return None
         row = conn.execute(
             "SELECT id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
-            "fingerprint, title, raw_line, created FROM findings WHERE session_id = ? AND id = ?",
-            [session_id, finding_id],
+            "fingerprint, title, raw_line, created FROM findings WHERE id = ?",
+            [finding_id],
         ).fetchone()
         conn.commit()
     return row_to_finding(row)
 
 
-def bulk_update_project_finding_review_states(session_id, project_id, data):
+def bulk_update_project_finding_review_states(session_id, project_id, data, *, team_id=""):
     if not isinstance(data, dict):
         raise ProjectWorkspaceError("finding review payload must be an object")
     raw_finding_ids = data.get("finding_ids")
@@ -311,25 +316,27 @@ def bulk_update_project_finding_review_states(session_id, project_id, data):
         raise ProjectWorkspaceError("too_many")
     review_state = _normalize_finding_review_payload(data)
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
+        run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            (*project_owner_params, project_id),
         ).fetchone()
         if not project:
             return None
         placeholders = ",".join("?" for _ in finding_ids)
         found_rows = conn.execute(  # nosec
-            "WITH project_runs AS ("
+            "WITH project_runs AS ("  # nosec
             "  SELECT l.entity_id AS run_id FROM project_links l "
             "  JOIN runs r ON r.id = l.entity_id "
-            "  WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ?"
+            "  WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_owner_sql +
             "), project_entities AS ("
             "  SELECT l.entity_id FROM project_links l "
             "  JOIN entities e ON e.id = l.entity_id "
-            "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ?"
+            "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity'"
             ") "
             "SELECT f.id FROM findings f "
-            "WHERE f.session_id = ? "
+            "WHERE 1 = 1 "
             f"AND f.id IN ({placeholders}) " # nosec
             "AND ("
             "  EXISTS ("
@@ -346,14 +353,14 @@ def bulk_update_project_finding_review_states(session_id, project_id, data):
             "    WHERE pe.entity_id = COALESCE(f.entity_id, f.target_id)"
             "  )"
             ")",
-            (project_id, session_id, project_id, session_id, session_id, *finding_ids),
+            (project_id, *run_owner_params, project_id, *finding_ids),
         ).fetchall()
         found_ids = {str(row["id"] or "") for row in found_rows if row["id"]}
         if found_ids:
             updated_at = _now()
             conn.executemany(
-                "UPDATE findings SET status = ?, status_updated_at = ? WHERE session_id = ? AND id = ?",
-                [(review_state, updated_at, session_id, finding_id) for finding_id in sorted(found_ids)],
+                "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
+                [(review_state, updated_at, finding_id) for finding_id in sorted(found_ids)],
             )
             conn.commit()
     results = [
@@ -371,14 +378,17 @@ def bulk_update_project_finding_review_states(session_id, project_id, data):
     }
 
 
-def list_project_findings(session_id, project_id, filters=None, *, limit=None, offset=0, include_total=False):
+def list_project_findings(session_id, project_id, filters=None, *, limit=None, offset=0, include_total=False, team_id=""):
     filters = filters if isinstance(filters, dict) else {}
     paginated = limit is not None or include_total
     safe_limit, safe_offset = _normalize_page_window(limit, offset, enabled=paginated)
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
+        run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
+        metadata_owner = metadata_owner_id(session_id, team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            (*project_owner_params, project_id),
         ).fetchone()
         if not project:
             return None
@@ -446,7 +456,6 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         )
         group_label_expr = "COALESCE(NULLIF(r.command, ''), " + source_run_expr + ")"
         where_clauses = [
-            "f.session_id = ?",
             "COALESCE(f.suppressed, FALSE) = FALSE",
             "("
             "EXISTS ("
@@ -464,7 +473,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             ")"
             ")",
         ]
-        params = [project_id, session_id, project_id, session_id, session_id]
+        params = [project_id, *run_owner_params, project_id]
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
             where_clauses.append(
@@ -510,31 +519,33 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             where_clauses.append(
                 "EXISTS ("
                 "  SELECT 1 FROM entity_labels filter_label "
-                "  WHERE filter_label.session_id = f.session_id "
+                "  WHERE filter_label.session_id = ? "
                 "  AND filter_label.entity_type = 'finding' "
                 "  AND filter_label.entity_id = f.id "
                 f"  AND filter_label.label IN ({placeholders})"  # nosec
                 ")"
             )
-            params.extend(labels)
+            params.extend([metadata_owner, *labels])
         if note_state == "noted":
             where_clauses.append(
                 "EXISTS ("
                 "  SELECT 1 FROM entity_notes filter_note "
-                "  WHERE filter_note.session_id = f.session_id "
+                "  WHERE filter_note.session_id = ? "
                 "  AND filter_note.entity_type = 'finding' "
                 "  AND filter_note.entity_id = f.id"
                 ")"
             )
+            params.append(metadata_owner)
         elif note_state == "unnoted":
             where_clauses.append(
                 "NOT EXISTS ("
                 "  SELECT 1 FROM entity_notes filter_note "
-                "  WHERE filter_note.session_id = f.session_id "
+                "  WHERE filter_note.session_id = ? "
                 "  AND filter_note.entity_type = 'finding' "
                 "  AND filter_note.entity_id = f.id"
                 ")"
             )
+            params.append(metadata_owner)
         if orphan_filter == "hide":
             where_clauses.append(source_exists_sql)
         elif orphan_filter == "only":
@@ -548,15 +559,16 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             params.extend(collapsed_groups)
 
         def build_base_sql(active_where_clauses):
-            return (  # nosec B608
+            return (  # nosec
                 "WITH project_runs AS ("  # nosec
                 "  SELECT l.entity_id AS run_id FROM project_links l "
                 "  JOIN runs r ON r.id = l.entity_id "
-                "  WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ?"
+                "  WHERE l.project_id = ? AND l.entity_type = 'run' AND "
+                + run_owner_sql +
                 "), project_entities AS ("
                 "  SELECT l.entity_id FROM project_links l "
                 "  JOIN entities e ON e.id = l.entity_id "
-                "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ?"
+                "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity'"
                 "), project_findings AS ("
                 "  SELECT f.id, COALESCE(f.last_seen_at, f.created) AS sort_seen "
                 "  FROM findings f "
@@ -577,8 +589,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         page_limit = safe_limit or 0
         if paginated:
             if include_total:
-                total_row = conn.execute(  # nosec B608
-                    base_sql + "SELECT COUNT(*) AS count FROM project_findings",  # nosec B608
+                total_row = conn.execute(  # nosec
+                    base_sql + "SELECT COUNT(*) AS count FROM project_findings",  # nosec
                     params,
                 ).fetchone()
                 total = int(total_row["count"] or 0) if total_row else 0
@@ -678,8 +690,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         ).fetchall()
         project_target_ids = {str(row["entity_id"] or "") for row in project_target_rows if row["entity_id"]}
         finding_ids = [str(row["id"] or "") for row in rows if row["id"]]
-        finding_labels = _entity_labels_by_id(conn, session_id, "finding", finding_ids)
-        finding_notes = _entity_notes_by_id(conn, session_id, "finding", finding_ids)
+        finding_labels = _entity_labels_by_id(conn, session_id, "finding", finding_ids, team_id=team_id)
+        finding_notes = _entity_notes_by_id(conn, session_id, "finding", finding_ids, team_id=team_id)
 
     findings = [
         item for item in (
@@ -761,7 +773,7 @@ def _normalize_finding_signal_key(text):
     return re.sub(r"\s+", " ", strip_ansi_codes(str(text or ""))).strip().lower()[:512]
 
 
-def _entry_primary_entity(conn, session_id, entry, seen_at):
+def _entry_primary_entity(conn, session_id, entry, seen_at, *, team_id=""):
     fallback_payload = _target_payload_from_candidate(entry.get("target") if isinstance(entry, dict) else "")
     if fallback_payload:
         try:
@@ -775,6 +787,7 @@ def _entry_primary_entity(conn, session_id, entry, seen_at):
                 session_id,
                 entity_type,
                 canonical_value,
+                team_id=team_id,
                 seen_at=seen_at,
                 occurrence_count=0,
             )
@@ -794,6 +807,7 @@ def _entry_primary_entity(conn, session_id, entry, seen_at):
             session_id,
             entity_type,
             canonical_value,
+            team_id=team_id,
             seen_at=seen_at,
             occurrence_count=0,
         )
@@ -801,12 +815,19 @@ def _entry_primary_entity(conn, session_id, entry, seen_at):
     return "", ""
 
 
-def record_run_findings(conn, session_id, run_id, entries):
+def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
-    run = conn.execute(
-        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
-        (session_id, run_id),
-    ).fetchone()
+    team_id = str(team_id or "").strip()
+    if team_id:
+        run = conn.execute(
+            "SELECT command, run_kind FROM runs WHERE team_id = ? AND id = ?",
+            (team_id, run_id),
+        ).fetchone()
+    else:
+        run = conn.execute(
+            "SELECT command, run_kind FROM runs WHERE session_id = ? AND (team_id IS NULL OR team_id = '') AND id = ?",
+            (session_id, run_id),
+        ).fetchone()
     if not run:
         return []
     run_kind = normalize_run_kind(run["run_kind"], command=str(run["command"] or ""))
@@ -849,14 +870,20 @@ def record_run_findings(conn, session_id, run_id, entries):
         severity = _finding_severity_from_text(raw_line)
         if kind == "error" and not severity:
             severity = "high"
-        entity_id, entity_sig = _entry_primary_entity(conn, session_id, entry, created)
+        entity_id, entity_sig = _entry_primary_entity(conn, session_id, entry, created, team_id=team_id)
         signal_key = _normalize_finding_signal_key(raw_line)
         subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{signal_key}"
         signature_hash = _finding_signature(tool_root, "finding", severity, signal_key, subject_key)
-        row = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? AND signature_hash = ?",
-            (session_id, signature_hash),
-        ).fetchone()
+        if team_id:
+            row = conn.execute(
+                "SELECT id FROM findings WHERE team_id = ? AND signature_hash = ?",
+                (team_id, signature_hash),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM findings WHERE session_id = ? AND team_id = '' AND signature_hash = ?",
+                (session_id, signature_hash),
+            ).fetchone()
         if row:
             finding_id = str(row["id"])
             conn.execute(
@@ -866,19 +893,21 @@ def record_run_findings(conn, session_id, run_id, entries):
                 (run_id, entity_id, run_id, created, severity, severity, title, raw_line, finding_id),
             )
         else:
+            owner_id = team_id or session_id
             finding_id = "fnd_" + hashlib.sha256(
-                f"{session_id}\x1f{signature_hash}".encode("utf-8", errors="replace")
+                f"{owner_id}\x1f{signature_hash}".encode("utf-8", errors="replace")
             ).hexdigest()[:32]
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, target_id, scope, line_number, review_state, "
+                "(id, session_id, team_id, run_id, target_id, scope, line_number, review_state, "
                 "entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
                 "status_updated_at, fingerprint, title, raw_line, created) "
-                "VALUES (?, ?, ?, ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, 0, 'new', '', ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, 0, 'new', '', ?, ?, ?, ?)",
                 (
                     finding_id,
                     session_id,
+                    team_id,
                     run_id,
                     entity_id,
                     line_index,
@@ -905,7 +934,7 @@ def record_run_findings(conn, session_id, run_id, entries):
         )
         recalculate_atlas_findings(conn, [finding_id])
         full_row = conn.execute(
-            "SELECT f.id, f.session_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
+            "SELECT f.id, f.session_id, f.team_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "

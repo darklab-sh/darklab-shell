@@ -599,6 +599,17 @@ body.mobile-terminal-mode {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .menu-sheet .mobile-scope-row {
+    cursor: pointer;
+  }
+  .menu-sheet .mobile-scope-row.is-loading .menu-item-hint {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .menu-sheet .mobile-scope-row.is-error .menu-item-hint {
+    color: var(--red);
+    opacity: 1;
+  }
   /* Surface-specific chev color: drill-chev (drill-in rows) and
      disclosure-chev (timestamps expander) both render in --border-bright
      so they recede against the menu text. The primitives in components.css

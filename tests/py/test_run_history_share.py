@@ -665,6 +665,7 @@ class TestRunStreaming:
                 run_id="run-broker-worker",
                 proc=fake_proc,
                 session_id="session-worker",
+                team_id="",
                 client_ip="203.0.113.10",
                 original_command="printf lines | grep keep",
                 run_started=started,
@@ -718,6 +719,7 @@ class TestRunStreaming:
                 run_id="run-broker-timeout",
                 proc=fake_proc,
                 session_id="session-worker",
+                team_id="",
                 client_ip="203.0.113.10",
                 original_command="sleep 10",
                 run_started=started,
@@ -758,6 +760,7 @@ class TestRunStreaming:
                 run_id="run-broker-error",
                 proc=fake_proc,
                 session_id="session-worker",
+                team_id="",
                 client_ip="203.0.113.10",
                 original_command="broken",
                 run_started=datetime.now(timezone.utc).isoformat(),
@@ -1815,7 +1818,12 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run._run_session_visibility", return_value={
+                 "allowed": True,
+                 "active_match": True,
+                 "db_match": False,
+                 "active_count": 1,
+             }), \
              mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("boom")):
             resp = _post_run(client, json={"command": "echo hi"})
             body = resp.get_data(as_text=True)
@@ -3750,6 +3758,7 @@ class TestRunOutputArtifacts:
         run_routes._save_completed_run(
             run_id,
             session_id,
+            "",
             "lookup alias-target",
             "2026-05-21T00:00:00Z",
             "2026-05-21T00:00:01Z",

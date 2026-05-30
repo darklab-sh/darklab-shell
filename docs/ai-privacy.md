@@ -24,11 +24,11 @@ The provider contract is OpenAI-compatible `/v1/chat/completions`. Run assists r
 
 When the bundled llama.cpp sidecar is used, assist requests ask the provider to reuse matching prompt prefixes so repeated local requests spend less time on identical system and developer prompt text. The bundled profile uses one llama-server slot by default because the app already serializes local AI calls, which keeps prompt reuse more predictable on CPU-only hosts. This cache lives inside the local model server process. It is enabled only for the bundled local llama.cpp profile, not for arbitrary OpenAI-compatible endpoints.
 
-`AI_API_KEY_SECRET_NAME` uses the existing encrypted session vault when an AI request has a session context. `AI_API_KEY` is the process/config fallback for deployments that prefer environment-managed credentials. The client sends an `Authorization` header only when a non-empty key is available, so local unauthenticated providers do not receive an empty bearer token.
+`AI_API_KEY_SECRET_NAME` uses the encrypted vault for the queued request scope: personal assists read the session's personal secret, and team assists read the team's explicit shared secret. Personal secrets are not inherited by team scope. `AI_API_KEY` is the process/config fallback for deployments that prefer environment-managed credentials. The client sends an `Authorization` header only when a non-empty key is available, so local unauthenticated providers do not receive an empty bearer token.
 
 By default, `AI_REQUIRE_PRIVATE_BASE_URL=true` requires the provider host to resolve to loopback, private, link-local, or explicitly allowed CIDR ranges. Hosted providers require an explicit configuration change.
 
-AI write actions use Redis-backed per-session and global rate limits, a short enqueue lock, and a heartbeat-backed global worker slot before a provider call starts. If Redis is unavailable, new AI writes fail closed instead of letting multiple web or worker processes fan out against a local model. Cached read routes remain scoped to the owning session.
+AI write actions use Redis-backed per-session and global rate limits, a short enqueue lock, and a heartbeat-backed global worker slot before a provider call starts. If Redis is unavailable, new AI writes fail closed instead of letting multiple web or worker processes fan out against a local model. Cached read routes remain scoped to the active personal or team owner, and team-owned runs reuse team-owned assist rows without mixing them into personal scope. Team viewers can read cached and in-flight assists, but triggering a new team AI assist requires run-command permission.
 
 ## Operator checks
 

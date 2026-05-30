@@ -70,8 +70,8 @@ The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side setti
 
 Resolution order is:
 
-1. command flags: `--api-url`, `--token`, and `--timeout`
-2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, and `DARKLAB_TIMEOUT`
+1. command flags: `--api-url`, `--token`, `--team`, and `--timeout`
+2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, and `DARKLAB_TIMEOUT`
 3. `~/.config/darklab/config.toml`
 4. built-in defaults
 
@@ -80,10 +80,11 @@ Example:
 ```toml
 api_url = "https://shell.example.com"
 token = "tok_your_session_token"
+team = "team_optional_scope"
 timeout = 30
 ```
 
-`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally.
+`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally. When the CLI writes this file, it keeps owner-only `0600` permissions because the file can store a session token and active team scope.
 
 Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
@@ -115,7 +116,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `ai_provider` | `openai_compatible` | Provider contract for AI assists. The current foundation uses OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints |
 | `ai_base_url` | _(empty)_ | Base URL for the AI provider, such as a llama.cpp, Ollama, vLLM, LiteLLM, or hosted OpenAI-compatible endpoint |
 | `ai_model` | _(empty)_ | Model name sent to the provider and checked by `/diag` against `/v1/models` |
-| `ai_api_key_secret_name` | _(empty)_ | Optional session vault secret name to use when an AI request has a session context |
+| `ai_api_key_secret_name` | _(empty)_ | Optional personal/team vault secret name to use when an AI request has a session context |
 | `ai_api_key` | _(empty)_ | Optional process/config fallback API key. Local unauthenticated providers usually leave this empty |
 | `ai_connect_timeout_seconds` | `5` | Provider TCP connect timeout |
 | `ai_timeout_seconds` | `120` | Provider read timeout. Local CPU models can need longer than normal HTTP calls, and AI assists run in the worker path rather than tying up a route worker |
@@ -149,6 +150,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `rate_limit_enabled` | `true` | Enables the shared `/runs` and `/api/v1` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
 | `rate_limit_per_minute` | `30` | Max `/runs` and `/api/v1` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/runs` and `/api/v1` requests per second per IP |
+| `team_read_rate_limit_per_minute` | `180` | Max team-management read requests per minute. The Options Teams tab, desktop HUD scope selector, mobile scope selector, and `/api/v1/teams` list/detail routes use this token-keyed limit |
+| `team_read_rate_limit_per_second` | `20` | Max team-management read requests per second for the same read surfaces |
+| `team_write_rate_limit_per_minute` | `30` | Max team-management write requests per minute for create, join, invite, membership, archive/reactivate, leave, and recovery-code changes |
 | `intel_cache_ttl_shodan_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Shodan IP responses |
 | `intel_cache_ttl_shodan_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Shodan search responses |
 | `intel_cache_ttl_censys_host_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Censys host responses |
@@ -393,9 +397,9 @@ commands:
 
 `help.flags` marks invocations whose output should stay visible but should not create findings or Atlas entities. Help invocations also bypass required-secret preflight for that command root, so users can run safe `--help` commands before configuring provider keys. An example can opt into the default container smoke corpus with `smoke.profile: unauthenticated` when it is safe to run without provider credentials or workspace setup.
 
-`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
+`requires_secrets` names encrypted secrets from the active personal or team scope that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 
-Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current session, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row.
+Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current personal or team scope, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row. Personal secrets are not inherited by team scope; team owners and admins create shared team secrets explicitly.
 
 Inside each command's `autocomplete` block, a root can define:
 
@@ -740,7 +744,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `llama`, `postgres`, or a comma-separated combination such as `llama,postgres` when you want profile-gated services included without passing `--profile` |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
-| `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted session vault when a request has session context; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
+| `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
 | `AI_CONNECT_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | Docker Compose, Flask app | Provider connect and read timeouts. Local CPU models often need a longer read timeout than normal app routes |
 | `AI_MAX_INPUT_CHARS` / `AI_MAX_OUTPUT_TOKENS` / `AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS` | Docker Compose, Flask app | Prompt input and provider output caps. Input is measured in characters. Summary and next-command assists use separate output caps because next-command JSON needs more room |
 | `AI_MAX_CONCURRENT` / `AI_MAX_QUEUE_DEPTH` | Docker Compose, Flask app | AI worker concurrency and queue/backlog limits. The bundled local profile defaults to one concurrent provider call |
@@ -756,7 +760,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
 | `DATABASE_POSTGRES_JIT` | Flask app | Optional override for `database_postgres_jit`. Leave unset or `false` for lower-latency interactive app queries |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
-| `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted per-session secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
+| `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
 | `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
 
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production overlay currently defaults `WEB_CONCURRENCY` to `8` when that variable is not set.

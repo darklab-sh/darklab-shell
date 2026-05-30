@@ -43,6 +43,9 @@ from services.history.run_metadata import (
 )
 from services.history.search import run_search_clause, sqlite_fts_query
 from core.process import active_runs_for_session
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
+from services.teams.request_scope import RequestScopeError, current_request_scope, requested_team_id, scope_error_payload
 from services.atlas.cleanup import (
     atlas_run_cleanup_preview,
     delete_atlas_cleanup_preview,
@@ -87,6 +90,25 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
+
+
+def _team_capability_error_response(exc: TeamPermissionDenied):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _require_team_capability(owner_scope, capability: Capability):
+    if not owner_scope.is_team:
+        return None
+    try:
+        require_capability(str((owner_scope.member or {}).get("role") or ""), capability)
+    except TeamPermissionDenied as exc:
+        return _team_capability_error_response(exc)
+    return None
+
+
+def _require_history_mutation_capability(owner_scope):
+    return _require_team_capability(owner_scope, Capability.MANAGE_HISTORY)
+
 
 BULK_HISTORY_EXPORT_MAX_ITEMS = 500
 BULK_HISTORY_EXPORT_MAX_BYTES = 50 * 1024 * 1024
@@ -170,6 +192,7 @@ def _history_match_clause(query, scope, force_like=False):
 
 def _history_base_clause(
     session_id,
+    owner_scope,
     query,
     command_root,
     exit_code_filter,
@@ -183,8 +206,9 @@ def _history_base_clause(
     force_like=False,
     offloaded_match_run_ids=None,
 ):
-    sql = " FROM runs r WHERE r.session_id = ?"
-    params: list[Any] = [session_id]
+    scope_sql, scope_params = owner_scope.predicate(table_alias="r")
+    sql = f" FROM runs r WHERE {scope_sql}"
+    params: list[Any] = list(scope_params)
     if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
         run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command", DB_BACKEND)
         sql += f" AND {run_kind_expr} = ?"
@@ -244,9 +268,10 @@ def _history_structured_filter_run_ids(conn, run_sql, run_params, structured_fil
     return run_ids
 
 
-def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
-    sql = " FROM snapshots s WHERE s.session_id = ?"
-    params: list[Any] = [session_id]
+def _history_snapshot_base_clause(owner_scope, query, date_range, project_id=""):
+    scope_sql, scope_params = owner_scope.predicate(table_alias="s")
+    sql = f" FROM snapshots s WHERE {scope_sql}"
+    params: list[Any] = list(scope_params)
     if project_id:
         sql += " AND 1 = 0"
     if query:
@@ -263,64 +288,68 @@ def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     return sql, params
 
 
-def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
+def _session_history_stats(conn, session_id: str, owner_scope) -> dict[str, Any]:
+    scope_sql, scope_params = owner_scope.predicate()
     if DB_BACKEND == DatabaseBackend.POSTGRES:
-        run_stats_sql = """
-        SELECT COUNT(*) AS total,
-               SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
-               SUM(
-                   CASE
-                       WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
-                       THEN 1
-                       ELSE 0
-                   END
-               ) AS failed,
-               SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
-               AVG(
-                   CASE
-                       WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
-                       THEN EXTRACT(
-                           EPOCH FROM (
-                               NULLIF(finished, '')::timestamptz - NULLIF(started, '')::timestamptz
+        run_stats_prefix = """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
+                   SUM(
+                       CASE
+                           WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
+                           THEN 1
+                           ELSE 0
+                       END
+                   ) AS failed,
+                   SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
+                   AVG(
+                       CASE
+                           WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
+                           THEN EXTRACT(
+                               EPOCH FROM (
+                                   NULLIF(finished, '')::timestamptz - NULLIF(started, '')::timestamptz
+                               )
                            )
-                       )
-                       ELSE NULL
-                   END
-               ) AS average_elapsed_seconds
-          FROM runs
-         WHERE session_id = ?
-        """
+                           ELSE NULL
+                       END
+                   ) AS average_elapsed_seconds
+              FROM runs
+             WHERE """
+        run_stats_sql = run_stats_prefix + scope_sql
     else:
-        run_stats_sql = """
-        SELECT COUNT(*) AS total,
-               SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
-               SUM(
-                   CASE
-                       WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
-                       THEN 1
-                       ELSE 0
-                   END
-               ) AS failed,
-               SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
-               AVG(
-                   CASE
-                       WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
-                       THEN (julianday(finished) - julianday(started)) * 86400.0
-                       ELSE NULL
-                   END
-               ) AS average_elapsed_seconds
-          FROM runs
-         WHERE session_id = ?
-        """
+        run_stats_prefix = """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
+                   SUM(
+                       CASE
+                           WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
+                           THEN 1
+                           ELSE 0
+                       END
+                   ) AS failed,
+                   SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
+                   AVG(
+                       CASE
+                           WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
+                           THEN (julianday(finished) - julianday(started)) * 86400.0
+                           ELSE NULL
+                       END
+                   ) AS average_elapsed_seconds
+              FROM runs
+             WHERE """
+        run_stats_sql = run_stats_prefix + scope_sql
     run_row = conn.execute(
         run_stats_sql,
-        (GRACEFUL_TERMINATION_EXIT_CODE, session_id),
+        (GRACEFUL_TERMINATION_EXIT_CODE, *scope_params),
     ).fetchone()
     snapshots = 0
     if _history_table_exists(conn, "snapshots"):
+        snapshot_scope_sql, snapshot_scope_params = owner_scope.predicate()
+        snapshot_count_prefix = "SELECT COUNT(*) AS count FROM snapshots WHERE "
+        snapshot_count_sql = snapshot_count_prefix + snapshot_scope_sql
         snapshots = int(conn.execute(
-            "SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?",
-            (session_id,),
+            snapshot_count_sql,
+            snapshot_scope_params,
         ).fetchone()["count"] or 0)
     starred = 0
     if _history_table_exists(conn, "starred_commands"):
@@ -342,7 +371,7 @@ def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
         },
         "snapshots": snapshots,
         "starred_commands": starred,
-        "active_runs": len(active_runs_for_session(session_id)),
+        "active_runs": len(active_runs_for_session(session_id, team_id=owner_scope.team_id)),
     }
 
 
@@ -422,11 +451,14 @@ def _history_run_max_output_kind(row) -> str:
     return best
 
 
-def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict[str, Any]:
+def _history_insights(conn, session_id: str, owner_scope, *, days: int | None = None) -> dict[str, Any]:
     today = datetime.now(timezone.utc).date()
+    scope_sql, scope_params = owner_scope.predicate()
+    first_started_prefix = "SELECT MIN(started) AS first_started FROM runs WHERE "
+    first_started_sql = first_started_prefix + scope_sql
     first_row = conn.execute(
-        "SELECT MIN(started) AS first_started FROM runs WHERE session_id = ?",
-        (session_id,),
+        first_started_sql,
+        scope_params,
     ).fetchone()
     first_started = _parse_iso_datetime(first_row["first_started"]) if first_row else None
     first_run_date = first_started.date() if first_started else None
@@ -439,8 +471,7 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
     fetch_days = max(days, 90)
     fetch_start_date = today - timedelta(days=fetch_days - 1)
     cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
-    rows = conn.execute(
-        """
+    insights_sql_prefix = """
         SELECT id, run_kind, command, started, finished, exit_code, output_line_count,
                COALESCE((
                  SELECT CASE MAX(CASE s.value
@@ -461,11 +492,15 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
                  SELECT COUNT(*) FROM findings_occurrences fo
                   WHERE fo.run_id = runs.id
                ) AS finding_count
-          FROM runs
-         WHERE session_id = ? AND started >= ?
+         FROM runs
+         WHERE """
+    insights_sql = insights_sql_prefix + scope_sql + """
+         AND started >= ?
          ORDER BY started ASC, id ASC
-        """,
-        (session_id, cutoff),
+        """
+    rows = conn.execute(
+        insights_sql,
+        (*scope_params, cutoff),
     ).fetchall()
     rows = [row for row in rows if str(row["run_kind"] or RUN_KIND_EXTERNAL) == RUN_KIND_EXTERNAL]
     categories = _command_category_map()
@@ -903,6 +938,11 @@ def get_history():
     """Return the most recent completed runs for this session."""
     # History is isolated per anonymous browser session, not shared globally.
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     query, structured_filters = structured_filters_from_params(
         request.args,
         query=_normalize_history_filter_text(request.args.get("q")),
@@ -940,6 +980,7 @@ def get_history():
                 offloaded_match_run_ids = _history_offloaded_search_run_ids(
                     conn,
                     session_id,
+                    owner_scope.team_id,
                     query,
                     command_root,
                     exit_code_filter,
@@ -951,6 +992,7 @@ def get_history():
                 )
             run_sql, run_params, fts_q = _history_base_clause(
                 session_id,
+                owner_scope,
                 query,
                 command_root,
                 exit_code_filter,
@@ -1004,7 +1046,7 @@ def get_history():
             and type_filter in {"all", "snapshots"}
             and not snapshot_filters_active
         ):
-            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range, project_id)
+            snap_sql, snap_params = _history_snapshot_base_clause(owner_scope, query, date_range, project_id)
 
         total_count = None
         if include_total:
@@ -1061,7 +1103,12 @@ def get_history():
         artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
         project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
-        atlas_counts = _run_atlas_counts_by_run(conn, session_id, [item["id"] for item in paged_runs])
+        atlas_counts = _run_atlas_counts_by_run(
+            conn,
+            session_id,
+            [item["id"] for item in paged_runs],
+            team_id=owner_scope.team_id,
+        )
         scheduled_by_run = schedule_ids_by_run(conn, [item["id"] for item in paged_runs])
         labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
@@ -1154,20 +1201,37 @@ def get_history():
 def get_history_commands():
     """Return recent distinct run commands for prompt history and recents."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     limit = _parse_history_int(
         request.args.get("limit"),
         CFG["recent_commands_limit"],
         maximum=200,
     )
+    scope_sql, scope_params = owner_scope.predicate()
+    recent_commands_prefix = (
+        "SELECT command, MAX(started) AS latest_started "
+        "FROM runs "
+        "WHERE "
+    )
+    recent_commands_suffix = (
+        " "
+        "GROUP BY command "
+        "ORDER BY latest_started DESC "
+        "LIMIT ?"
+    )
+    recent_commands_sql = (
+        recent_commands_prefix
+        + scope_sql
+        + recent_commands_suffix
+    )
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT command, MAX(started) AS latest_started "
-            "FROM runs "
-            "WHERE session_id = ? "
-            "GROUP BY command "
-            "ORDER BY latest_started DESC "
-            "LIMIT ?",
-            (session_id, limit),
+            recent_commands_sql,
+            (*scope_params, limit),
         ).fetchall()
     runs = [
         {"command": str(row["command"]), "started": row["latest_started"]}
@@ -1191,8 +1255,13 @@ def get_history_commands():
 def get_history_stats():
     """Return compact session-level history counters for Status Monitor."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     with db_connect() as conn:
-        payload = _session_history_stats(conn, session_id)
+        payload = _session_history_stats(conn, session_id, owner_scope)
     log.debug("HISTORY_STATS_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id),
     })
@@ -1203,6 +1272,11 @@ def get_history_stats():
 def get_history_insights():
     """Return compact visual history data for the Status Monitor."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     requested_days = _normalize_history_filter_text(request.args.get("days")).lower()
     days = (
         None
@@ -1210,7 +1284,7 @@ def get_history_insights():
         else _parse_history_int(requested_days, 28, minimum=28, maximum=365)
     )
     with db_connect() as conn:
-        payload = _history_insights(conn, session_id, days=days)
+        payload = _history_insights(conn, session_id, owner_scope, days=days)
     log.debug("HISTORY_INSIGHTS_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id),
         "days": payload.get("days"),
@@ -1222,8 +1296,13 @@ def get_history_insights():
 def get_active_history_runs():
     """Return currently running commands for this session."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     client_id = str(request.headers.get("X-Client-ID", "") or "").strip()[:128]
-    runs = active_runs_for_session(session_id, client_id=client_id)
+    runs = active_runs_for_session(session_id, client_id=client_id, team_id=owner_scope.team_id)
     log.debug("ACTIVE_RUNS_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": len(runs),
     })
@@ -1510,7 +1589,12 @@ def history_run_ai_assists(run_id):
     if not session_id:
         return jsonify({"error": "session_required"}), 401
     try:
-        assists = list_run_assists(session_id, run_id)
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    try:
+        assists = list_run_assists(session_id, run_id, team_id=owner_scope.team_id)
     except AIAssistRouteError as exc:
         return _ai_route_error(exc)
     return jsonify({"assists": assists})
@@ -1525,9 +1609,18 @@ def history_run_ai_summary(run_id):
     if data is not None and not isinstance(data, dict):
         return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object"}), 400
     try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
+    try:
         assist, status_code = enqueue_summary_assist(
             session_id,
             run_id,
+            team_id=owner_scope.team_id,
             force=_parse_history_bool((data or {}).get("force")),
         )
     except AIAssistRouteError as exc:
@@ -1544,9 +1637,18 @@ def history_run_ai_next_commands(run_id):
     if data is not None and not isinstance(data, dict):
         return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object"}), 400
     try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
+    try:
         assist, status_code = enqueue_next_commands_assist(
             session_id,
             run_id,
+            team_id=owner_scope.team_id,
             force=_parse_history_bool((data or {}).get("force")),
         )
     except AIAssistRouteError as exc:
@@ -1573,6 +1675,24 @@ def get_run(run_id):
         })
         return _permalink_error_page("run")
     run = dict(row)
+    run_team_id = str(run.get("team_id") or "")
+    requested_run_team_id = requested_team_id(request)
+    team_scope_allowed = False
+    if run_team_id and requested_run_team_id:
+        if requested_run_team_id != run_team_id:
+            if "json" in request.args:
+                return jsonify({
+                    "error": "team_scope_mismatch",
+                    "message": "This run belongs to a different team scope.",
+                }), 404
+            return _permalink_error_page("run")
+        try:
+            team_scope_allowed = current_request_scope(session_id, request).team_id == run_team_id
+        except RequestScopeError as exc:
+            if "json" in request.args:
+                payload, status = scope_error_payload(exc)
+                return jsonify(payload), status
+            return _permalink_error_page("run")
     run["preview_truncated"] = bool(run.get("preview_truncated"))
     run["full_output_available"] = bool(run.get("full_output_available"))
     run["full_output_truncated"] = bool(run.get("full_output_truncated"))
@@ -1599,9 +1719,17 @@ def get_run(run_id):
             )))
     with db_connect() as conn:
         artifacts_by_run = _run_file_artifacts_by_run(conn, [run_id])
-        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id])
-        include_private_metadata = str(run.get("session_id") or "") == str(session_id or "")
-        atlas_counts = _run_atlas_counts_by_run(conn, session_id, [run_id]) if include_private_metadata else {}
+        include_private_metadata = (
+            not run_team_id
+            and str(run.get("session_id") or "") == str(session_id or "")
+        )
+        if run_team_id:
+            include_private_metadata = team_scope_allowed
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id]) if include_private_metadata else {}
+        atlas_counts = (
+            _run_atlas_counts_by_run(conn, session_id, [run_id], team_id=run_team_id)
+            if include_private_metadata else {}
+        )
         findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
         labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
         notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
@@ -1686,13 +1814,26 @@ def get_run(run_id):
 def delete_run(run_id):
     """Delete a specific run from history for this session."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_history_mutation_capability(owner_scope)
+    if capability_response is not None:
+        return capability_response
+    scope_sql, scope_params = owner_scope.predicate()
     prune_atlas = str(request.args.get("prune_atlas") or "").strip().lower() in {"1", "true", "yes"}
     prune_curated_atlas = str(request.args.get("prune_curated_atlas") or "").strip().lower() in {"1", "true", "yes"}
     atlas_cleanup = {"entities": 0, "findings": 0}
+    owned_run_prefix = "SELECT id FROM runs WHERE id = ? AND "
+    delete_run_prefix = "DELETE FROM runs WHERE id = ? AND "
+    owned_run_sql = owned_run_prefix + scope_sql
+    delete_run_sql = delete_run_prefix + scope_sql
     with db_connect() as conn:
         owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
-            (run_id, session_id),
+            owned_run_sql,
+            (run_id, *scope_params),
         ).fetchone()
         if owned:
             cleanup_preview = (
@@ -1703,9 +1844,7 @@ def delete_run(run_id):
             delete_run_artifacts(conn, [run_id])
             if cleanup_preview:
                 atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
-        cur = conn.execute(
-            "DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id)
-        )
+        cur = conn.execute(delete_run_sql, (run_id, *scope_params))
         conn.commit()
     if cur.rowcount:
         log.info("HISTORY_DELETED", extra={
@@ -1969,6 +2108,11 @@ def _history_export_txt_lines(records, skipped):
 def bulk_export_history():
     """Export selected completed runs and snapshots for this session."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     run_ids, snapshot_ids, export_format, error_response = _normalize_bulk_export_payload(
         request.get_json(silent=True) or {},
     )
@@ -1980,7 +2124,7 @@ def bulk_export_history():
 
     active_ids = {
         str(item.get("run_id") or "")
-        for item in active_runs_for_session(session_id)
+        for item in active_runs_for_session(session_id, team_id=owner_scope.team_id)
         if item.get("run_id")
     }
     records = []
@@ -1990,19 +2134,21 @@ def bulk_export_history():
         owned_runs = {}
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
+            scope_sql, scope_params = owner_scope.predicate(table_alias="runs")
             rows = conn.execute(
                 f"SELECT runs.*, art.rel_path "  # nosec
                 f"FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-                f"WHERE runs.session_id = ? AND runs.id IN ({placeholders})",
-                [session_id, *run_ids],
+                f"WHERE {scope_sql} AND runs.id IN ({placeholders})",
+                [*scope_params, *run_ids],
             ).fetchall()
             owned_runs = {str(row["id"]): dict(row) for row in rows}
         owned_snapshots = {}
         if snapshot_ids:
             placeholders = ",".join("?" for _ in snapshot_ids)
+            scope_sql, scope_params = owner_scope.predicate()
             rows = conn.execute(
-                f"SELECT * FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-                [session_id, *snapshot_ids],
+                f"SELECT * FROM snapshots WHERE {scope_sql} AND id IN ({placeholders})",  # nosec
+                [*scope_params, *snapshot_ids],
             ).fetchall()
             owned_snapshots = {str(row["id"]): dict(row) for row in rows}
 
@@ -2058,12 +2204,20 @@ def bulk_export_history():
 def bulk_delete_history():
     """Delete selected completed runs for this session."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_history_mutation_capability(owner_scope)
+    if capability_response is not None:
+        return capability_response
     run_ids, error_response = _normalize_bulk_run_ids_payload(request.get_json(silent=True) or {})
     if error_response is not None:
         return error_response
     active_ids = {
         str(item.get("run_id") or "")
-        for item in active_runs_for_session(session_id)
+        for item in active_runs_for_session(session_id, team_id=owner_scope.team_id)
         if item.get("run_id")
     }
     counts = {"deleted": 0, "not_found": 0, "rejected": 0}
@@ -2072,9 +2226,10 @@ def bulk_delete_history():
     assert run_ids is not None
     with db_connect() as conn:
         placeholders = ",".join("?" for _ in run_ids)
+        scope_sql, scope_params = owner_scope.predicate(table_alias="runs")
         rows = conn.execute(
-            f"SELECT id, finished, exit_code FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-            [session_id, *run_ids],
+            f"SELECT id, finished, exit_code FROM runs WHERE {scope_sql} AND id IN ({placeholders})",  # nosec
+            [*scope_params, *run_ids],
         ).fetchall()
         owned_by_id = {str(row["id"]): row for row in rows}
         for run_id in run_ids:
@@ -2093,9 +2248,10 @@ def bulk_delete_history():
         if deletable_ids:
             delete_run_artifacts(conn, deletable_ids)
             delete_placeholders = ",".join("?" for _ in deletable_ids)
+            delete_scope_sql, delete_scope_params = owner_scope.predicate()
             conn.execute(
-                f"DELETE FROM runs WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
-                [session_id, *deletable_ids],
+                f"DELETE FROM runs WHERE {delete_scope_sql} AND id IN ({delete_placeholders})",  # nosec
+                [*delete_scope_params, *deletable_ids],
             )
         conn.commit()
     log.info("HISTORY_BULK_DELETED", extra={
@@ -2112,15 +2268,25 @@ def bulk_delete_history():
 def clear_history():
     """Delete all runs for this session."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_history_mutation_capability(owner_scope)
+    if capability_response is not None:
+        return capability_response
     with db_connect() as conn:
+        scope_sql, scope_params = owner_scope.predicate()
         run_ids = [
             row["id"]
             for row in conn.execute(
-                "SELECT id FROM runs WHERE session_id = ?", (session_id,)
+                "SELECT id FROM runs WHERE " + scope_sql,  # nosec
+                scope_params,
             ).fetchall()
         ]
         delete_run_artifacts(conn, run_ids)
-        cur = conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
+        cur = conn.execute("DELETE FROM runs WHERE " + scope_sql, scope_params)  # nosec
         conn.commit()
     log.info("HISTORY_CLEARED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": cur.rowcount,
@@ -2140,6 +2306,14 @@ def save_share():
     content = data.get("content", [])  # list of {text, cls} objects
     apply_redaction = data.get("apply_redaction", True)
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.MANAGE_HISTORY)
+    if capability_response:
+        return capability_response
     if not isinstance(label, str):
         return jsonify({"error": "Label must be a string"}), 400
     if not isinstance(content, list):
@@ -2171,8 +2345,8 @@ def save_share():
     )
     with db_connect() as conn:
         conn.execute(
-            "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
-            (share_id, session_id, label, created, stored_content)
+            "INSERT INTO snapshots (id, session_id, team_id, label, created, content) VALUES (?, ?, ?, ?, ?, ?)",
+            (share_id, session_id, owner_scope.team_id, label, created, stored_content)
         )
         conn.commit()
     log.info("SHARE_CREATED", extra={

@@ -183,6 +183,8 @@ function loadShellChrome({
   applyProjectAutoLinkExternalRunsPreference = (mode) => { preferences.pref_project_auto_link_external_runs = mode },
   getProjectAutoLinkRunEntitiesPreference = () => preferences.pref_project_auto_link_run_entities || 'on',
   applyProjectAutoLinkRunEntitiesPreference = (mode) => { preferences.pref_project_auto_link_run_entities = mode },
+  activeTeamScopeCan = () => true,
+  teamScopeDeniedMessage = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
 } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
@@ -342,6 +344,8 @@ function loadShellChrome({
     bindMobileSheet,
     enhanceAppSelects,
     syncAppSelect,
+    activeTeamScopeCan,
+    teamScopeDeniedMessage,
   }
   const downloadBlobAsAttachment = (blob, filename) => {
     const url = URL.createObjectURL(blob)
@@ -408,6 +412,8 @@ function loadShellChrome({
       window.bindDismissible = global.bindDismissible;
       window.bindMobileSheet = global.bindMobileSheet;
       window.enhanceAppSelects = global.enhanceAppSelects;
+      window.activeTeamScopeCan = global.activeTeamScopeCan;
+      window.teamScopeDeniedMessage = global.teamScopeDeniedMessage;
       ${ENTITY_METADATA_SRC}
       ${UI_ACTION_SHEET_SRC}
       ${ATLAS_ENTITY_ROW_SRC}
@@ -4175,6 +4181,129 @@ describe('shell chrome project workspace', () => {
       method: 'PUT',
       body: JSON.stringify({ review_state: 'false_positive' }),
     }))
+  })
+
+  it('locks finding review dropdowns and board dragging for view-only team members', async () => {
+    const projectFindings = [
+      {
+        id: 'finding-high',
+        run_id: 'run-new',
+        run_command: 'httpx new.example',
+        title: 'High issue',
+        raw_line: 'high',
+        line_number: 5,
+        severity: 'high',
+        review_state: 'new',
+      },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'Sort Project' } }),
+        })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'Sort Project', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: { id: 'project-1', name: 'Sort Project', status: 'active' },
+            counts: { runs: 1, findings: 1, entities: 1, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            entity_counts: { ip: 1 },
+            runs: [{ id: 'run-new', command: 'httpx new.example', started: '2026-05-07T01:00:00Z' }],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/findings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: projectFindings,
+            total: projectFindings.length,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            group_counts: {},
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/entities')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            entities: [{
+              id: 'entity-ip',
+              type: 'ip',
+              canonical_value: '198.51.100.10',
+              source_run_ids: ['run-new'],
+            }],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            counts_by_type: { ip: 1 },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: projectFindings, total: 1 }) })
+    })
+    const shell = loadShellChrome({
+      apiFetch,
+      activeTeamScopeCan: capability => !['mutate_projects', 'triage_findings'].includes(capability),
+    })
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="entities"]').click()
+    await tick()
+    await tick()
+
+    const entitySelectToggle = document.querySelector('[data-project-action="toggle-project-entity-select"]')
+    expect(entitySelectToggle?.disabled).toBe(true)
+    entitySelectToggle.disabled = false
+    entitySelectToggle.click()
+    await tick()
+    expect(document.querySelector('[data-project-entity-select]')).toBeNull()
+
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+
+    const findingSelectToggle = document.querySelector('[data-project-action="toggle-project-finding-select"]')
+    expect(findingSelectToggle?.disabled).toBe(true)
+    findingSelectToggle.disabled = false
+    findingSelectToggle.click()
+    await tick()
+    expect(document.querySelector('[data-project-finding-select]')).toBeNull()
+
+    const listReview = document.querySelector('[data-project-review-state]')
+    expect(listReview?.disabled).toBe(true)
+
+    document.querySelector('[data-project-action="open-findings-board"]').click()
+    await tick()
+    await tick()
+
+    const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
+    const boardCard = document.querySelector('#findings-board-body [data-finding-id]')
+    expect(boardReview?.disabled).toBe(true)
+    expect(boardCard?.draggable).toBe(false)
+
+    boardReview.value = 'false_positive'
+    boardReview.dispatchEvent(new Event('change', { bubbles: true }))
+    boardCard.dispatchEvent(new Event('dragstart', { bubbles: true, cancelable: true }))
+    await tick()
+
+    expect(apiFetch).not.toHaveBeenCalledWith('/findings/finding-high/review', expect.anything())
+    expect(document.getElementById('findings-board-message').textContent)
+      .toContain("View-only team members can't triage team findings")
   })
 
   it('refreshes an open Projects modal after a cross-tab project broadcast', async () => {

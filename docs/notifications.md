@@ -6,7 +6,7 @@ Browser desktop notifications are still controlled by the **Run Notifications** 
 
 ## Channel Types
 
-Notification channels belong to a durable `tok_` session. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked.
+Notification channels belong to a durable `tok_` session or to the active team scope. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked. In team scope, owners and admins manage shared channels, and every team member can read the team's delivery audit rows.
 
 | Kind | Sends to | Secret fields | Config fields |
 | --- | --- | --- | --- |

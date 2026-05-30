@@ -48,6 +48,7 @@ def enqueue_run_complete(
     command: str,
     exit_code: int,
     run_kind: str,
+    team_id: str = "",
     finalize_summary: dict[str, Any] | None = None,
     cfg=None,
     conn=None,
@@ -73,6 +74,7 @@ def enqueue_run_complete(
             session_id,
             conn=conn,
             run_id=run_id,
+            team_id=team_id,
         )
     except Exception:
         log.error("NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR", exc_info=True, extra={

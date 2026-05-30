@@ -1383,6 +1383,36 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('[reattached to active run after stream recovery]', 'notice', 'tab-1')
   })
 
+  it('shows run stream JSON messages instead of machine error codes', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-1/stream?tab_id=tab-1') {
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          headers: { get: () => 'application/json' },
+          json: () => Promise.resolve({
+            error: 'run_scope_mismatch',
+            message: 'Run exists in a different team scope. Switch to that team scope to view it.',
+          }),
+        })
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _subscribeRunStream } = loadRunnerFns({
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-1', 'tab-1')).resolves.toBe(false)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[server error] The server could not stream the command. Run exists in a different team scope. Switch to that team scope to view it.',
+      'exit-fail',
+      'tab-1',
+    )
+  })
+
   it('pauses background run streams for Status Monitor API calls and resumes from the last event id', async () => {
     const activeStream = controllableBrokerStreamResponse()
     const backgroundStream = controllableBrokerStreamResponse()
@@ -2058,6 +2088,33 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenLastCalledWith('[denied] not allowed', 'denied', 'tab-1')
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
+  })
+
+  it('blocks team-scope command starts before posting when the active role is view-only', () => {
+    const apiFetch = vi.fn()
+    const appendLine = vi.fn()
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+      appendCommandEcho,
+      runnerInitCode: `
+        function activeTeamScopeCan(capability) { return capability !== 'run_commands'; }
+        function teamScopeDeniedMessage(action) {
+          return "View-only team members can't " + action + ". Switch to Personal or ask for operator access.";
+        }
+      `,
+    })
+
+    expect(submitCommand('ping darklab.sh')).toBe(true)
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith(
+      "[denied] View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.",
+      'denied',
+      'tab-1',
+    )
   })
 
   it('runCommand shows the missing-secret setup hint from the server', async () => {

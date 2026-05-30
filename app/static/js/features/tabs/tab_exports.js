@@ -304,7 +304,22 @@ function _shareSnapshotLabel(tab) {
   return latestCommand || customLabel || 'snapshot';
 }
 
+function _canCreateShareSnapshot() {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
+function _shareSnapshotDeniedMessage() {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage('create team history snapshots')
+    : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+}
+
 async function permalinkTab(id) {
+  if (!_canCreateShareSnapshot()) {
+    showToast(_shareSnapshotDeniedMessage(), 'error');
+    refocusComposerAfterAction();
+    return;
+  }
   const t = getTab(id);
   if (!t || !t.rawLines.length) {
     showToast('No output to share yet');

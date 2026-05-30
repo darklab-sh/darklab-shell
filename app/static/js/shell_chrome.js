@@ -530,6 +530,7 @@
   // needed; the per-tab footer still exists in the DOM for mobile.
   const hudActions = document.getElementById('hud-actions');
   let hudKillBtn = null;
+  let hudShareSnapshotBtn = null;
 
   function _currentTabId() {
     return (typeof getActiveTabId === 'function') ? getActiveTabId() : null;
@@ -567,6 +568,25 @@
     return el;
   }
 
+  function _canCreateHudShareSnapshot() {
+    return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+  }
+
+  function _hudShareSnapshotDeniedTitle() {
+    return typeof teamScopeDeniedMessage === 'function'
+      ? teamScopeDeniedMessage('create team history snapshots')
+      : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+  }
+
+  function _refreshHudShareSnapshotState() {
+    if (!hudShareSnapshotBtn) return;
+    const allowed = _canCreateHudShareSnapshot();
+    hudShareSnapshotBtn.disabled = !allowed;
+    hudShareSnapshotBtn.title = allowed
+      ? 'Share tab as permalink (Option+P / Alt+P)'
+      : _hudShareSnapshotDeniedTitle();
+  }
+
   function buildHudActions() {
     if (!hudActions) return;
     hudActions.replaceChildren();
@@ -577,10 +597,12 @@
     }, 'btn btn-destructive btn-compact u-hidden', 'Kill current run');
     hudActions.appendChild(hudKillBtn);
 
-    hudActions.appendChild(_makeHudBtn('share snapshot', 'permalink', () => {
+    hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
       if (id && typeof permalinkTab === 'function') permalinkTab(id);
-    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)'));
+    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)');
+    hudActions.appendChild(hudShareSnapshotBtn);
+    _refreshHudShareSnapshotState();
 
     hudActions.appendChild(_makeHudBtn('copy', 'copy', () => {
       const id = _currentTabId();
@@ -642,6 +664,7 @@
     const id = tabId || _currentTabId();
     const tab = (typeof getTab === 'function') ? getTab(id) : null;
     _setHudKillVisible(!!(tab && tab.st === 'running'));
+    _refreshHudShareSnapshotState();
   }
 
   function refreshHudRunningState() {
@@ -652,6 +675,12 @@
   }
 
   buildHudActions();
+  document.addEventListener('app:scope-changed', () => {
+    _refreshHudShareSnapshotState();
+  });
+  document.addEventListener('app:scope-capabilities-changed', () => {
+    _refreshHudShareSnapshotState();
+  });
 
   // ── HUD metrics ─────────────────────────────────────────────────
   // Live-updating pills on the left side of the HUD. State is owned here;

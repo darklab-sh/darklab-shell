@@ -38,6 +38,7 @@ FIRE_STATUSES = frozenset({
 class Schedule:
     id: str
     session_token: str
+    team_id: str
     owner_kind: str
     owner_id: str
     kind: str
@@ -62,6 +63,7 @@ class Schedule:
 class ScheduleFire:
     id: str
     schedule_id: str
+    team_id: str
     owner_kind: str
     owner_id: str
     fired_at: str

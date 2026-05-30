@@ -12,6 +12,7 @@ from config import CFG
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
+from services.atlas.lookup import entity_exists_in_scope, metadata_owner_id
 from services.intel.lookup import lookup_entity
 from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
 
@@ -41,12 +42,15 @@ def _snapshot_summary(payload: dict[str, Any], fallback: str = "") -> str:
     return "lookup completed"
 
 
-def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | None:
+def refresh_entity_intel(session_id: str, entity_id: str, *, team_id: str = "") -> dict[str, Any] | None:
     """Refresh provider intel for one Atlas entity and persist snapshots."""
+    metadata_session = metadata_owner_id(session_id, team_id)
     with db_connect() as conn:
+        if not entity_exists_in_scope(conn, session_id, entity_id, team_id=team_id):
+            return None
         entity = conn.execute(
-            "SELECT id, type, canonical_value FROM entities WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
+            "SELECT id, type, canonical_value FROM entities WHERE id = ?",
+            (entity_id,),
         ).fetchone()
         if not entity:
             return None
@@ -108,11 +112,12 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '') "
                 "ON CONFLICT(entity_id, provider) DO UPDATE SET "
-                "status = excluded.status, summary = excluded.summary, data_json = excluded.data_json, "
+                "session_id = excluded.session_id, status = excluded.status, summary = excluded.summary, "
+                "data_json = excluded.data_json, "
                 "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
                 (
                     snapshot_id,
-                    session_id,
+                    metadata_session,
                     entity_id,
                     provider,
                     status,

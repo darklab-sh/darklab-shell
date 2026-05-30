@@ -11,6 +11,7 @@ MIGRATION = Migration(
             id TEXT PRIMARY KEY,
             run_id TEXT NOT NULL,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             variant TEXT NOT NULL,
             prompt_version TEXT NOT NULL DEFAULT '',
             prompt_version_source TEXT NOT NULL DEFAULT 'canonical',
@@ -59,6 +60,10 @@ MIGRATION = Migration(
         """
         CREATE INDEX IF NOT EXISTS idx_ai_run_assists_session_run_variant
         ON ai_run_assists (session_id, run_id, variant, created_at DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_ai_run_assists_team_run_variant
+        ON ai_run_assists (team_id, run_id, variant, created_at DESC)
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_ai_run_assists_status_created

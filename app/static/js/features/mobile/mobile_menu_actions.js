@@ -42,6 +42,7 @@ function dispatchMobileMenuAction(action, btn = null) {
     refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
+  if (action === 'scope' && typeof openTeamScopeSelector === 'function') openTeamScopeSelector();
   if (action === 'projects' && typeof openProjectWorkspace === 'function') void openProjectWorkspace();
   if (action === 'atlas' && typeof openAtlas === 'function') void openAtlas({ source: 'mobile-menu' });
   if (action === 'findings-board' && typeof openFindingsBoard === 'function') void openFindingsBoard({ source: 'mobile-menu' });

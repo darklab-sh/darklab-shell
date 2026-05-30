@@ -33,7 +33,7 @@ curl -H "Authorization: Bearer tok_your_session_token" \
   http://localhost:8888/api/v1/whoami
 ```
 
-`Authorization: Bearer tok_...` is the canonical header. `X-Session-ID: tok_...` is accepted as a compatibility fallback. Anonymous UUID sessions are rejected on `/api/v1/*`, and revoked or unknown tokens return a normal JSON error.
+`Authorization: Bearer tok_...` is the canonical header. `X-Session-ID: tok_...` is accepted as a compatibility fallback. Anonymous UUID sessions are rejected on `/api/v1/*`, and revoked or unknown tokens return a normal JSON error. API requests use personal scope by default; callers can pass `X-Team-ID` or `team_id` when the token belongs to that team.
 
 Errors use one shape:
 
@@ -91,32 +91,44 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/health` | Unauthenticated liveness check. |
 | `GET` | `/api/v1/openapi.json` | Unauthenticated OpenAPI document. |
 | `GET` | `/api/v1/whoami` | Token smoke test with creation metadata and the current successful-auth timestamp, without echoing the token. |
+| `GET` | `/api/v1/teams` | List teams joined by the current token. |
+| `POST` | `/api/v1/teams` | Create a team and return the one-time recovery code. |
+| `GET` | `/api/v1/teams/<team_id>` | Team detail with members, invites, and recovery-code metadata. |
+| `PATCH` | `/api/v1/teams/<team_id>` | Archive or reactivate a team when the token has the required role; reactivation keeps archive-paused schedules and watchers paused. |
+| `POST` | `/api/v1/teams/<team_id>/invites` | Create an invite for a role and return the one-time invite code. |
+| `DELETE` | `/api/v1/teams/<team_id>/invites/<invite_id>` | Revoke an invite. |
+| `POST` | `/api/v1/teams/join` | Join a team with an invite code. |
+| `PATCH` | `/api/v1/teams/<team_id>/members/<member_id>` | Update a member role or display name. |
+| `DELETE` | `/api/v1/teams/<team_id>/members/<member_id>` | Remove a member from a team. |
+| `POST` | `/api/v1/teams/<team_id>/leave` | Leave a team as the current token. |
+| `POST` | `/api/v1/teams/<team_id>/recovery/rotate` | Rotate a team recovery code and return the one-time replacement. |
+| `POST` | `/api/v1/teams/recovery/redeem` | Redeem a recovery code and join as an owner. |
 | `GET` | `/api/v1/history` | Current-token run history with `limit`, `offset`, `project_id`, `q`, `since`, `until`, `run_kind`, and `exit_code` filters. |
 | `GET` | `/api/v1/history/search` | Search saved run output and return line-context matches with `q`, `context`, `limit`, `offset`, and the same history filters. |
 | `GET` | `/api/v1/history/<run_id>` | One current-token run summary. |
 | `GET` | `/api/v1/history/<run_id>/output` | Text output by default, or JSON with `?format=json`; supports `?range=N-M`. |
 | `GET` | `/api/v1/history/<run_id>/artifacts` | Workspace artifact metadata for one run. |
 | `GET` | `/api/v1/history/<run_id>/artifacts/<artifact_id>` | Download one artifact by stable artifact id. |
-| `GET` | `/api/v1/atlas` | Atlas summary counts with optional `project_id`, `run_id`, orphan, and suppression filters. |
-| `GET` | `/api/v1/atlas/runs` | Source runs that currently contribute Atlas entities or findings. |
-| `GET` | `/api/v1/atlas/entities` | Atlas entity page with `entity_type`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
-| `GET` | `/api/v1/atlas/entities/<entity_id>` | One Atlas entity with source runs, findings, intel summary, labels, notes, and project links. |
-| `GET` | `/api/v1/atlas/findings` | Atlas finding page with `review_state`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
-| `GET` | `/api/v1/atlas/findings/<finding_id>` | One Atlas finding with recent source occurrences. |
+| `GET` | `/api/v1/atlas` | Active personal/team-scope Atlas summary counts with optional `project_id`, `run_id`, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/runs` | Active-scope source runs that currently contribute Atlas entities or findings. |
+| `GET` | `/api/v1/atlas/entities` | Active-scope Atlas entity page with `entity_type`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/entities/<entity_id>` | One active-scope Atlas entity with source runs, findings, intel summary, labels, notes, and project links. |
+| `GET` | `/api/v1/atlas/findings` | Active-scope Atlas finding page with `review_state`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/findings/<finding_id>` | One active-scope Atlas finding with recent source occurrences. |
 | `GET` | `/api/v1/projects` | Read-only project list. |
 | `GET` | `/api/v1/projects/<project_id>` | Read-only project detail. |
 | `GET` | `/api/v1/projects/<project_id>/findings` | Read-only project finding page. |
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
-| `GET` | `/api/v1/schedules` | Scheduled-command page for the token session. |
+| `GET` | `/api/v1/schedules` | Scheduled-command page for the token's active personal/team scope. |
 | `POST` | `/api/v1/schedules` | Create a scheduled command with `command`, `cron_expr` or `cadence_preset`, optional `timezone`, and optional `label`. |
 | `GET` | `/api/v1/schedules/<schedule_id>` | One scheduled command plus a next-fire preview. |
 | `PATCH` | `/api/v1/schedules/<schedule_id>` | Update a scheduled command's command, cadence, timezone, label, or enabled state. |
 | `DELETE` | `/api/v1/schedules/<schedule_id>` | Delete a scheduled command. |
 | `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fire a scheduled command immediately and return the updated schedule row. |
 | `GET` | `/api/v1/schedules/<schedule_id>/fires` | Read paged fire audit rows for a scheduled command. |
-| `GET` | `/api/v1/watchers` | Change-detection watcher page for the token session. |
+| `GET` | `/api/v1/watchers` | Change-detection watcher page for the token's active personal/team scope. |
 | `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, and optional command override. |
 | `GET` | `/api/v1/watchers/<watcher_id>` | One change-detection watcher. |
 | `PATCH` | `/api/v1/watchers/<watcher_id>` | Update a watcher's command, cadence, timezone, label, options, or pause/resume state. |
@@ -136,9 +148,9 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Stored run output, with the same `format` and `range` options as the history output route. |
 | `POST` | `/api/v1/runs/<run_id>/wait` | Block until the run finishes or `?timeout=` expires. |
-| `GET` | `/api/v1/runs/<run_id>/ai-assists` | List cached and in-flight AI assists for one completed run. |
-| `POST` | `/api/v1/runs/<run_id>/ai-summary` | Return a cached AI summary or queue one for the AI worker. |
-| `POST` | `/api/v1/runs/<run_id>/ai-next-commands` | Return cached AI next-command drafts or queue them for the AI worker. |
+| `GET` | `/api/v1/runs/<run_id>/ai-assists` | List cached and in-flight AI assists for one completed run in the active personal/team scope. |
+| `POST` | `/api/v1/runs/<run_id>/ai-summary` | Return a cached AI summary or queue one for the AI worker; team scope requires run-command permission. |
+| `POST` | `/api/v1/runs/<run_id>/ai-next-commands` | Return cached AI next-command drafts or queue them for the AI worker; team scope requires run-command permission. |
 | `POST` | `/api/v1/runs/<run_id>/projects/<project_id>` | Link a completed external run to an active project. |
 | `DELETE` | `/api/v1/runs/<run_id>/projects/<project_id>` | Remove a completed external run link from an active project. |
 | `GET` | `/api/v1/runs/<run_id>/stream` | SSE stream by default, or NDJSON with `?format=ndjson`. |
@@ -171,7 +183,7 @@ AI assist responses use this envelope:
 
 `variant` is `summary` or `next_commands`. `status` is `queued`, `in_progress`, `completed`, or `failed`. `GET /api/v1/runs/<run_id>/ai-assists` returns `{"assists":[...]}` with cached and in-flight assists visible to the current token.
 
-`POST /api/v1/runs/<run_id>/ai-summary` and `POST /api/v1/runs/<run_id>/ai-next-commands` return `200` when a completed cached assist is reused and `202` when work is queued or already in progress. Error responses use the normal API error envelope and include:
+`POST /api/v1/runs/<run_id>/ai-summary` and `POST /api/v1/runs/<run_id>/ai-next-commands` return `200` when a completed cached assist is reused and `202` when work is queued or already in progress. In team scope, these trigger routes require run-command permission because they can spend provider resources. Error responses use the normal API error envelope and include:
 
 - `403` with `ai_disabled` or `ai_feature_disabled` when AI or that assist type is off.
 - `404` when the run is not visible to the token.
@@ -184,7 +196,28 @@ AI assist responses include a `progress` object while a queued request is active
 
 Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint`. Next-command payloads use `suggestions`, where accepted and rejected drafts include command text, reason, risk label, validation result, and any rejection reason.
 
-All run, history, artifact, and project routes are scoped to the token session. Cross-session IDs return `404` rather than confirming the object exists elsewhere.
+Run, history, artifact, project, AI assist, schedule, and watcher routes are scoped to the token's active personal/team scope. Cross-scope IDs return `404` rather than confirming the object exists elsewhere.
+
+---
+
+## Teams
+
+Teams let multiple durable session tokens share team-owned data without sharing one token. Browser users manage teams from Options > Teams, API users can call `/api/v1/teams`, and CLI users can use `darklab team`. The terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation; use Options, `/api/v1/teams`, or `darklab team ...` for member updates, member removal, recovery-code redemption, archive/reactivate, and saved CLI scope switching.
+
+```bash
+darklab team create "Ops Team" --slug ops --display-name "Primary token"
+darklab team invite create team_123 --role operator --label "Night shift"
+darklab team join tinv_...
+darklab team switch ops
+darklab team members team_123
+darklab team recovery rotate team_123
+```
+
+`darklab team switch <team-id-or-slug>` writes the selected team to the CLI config file. Use `darklab team switch personal` to clear it. API callers can also pass `X-Team-ID` per request, and the CLI accepts `--team`, `DARKLAB_TEAM`, or `team = "team_..."` in `~/.config/darklab/config.toml`.
+
+Owners can manage owner membership and owner invites, rotate recovery codes, archive or reactivate teams, and use every team-scoped write path. Admins can do operator work and can also manage non-owner members, non-owner invites, shared workflows, notification channels, and shared team secrets, but they cannot rotate recovery codes or manage owners. Operators can run commands, manage shared history and automation, update projects, and triage findings, but they cannot manage membership or shared secrets. Viewers can inspect shared data but cannot start commands or mutate shared resources. Teams always keep at least one active owner, so owner removal or self-demotion that would leave no active owner returns `409 team_owner_required`. Team membership objects include a `capabilities` array with the server-granted permission names for that member role, so API clients can decide which controls to show without copying the role matrix. Role failures return `403` with the normal API error envelope.
+
+Archiving a team pauses team-owned schedules and watchers in place. Archived teams stay readable to members, but active team-scope requests, invite changes, membership edits, and recovery-code rotation are rejected until the team is reactivated. Reactivating the team restores access, but those paused schedules and watchers stay paused until someone resumes them.
 
 ---
 
@@ -268,7 +301,7 @@ Search responses are paged by match row and include `run_id`, `line_number`, the
 
 ## Atlas
 
-The Atlas API is read-only in v1 and follows the same filters as the browser overlay:
+The Atlas API is read-only in v1 and follows the same active personal/team scope and filters as the browser overlay:
 
 ```bash
 darklab atlas summary
@@ -282,7 +315,7 @@ Entity and finding list routes use the same `limit`, `offset`, and filter contra
 
 ## Schedules
 
-Durable `tok_` sessions can manage normal scheduled commands through `/api/v1/schedules` and `darklab schedule`. Schedule create and update calls use the same command-policy checks as browser schedules, so saved commands are validated before they can fire later. Due schedules launch through the same brokered run path as manual runs; history summaries mark those runs with `scheduled: true` and the originating `schedule_id`.
+Durable `tok_` sessions can manage normal scheduled commands through `/api/v1/schedules` and `darklab schedule`. Direct API callers can add `X-Team-ID` or `team_id` to work inside a team scope they belong to; otherwise schedules use personal scope. Schedule create and update calls use the same command-policy checks as browser schedules, so saved commands are validated before they can fire later. Due schedules launch through the same brokered run path as manual runs and keep the scope they were created in; history summaries mark those runs with `scheduled: true` and the originating `schedule_id`.
 
 ```bash
 darklab schedule create --every hourly -- nmap -p 80 darklab.sh
@@ -306,7 +339,7 @@ Schedule list and fire-audit routes use the normal `limit`, `offset`, and `has_m
 
 ## Watchers
 
-Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. A watcher can start from a completed baseline run, or it can capture its first successful fire as the baseline. Each watcher owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares later completed fires against the current baseline.
+Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. Direct API callers can add `X-Team-ID` or `team_id` to work inside a team scope they belong to; otherwise watchers use personal scope. A watcher can start from a completed baseline run in the same scope, or it can capture its first successful fire as the baseline. Each watcher owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares later completed fires against the current baseline.
 
 ```bash
 darklab watch create --first-run --every hourly -- nmap -sV darklab.sh
@@ -331,7 +364,7 @@ Watcher notifications use `watcher_changed`, `watcher_error`, and `watcher_recov
 
 ## Notifications
 
-Durable `tok_` sessions can manage outbound notification channels through the API and CLI. GET responses never include raw secret values. Create and update calls accept `secret_values`, store those values in the server vault, and return only `secret_fields` metadata that says which required fields are configured.
+Durable `tok_` sessions can manage outbound notification channels through the API and CLI. Add `X-Team-ID` to browser/API requests to work in a team scope; owners and admins can create or change team channels, and all team members can read delivery audit rows. GET responses never include raw secret values. Create and update calls accept `secret_values`, store those values in the server vault, and return only `secret_fields` metadata that says which required fields are configured.
 
 ```bash
 darklab notify create webhook \
@@ -452,6 +485,16 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
+| `darklab team list\|status [--format text\|json]` | List joined teams or show the active CLI scope. |
+| `darklab team create <name> [--slug SLUG] [--display-name NAME] [--format text\|json]` | Create a team and print the one-time recovery code. |
+| `darklab team switch <team-id\|slug\|name\|personal>` | Save the active CLI team scope, or clear it with `personal`. |
+| `darklab team info\|members <team_id> [--format text\|json]` | Inspect one team and its members. |
+| `darklab team invite create <team_id> --role owner\|admin\|operator\|viewer [--label TEXT] [--expires-at ISO_TIME] [--max-uses N] [--format text\|json]` | Create an invite and print the one-time invite code. |
+| `darklab team invite revoke <team_id> <invite_id> [--format text\|json]` | Revoke a pending invite. |
+| `darklab team join <invite-code> [--display-name NAME] [--format text\|json]` | Join a team from an invite code. |
+| `darklab team member update\|remove <team_id> <member_id> ...` | Update a member role/display name or remove a member. |
+| `darklab team leave <team_id> [--format text\|json]` | Leave a team. |
+| `darklab team recovery rotate\|redeem ...` | Rotate a team recovery code or redeem one as an owner. |
 | `darklab schedule list [--limit N] [--offset N] [--format text\|json\|ndjson]` | List scheduled commands. `--limit` defaults to 50 and caps at 100. |
 | `darklab schedule create (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] -- COMMAND` | Create a scheduled command from shell-shaped arguments after `--`. |
 | `darklab schedule info <schedule_id>` | Inspect one scheduled command, including cadence, next fires, last fire, and recent fire audit rows. |
@@ -494,8 +537,8 @@ For zsh, make sure `~/.zfunc` is on `fpath` and `compinit` is loaded.
 
 Config precedence is:
 
-1. flags such as `--api-url`, `--token`, and `--timeout`
-2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TIMEOUT`
+1. flags such as `--api-url`, `--token`, `--team`, and `--timeout`
+2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, `DARKLAB_TIMEOUT`
 3. `~/.config/darklab/config.toml`
 4. defaults
 
@@ -504,10 +547,11 @@ Example config file:
 ```toml
 api_url = "https://shell.example.com"
 token = "tok_your_session_token"
+team = "team_optional_scope"
 timeout = 30
 ```
 
-`api_url` must include `http://` or `https://`. Local and LAN URLs can use plain HTTP and custom ports, such as `http://192.168.1.3:9999`. The config file is parsed as TOML, so normal TOML quoting, inline comments, and numeric values work as expected.
+`api_url` must include `http://` or `https://`. Local and LAN URLs can use plain HTTP and custom ports, such as `http://192.168.1.3:9999`. The config file is parsed as TOML, so normal TOML quoting, inline comments, and numeric values work as expected. When the CLI writes this file, it sets owner-only `0600` permissions because the file can contain a session token.
 
 ---
 

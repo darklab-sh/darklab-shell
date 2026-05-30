@@ -29,6 +29,7 @@ from services.commands.registry import (
 from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
 from services.intel.registry import app_native_secret_consumers, provider_status_catalog
+from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
 from services.workflows.user_workflows import list_user_workflows
 from services.commands.wordlists import wordlist_autocomplete_items
 
@@ -324,7 +325,16 @@ def faq():
 @content_bp.route("/workflows")
 def workflows():
     """Return user-created, built-in, and custom workflows.yaml entries."""
-    items = [*list_user_workflows(get_session_id()), *load_all_workflows(_config.CFG)]
+    session_id = get_session_id()
+    user_items = []
+    if session_id:
+        try:
+            scope = current_request_scope(session_id, request)
+        except RequestScopeError as exc:
+            payload, status = scope_error_payload(exc)
+            return jsonify(payload), status
+        user_items = list_user_workflows(session_id, team_id=scope.team_id)
+    items = [*user_items, *load_all_workflows(_config.CFG)]
     _log_content_view("/workflows", count=len(items))
     return jsonify({"items": items})
 

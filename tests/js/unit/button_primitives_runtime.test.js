@@ -150,6 +150,7 @@ function mountMobileHarness({
   openHistoryWithFilters = undefined,
   resetHistoryMobileFilters = undefined,
   dispatchMobileMenuAction = undefined,
+  activeTeamScopeCan = undefined,
 } = {}) {
   document.body.className = 'mobile-terminal-mode'
   document.body.innerHTML = `
@@ -236,6 +237,7 @@ function mountMobileHarness({
     resetHistoryMobileFilters,
     dispatchMobileMenuAction,
     openHistoryRunDetails: vi.fn(),
+    activeTeamScopeCan,
   }
 
   window.apiFetch = apiFetch
@@ -253,6 +255,8 @@ function mountMobileHarness({
   window.openHistoryWithFilters = openHistoryWithFilters
   window.resetHistoryMobileFilters = resetHistoryMobileFilters
   window.dispatchMobileMenuAction = dispatchMobileMenuAction
+  if (activeTeamScopeCan) window.activeTeamScopeCan = activeTeamScopeCan
+  else delete window.activeTeamScopeCan
 
   fromDomScripts(
     ['app/static/js/mobile_chrome.js'],
@@ -334,5 +338,26 @@ describe('runtime button primitive contract', () => {
 
     expect(resetHistoryMobileFilters).toHaveBeenCalled()
     expect(openHistoryWithFilters).toHaveBeenCalledWith()
+  })
+
+  it('mobile recents hides write-only actions for view-only team scope', async () => {
+    const { mobileRecentPeek } = mountMobileHarness({
+      activeTeamScopeCan: vi.fn(() => false),
+    })
+
+    mobileRecentPeek.click()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.getElementById('mobile-recents-clear')?.classList.contains('u-hidden')).toBe(true)
+    document.querySelector('.sheet-item-action-menu-trigger')?.click()
+    const menuText = document.querySelector('.sheet-item-action-menu')?.textContent || ''
+    expect(menuText).toContain('permalink')
+    expect(menuText).toContain('compare')
+    expect(menuText).toContain('copy run id')
+    expect(menuText).not.toContain('edit')
+    expect(menuText).not.toContain('add to active project')
+    expect(menuText).not.toContain('add to project')
+    expect(menuText).not.toContain('delete')
   })
 })

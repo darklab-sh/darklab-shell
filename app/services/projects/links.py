@@ -12,6 +12,7 @@ from core.database import (
     validate_project_link_source,
 )
 from core.database_backend import dialect_for_backend
+from services.atlas.lookup import entity_exists_in_scope
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     MAX_BULK_RUN_ACTION_ITEMS,
@@ -26,7 +27,9 @@ from services.projects.preferences import (
     load_session_preferences as _load_session_preferences,
     project_auto_link_external_runs_enabled as _project_auto_link_external_runs_enabled,
     project_auto_link_run_entities_enabled as _project_auto_link_run_entities_enabled,
+    save_session_preferences as _save_session_preferences,
 )
+from services.projects.scope import shared_owner_where
 from services.projects.utils import (
     new_project_link_id as _new_project_link_id,
     now as _now,
@@ -61,6 +64,13 @@ def _consume_budget(budget):
     return None if budget is None else max(0, budget - 1)
 
 
+def _active_project_preference_key(team_id=""):
+    normalized_team_id = str(team_id or "").strip()
+    if normalized_team_id:
+        return f"{ACTIVE_PROJECT_PREF_KEY}:{normalized_team_id}"
+    return ACTIVE_PROJECT_PREF_KEY
+
+
 def _project_link_count(conn, project_id, *, entity_type=None):
     if entity_type:
         row = conn.execute(
@@ -91,23 +101,31 @@ def _project_link_budgets(conn, project_id, entity_type):
     return link_budget, entity_budget
 
 
-def link_run_to_active_project(conn, session_id, run_id):
+def link_run_to_active_project(conn, session_id, run_id, *, team_id=""):
     if not _project_auto_link_external_runs_enabled(conn, session_id):
         return None
     preferences = _load_session_preferences(conn, session_id)
-    project_id = str(preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
+    preference_key = _active_project_preference_key(team_id)
+    project_id = str(preferences.get(preference_key) or "")
     if not project_id:
         return None
+    project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
     project = conn.execute(
-        "SELECT id, name, slug FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
-        (session_id, project_id),
+        "SELECT id, name, slug FROM projects "
+        "WHERE " + project_owner_sql + " AND id = ? AND status != 'archived'",  # nosec
+        (*project_owner_params, project_id),
     ).fetchone()
     if not project:
-        _clear_active_project_preference(conn, session_id)
+        if preference_key == ACTIVE_PROJECT_PREF_KEY:
+            _clear_active_project_preference(conn, session_id)
+        else:
+            preferences.pop(preference_key, None)
+            _save_session_preferences(conn, session_id, preferences)
         return None
+    run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id)
     run = conn.execute(
-        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
-        (session_id, run_id),
+        "SELECT command, run_kind FROM runs WHERE " + run_owner_sql + " AND id = ?",  # nosec
+        (*run_owner_params, run_id),
     ).fetchone()
     if not run:
         return None
@@ -137,17 +155,20 @@ def link_run_to_active_project(conn, session_id, run_id):
     raise ProjectWorkspaceError("could not allocate an active project link id")
 
 
-def link_run_to_project_on_conn(conn, session_id, project_id, run_id, *, source="manual"):
+def link_run_to_project_on_conn(conn, session_id, project_id, run_id, *, source="manual", team_id=""):
     source = validate_project_link_source(source)
+    project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
+    run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id)
     project = conn.execute(
-        "SELECT id, name, slug FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
-        (session_id, project_id),
+        "SELECT id, name, slug FROM projects "
+        "WHERE " + project_owner_sql + " AND id = ? AND status != 'archived'",  # nosec
+        (*project_owner_params, project_id),
     ).fetchone()
     if not project:
         raise ProjectWorkspaceNotFound("project not found")
     run = conn.execute(
-        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
-        (session_id, run_id),
+        "SELECT command, run_kind FROM runs WHERE " + run_owner_sql + " AND id = ?",  # nosec
+        (*run_owner_params, run_id),
     ).fetchone()
     if not run:
         raise ProjectWorkspaceNotFound("run not found")
@@ -193,7 +214,7 @@ def link_run_to_project_on_conn(conn, session_id, project_id, run_id, *, source=
     raise ProjectWorkspaceError("could not allocate a project link id")
 
 
-def link_active_project_run_entities(conn, session_id, project_id, run_id):
+def link_active_project_run_entities(conn, session_id, project_id, run_id, *, team_id=""):
     if not _project_auto_link_run_entities_enabled(conn, session_id):
         return None
     return _link_project_run_entities_on_conn(
@@ -202,6 +223,7 @@ def link_active_project_run_entities(conn, session_id, project_id, run_id):
         project_id,
         [run_id],
         source="active_project",
+        team_id=team_id,
     )
 
 
@@ -239,12 +261,13 @@ def _insert_project_link(
     raise ProjectWorkspaceError("could not allocate a project link id")
 
 
-def _run_entity_ids_for_project_link(conn, session_id, run_ids):
+def _run_entity_ids_for_project_link(conn, session_id, run_ids, *, team_id=""):
     normalized_run_ids = [str(run_id or "").strip() for run_id in run_ids]
     normalized_run_ids = [run_id for run_id in normalized_run_ids if run_id]
     if not normalized_run_ids:
         return []
     placeholders = ",".join("?" for _ in normalized_run_ids)
+    run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
     rows = conn.execute(
         "SELECT linked.id "
         "FROM ("
@@ -252,11 +275,12 @@ def _run_entity_ids_for_project_link(conn, session_id, run_ids):
         "  FROM entity_run_links erl "
         "  JOIN entities e ON e.id = erl.entity_id "
         "  JOIN runs r ON r.id = erl.run_id "
-        f"  WHERE r.session_id = ? AND e.session_id = ? AND erl.run_id IN ({placeholders}) "  # nosec
+        "  WHERE " + run_owner_sql + " AND e.session_id = ? "  # nosec
+        f"  AND erl.run_id IN ({placeholders}) "
         "  GROUP BY e.id"
         ") linked "
         "ORDER BY linked.sort_seen_at DESC, linked.sort_value ASC",
-        [session_id, session_id, *normalized_run_ids],
+        [*run_owner_params, session_id, *normalized_run_ids],
     ).fetchall()
     return [str(row["id"]) for row in rows if row["id"]]
 
@@ -381,21 +405,22 @@ def _attach_project_run_entity_unlink_finding_stats(conn, stats, session_id, pro
     stats["kept_curated_findings"] = stats["curated_findings"]
 
 
-def preview_project_run_entity_links(session_id, project_id, data):
+def preview_project_run_entity_links(session_id, project_id, data, *, team_id=""):
     run_ids = _normalize_project_run_ids_payload(data)
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
-        run_maps = _bulk_project_run_maps(conn, session_id, run_ids)
+        run_maps = _bulk_project_run_maps(conn, session_id, run_ids, team_id=team_id)
         if any(run_id not in run_maps["owned"] for run_id in run_ids):
             raise ProjectWorkspaceNotFound("run not found for this session")
         if any(run_id not in run_maps["linkable"] for run_id in run_ids):
             raise ProjectWorkspaceError("project links only support external runs")
-        entity_ids = _run_entity_ids_for_project_link(conn, session_id, run_ids)
+        entity_ids = _run_entity_ids_for_project_link(conn, session_id, run_ids, team_id=team_id)
         stats = _project_run_entity_link_stats(conn, project_id, entity_ids)
     stats["run_count"] = len(run_ids)
     return stats
@@ -529,23 +554,24 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
     return stats, removable_ids
 
 
-def preview_project_run_entity_unlinks(session_id, project_id, data):
+def preview_project_run_entity_unlinks(session_id, project_id, data, *, team_id=""):
     run_ids = _normalize_project_run_ids_payload(data)
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
-        run_maps = _bulk_project_run_maps(conn, session_id, run_ids)
+        run_maps = _bulk_project_run_maps(conn, session_id, run_ids, team_id=team_id)
         if any(run_id not in run_maps["owned"] for run_id in run_ids):
             raise ProjectWorkspaceNotFound("run not found for this session")
         stats, _ = _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids)
     return stats
 
 
-def unlink_project_run_entities(session_id, project_id, run_ids, *, include_curated=False):
+def unlink_project_run_entities(session_id, project_id, run_ids, *, include_curated=False, team_id=""):
     normalized_run_ids = []
     seen = set()
     for raw_run_id in run_ids:
@@ -556,13 +582,14 @@ def unlink_project_run_entities(session_id, project_id, run_ids, *, include_cura
         normalized_run_ids.append(run_id)
     with db_connect() as conn:
         conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
-        run_maps = _bulk_project_run_maps(conn, session_id, normalized_run_ids)
+        run_maps = _bulk_project_run_maps(conn, session_id, normalized_run_ids, team_id=team_id)
         owned_run_ids = [run_id for run_id in normalized_run_ids if run_id in run_maps["owned"]]
         stats, removable_ids = _project_run_entity_unlink_candidates(
             conn,
@@ -586,7 +613,7 @@ def unlink_project_run_entities(session_id, project_id, run_ids, *, include_cura
     return stats
 
 
-def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, source="manual"):
+def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, source="manual", *, team_id=""):
     source = validate_project_link_source(source)
     normalized_run_ids = [
         _trim_text(run_id, MAX_ENTITY_ID_LEN)
@@ -595,15 +622,16 @@ def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, so
     normalized_run_ids = [run_id for run_id in normalized_run_ids if run_id]
     if not normalized_run_ids:
         return _project_run_entity_link_stats(conn, project_id, [])
+    project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
     project = conn.execute(
-        "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-        [session_id, project_id],
+        "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+        [*project_owner_params, project_id],
     ).fetchone()
     if not project:
         return None
-    run_maps = _bulk_project_run_maps(conn, session_id, normalized_run_ids)
+    run_maps = _bulk_project_run_maps(conn, session_id, normalized_run_ids, team_id=team_id)
     linkable_run_ids = [run_id for run_id in normalized_run_ids if run_id in run_maps["linkable"]]
-    entity_ids = _run_entity_ids_for_project_link(conn, session_id, linkable_run_ids)
+    entity_ids = _run_entity_ids_for_project_link(conn, session_id, linkable_run_ids, team_id=team_id)
     stats = _project_run_entity_link_stats(conn, project_id, entity_ids)
     new_link_budget, new_entity_budget = _project_link_budgets(conn, project_id, "atlas_entity")
     linked_rows = set()
@@ -632,10 +660,10 @@ def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, so
     return stats
 
 
-def link_project_run_entities(session_id, project_id, run_ids, source="manual"):
+def link_project_run_entities(session_id, project_id, run_ids, source="manual", *, team_id=""):
     with db_connect() as conn:
         conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
-        stats = _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, source=source)
+        stats = _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, source=source, team_id=team_id)
         conn.commit()
     return stats
 
@@ -735,21 +763,33 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     return row is not None
 
 
-def _run_is_project_linkable(conn, session_id, run_id):
+def _run_is_project_linkable(conn, session_id, run_id, *, team_id=""):
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
     row = conn.execute(
-        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
-        (session_id, run_id),
+        "SELECT command, run_kind FROM runs WHERE " + owner_sql + " AND id = ?",  # nosec
+        (*owner_params, run_id),
     ).fetchone()
     if not row:
         return False
     return is_project_linkable_run_kind(normalize_run_kind(row["run_kind"], command=str(row["command"] or "")))
 
 
-def list_project_links(session_id, project_id):
+def _run_belongs_to_owner(conn, session_id, run_id, *, team_id=""):
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
+    row = conn.execute(
+        "SELECT 1 FROM runs WHERE " + owner_sql + " AND id = ?",  # nosec
+        (*owner_params, run_id),
+    ).fetchone()
+    return row is not None
+
+
+def list_project_links(session_id, project_id, *, team_id=""):
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
+        run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            (*project_owner_params, project_id),
         ).fetchone()
         if not project:
             return None
@@ -757,26 +797,35 @@ def list_project_links(session_id, project_id):
             "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created "
             "FROM project_links l JOIN runs r ON r.id = l.entity_id "
             "WHERE l.project_id = ? AND l.entity_type = 'run' "
-            "AND r.session_id = ? AND r.run_kind = ? "
+            "AND " + run_owner_sql + " AND r.run_kind = ? "  # nosec
             "ORDER BY l.created DESC",
-            (project_id, session_id, RUN_KIND_EXTERNAL),
+            (project_id, *run_owner_params, RUN_KIND_EXTERNAL),
         ).fetchall()
     return [_row_to_link(row) for row in rows]
 
 
-def link_project_entity(session_id, project_id, data):
+def link_project_entity(session_id, project_id, data, *, team_id=""):
     entity_type, entity_id, source = _normalize_link_payload(data)
     created = _now()
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            (*project_owner_params, project_id),
         ).fetchone()
         if not project:
             return None
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+        if entity_type == "run":
+            entity_exists = _run_belongs_to_owner(conn, session_id, entity_id, team_id=team_id)
+        else:
+            entity_exists = (
+                entity_exists_in_scope(conn, session_id, entity_id, team_id=team_id)
+                if entity_type == "atlas_entity"
+                else not team_id and _entity_belongs_to_session(conn, session_id, entity_type, entity_id)
+            )
+        if not entity_exists:
             raise ProjectWorkspaceNotFound(f"{entity_type} not found for this session")
-        if entity_type == "run" and not _run_is_project_linkable(conn, session_id, entity_id):
+        if entity_type == "run" and not _run_is_project_linkable(conn, session_id, entity_id, team_id=team_id):
             raise ProjectWorkspaceError("project links only support external runs")
         row = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
@@ -829,11 +878,12 @@ def _project_bulk_result(statuses, entity_type, entity_id, status, *, reason=Non
     return item
 
 
-def _bulk_project_run_maps(conn, session_id, run_ids):
+def _bulk_project_run_maps(conn, session_id, run_ids, *, team_id=""):
     placeholders = ",".join("?" for _ in run_ids)
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
     owned_rows = conn.execute(
-        f"SELECT id, command, run_kind FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-        [session_id, *run_ids],
+        "SELECT id, command, run_kind FROM runs WHERE " + owner_sql + f" AND id IN ({placeholders})",  # nosec
+        [*owner_params, *run_ids],
     ).fetchall()
     owned = {str(row["id"]) for row in owned_rows}
     linkable = {
@@ -847,9 +897,18 @@ def _bulk_project_run_maps(conn, session_id, run_ids):
     }
 
 
-def _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids):
+def _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids, *, team_id=""):
     if entity_type == "run":
-        return _bulk_project_run_maps(conn, session_id, entity_ids)
+        return _bulk_project_run_maps(conn, session_id, entity_ids, team_id=team_id)
+    if team_id:
+        owned = set()
+        for entity_id in entity_ids:
+            if entity_exists_in_scope(conn, session_id, entity_id, team_id=team_id):
+                owned.add(entity_id)
+        return {
+            "owned": owned,
+            "linkable": set(owned),
+        }
     if entity_type != "atlas_entity":
         return {"owned": set(), "linkable": set()}
     placeholders = ",".join("?" for _ in entity_ids)
@@ -864,7 +923,7 @@ def _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids):
     }
 
 
-def link_project_entities(session_id, project_id, data):
+def link_project_entities(session_id, project_id, data, *, team_id=""):
     entity_type, entity_ids, source = _normalize_bulk_link_payload(data)
     counts = {
         "added": 0,
@@ -877,13 +936,14 @@ def link_project_entities(session_id, project_id, data):
     results = []
     with db_connect() as conn:
         conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
-        entity_maps = _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids)
+        entity_maps = _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids, team_id=team_id)
         placeholders = ",".join("?" for _ in entity_ids)
         link_rows = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "  # nosec
@@ -916,13 +976,14 @@ def link_project_entities(session_id, project_id, data):
     return {"ok": True, "counts": counts, "results": results, "links": links}
 
 
-def unlink_project_entity(session_id, project_id, data):
+def unlink_project_entity(session_id, project_id, data, *, team_id=""):
     raw = data if isinstance(data, dict) else {}
     entity_type, entity_id, _ = _normalize_link_payload({**raw, "source": "manual"})
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
@@ -934,7 +995,7 @@ def unlink_project_entity(session_id, project_id, data):
     return result.rowcount > 0
 
 
-def unlink_project_entities(session_id, project_id, data):
+def unlink_project_entities(session_id, project_id, data, *, team_id=""):
     entity_type, entity_ids, _ = _normalize_bulk_link_payload({**(data if isinstance(data, dict) else {}), "source": "manual"})
     counts = {
         "added": 0,
@@ -946,13 +1007,14 @@ def unlink_project_entities(session_id, project_id, data):
     }
     results = []
     with db_connect() as conn:
+        project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            [session_id, project_id],
+            "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
+            [*project_owner_params, project_id],
         ).fetchone()
         if not project:
             return None
-        entity_maps = _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids)
+        entity_maps = _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids, team_id=team_id)
         placeholders = ",".join("?" for _ in entity_ids)
         link_rows = conn.execute(
             "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = ? "  # nosec

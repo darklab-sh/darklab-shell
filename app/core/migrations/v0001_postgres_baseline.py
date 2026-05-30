@@ -10,6 +10,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS runs (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             run_kind TEXT NOT NULL DEFAULT 'external',
             owner_tab_id TEXT NOT NULL DEFAULT '',
             command TEXT NOT NULL,
@@ -51,6 +52,7 @@ MIGRATION = Migration(
             id TEXT PRIMARY KEY,
             run_id TEXT NOT NULL,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             variant TEXT NOT NULL,
             prompt_version TEXT NOT NULL DEFAULT '',
             prompt_version_source TEXT NOT NULL DEFAULT 'canonical',
@@ -100,6 +102,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS snapshots (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             label TEXT NOT NULL,
             created TEXT NOT NULL,
             content TEXT NOT NULL
@@ -110,6 +113,72 @@ MIGRATION = Migration(
             token TEXT PRIMARY KEY,
             created TEXT NOT NULL,
             last_seen_at TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS teams (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_by_member_id TEXT NOT NULL DEFAULT '',
+            created_by_session_token_hash TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            archived_at TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (slug),
+            CHECK (status IN ('active', 'archived', 'deleted'))
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS team_members (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            session_token TEXT,
+            session_token_hash TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            invited_by_member_id TEXT NOT NULL DEFAULT '',
+            joined_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL DEFAULT '',
+            removed_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (team_id, session_token_hash),
+            FOREIGN KEY (session_token) REFERENCES session_tokens(token) ON DELETE SET NULL,
+            CHECK (role IN ('owner', 'admin', 'operator', 'viewer')),
+            CHECK (status IN ('active', 'removed'))
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS team_invites (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_by_member_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL DEFAULT '',
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            revoked_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE (code_hash),
+            CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS team_recovery_codes (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            created_by_member_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            rotated_at TEXT NOT NULL DEFAULT '',
+            revoked_at TEXT NOT NULL DEFAULT '',
+            used_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (code_hash)
         )
         """,
         """
@@ -139,6 +208,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS user_workflows (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             title TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             inputs JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -150,11 +220,12 @@ MIGRATION = Migration(
         """
         CREATE TABLE IF NOT EXISTS recent_values (
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             kind TEXT NOT NULL,
             value TEXT NOT NULL,
             last_used TEXT NOT NULL,
             use_count BIGINT NOT NULL DEFAULT 1,
-            PRIMARY KEY (session_id, kind, value)
+            PRIMARY KEY (session_id, team_id, kind, value)
         )
         """,
         """
@@ -173,6 +244,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS notification_channels (
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             kind TEXT NOT NULL,
             label TEXT NOT NULL DEFAULT '',
             secrets_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -188,6 +260,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS notification_events (
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             channel_id TEXT NOT NULL,
             trigger TEXT NOT NULL,
             payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -208,6 +281,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS schedules (
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             owner_kind TEXT NOT NULL DEFAULT 'user',
             owner_id TEXT NOT NULL DEFAULT '',
             kind TEXT NOT NULL DEFAULT 'command',
@@ -236,6 +310,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS schedule_fires (
             id TEXT PRIMARY KEY,
             schedule_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             owner_kind TEXT NOT NULL,
             owner_id TEXT NOT NULL DEFAULT '',
             fired_at TEXT NOT NULL,
@@ -250,6 +325,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS watchers (
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             label TEXT NOT NULL DEFAULT '',
             command_text TEXT NOT NULL,
             schedule_id TEXT NOT NULL UNIQUE,
@@ -272,6 +348,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS watcher_fires (
             id TEXT PRIMARY KEY,
             watcher_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             baseline_run_id TEXT NOT NULL,
             run_id TEXT NOT NULL,
             diff_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -288,14 +365,14 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS projects (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL,
             slug TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'active',
             color TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
-            updated TEXT NOT NULL,
-            UNIQUE (session_id, slug)
+            updated TEXT NOT NULL
         )
         """,
         """
@@ -317,6 +394,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS entities (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             type TEXT NOT NULL,
             canonical_value TEXT NOT NULL,
             signature_hash TEXT NOT NULL,
@@ -326,8 +404,7 @@ MIGRATION = Migration(
             suppressed BOOLEAN NOT NULL DEFAULT FALSE,
             suppressed_reason TEXT NOT NULL DEFAULT '',
             suppressed_at TEXT NOT NULL DEFAULT '',
-            created TEXT NOT NULL,
-            UNIQUE (session_id, type, signature_hash)
+            created TEXT NOT NULL
         )
         """,
         """
@@ -374,6 +451,7 @@ MIGRATION = Migration(
         CREATE TABLE IF NOT EXISTS findings (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
             run_id TEXT NOT NULL DEFAULT '',
             target_id TEXT NOT NULL DEFAULT '',
             scope TEXT NOT NULL DEFAULT 'finding',
@@ -454,11 +532,16 @@ MIGRATION = Migration(
         "CREATE INDEX IF NOT EXISTS idx_runs_session_started ON runs (session_id, started DESC)",
         "CREATE INDEX IF NOT EXISTS idx_runs_session_command_started ON runs (session_id, command, started DESC)",
         "CREATE INDEX IF NOT EXISTS idx_runs_session_kind_started ON runs (session_id, run_kind, started DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_runs_team_started ON runs (team_id, started DESC)",
         "CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)",
         "CREATE INDEX IF NOT EXISTS idx_run_output_summary_lookup ON run_output_summary (family, value, run_id)",
         """
         CREATE INDEX IF NOT EXISTS idx_ai_run_assists_session_run_variant
         ON ai_run_assists (session_id, run_id, variant, created_at DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_ai_run_assists_team_run_variant
+        ON ai_run_assists (team_id, run_id, variant, created_at DESC)
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_ai_run_assists_status_created
@@ -471,6 +554,24 @@ MIGRATION = Migration(
         """,
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)",
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session_created ON snapshots (session_id, created DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_team_created ON snapshots (team_id, created DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_teams_status_updated ON teams (status, updated_at DESC)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_team_members_team_status_role
+        ON team_members (team_id, status, role)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_team_members_session_token_hash
+        ON team_members (session_token_hash)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_team_invites_team_active
+        ON team_invites (team_id, revoked_at, expires_at)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_team_recovery_codes_team_active
+        ON team_recovery_codes (team_id, revoked_at, used_at)
+        """,
         "CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)",
         "CREATE INDEX IF NOT EXISTS idx_session_variables_session ON session_variables (session_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_workflows_session ON user_workflows (session_id)",
@@ -479,8 +580,16 @@ MIGRATION = Migration(
         ON user_workflows (session_id, updated DESC, created DESC)
         """,
         """
+        CREATE INDEX IF NOT EXISTS idx_user_workflows_team_updated_created
+        ON user_workflows (team_id, updated DESC, created DESC)
+        """,
+        """
         CREATE INDEX IF NOT EXISTS idx_recent_values_session_kind_last_used
         ON recent_values (session_id, kind, last_used DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_recent_values_team_kind_last_used
+        ON recent_values (team_id, kind, last_used DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_secrets_session_updated ON secrets (session_token, updated_at DESC)",
         """
@@ -488,8 +597,16 @@ MIGRATION = Migration(
         ON notification_channels (session_token, kind, updated DESC)
         """,
         """
+        CREATE INDEX IF NOT EXISTS idx_notification_channels_team_kind_updated
+        ON notification_channels (team_id, kind, updated DESC)
+        """,
+        """
         CREATE INDEX IF NOT EXISTS idx_notification_channels_session_muted
         ON notification_channels (session_token, muted)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_notification_channels_team_muted
+        ON notification_channels (team_id, muted)
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_notification_events_status_next_attempt
@@ -498,6 +615,10 @@ MIGRATION = Migration(
         """
         CREATE INDEX IF NOT EXISTS idx_notification_events_session_created
         ON notification_events (session_token, created DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_notification_events_team_created
+        ON notification_events (team_id, created DESC)
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_notification_events_channel_created
@@ -509,14 +630,26 @@ MIGRATION = Migration(
         CREATE INDEX IF NOT EXISTS idx_schedules_session_updated
         ON schedules (session_token, owner_kind, updated DESC)
         """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_schedules_team_updated
+        ON schedules (team_id, owner_kind, updated DESC)
+        """,
         "CREATE INDEX IF NOT EXISTS idx_schedules_owner ON schedules (owner_kind, owner_id)",
         """
         CREATE INDEX IF NOT EXISTS idx_schedule_fires_schedule_fired
         ON schedule_fires (schedule_id, fired_at DESC)
         """,
         """
+        CREATE INDEX IF NOT EXISTS idx_schedule_fires_team_schedule
+        ON schedule_fires (team_id, schedule_id, fired_at DESC)
+        """,
+        """
         CREATE INDEX IF NOT EXISTS idx_watchers_session_updated
         ON watchers (session_token, updated DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_watchers_team_updated
+        ON watchers (team_id, updated DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_watchers_schedule ON watchers (schedule_id)",
         "CREATE INDEX IF NOT EXISTS idx_watchers_baseline ON watchers (baseline_run_id)",
@@ -524,15 +657,58 @@ MIGRATION = Migration(
         CREATE INDEX IF NOT EXISTS idx_watcher_fires_watcher_created
         ON watcher_fires (watcher_id, created DESC)
         """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_watcher_fires_team_watcher
+        ON watcher_fires (team_id, watcher_id, created DESC)
+        """,
         "CREATE INDEX IF NOT EXISTS idx_watcher_fires_run ON watcher_fires (run_id)",
         "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated ON projects (session_id, status, updated DESC)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_slug_unique
+        ON projects (session_id, slug)
+        WHERE team_id = ''
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_projects_team_status_updated ON projects (team_id, status, updated DESC)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_team_slug_unique
+        ON projects (team_id, slug)
+        WHERE team_id != ''
+        """,
         """
         CREATE INDEX IF NOT EXISTS idx_project_links_project_entity_created
         ON project_links (project_id, entity_type, created DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_project_links_entity_lookup ON project_links (entity_type, entity_id)",
-        "CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen ON entities (session_id, type, last_seen_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_entities_session_value ON entities (session_id, canonical_value)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen
+        ON entities (session_id, type, last_seen_at DESC)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_session_value
+        ON entities (session_id, canonical_value)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_personal_signature
+        ON entities (session_id, type, signature_hash)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_team_signature
+        ON entities (team_id, type, signature_hash)
+        WHERE team_id != ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_team_type_last_seen
+        ON entities (team_id, type, last_seen_at DESC)
+        WHERE team_id != ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_team_value
+        ON entities (team_id, canonical_value)
+        WHERE team_id != ''
+        """,
         "CREATE INDEX IF NOT EXISTS idx_entity_run_links_run ON entity_run_links (run_id)",
         """
         CREATE INDEX IF NOT EXISTS idx_entity_run_links_entity_seen
@@ -547,22 +723,57 @@ MIGRATION = Migration(
         ON run_file_artifacts (session_id, run_id, workspace_path)
         """,
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_session_signature
-        ON findings (session_id, signature_hash) WHERE signature_hash != ''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_personal_signature
+        ON findings (session_id, signature_hash)
+        WHERE team_id = '' AND signature_hash != ''
         """,
-        "CREATE INDEX IF NOT EXISTS idx_findings_session_status ON findings (session_id, status)",
-        "CREATE INDEX IF NOT EXISTS idx_findings_session_entity_seen ON findings (session_id, entity_id, last_seen_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_findings_session_run_seen ON findings (session_id, run_id, last_seen_at DESC)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_team_signature
+        ON findings (team_id, signature_hash)
+        WHERE team_id != '' AND signature_hash != ''
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_findings_session_status ON findings (session_id, status) WHERE team_id = ''",
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_session_entity_seen
+        ON findings (session_id, entity_id, last_seen_at DESC)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_session_run_seen
+        ON findings (session_id, run_id, last_seen_at DESC)
+        WHERE team_id = ''
+        """,
         """
         CREATE INDEX IF NOT EXISTS idx_findings_session_first_run_seen
         ON findings (session_id, first_run_id, last_seen_at DESC)
+        WHERE team_id = ''
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_findings_session_last_run_seen
         ON findings (session_id, last_run_id, last_seen_at DESC)
+        WHERE team_id = ''
         """,
-        "CREATE INDEX IF NOT EXISTS idx_findings_session_tool_seen ON findings (session_id, tool_root, last_seen_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_findings_session_severity_seen ON findings (session_id, severity, last_seen_at DESC)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_session_tool_seen
+        ON findings (session_id, tool_root, last_seen_at DESC)
+        WHERE team_id = ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_session_severity_seen
+        ON findings (session_id, severity, last_seen_at DESC)
+        WHERE team_id = ''
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_findings_team_status ON findings (team_id, status) WHERE team_id != ''",
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_team_entity_seen
+        ON findings (team_id, entity_id, last_seen_at DESC)
+        WHERE team_id != ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_team_run_seen
+        ON findings (team_id, run_id, last_seen_at DESC)
+        WHERE team_id != ''
+        """,
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_run ON findings_occurrences (run_id)",
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_finding_seen ON findings_occurrences (finding_id, seen_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_entity_labels_entity_created ON entity_labels (entity_type, entity_id, created)",

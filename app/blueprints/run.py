@@ -18,7 +18,7 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -49,15 +49,27 @@ from services.commands.builtins import (
 )
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from core.process import (
-    active_run_belongs_to_session,
+    active_run_belongs_to_scope,
     active_run_register,
     active_run_remove,
     active_run_touch_owner,
+    active_runs_for_team,
     active_runs_for_session,
     pid_for_session,
+    pid_for_team,
     pid_pop,
     pid_register,
 )
+from services.teams.request_scope import (
+    RequestScope,
+    RequestScopeError,
+    current_request_scope,
+    requested_team_id,
+    scope_error_payload,
+)
+from services.teams.scope import OwnerContext
+from services.teams.capabilities import Capability, require_capability, role_can
+from services.teams.contracts import TeamPermissionDenied
 from services.runs.broker import (
     broker_available,
     broker_mode,
@@ -128,7 +140,7 @@ from services.pty.service import (
     pty_broker_unavailable_reason,
     pty_enabled,
     pty_run_snapshot,
-    pty_run_belongs_to_session,
+    pty_run_belongs_to_scope,
     resize_pty,
     start_pty_run,
     stream_pty_events,
@@ -146,6 +158,8 @@ class _RunSessionVisibility(TypedDict):
     active_match: bool
     db_match: bool
     active_count: int
+    scope_mismatch: NotRequired[bool]
+    actual_team_id: NotRequired[str]
 
 
 def _active_run_owner_value(value: object) -> str:
@@ -154,6 +168,35 @@ def _active_run_owner_value(value: object) -> str:
 
 def _workspace_cwd_value(value: object) -> str:
     return str(value or "").strip()[:1024]
+
+
+def _team_capability_error_response(exc: TeamPermissionDenied):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _require_team_capability(owner_scope, capability: Capability):
+    if not owner_scope.is_team:
+        return None
+    try:
+        require_capability(str((owner_scope.member or {}).get("role") or ""), capability)
+    except TeamPermissionDenied as exc:
+        return _team_capability_error_response(exc)
+    return None
+
+
+def _scope_has_team_capability(owner_scope, capability: Capability) -> bool:
+    if not owner_scope.is_team:
+        return True
+    return role_can(str((owner_scope.member or {}).get("role") or ""), capability)
+
+
+def _team_audit_fields(owner_scope) -> dict[str, str]:
+    member = owner_scope.member or {}
+    return {
+        "team_id": str(owner_scope.team_id or ""),
+        "actor_member_id": str(member.get("id") or ""),
+        "team_role": str(member.get("role") or ""),
+    }
 
 
 def _validate_command_for_run(
@@ -224,6 +267,7 @@ def _insert_run_row(
     *,
     run_id: str,
     session_id: str,
+    team_id: str,
     run_kind: str,
     owner_tab_id: str,
     command: str,
@@ -241,13 +285,14 @@ def _insert_run_row(
     conn.execute(
         "INSERT INTO runs "
         "("
-        "id, session_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
+        "id, session_id, team_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
         "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
         "output_search_text"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             run_id,
             session_id,
+            team_id,
             run_kind,
             owner_tab_id,
             command,
@@ -572,7 +617,7 @@ def _extract_output_search_text(preview_lines):
     return _search_text_from_events(_line_events_from_output_entries(preview_lines))
 
 
-def _link_active_project_run_entities_for_finalize(conn, session_id, project_id, run_id):
+def _link_active_project_run_entities_for_finalize(conn, session_id, project_id, run_id, *, team_id=""):
     return _run_finalize_savepoint(
         conn,
         "active_project_entity_link",
@@ -581,6 +626,7 @@ def _link_active_project_run_entities_for_finalize(conn, session_id, project_id,
             session_id,
             project_id,
             run_id,
+            team_id=team_id,
         ),
     )
 
@@ -634,6 +680,7 @@ def _structured_output_summary_fields(entries):
 def _save_completed_run(
     run_id,
     session_id,
+    team_id,
     command,
     run_started,
     finished_iso,
@@ -686,6 +733,7 @@ def _save_completed_run(
                 conn,
                 run_id=run_id,
                 session_id=session_id,
+                team_id=team_id,
                 run_kind=run_kind,
                 owner_tab_id=owner_tab_id,
                 command=command,
@@ -722,6 +770,7 @@ def _save_completed_run(
                             link_project_id,
                             run_id,
                             source="manual",
+                            team_id=team_id,
                         ),
                     )
                 except Exception:
@@ -737,7 +786,7 @@ def _save_completed_run(
                     active_project_link = _run_finalize_savepoint(
                         conn,
                         "active_project_link",
-                        lambda: link_run_to_active_project(conn, session_id, run_id),
+                        lambda: link_run_to_active_project(conn, session_id, run_id, team_id=team_id),
                     )
                 except Exception:
                     active_project_link = None
@@ -799,7 +848,7 @@ def _save_completed_run(
                 recorded_findings = _run_finalize_savepoint(
                     conn,
                     "run_findings",
-                    lambda: record_run_findings(conn, session_id, run_id, persisted_entries),
+                    lambda: record_run_findings(conn, session_id, run_id, persisted_entries, team_id=team_id),
                 )
             except Exception:
                 recorded_findings = []
@@ -818,6 +867,7 @@ def _save_completed_run(
                         session_id,
                         run_id,
                         persisted_entries,
+                        team_id=team_id,
                         seen_at=finished_iso,
                     ),
                 )
@@ -836,6 +886,7 @@ def _save_completed_run(
                         session_id,
                         active_project_link["project_id"],
                         run_id,
+                        team_id=team_id,
                     )
                     if linked_entities:
                         active_project_link["linked_entity_count"] = int(
@@ -907,6 +958,7 @@ def _save_completed_run(
 def _finalize_completed_run(
     run_id,
     session_id,
+    team_id,
     client_ip,
     original_command,
     run_started,
@@ -922,7 +974,7 @@ def _finalize_completed_run(
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
     finalize_summary = {}
     active_project_link = _save_completed_run(
-        run_id, session_id, original_command, run_started,
+        run_id, session_id, team_id, original_command, run_started,
         finished.isoformat(), exit_code, capture,
         workspace_artifacts=workspace_artifacts,
         link_active_project=cmd_type == "real",
@@ -956,6 +1008,7 @@ def _finalize_completed_run(
         command=original_command,
         exit_code=exit_code,
         run_kind=run_kind_for_cmd_type(cmd_type),
+        team_id=team_id,
         finalize_summary=finalize_summary,
         cfg=CFG,
     )
@@ -993,6 +1046,7 @@ def _persist_completed_pty_run(
     _save_completed_run(
         run.run_id,
         run.session_id,
+        str(getattr(run, "team_id", "") or ""),
         run.command,
         run.started,
         finished_iso,
@@ -1065,6 +1119,14 @@ def save_client_side_run():
         return jsonify({"error": "exit_code must be an integer"}), 400
 
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
     client_ip = get_client_ip()
     raw_lines = data.get("lines", [])
     raw_line_count = len(raw_lines) if isinstance(raw_lines, list) else 0
@@ -1115,6 +1177,7 @@ def save_client_side_run():
             conn,
             run_id=run_id,
             session_id=session_id,
+            team_id=owner_scope.team_id,
             run_kind=RUN_KIND_BUILTIN,
             owner_tab_id=_active_run_owner_value(data.get("tab_id", "")),
             command=command,
@@ -1524,7 +1587,7 @@ def _filter_builtin_command_events(events, variable_notice: str, postfilter: _Sy
     return filtered_events
 
 
-def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str, str], list[str]]:
+def _resolve_secret_environment(command: str, session_id: str, *, team_id: str = "") -> tuple[dict[str, str], list[str]]:
     if is_help_invocation(command):
         return {}, []
     declarations = required_secrets_for_command(command)
@@ -1536,6 +1599,7 @@ def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str
             status_code=401,
         )
 
+    secret_scope_id = team_id or session_id
     env_overrides: dict[str, str] = {}
     missing_required: list[str] = []
     missing_optional: list[str] = []
@@ -1557,7 +1621,12 @@ def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str
         try:
             value = None
             for lookup_env_name in lookup_env_names:
-                value = get_secret_value_for_env(session_id, lookup_env_name)
+                value = get_secret_value_for_env(
+                    secret_scope_id,
+                    lookup_env_name,
+                    audit_session_id=session_id,
+                    team_id=team_id,
+                )
                 if value is not None:
                     break
         except (InvalidSecretName, MasterKeyError, SecretDecryptError) as exc:
@@ -1576,9 +1645,13 @@ def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str
         if len(missing_required) == 1:
             subject = f"secret {missing_labels.get(missing_required[0], missing_required[0])}"
             setup_hint = "Set it via \"secret set NAME\" or the Options > Secrets panel."
+            if team_id:
+                setup_hint = "Set it in Options > Secrets while the team scope is active."
         else:
             subject = "secrets " + ", ".join(missing_labels.get(env_name, env_name) for env_name in missing_required)
             setup_hint = "Set each one via \"secret set NAME\" or the Options > Secrets panel."
+            if team_id:
+                setup_hint = "Set them in Options > Secrets while the team scope is active."
         raise _RunPreparationError(
             f"Run requires {subject} which is not set. " +
             setup_hint,
@@ -1599,6 +1672,8 @@ def _prepare_real_command(
     session_id: str,
     client_ip: str,
     workspace_cwd: str = "",
+    *,
+    team_id: str = "",
 ) -> _PreparedRealCommand:
     registry_command = execution_command
     validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
@@ -1619,7 +1694,7 @@ def _prepare_real_command(
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "missing": missing_runtime,
         })
-    env_overrides, secret_env_names = _resolve_secret_environment(registry_command, session_id)
+    env_overrides, secret_env_names = _resolve_secret_environment(registry_command, session_id, team_id=team_id)
     return _PreparedRealCommand(
         registry_command=registry_command,
         execution_command=execution_command,
@@ -1685,6 +1760,7 @@ def _start_real_command_process(
     *,
     owner_client_id: str = "",
     owner_tab_id: str = "",
+    team_id: str = "",
 ) -> _StartedRealCommand:
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
@@ -1726,14 +1802,19 @@ def _start_real_command_process(
                 popen_env[key] = ""
 
     pid_register(run_id, proc.pid)
+    active_kwargs = {
+        "owner_client_id": owner_client_id,
+        "owner_tab_id": owner_tab_id,
+    }
+    if team_id:
+        active_kwargs["team_id"] = team_id
     active_run_register(
         run_id,
         proc.pid,
         session_id,
         original_command,
         run_started,
-        owner_client_id=owner_client_id,
-        owner_tab_id=owner_tab_id,
+        **active_kwargs,
     )
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
@@ -1798,6 +1879,7 @@ def _brokered_synthetic_run(
     *,
     cmd_type="builtin",
     owner_tab_id="",
+    team_id="",
 ):
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
@@ -1848,7 +1930,7 @@ def _brokered_synthetic_run(
             "full_output_available": capture.full_output_available,
         })
         _save_completed_run(
-            run_id, session_id, original_command, run_started,
+            run_id, session_id, team_id, original_command, run_started,
             finished.isoformat(), exit_code, capture,
             link_active_project=cmd_type == "real",
             run_kind=run_kind_for_cmd_type(cmd_type),
@@ -1875,6 +1957,7 @@ def _brokered_real_run_worker(
     run_id,
     proc,
     session_id,
+    team_id,
     client_ip,
     original_command,
     run_started,
@@ -1992,6 +2075,7 @@ def _brokered_real_run_worker(
         finalize_info = _finalize_completed_run(
             run_id,
             session_id,
+            team_id,
             client_ip,
             original_command,
             run_started,
@@ -2069,10 +2153,36 @@ def _brokered_real_run_worker(
 
 
 def _run_belongs_to_session(run_id: str, session_id: str) -> bool:
-    return bool(_run_session_visibility(run_id, session_id)["allowed"])
+    return bool(_run_session_visibility(run_id, session_id, "")["allowed"])
 
 
-def _run_session_visibility(run_id: str, session_id: str) -> _RunSessionVisibility:
+def pty_run_belongs_to_session(run_id: str, session_id: str) -> bool:
+    return pty_run_belongs_to_scope(run_id, session_id, "")
+
+
+def _run_scope_mismatch_payload(actual_team_id: str) -> dict[str, str]:
+    if actual_team_id:
+        return {
+            "error": "run_scope_mismatch",
+            "message": "Run exists in a different team scope. Switch to that team scope to view it.",
+            "scope": "team",
+            "team_id": actual_team_id,
+        }
+    return {
+        "error": "run_scope_mismatch",
+        "message": "Run exists in personal scope. Switch to personal scope to view it.",
+        "scope": "personal",
+        "team_id": "",
+    }
+
+
+def _run_visibility_error_response(visibility: _RunSessionVisibility):
+    if visibility.get("scope_mismatch"):
+        return jsonify(_run_scope_mismatch_payload(str(visibility.get("actual_team_id", "") or ""))), 409
+    return jsonify({"error": "Run not found"}), 404
+
+
+def _run_session_visibility(run_id: str, session_id: str, team_id: str = "") -> _RunSessionVisibility:
     if not run_id or not session_id:
         return {
             "allowed": False,
@@ -2080,14 +2190,19 @@ def _run_session_visibility(run_id: str, session_id: str) -> _RunSessionVisibili
             "db_match": False,
             "active_count": 0,
         }
-    if active_run_belongs_to_session(run_id, session_id):
+    if active_run_belongs_to_scope(run_id, session_id, team_id):
         return {
             "allowed": True,
             "active_match": True,
             "db_match": False,
             "active_count": 1,
         }
-    active_ids = {str(item.get("run_id", "")) for item in active_runs_for_session(session_id)}
+    scoped_active_runs = (
+        active_runs_for_team(team_id)
+        if team_id
+        else active_runs_for_session(session_id, team_id="")
+    )
+    active_ids = {str(item.get("run_id", "")) for item in scoped_active_runs}
     active_match = run_id in active_ids
     if active_match:
         return {
@@ -2096,18 +2211,42 @@ def _run_session_visibility(run_id: str, session_id: str) -> _RunSessionVisibili
             "db_match": False,
             "active_count": len(active_ids),
         }
+    for item in active_runs_for_session(session_id, team_id=None):
+        if str(item.get("run_id", "")) == run_id:
+            return {
+                "allowed": False,
+                "active_match": False,
+                "db_match": False,
+                "active_count": len(active_ids),
+                "scope_mismatch": True,
+                "actual_team_id": str(item.get("team_id", "") or ""),
+            }
     try:
         with db_connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM runs WHERE id = ? AND session_id = ?",
-                (run_id, session_id),
-            ).fetchone()
+            if team_id:
+                row = conn.execute(
+                    "SELECT 1 FROM runs WHERE id = ? AND team_id = ?",
+                    (run_id, team_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT 1 FROM runs WHERE id = ? AND session_id = ? AND team_id = ''",
+                    (run_id, session_id),
+                ).fetchone()
             db_match = row is not None
+            other_scope_row = None
+            if not db_match:
+                other_scope_row = conn.execute(
+                    "SELECT team_id FROM runs WHERE id = ?",
+                    (run_id,),
+                ).fetchone()
             return {
                 "allowed": db_match,
                 "active_match": False,
                 "db_match": db_match,
                 "active_count": len(active_ids),
+                "scope_mismatch": other_scope_row is not None,
+                "actual_team_id": str(other_scope_row["team_id"] or "") if other_scope_row else "",
             }
     except Exception:
         log.error("RUN_BROKER_SESSION_CHECK_ERROR", exc_info=True, extra={
@@ -2144,6 +2283,14 @@ def start_interactive_pty_run():
         return jsonify({"error": "No command provided"}), 400
 
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
     client_ip = get_client_ip()
     workspace_cwd = _workspace_cwd_value(data.get("workspace_cwd", ""))
     try:
@@ -2170,6 +2317,7 @@ def start_interactive_pty_run():
     try:
         run = start_pty_run(
             session_id=session_id,
+            team_id=owner_scope.team_id,
             client_ip=client_ip,
             command=original_command,
             argv=argv,
@@ -2221,17 +2369,37 @@ def start_interactive_pty_run():
 @run_bp.route("/pty/runs/<run_id>/stream")
 def stream_interactive_pty_run(run_id):
     session_id = get_session_id()
-    if not pty_run_belongs_to_session(run_id, session_id):
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    belongs_to_run = (
+        pty_run_belongs_to_scope(run_id, session_id, owner_scope.team_id)
+        if owner_scope.is_team
+        else pty_run_belongs_to_session(run_id, session_id)
+    )
+    if not belongs_to_run:
         return jsonify({"error": "Run not found"}), 404
     after_id = request.args.get("after", "0-0") or "0-0"
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
-    if owner_client_id and pty_run_belongs_to_session(run_id, session_id):
-        claim_pty_stream_owner(run_id, session_id, owner_client_id, owner_tab_id)
+    can_control = _scope_has_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if owner_client_id and can_control:
+        if owner_scope.is_team:
+            claim_pty_stream_owner(
+                run_id,
+                session_id,
+                owner_client_id,
+                owner_tab_id,
+                team_id=owner_scope.team_id,
+            )
+        else:
+            claim_pty_stream_owner(run_id, session_id, owner_client_id, owner_tab_id)
 
     def generate():
-        for item in stream_pty_events(run_id, session_id, after=after_id):
-            if owner_client_id:
+        for item in stream_pty_events(run_id, session_id, after=after_id, team_id=owner_scope.team_id):
+            if owner_client_id and can_control:
                 active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
             yield item
 
@@ -2260,7 +2428,15 @@ def _pty_snapshot_error_response(message: str):
 @run_bp.route("/pty/runs/<run_id>/snapshot")
 def snapshot_interactive_pty_run(run_id):
     session_id = get_session_id()
-    ok, message, snapshot = pty_run_snapshot(run_id, session_id)
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    if owner_scope.is_team:
+        ok, message, snapshot = pty_run_snapshot(run_id, session_id, team_id=owner_scope.team_id)
+    else:
+        ok, message, snapshot = pty_run_snapshot(run_id, session_id)
     if not ok:
         return _pty_snapshot_error_response(message)
     return jsonify(snapshot)
@@ -2270,6 +2446,14 @@ def snapshot_interactive_pty_run(run_id):
 @limiter.limit(_interactive_pty_input_limit)
 def send_interactive_pty_input(run_id):
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
@@ -2279,6 +2463,7 @@ def send_interactive_pty_input(run_id):
         data.get("data", ""),
         _active_run_owner_value(request.headers.get("X-Client-ID", "")),
         _active_run_owner_value(data.get("tab_id", "")),
+        team_id=owner_scope.team_id,
     )
     if not ok:
         status = 404 if message == "Run not found" else 409 if "no longer active" in message else 400
@@ -2292,10 +2477,24 @@ def send_interactive_pty_input(run_id):
 ))
 def resize_interactive_pty_run(run_id):
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    ok, message, rows, cols = resize_pty(run_id, session_id, data.get("rows"), data.get("cols"))
+    ok, message, rows, cols = resize_pty(
+        run_id,
+        session_id,
+        data.get("rows"),
+        data.get("cols"),
+        team_id=owner_scope.team_id,
+    )
     if not ok:
         status = 404 if message == "Run not found" else 409 if "no longer active" in message else 400
         return jsonify({"error": message or "Resize rejected"}), status
@@ -2307,14 +2506,11 @@ def resize_interactive_pty_run(run_id):
     f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
 ))
 def start_brokered_run():
-    if not broker_available():
-        return jsonify({"error": broker_unavailable_reason()}), 503
-
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    original_command = data.get("command", "")
     session_id = get_session_id()
+    original_command = data.get("command", "")
     client_ip = get_client_ip()
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(data.get("tab_id", ""))
@@ -2324,11 +2520,29 @@ def start_brokered_run():
     original_command = original_command.strip()
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
+    team_id = ""
+    team_role = ""
+    if requested_team_id(request):
+        try:
+            owner_scope = current_request_scope(session_id, request)
+        except RequestScopeError as exc:
+            payload, status = scope_error_payload(exc)
+            return jsonify(payload), status
+        capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+        if capability_response:
+            return capability_response
+        team_id = owner_scope.team_id
+        team_role = str((owner_scope.member or {}).get("role") or "")
+
+    if not broker_available():
+        return jsonify({"error": broker_unavailable_reason()}), 503
 
     try:
         started = _start_brokered_run_service(
             original_command=original_command,
             session_id=session_id,
+            team_id=team_id,
+            team_role=team_role,
             client_ip=client_ip,
             handlers=_run_start_handlers(),
             owner_client_id=owner_client_id,
@@ -2346,8 +2560,14 @@ def start_brokered_run():
 @run_bp.route("/runs/<run_id>/events")
 def get_brokered_run_events(run_id):
     session_id = get_session_id()
-    if not _run_belongs_to_session(run_id, session_id):
-        return jsonify({"error": "Run not found"}), 404
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    visibility = _run_session_visibility(run_id, session_id, owner_scope.team_id)
+    if not visibility["allowed"]:
+        return _run_visibility_error_response(visibility)
     after_id = str(request.args.get("after", "0-0") or "0-0")
     try:
         limit = max(1, min(int(request.args.get("limit", 100) or 100), 500))
@@ -2363,8 +2583,13 @@ def get_brokered_run_events(run_id):
 @run_bp.route("/runs/<run_id>/stream")
 def stream_brokered_run(run_id):
     session_id = get_session_id()
-    if not _run_belongs_to_session(run_id, session_id):
-        visibility = _run_session_visibility(run_id, session_id)
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    visibility = _run_session_visibility(run_id, session_id, owner_scope.team_id)
+    if not visibility["allowed"]:
         log.warning("RUN_BROKER_STREAM_MISS", extra={
             "run_id": run_id,
             "session": get_log_session_id(session_id),
@@ -2376,8 +2601,10 @@ def stream_brokered_run(run_id):
             "after_id": str(request.args.get("after", "0-0") or "0-0"),
             "owner_client_id_present": bool(_active_run_owner_value(request.headers.get("X-Client-ID", ""))),
             "owner_tab_id_present": bool(_active_run_owner_value(request.args.get("tab_id", ""))),
+            "scope_mismatch": bool(visibility.get("scope_mismatch")),
+            "actual_team_id": str(visibility.get("actual_team_id", "") or ""),
         })
-        return jsonify({"error": "Run not found"}), 404
+        return _run_visibility_error_response(visibility)
     after_id = str(request.args.get("after", "0-0") or "0-0")
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
@@ -2403,24 +2630,45 @@ def kill_command():
     if not isinstance(run_id, str):
         return jsonify({"error": "run_id must be a string"}), 400
     session_id = get_session_id()
+    if session_id or requested_team_id(request):
+        try:
+            owner_scope = current_request_scope(session_id, request)
+        except RequestScopeError as exc:
+            payload, status = scope_error_payload(exc)
+            return jsonify(payload), status
+    else:
+        owner_scope = RequestScope(OwnerContext(scope="personal", owner_id="", actor_session_id=""))
+    capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
+    if capability_response:
+        return capability_response
+    kill_audit = {
+        "session": get_log_session_id(session_id),
+        **_team_audit_fields(owner_scope),
+    }
     killer_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    active_runs = (
+        active_runs_for_team(owner_scope.team_id)
+        if owner_scope.is_team
+        else active_runs_for_session(session_id, team_id="")
+    )
     active_run = next(
-        (run for run in active_runs_for_session(session_id) if run.get("run_id") == run_id),
+        (run for run in active_runs if run.get("run_id") == run_id),
         {},
     )
     run_type = str(active_run.get("run_type", "command") or "command").lower()
-    pid       = pid_for_session(run_id, session_id)
+    pid = pid_for_team(run_id, owner_scope.team_id) if owner_scope.is_team else pid_for_session(run_id, session_id)
     if not pid:
         log.debug("KILL_MISS", extra={
             "ip": client_ip,
             "run_id": run_id,
-            "session": get_log_session_id(session_id),
+            **kill_audit,
         })
         return jsonify({"error": "No such process"}), 404
     killed_payload = {
         "killer_client_id": killer_client_id,
         "killer_tab_id": killer_tab_id,
     }
+    pgid = pid
     try:
         # Subprocesses call os.setsid() during child setup, which makes PGID
         # == PID at creation time. Use the stored PID directly as the
@@ -2431,30 +2679,45 @@ def kill_command():
         # Using the original PID as the PGID is safe: if the process group
         # no longer exists the signal fails with ESRCH instead of hitting
         # an unrelated process.
-        pgid = pid
         _signal_process_group(pgid)
         if run_type == "pty":
-            notify_pty_killed_event(run_id, session_id, killed_payload)
+            if owner_scope.is_team:
+                notify_pty_killed_event(run_id, session_id, killed_payload, team_id=owner_scope.team_id)
+            else:
+                notify_pty_killed_event(run_id, session_id, killed_payload)
         else:
             publish_run_event(run_id, "killed", killed_payload)
         log.info("RUN_KILL", extra={
             "run_id": run_id,
             "ip": client_ip,
-            "session": get_log_session_id(session_id),
+            **kill_audit,
             "pid": pid,
             "pgid": pgid,
         })
     except ProcessLookupError as e:
         if run_type == "pty":
-            notify_pty_killed_event(run_id, session_id, killed_payload)
+            if owner_scope.is_team:
+                notify_pty_killed_event(run_id, session_id, killed_payload, team_id=owner_scope.team_id)
+            else:
+                notify_pty_killed_event(run_id, session_id, killed_payload)
         else:
             publish_run_event(run_id, "killed", killed_payload)
         log.warning("KILL_FAILED", extra={
-            "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),
+            "run_id": run_id,
+            "ip": client_ip,
+            **kill_audit,
+            "pid": pid,
+            "pgid": pgid,
+            "error": str(e),
         })
     except (subprocess.TimeoutExpired, OSError) as e:
         log.warning("KILL_FAILED", extra={
-            "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),
+            "run_id": run_id,
+            "ip": client_ip,
+            **kill_audit,
+            "pid": pid,
+            "pgid": pgid,
+            "error": str(e),
         })
         return jsonify({"error": "Failed to signal process"}), 500
     return jsonify({"killed": True})

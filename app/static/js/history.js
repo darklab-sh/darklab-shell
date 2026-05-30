@@ -888,7 +888,12 @@ async function _historyPostBulkDelete(url, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!resp.ok) {
+    if (typeof _historyMutationError === 'function') {
+      throw await _historyMutationError(resp, 'Failed to delete selected history items');
+    }
+    throw new Error(`HTTP ${resp.status}`);
+  }
   return resp.json();
 }
 
@@ -947,6 +952,10 @@ async function _historyBulkDeleteSelectedItems() {
   const runIds = _historySelectedRunIds();
   const snapshotIds = _historySelectedSnapshotIds();
   if (!runIds.length && !snapshotIds.length) return;
+  if (typeof _historyCanManageHistory === 'function' && !_historyCanManageHistory()) {
+    if (typeof _historyShowPermissionDenied === 'function') _historyShowPermissionDenied('delete team history');
+    return;
+  }
   const label = _historyBulkDeleteLabel(runIds.length, snapshotIds.length);
   const choice = await showConfirm({
     body: {
@@ -981,8 +990,8 @@ async function _historyBulkDeleteSelectedItems() {
     const message = [pieces.join(' - '), reasonSummary].filter(Boolean).join(' - ');
     _historyBulkToast(message, counts);
     await _historyRefreshAfterBulk();
-  } catch (_) {
-    showToast('Failed to delete selected history items', 'error');
+  } catch (err) {
+    showToast(err.userFacing ? err.message : 'Failed to delete selected history items', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
@@ -1021,11 +1030,19 @@ function _historyBuildBulkActionMenu(disabled) {
     item.textContent = label;
     const projectActionDisabled = !['bulk-delete', 'bulk-export-txt', 'bulk-export-jsonl'].includes(action)
       && !hasOnlyProjectLinkableRuns;
+    const historyDeleteDisabled = action === 'bulk-delete'
+      && typeof _historyCanManageHistory === 'function'
+      && !_historyCanManageHistory();
     item.disabled = disabled
       || projectActionDisabled
+      || historyDeleteDisabled
       || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
     if (action === 'bulk-add-active-project' && !(activeProject && activeProject.id)) {
       item.title = 'Select an active project first.';
+    } else if (historyDeleteDisabled) {
+      item.title = typeof _historyScopeDeniedMessage === 'function'
+        ? _historyScopeDeniedMessage('delete team history')
+        : 'View-only team members cannot delete team history.';
     } else if (projectActionDisabled) {
       item.title = 'Project actions apply to selected external runs.';
     }

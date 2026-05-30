@@ -48,6 +48,18 @@
     return global.DarklabProjectFindingsData || {};
   }
 
+  function canTriageFindings() {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan('triage_findings')
+      : true;
+  }
+
+  function triageDeniedMessage() {
+    return typeof global.teamScopeDeniedMessage === 'function'
+      ? global.teamScopeDeniedMessage('triage team findings')
+      : "View-only team members can't triage team findings. Switch to Personal or ask for operator access.";
+  }
+
   function showMessage(message = '', tone = '') {
     if (!messageEl) return;
     messageEl.textContent = String(message || '');
@@ -149,6 +161,7 @@
 
   function reviewSelect(finding) {
     const select = document.createElement('select');
+    const allowed = canTriageFindings();
     select.className = 'form-select form-control-compact findings-board-review';
     select.dataset.findingsBoardReview = '1';
     select.dataset.findingId = String(finding.id || '');
@@ -161,6 +174,8 @@
       select.appendChild(option);
     });
     select.value = String(finding.review_state || 'new');
+    select.disabled = !allowed;
+    if (!allowed) select.title = triageDeniedMessage();
     return select;
   }
 
@@ -183,7 +198,7 @@
       card.severity ? `severity-${card.severity}` : '',
     ].filter(Boolean).join(' ');
     article.tabIndex = 0;
-    article.draggable = !!card.id;
+    article.draggable = !!card.id && canTriageFindings();
     article.dataset.findingId = card.id;
 
     const header = document.createElement('div');
@@ -338,6 +353,12 @@
   async function persistReviewState(findingId, reviewState, previousReviewState) {
     const finding = findingById(findingId);
     if (!finding || !reviewState || reviewState === previousReviewState) return;
+    if (!canTriageFindings()) {
+      setFindingReviewState(findingId, previousReviewState || 'new');
+      showMessage(triageDeniedMessage(), 'error');
+      render();
+      return;
+    }
     setFindingReviewState(findingId, reviewState);
     render();
     try {
@@ -346,7 +367,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ review_state: reviewState }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        let message = `HTTP ${resp.status}`;
+        try {
+          const data = await resp.json();
+          if (data && data.error === 'team_forbidden') message = triageDeniedMessage();
+          else if (data && typeof data.message === 'string' && data.message.trim()) message = data.message.trim();
+        } catch (_) {}
+        throw new Error(message);
+      }
       const data = await resp.json().catch(() => null);
       if (data && data.finding) setFindingReviewState(findingId, data.finding.review_state || reviewState);
       showMessage('');
@@ -427,6 +456,11 @@
     }
   });
   bodyEl?.addEventListener('dragstart', event => {
+    if (!canTriageFindings()) {
+      event.preventDefault();
+      showMessage(triageDeniedMessage(), 'error');
+      return;
+    }
     const card = event.target.closest?.('[data-finding-id]');
     if (!card) return;
     state.draggedId = String(card.dataset.findingId || '');
@@ -439,6 +473,7 @@
     bodyEl.querySelectorAll('.is-drop-target').forEach(item => item.classList.remove('is-drop-target'));
   });
   bodyEl?.addEventListener('dragover', event => {
+    if (!canTriageFindings()) return;
     const column = event.target.closest?.('[data-findings-board-drop-state]');
     if (!column || !state.draggedId) return;
     event.preventDefault();
@@ -448,6 +483,13 @@
     event.target.closest?.('[data-findings-board-drop-state]')?.classList.remove('is-drop-target');
   });
   bodyEl?.addEventListener('drop', event => {
+    if (!canTriageFindings()) {
+      event.preventDefault();
+      state.draggedId = '';
+      bodyEl.querySelectorAll('.is-drop-target').forEach(item => item.classList.remove('is-drop-target'));
+      showMessage(triageDeniedMessage(), 'error');
+      return;
+    }
     const column = event.target.closest?.('[data-findings-board-drop-state]');
     if (!column) return;
     event.preventDefault();

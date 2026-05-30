@@ -1156,6 +1156,8 @@ class TestAIAssistContextAndStorage:
 
         with self._ai_db(monkeypatch, tmp_path) as conn:
             self._insert_run_context_rows(conn)
+            conn.execute("UPDATE runs SET team_id = ? WHERE id = ?", ("team_ai", "run-ai"))
+            conn.commit()
         self._enable_ai_redis(monkeypatch)
 
         cfg = {
@@ -1166,13 +1168,14 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai", session_id="tok_ai", team_id="team_ai", cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         assist, inserted = enqueue_assist(
             "tok_ai",
             "run-ai",
             "summary",
             context,
+            team_id="team_ai",
             cfg=cfg,
             prompt_version=prompt_version,
             prompt_version_source=source,
@@ -1181,8 +1184,9 @@ class TestAIAssistContextAndStorage:
         assert inserted is True
 
         class FakeClient:
-            def __init__(self, _cfg, *, session_token=None, progress_callback=None):
+            def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
                 assert session_token == "tok_ai"
+                assert secret_scope_token == "team_ai"
                 self.model = "llama3.1:8b"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -1238,8 +1242,14 @@ class TestAIAssistContextAndStorage:
         assert json.loads(row["payload"])["warnings"] == ["ignore previous instructions"]
         assert row["duration_ms"] == 42
         provider_log = next(extra for event, extra in logs if event == "AI_ASSIST_PROVIDER_REQUEST")
+        assert provider_log["team_id"] == "team_ai"
+        assert provider_log["session"] == "tok_ai********"
+        assert provider_log["secret_scope"] == "team"
         assert provider_log["read_timeout_seconds"] == 120.0
         completed_log = next(extra for event, extra in logs if event == "AI_ASSIST_COMPLETED")
+        assert completed_log["team_id"] == "team_ai"
+        assert completed_log["session"] == "tok_ai********"
+        assert completed_log["secret_scope"] == "team"
         assert completed_log["provider_prompt_tokens"] == 12
         assert completed_log["provider_prompt_ms"] == 34
         assert completed_log["provider_predicted_tokens"] == 6
@@ -1365,8 +1375,9 @@ class TestAIAssistContextAndStorage:
         class FakeClient:
             calls = []
 
-            def __init__(self, _cfg, *, session_token=None, progress_callback=None):
+            def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
                 assert session_token == "tok_ai"
+                assert secret_scope_token == "tok_ai"
                 self.model = "llama3.1:8b"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -1451,14 +1462,16 @@ class TestAIAssistContextAndStorage:
         warning.assert_called_once()
         assert warning.call_args.args == ("AI_ASSIST_FAILED",)
         assert warning.call_args.kwargs["extra"] == {
-            "assist_id": assist["id"],
-            "run_id": "run-ai",
-            "variant": "summary",
+            "team_id": "",
             "session": "tok_ai********",
+            "secret_scope": "personal",
             "model": "llama3.1:8b",
             "prompt_version": "ai-assist-v1",
             "prompt_version_source": "canonical",
             "context_hash": "stale",
+            "assist_id": assist["id"],
+            "run_id": "run-ai",
+            "variant": "summary",
             "error_code": "ai_context_changed",
             "error_message": "Run context changed after assist was queued",
             "status": None,
@@ -1501,8 +1514,9 @@ class TestAIAssistContextAndStorage:
         heartbeats = []
 
         class FakeClient:
-            def __init__(self, _cfg, *, session_token=None, progress_callback=None):
+            def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
                 assert session_token == "tok_ai"
+                assert secret_scope_token == "tok_ai"
                 self.model = "Llama-3.1-8B-Instruct"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -2646,6 +2660,10 @@ class TestPostgresMigrations:
         "ai_suggestion_validations",
         "snapshots",
         "session_tokens",
+        "teams",
+        "team_members",
+        "team_invites",
+        "team_recovery_codes",
         "session_preferences",
         "starred_commands",
         "session_variables",
@@ -2732,6 +2750,16 @@ class TestPostgresMigrations:
             "0012",
             "0013",
             "0014",
+            "0015",
+            "0016",
+            "0017",
+            "0018",
+            "0019",
+            "0020",
+            "0021",
+            "0022",
+            "0023",
+            "0024",
         ]
         for table_name in (
             "runs",
@@ -2741,6 +2769,10 @@ class TestPostgresMigrations:
             "ai_suggestion_validations",
             "snapshots",
             "session_tokens",
+            "teams",
+            "team_members",
+            "team_invites",
+            "team_recovery_codes",
             "session_preferences",
             "starred_commands",
             "session_variables",
@@ -2952,6 +2984,214 @@ class TestPostgresMigrations:
         prune_retention.assert_called_once_with(fake_app_conn)
 
 
+class TestTeamModeFoundation:
+    def _team_db(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        database._create_schema(conn)
+        database._create_indexes(conn)
+        return conn
+
+    def test_capability_matrix_and_requirement_errors(self):
+        from services.teams.capabilities import Capability, require_capability, role_can
+        from services.teams.contracts import TeamPermissionDenied
+
+        assert role_can("owner", Capability.ARCHIVE_TEAM)
+        assert role_can("admin", Capability.MANAGE_MEMBERS)
+        assert role_can("admin", Capability.MANAGE_SECRETS)
+        assert role_can("operator", Capability.RUN_COMMANDS)
+        assert role_can("operator", Capability.MANAGE_HISTORY)
+        assert role_can("operator", Capability.MANAGE_AUTOMATION)
+        assert not role_can("operator", Capability.MANAGE_MEMBERS)
+        assert not role_can("operator", Capability.MANAGE_SECRETS)
+        assert role_can("viewer", Capability.VIEW_TEAM)
+        assert not role_can("viewer", Capability.RUN_COMMANDS)
+        assert not role_can("viewer", Capability.MANAGE_HISTORY)
+        assert not role_can("viewer", Capability.MANAGE_AUTOMATION)
+        assert not role_can("unknown", Capability.VIEW_TEAM)
+        assert not role_can("owner", "not_a_capability")
+
+        with mock.patch("services.teams.capabilities.log.warning") as mock_warning:
+            with pytest.raises(TeamPermissionDenied):
+                require_capability(
+                    "viewer",
+                    Capability.RUN_COMMANDS,
+                    team_id="team_capability",
+                    actor_member_id="tmem_viewer",
+                    route="/runs",
+                    method="POST",
+                    action="run_start",
+                )
+        assert mock_warning.call_args.args[0] == "TEAM_CAPABILITY_DENIED"
+        denied_extra = mock_warning.call_args.kwargs["extra"]
+        assert denied_extra["actor_role"] == "viewer"
+        assert denied_extra["capability"] == "run_commands"
+        assert denied_extra["team_id"] == "team_capability"
+        assert denied_extra["actor_member_id"] == "tmem_viewer"
+        assert denied_extra["route"] == "/runs"
+        assert denied_extra["method"] == "POST"
+        assert denied_extra["action"] == "run_start"
+
+    def test_owner_context_predicates_keep_personal_scope_default(self):
+        from services.teams.scope import (
+            personal_owner_context,
+            personal_scope_predicate,
+            shared_owner_predicate,
+            team_owner_context,
+        )
+
+        personal = personal_owner_context("sess_abc")
+        team = team_owner_context("team_abc", actor_member_id="tmem_123", actor_session_id="sess_abc")
+
+        assert personal.scope == "personal"
+        assert personal_scope_predicate(personal) == ("session_id = ?", ("sess_abc",))
+        assert shared_owner_predicate(personal) == (
+            "(team_id IS NULL OR team_id = '') AND session_id = ?",
+            ("sess_abc",),
+        )
+        assert shared_owner_predicate(team) == ("team_id = ?", ("team_abc",))
+
+        with pytest.raises(ValueError):
+            personal_scope_predicate(team)
+
+    def test_request_scope_logs_resolution_and_rejections(self):
+        from flask import request
+        from services.teams import request_scope, storage
+
+        conn = self._team_db()
+        try:
+            team = storage.create_team(conn, name="Scoped Operators", creator_session_token="tok_scope_owner")
+            conn.commit()
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context("/history"):
+                with mock.patch.object(request_scope.log, "debug") as mock_debug:
+                    scope = request_scope.current_request_scope("tok_scope_owner", request)
+            assert scope.is_team is False
+            assert mock_debug.call_args.args[0] == "TEAM_SCOPE_RESOLVED"
+            personal_extra = mock_debug.call_args.kwargs["extra"]
+            assert personal_extra["scope"] == "personal"
+            assert personal_extra["source"] == "none"
+            assert personal_extra["session"].startswith("tok_sco")
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context(
+                f"/api/v1/history?team_id={team['id']}",
+                method="GET",
+                environ_base={"REMOTE_ADDR": "198.51.100.10"},
+            ):
+                with mock.patch.object(request_scope.log, "debug") as mock_debug:
+                    team_scope = request_scope.current_request_scope("tok_scope_owner", request)
+            assert team_scope.is_team is True
+            assert team_scope.team_id == team["id"]
+            team_extra = mock_debug.call_args.kwargs["extra"]
+            assert team_extra["scope"] == "team"
+            assert team_extra["source"] == "query"
+            assert team_extra["team_id"] == team["id"]
+            assert team_extra["actor_role"] == "owner"
+            assert team_extra["route"] == "/api/v1/history"
+            assert team_extra["method"] == "GET"
+            assert team_extra["session"] != "tok_scope_owner"
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context(
+                "/api/v1/history",
+                headers={"X-Team-ID": team["id"]},
+            ):
+                with mock.patch.object(request_scope.log, "warning") as mock_warning:
+                    with pytest.raises(request_scope.RequestScopeError):
+                        request_scope.current_request_scope("tok_scope_other", request)
+            assert mock_warning.call_args.args[0] == "TEAM_SCOPE_REJECTED"
+            rejected_extra = mock_warning.call_args.kwargs["extra"]
+            assert rejected_extra["reason"] == "team_forbidden"
+            assert rejected_extra["source"] == "header"
+            assert rejected_extra["team_id"] == team["id"]
+            assert rejected_extra["session"] != "tok_scope_other"
+        finally:
+            conn.close()
+
+    def test_team_storage_smoke_creates_member_invite_and_recovery_code(self):
+        from services.teams import storage
+
+        conn = self._team_db()
+        try:
+            team, recovery = storage.create_team_with_recovery_code(
+                conn,
+                name="Darklab Operators",
+                creator_session_token="tok_owner",
+                display_name="Owner",
+            )
+            member = storage.add_team_member(
+                conn,
+                team_id=team["id"],
+                session_token="tok_operator",
+                role="operator",
+                display_name="Operator",
+                invited_by_member_id=team["creator_member_id"],
+            )
+            invite = storage.create_team_invite(
+                conn,
+                team_id=team["id"],
+                code_hash="invite_hash",
+                role="viewer",
+                created_by_member_id=team["creator_member_id"],
+                label="Read-only",
+            )
+
+            assert team["slug"] == "darklab-operators"
+            assert team["created_by_member_id"] == team["creator_member_id"]
+            assert member["role"] == "operator"
+            assert invite["role"] == "viewer"
+            assert recovery["team_id"] == team["id"]
+            assert recovery["code"].startswith("trec_")
+            assert storage.active_owner_count(conn, team["id"]) == 1
+            assert storage.list_teams_for_token(conn, "tok_owner")[0]["id"] == team["id"]
+
+            other_team = storage.create_team(conn, name="Other Operators", creator_session_token="tok_other")
+            with pytest.raises(sqlite3.IntegrityError):
+                storage.create_team_invite(
+                    conn,
+                    team_id=other_team["id"],
+                    code_hash="invite_hash",
+                    role="viewer",
+                    created_by_member_id=other_team["creator_member_id"],
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                storage.create_team_recovery_code(
+                    conn,
+                    team_id=other_team["id"],
+                    code_hash=storage.token_hash(recovery["code"]),
+                    created_by_member_id=other_team["creator_member_id"],
+                )
+        finally:
+            conn.close()
+
+    def test_team_slug_uniqueness_raises_domain_error(self):
+        from services.teams import storage
+        from services.teams.contracts import TeamSlugUnavailable
+
+        conn = self._team_db()
+        try:
+            storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_one")
+            with pytest.raises(TeamSlugUnavailable):
+                storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_two")
+        finally:
+            conn.close()
+
+    def test_team_owner_guard_blocks_last_owner_removal(self):
+        from services.teams import storage
+        from services.teams.contracts import TeamOwnerRequired
+
+        conn = self._team_db()
+        try:
+            team = storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_owner")
+            with pytest.raises(TeamOwnerRequired):
+                storage.soft_remove_team_member(conn, team["creator_member_id"])
+            assert storage.active_owner_count(conn, team["id"]) == 1
+        finally:
+            conn.close()
+
+
 class TestSchedulerFoundation:
     def _scheduler_db(self, monkeypatch, tmp_path):
         db_path = os.path.join(tmp_path, "scheduler.db")
@@ -2974,6 +3214,7 @@ class TestSchedulerFoundation:
         base = {
             "id": "sch_test",
             "session_token": "tok_scheduler",
+            "team_id": "",
             "owner_kind": OWNER_KIND_USER,
             "owner_id": "",
             "kind": SCHEDULE_KIND_COMMAND,
@@ -3076,6 +3317,22 @@ class TestSchedulerFoundation:
                 owner_id="wtr_123",
                 conn=conn,
             )
+            team_schedule = service.create_schedule(
+                "tok_scheduler",
+                team_id="team_scheduler",
+                command_text="echo team",
+                cadence_preset="hourly",
+                owner_kind="watcher",
+                owner_id="wtr_team",
+                conn=conn,
+            )
+            with mock.patch.object(service.log, "debug") as debug_log:
+                refreshed = service.mark_schedule_after_fire(
+                    conn,
+                    team_schedule,
+                    fired_at="2026-05-20T10:00:00+00:00",
+                    run_id="run_team_schedule",
+                )
             conn.commit()
 
             visible = service.list_for_session("tok_scheduler", conn=conn)
@@ -3083,6 +3340,11 @@ class TestSchedulerFoundation:
 
         assert [schedule.id for schedule in visible] == [user_schedule.id]
         assert {schedule.id for schedule in all_rows} == {user_schedule.id, watcher_schedule.id}
+        assert refreshed.last_run_id == "run_team_schedule"
+        after_fire_extra = debug_log.call_args.kwargs["extra"]
+        assert after_fire_extra["team_id"] == "team_scheduler"
+        assert after_fire_extra["session"] == "tok_sche********"
+        assert after_fire_extra["owner_id"] == "wtr_team"
 
     def test_scheduler_recovery_coalesces_recent_missed_fire(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch, recovery, service
@@ -3143,7 +3405,7 @@ class TestSchedulerFoundation:
         from services.scheduler import dispatch, service
 
         fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
-        monkeypatch.setattr(dispatch, "active_runs_for_session", lambda _session: [{"run_id": "run_active"}])
+        monkeypatch.setattr(dispatch, "active_runs_for_session", lambda _session, **_kwargs: [{"run_id": "run_active"}])
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
             conn.execute(
                 "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
@@ -3703,6 +3965,29 @@ class TestWatchersFoundation:
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             visible_schedules = schedule_service.list_for_session("tok_watchers", conn=conn)
             visible_watchers = watcher_service.list_for_session("tok_watchers", conn=conn)
+            team_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                team_id="team_watchers",
+                command_text="nmap -sV team.darklab.sh",
+                baseline_run_id="run_team_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            team_schedule = schedule_service.create_schedule(
+                "tok_watchers",
+                team_id="team_watchers",
+                command_text="echo team schedule",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            with mock.patch.object(watcher_service.log, "info") as info_log:
+                paused = watcher_service.pause_team_watchers_and_schedules(
+                    conn,
+                    "team_watchers",
+                    reason="team_archived",
+                )
+            paused_watcher = watcher_service.get_watcher(team_watcher.id, conn=conn)
+            paused_schedule = schedule_service.get_schedule(team_schedule.id, conn=conn)
 
         assert watcher.baseline_run_id == "run_baseline"
         assert watcher.command_text == "nmap -sV darklab.sh"
@@ -3713,6 +3998,18 @@ class TestWatchersFoundation:
         assert schedule.command_text == watcher.command_text
         assert visible_schedules == []
         assert [item.id for item in visible_watchers] == [watcher.id]
+        assert paused == {"watchers": 1, "schedules": 1}
+        assert paused_watcher is not None
+        assert paused_watcher.state == "paused"
+        assert paused_schedule is not None
+        assert paused_schedule.enabled is False
+        assert info_log.call_args.args == ("TEAM_AUTOMATION_PAUSED",)
+        assert info_log.call_args.kwargs["extra"] == {
+            "team_id": "team_watchers",
+            "reason": "team_archived",
+            "paused_watchers": 1,
+            "paused_schedules": 1,
+        }
 
     def test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
@@ -4747,6 +5044,121 @@ class TestNotificationsPhase0:
         assert exit_code == 0
         assert "Webhook channels require secret values" in text
         assert "Options > Notifications" in text
+
+    def test_team_builtin_creates_invites_joins_and_rotates_recovery(self, monkeypatch, tmp_path):
+        from services.commands import builtins_team
+
+        conn = self._notification_db(monkeypatch, tmp_path)
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            for token in ("tok_team_builtin_owner", "tok_team_builtin_operator"):
+                conn.execute(
+                    "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                    (token, now, ""),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with mock.patch.object(builtins_team.log, "info") as mock_info, \
+             mock.patch.object(builtins_team.log, "warning") as mock_warning:
+            create_lines, create_exit = builtin_commands.execute_builtin_command(
+                "team create Builtin Operators --display-name Owner",
+                "tok_team_builtin_owner",
+            )
+            create_text = "\n".join(str(line.get("text", "")) for line in create_lines)
+            match = re.search(r"\((team_[a-f0-9]+)\)", create_text)
+            assert create_exit == 0
+            assert match
+            team_id = match.group(1)
+            assert "recovery code: trec_" in create_text
+            create_recovery_match = re.search(r"recovery code: (trec_[A-Za-z0-9_-]+)", create_text)
+            assert create_recovery_match
+
+            list_lines, _ = builtin_commands.execute_builtin_command("team list", "tok_team_builtin_owner")
+            assert team_id in "\n".join(str(line.get("text", "")) for line in list_lines)
+
+            invite_lines, _ = builtin_commands.execute_builtin_command(
+                "team invite create --role operator --label Shell",
+                "tok_team_builtin_owner",
+                team_id=team_id,
+                team_role="owner",
+            )
+            invite_text = "\n".join(str(line.get("text", "")) for line in invite_lines)
+            code_match = re.search(r"code: (tinv_[A-Za-z0-9_-]+)", invite_text)
+            assert code_match
+
+            join_lines, _ = builtin_commands.execute_builtin_command(
+                f"team join {code_match.group(1)} --display-name Operator",
+                "tok_team_builtin_operator",
+            )
+            assert "joined Builtin Operators" in "\n".join(str(line.get("text", "")) for line in join_lines)
+
+            denied_invite_lines, _ = builtin_commands.execute_builtin_command(
+                "team invite create --role viewer",
+                "tok_team_builtin_operator",
+                team_id=team_id,
+                team_role="operator",
+            )
+            assert "lacks team capability" in "\n".join(str(line.get("text", "")) for line in denied_invite_lines)
+
+            denied_recovery_lines, _ = builtin_commands.execute_builtin_command(
+                "team recovery rotate",
+                "tok_team_builtin_operator",
+                team_id=team_id,
+                team_role="operator",
+            )
+            assert "lacks team capability" in "\n".join(str(line.get("text", "")) for line in denied_recovery_lines)
+
+            members_lines, _ = builtin_commands.execute_builtin_command(
+                "team members",
+                "tok_team_builtin_owner",
+                team_id=team_id,
+                team_role="owner",
+            )
+            members_text = "\n".join(str(line.get("text", "")) for line in members_lines)
+            assert "Operator" in members_text
+            assert "owner" in members_text
+
+            recovery_lines, _ = builtin_commands.execute_builtin_command(
+                "team recovery rotate",
+                "tok_team_builtin_owner",
+                team_id=team_id,
+                team_role="owner",
+            )
+            recovery_text = "\n".join(str(line.get("text", "")) for line in recovery_lines)
+            assert "recovery code: trec_" in recovery_text
+            rotate_recovery_match = re.search(r"recovery code: (trec_[A-Za-z0-9_-]+)", recovery_text)
+            assert rotate_recovery_match
+
+        team_actions = [
+            call.kwargs["extra"]
+            for call in mock_info.call_args_list
+            if call.args and call.args[0] == "TEAM_ACTION"
+        ]
+        assert [event["action"] for event in team_actions] == [
+            "create",
+            "invite_create",
+            "invite_redeem",
+            "recovery_rotate",
+        ]
+        assert {event["surface"] for event in team_actions} == {"terminal_builtin"}
+        assert team_actions[0]["actor_role"] == "owner"
+        assert team_actions[1]["target_invite_id"].startswith("tinv_")
+        assert team_actions[2]["team_id"] == team_id
+        team_actions_json = json.dumps(team_actions)
+        assert code_match.group(1) not in team_actions_json
+        assert create_recovery_match.group(1) not in team_actions_json
+        assert rotate_recovery_match.group(1) not in team_actions_json
+        rejected = [
+            call.kwargs["extra"]
+            for call in mock_warning.call_args_list
+            if call.args and call.args[0] == "TEAM_ACTION_REJECTED"
+        ]
+        assert rejected[-2]["action"] == "invite_create"
+        assert rejected[-1]["action"] == "recovery_rotate"
+        assert {event["surface"] for event in rejected[-2:]} == {"terminal_builtin"}
+        assert {event["actor_role"] for event in rejected[-2:]} == {"operator"}
 
 
 class TestRunHistorySearchClauses:
@@ -6719,22 +7131,33 @@ class TestSessionWorkspace:
             except WorkspaceQuotaExceeded:
                 pass
 
-    def test_cleanup_removes_only_expired_session_directories(self):
+    def test_cleanup_removes_only_expired_session_directories(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
             old_root = ensure_session_workspace("old-session", cfg)
+            blocked_root = ensure_session_workspace("blocked-session", cfg)
             fresh_root = ensure_session_workspace("fresh-session", cfg)
             unrelated = Path(tmp) / "manual"
             unrelated.mkdir()
             old_ts = 1000
             fresh_ts = 2000
             os.utime(old_root, (old_ts, old_ts))
+            os.utime(blocked_root, (old_ts, old_ts))
             os.utime(fresh_root, (fresh_ts, fresh_ts))
+            original_rmtree = workspace_module.shutil.rmtree
+
+            def fake_rmtree(path, *args, **kwargs):
+                if Path(path) == blocked_root:
+                    raise PermissionError("permission denied")
+                return original_rmtree(path, *args, **kwargs)
+
+            monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
 
             removed = cleanup_inactive_workspaces(cfg, now=4601)
 
             assert removed == 1
             assert not old_root.exists()
+            assert blocked_root.exists()
             assert fresh_root.exists()
             assert unrelated.exists()
 
@@ -10158,6 +10581,41 @@ class TestPtyBrokerService:
             {"rows": 33, "cols": 120, "action": "resize"},
         ]
 
+        team_run_id = "pty-run-team-redis"
+        fake.set(
+            pty_service._meta_key(team_run_id),
+            json.dumps({
+                "run_id": team_run_id,
+                "session_id": "creator-session",
+                "team_id": "team-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_team",
+                 return_value=[{"run_id": team_run_id, "run_type": "pty", "team_id": "team-1"}],
+             ):
+            assert pty_service.write_pty_input(
+                team_run_id,
+                "member-session",
+                "q",
+                team_id="team-1",
+            ) == (True, "")
+            assert pty_service.resize_pty(
+                team_run_id,
+                "member-session",
+                40,
+                140,
+                team_id="team-1",
+            ) == (True, "", 40, 140)
+
     def test_pty_stream_replays_redis_output_events_for_any_worker(self):
         fake = process._FakeRedisClient()
         run_id = "pty-run-stream"
@@ -10205,6 +10663,7 @@ class TestPtyBrokerService:
         run = pty_service.PtyRun(
             run_id="pty-run-snapshot-redis",
             session_id="session-1",
+            team_id="",
             command="mtr --interactive darklab.sh",
             argv=["mtr", "darklab.sh"],
             started="2026-01-01T00:00:00Z",
@@ -10386,6 +10845,7 @@ class TestPtyBrokerService:
         run = pty_service.PtyRun(
             run_id="pty-run-snapshot-rate",
             session_id="session-1",
+            team_id="",
             command="ffuf --interactive -u https://darklab.sh/FUZZ -w words.txt",
             argv=["ffuf"],
             started="2026-01-01T00:00:00Z",
@@ -13347,6 +13807,100 @@ class TestDatabaseInit:
         assert entity_count == 0
         assert link_count == 0
 
+    def test_materializer_deduplicates_team_entities_across_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            for run_id, session_id in (
+                ("run-atlas-team-owner", "tok_team_owner"),
+                ("run-atlas-team-operator", "tok_team_operator"),
+            ):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, team_id, command, started, output_preview) "
+                    "VALUES (?, ?, 'team_atlas', ?, ?, ?)",
+                    (run_id, session_id, "host darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+                )
+                materialize_run_entities(
+                    conn,
+                    session_id,
+                    run_id,
+                    [{"entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}]}],
+                    team_id="team_atlas",
+                    seen_at="2026-05-14T00:00:01+00:00",
+                )
+            conn.commit()
+            entity_rows = conn.execute(
+                "SELECT session_id, team_id, type, canonical_value, occurrence_count FROM entities"
+            ).fetchall()
+            link_rows = conn.execute("SELECT entity_id, run_id FROM entity_run_links ORDER BY run_id").fetchall()
+            conn.close()
+
+        assert len(entity_rows) == 1
+        assert entity_rows[0]["session_id"] == "tok_team_owner"
+        assert entity_rows[0]["team_id"] == "team_atlas"
+        assert entity_rows[0]["type"] == "domain"
+        assert entity_rows[0]["canonical_value"] == "darklab.sh"
+        assert entity_rows[0]["occurrence_count"] == 2
+        assert len({row["entity_id"] for row in link_rows}) == 1
+        assert [row["run_id"] for row in link_rows] == ["run-atlas-team-operator", "run-atlas-team-owner"]
+
+    def test_record_run_findings_deduplicates_team_findings_across_members(self):
+        from services.projects.findings import record_run_findings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            entries = [
+                {
+                    "text": "[medium] darklab.sh missing security headers",
+                    "line_index": 1,
+                    "signals": ["findings"],
+                    "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                }
+            ]
+            for run_id, session_id in (
+                ("run-finding-team-owner", "tok_team_owner"),
+                ("run-finding-team-operator", "tok_team_operator"),
+            ):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, team_id, run_kind, command, started, finished, exit_code) "
+                    "VALUES (?, ?, 'team_findings', 'external', 'httpx darklab.sh', ?, ?, 0)",
+                    (
+                        run_id,
+                        session_id,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:01+00:00",
+                    ),
+                )
+                record_run_findings(conn, session_id, run_id, entries, team_id="team_findings")
+            conn.commit()
+            finding_rows = conn.execute(
+                "SELECT session_id, team_id, entity_id, signature_hash, occurrence_count FROM findings"
+            ).fetchall()
+            occurrence_rows = conn.execute(
+                "SELECT finding_id, run_id FROM findings_occurrences ORDER BY run_id"
+            ).fetchall()
+            entity_rows = conn.execute("SELECT id, team_id, canonical_value FROM entities").fetchall()
+            conn.close()
+
+        assert len(entity_rows) == 1
+        assert entity_rows[0]["team_id"] == "team_findings"
+        assert entity_rows[0]["canonical_value"] == "darklab.sh"
+        assert len(finding_rows) == 1
+        assert finding_rows[0]["session_id"] == "tok_team_owner"
+        assert finding_rows[0]["team_id"] == "team_findings"
+        assert finding_rows[0]["entity_id"] == entity_rows[0]["id"]
+        assert finding_rows[0]["occurrence_count"] == 2
+        assert len({row["finding_id"] for row in occurrence_rows}) == 1
+        assert [row["run_id"] for row in occurrence_rows] == [
+            "run-finding-team-operator",
+            "run-finding-team-owner",
+        ]
+
     def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -13538,10 +14092,14 @@ class TestDatabaseInit:
             conn.close()
 
         assert "idx_projects_session_status_updated" in project_indexes
+        assert "idx_projects_personal_slug_unique" in project_indexes
+        assert "idx_projects_team_status_updated" in project_indexes
+        assert "idx_projects_team_slug_unique" in project_indexes
         assert "idx_project_links_project_entity_created" in link_indexes
         assert "idx_project_links_entity_lookup" in link_indexes
         assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
-        assert "idx_findings_session_signature" in finding_indexes
+        assert "idx_findings_personal_signature" in finding_indexes
+        assert "idx_findings_team_signature" in finding_indexes
         assert "idx_findings_session_status" in finding_indexes
         assert "idx_findings_session_entity_seen" in finding_indexes
         assert "idx_findings_session_run_seen" in finding_indexes
@@ -13549,6 +14107,9 @@ class TestDatabaseInit:
         assert "idx_findings_session_last_run_seen" in finding_indexes
         assert "idx_findings_session_tool_seen" in finding_indexes
         assert "idx_findings_session_severity_seen" in finding_indexes
+        assert "idx_findings_team_status" in finding_indexes
+        assert "idx_findings_team_entity_seen" in finding_indexes
+        assert "idx_findings_team_run_seen" in finding_indexes
         assert "idx_findings_occurrences_run" in occurrence_indexes
         assert "idx_findings_occurrences_finding_seen" in occurrence_indexes
         assert "idx_entity_run_links_run" in entity_run_indexes
@@ -13557,6 +14118,101 @@ class TestDatabaseInit:
         assert "idx_entity_notes_entity_updated" in note_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
+
+    def test_project_slug_migration_separates_personal_and_team_scopes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    color TEXT NOT NULL DEFAULT '',
+                    created TEXT NOT NULL,
+                    updated TEXT NOT NULL,
+                    UNIQUE (session_id, slug)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "VALUES ('prj-personal', 'tok_owner', 'Case', 'case', 'now', 'now')"
+            )
+            conn.execute("""
+                CREATE TABLE team_invites (
+                    id TEXT PRIMARY KEY,
+                    team_id TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    label TEXT NOT NULL DEFAULT '',
+                    created_by_member_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL DEFAULT '',
+                    max_uses INTEGER NOT NULL DEFAULT 1,
+                    use_count INTEGER NOT NULL DEFAULT 0,
+                    revoked_at TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    UNIQUE (team_id, code_hash),
+                    CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE team_recovery_codes (
+                    id TEXT PRIMARY KEY,
+                    team_id TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    created_by_member_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    rotated_at TEXT NOT NULL DEFAULT '',
+                    revoked_at TEXT NOT NULL DEFAULT '',
+                    used_at TEXT NOT NULL DEFAULT '',
+                    UNIQUE (team_id, code_hash)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO team_invites "
+                "(id, team_id, code_hash, role, created_by_member_id, created_at) "
+                "VALUES ('invite-one', 'team_one', 'invite_hash', 'operator', 'member-one', 'now')"
+            )
+            conn.execute(
+                "INSERT INTO team_recovery_codes "
+                "(id, team_id, code_hash, created_by_member_id, created_at) "
+                "VALUES ('recovery-one', 'team_one', 'recovery_hash', 'member-one', 'now')"
+            )
+            conn.commit()
+            conn.close()
+
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+                "VALUES ('prj-team', 'tok_owner', 'team_1', 'Case', 'case', 'now', 'now')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+                    "VALUES ('prj-personal-dupe', 'tok_owner', '', 'Case', 'case', 'now', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+                    "VALUES ('prj-team-dupe', 'tok_other', 'team_1', 'Case', 'case', 'now', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO team_invites "
+                    "(id, team_id, code_hash, role, created_by_member_id, created_at) "
+                    "VALUES ('invite-two', 'team_two', 'invite_hash', 'operator', 'member-two', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO team_recovery_codes "
+                    "(id, team_id, code_hash, created_by_member_id, created_at) "
+                    "VALUES ('recovery-two', 'team_two', 'recovery_hash', 'member-two', 'now')"
+                )
+            conn.close()
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise

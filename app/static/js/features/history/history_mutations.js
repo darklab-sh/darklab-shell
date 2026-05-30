@@ -2,6 +2,41 @@
 
 let pendingHistAction = null;
 
+function _historyActiveScopeCan(capability) {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan(capability) : true;
+}
+
+function _historyScopeDeniedMessage(action) {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage(action)
+    : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+}
+
+function _historyCanManageHistory() {
+  return _historyActiveScopeCan('manage_history');
+}
+
+function _historyShowPermissionDenied(action = 'delete team history') {
+  if (typeof showToast === 'function') showToast(_historyScopeDeniedMessage(action), 'error');
+}
+
+async function _historyMutationError(resp, fallback) {
+  let message = fallback;
+  try {
+    const data = typeof resp.json === 'function' ? await resp.json() : {};
+    if (data && data.error === 'team_forbidden') {
+      message = _historyScopeDeniedMessage('delete team history');
+    } else if (data && typeof data.message === 'string' && data.message.trim()) {
+      message = data.message.trim();
+    } else if (data && typeof data.error === 'string' && data.error.trim()) {
+      message = data.error.trim();
+    }
+  } catch (_) {}
+  const err = new Error(message || fallback);
+  err.userFacing = true;
+  return err;
+}
+
 function _historyCleanupLabel(cleanup) {
   const entities = Number(cleanup?.entities || 0);
   const findings = Number(cleanup?.findings || 0);
@@ -69,6 +104,10 @@ async function _loadHistoryAtlasCleanup(runId) {
 }
 
 function confirmHistAction(type, id, command, itemType = 'run') {
+  if ((type === 'delete' || type === 'clear') && !_historyCanManageHistory()) {
+    _historyShowPermissionDenied('delete team history');
+    return;
+  }
   pendingHistAction = { type, id, command, itemType };
   const runDelete = type === 'delete' && itemType !== 'snapshot' && id;
   const isBulk = type === 'clear';
@@ -138,7 +177,8 @@ function executeHistAction(type) {
     const deleteUrl = itemType === 'snapshot'
       ? `/share/${id}`
       : `/history/${id}${query ? `?${query}` : ''}`;
-    apiFetch(deleteUrl, { method: 'DELETE' }).then(() => {
+    apiFetch(deleteUrl, { method: 'DELETE' }).then(async (resp) => {
+      if (!resp.ok) throw await _historyMutationError(resp, 'Failed to delete run');
       if (itemType === 'snapshot') {
         refreshHistoryPanel();
         return;
@@ -157,7 +197,7 @@ function executeHistAction(type) {
       recentPreviewHistory = recentPreviewHistory.filter(c => c !== command);
       renderHistory();
       refreshHistoryPanel();
-    }).catch(() => showToast('Failed to delete run'));
+    }).catch((err) => showToast(err.userFacing ? err.message : 'Failed to delete run', 'error'));
   } else if (action === 'clear-nonfav') {
     apiFetch('/history?type=runs')
       .then(r => r.json())
@@ -168,19 +208,24 @@ function executeHistAction(type) {
         cmdHistory = cmdHistory.filter(c => !deleteCmds.has(c));
         recentPreviewHistory = recentPreviewHistory.filter(c => !deleteCmds.has(c));
         renderHistory();
-        return Promise.all(toDelete.map(r => apiFetch(`/history/${r.id}`, { method: 'DELETE' })));
+        return Promise.all(toDelete.map(async (r) => {
+          const resp = await apiFetch(`/history/${r.id}`, { method: 'DELETE' });
+          if (!resp.ok) throw await _historyMutationError(resp, 'Failed to clear history');
+          return resp;
+        }));
       })
       .then(() => refreshHistoryPanel())
-      .catch(() => showToast('Failed to clear history'));
+      .catch((err) => showToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
   } else {
-    apiFetch('/history', { method: 'DELETE' }).then(() => {
+    apiFetch('/history', { method: 'DELETE' }).then(async (resp) => {
+      if (!resp.ok) throw await _historyMutationError(resp, 'Failed to clear history');
       _saveStarred(new Set());
       apiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
       cmdHistory = [];
       recentPreviewHistory = [];
       renderHistory();
       refreshHistoryPanel();
-    }).catch(() => showToast('Failed to clear history'));
+    }).catch((err) => showToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
   }
 }
 

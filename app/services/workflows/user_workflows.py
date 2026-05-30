@@ -1,5 +1,5 @@
 """
-Session-scoped user-created workflows.
+Personal and team-scoped user-created workflows.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
+from services.teams.scope import personal_owner_context, shared_owner_predicate
 from services.workflows.catalog import normalize_workflow_entry
 
 
@@ -48,6 +49,8 @@ def _row_to_workflow(row):
         "created": item["created"],
         "updated": item["updated"],
     })
+    if "team_id" in row.keys():
+        normalized["team_id"] = row["team_id"] or ""
     return normalized
 
 
@@ -102,22 +105,35 @@ def _clean_payload(data):
     return normalized
 
 
-def list_user_workflows(session_id):
+def _workflow_owner_where(session_id, *, team_id="", table_alias=""):
+    prefix = f"{table_alias}." if table_alias else ""
+    if team_id:
+        return f"{prefix}team_id = ?", (team_id,)
+    return shared_owner_predicate(
+        personal_owner_context(session_id),
+        team_column=f"{prefix}team_id",
+        session_column=f"{prefix}session_id",
+    )
+
+
+def list_user_workflows(session_id, *, team_id=""):
     with db_connect() as conn:
+        owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         rows = conn.execute(
-            "SELECT id, title, description, inputs, steps, created, updated "
-            "FROM user_workflows WHERE session_id = ? ORDER BY updated DESC, created DESC",
-            (session_id,),
+            "SELECT id, session_id, team_id, title, description, inputs, steps, created, updated "
+            "FROM user_workflows WHERE " + owner_sql + " ORDER BY updated DESC, created DESC",  # nosec
+            owner_params,
         ).fetchall()
     return [item for item in (_row_to_workflow(row) for row in rows) if item]
 
 
-def get_user_workflow(session_id, workflow_id):
+def get_user_workflow(session_id, workflow_id, *, team_id=""):
     with db_connect() as conn:
+        owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         row = conn.execute(
-            "SELECT id, title, description, inputs, steps, created, updated "
-            "FROM user_workflows WHERE session_id = ? AND id = ?",
-            (session_id, workflow_id),
+            "SELECT id, session_id, team_id, title, description, inputs, steps, created, updated "
+            "FROM user_workflows WHERE " + owner_sql + " AND id = ?",  # nosec
+            (*owner_params, workflow_id),
         ).fetchone()
     return _row_to_workflow(row) if row else None
 
@@ -126,7 +142,7 @@ def _new_workflow_id():
     return "usr_" + secrets.token_hex(8)
 
 
-def create_user_workflow(session_id, data):
+def create_user_workflow(session_id, data, *, team_id=""):
     workflow = _clean_payload(data)
     created = _now()
     with db_connect() as conn:
@@ -135,12 +151,13 @@ def create_user_workflow(session_id, data):
             workflow_id = _new_workflow_id()
             result = conn.execute(
                 "INSERT INTO user_workflows "  # nosec B608
-                "(id, session_id, title, description, inputs, steps, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "(id, session_id, team_id, title, description, inputs, steps, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + dialect.insert_or_ignore_clause(("id",)),
                 (
                     workflow_id,
                     session_id,
+                    str(team_id or ""),
                     workflow["title"],
                     workflow["description"],
                     dialect.json_param(workflow["inputs"]),
@@ -151,40 +168,42 @@ def create_user_workflow(session_id, data):
             )
             if result.rowcount:
                 conn.commit()
-                return get_user_workflow(session_id, workflow_id)
+                return get_user_workflow(session_id, workflow_id, team_id=team_id)
         raise UserWorkflowError("could not allocate a workflow id")
 
 
-def update_user_workflow(session_id, workflow_id, data):
+def update_user_workflow(session_id, workflow_id, data, *, team_id=""):
     workflow = _clean_payload(data)
     updated = _now()
     with db_connect() as conn:
         dialect = dialect_for_backend(DB_BACKEND)
+        owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         result = conn.execute(
             "UPDATE user_workflows "
             "SET title = ?, description = ?, inputs = ?, steps = ?, updated = ? "
-            "WHERE session_id = ? AND id = ?",
+            "WHERE " + owner_sql + " AND id = ?",  # nosec
             (
                 workflow["title"],
                 workflow["description"],
                 dialect.json_param(workflow["inputs"]),
                 dialect.json_param(workflow["steps"]),
                 updated,
-                session_id,
+                *owner_params,
                 workflow_id,
             ),
         )
         conn.commit()
     if result.rowcount == 0:
         return None
-    return get_user_workflow(session_id, workflow_id)
+    return get_user_workflow(session_id, workflow_id, team_id=team_id)
 
 
-def delete_user_workflow(session_id, workflow_id):
+def delete_user_workflow(session_id, workflow_id, *, team_id=""):
     with db_connect() as conn:
+        owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         result = conn.execute(
-            "DELETE FROM user_workflows WHERE session_id = ? AND id = ?",
-            (session_id, workflow_id),
+            "DELETE FROM user_workflows WHERE " + owner_sql + " AND id = ?",  # nosec
+            (*owner_params, workflow_id),
         )
         conn.commit()
     return result.rowcount > 0

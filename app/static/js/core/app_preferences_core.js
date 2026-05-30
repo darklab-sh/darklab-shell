@@ -26,7 +26,7 @@
   const HUD_CLOCK_MODES = Object.freeze(['utc', 'local']);
   const COMPARE_VIEW_MODES = Object.freeze(['auto', 'side_by_side', 'unified', 'changes_only', 'findings_only']);
   const COMPARE_CONTEXT_MODES = Object.freeze(['3', '10', 'all']);
-  const OPTIONS_MODAL_TABS = Object.freeze(['preferences', 'secrets', 'notifications']);
+  const OPTIONS_MODAL_TABS = Object.freeze(['preferences', 'secrets', 'teams', 'notifications']);
 
   function _coerceMode(value, modes, fallback) {
     return modes.includes(value) ? value : fallback;

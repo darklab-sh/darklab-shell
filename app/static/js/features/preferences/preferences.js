@@ -274,6 +274,12 @@ function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   if (nextTab === 'notifications' && typeof refreshNotificationChannels === 'function') {
     void refreshNotificationChannels();
   }
+  const refreshTeams = typeof refreshOptionsTeams === 'function'
+    ? refreshOptionsTeams
+    : (typeof window !== 'undefined' && typeof window.refreshOptionsTeams === 'function' ? window.refreshOptionsTeams : null);
+  if (nextTab === 'teams' && refreshTeams) {
+    void refreshTeams();
+  }
   return nextTab;
 }
 

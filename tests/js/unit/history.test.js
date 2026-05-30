@@ -525,6 +525,8 @@ describe('history panel actions', () => {
     downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
     submitComposerCommandImpl = vi.fn(() => true),
+    activeTeamScopeCanImpl = () => true,
+    teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
   } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
@@ -797,6 +799,8 @@ describe('history panel actions', () => {
             if (typeof end === 'number') cmdInput.selectionEnd = end
           },
           refocusComposerAfterAction,
+          activeTeamScopeCan: activeTeamScopeCanImpl,
+          teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
         },
       `{
         refreshHistoryPanel,
@@ -3706,6 +3710,87 @@ describe('history panel actions', () => {
     )
   })
 
+  it('hides history metadata edit and delete actions for view-only team members', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      activeTeamScopeCanImpl: capability => capability !== 'manage_history',
+      apiFetchImpl: vi.fn((url) => {
+        if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                roots: [],
+                items: [
+                  {
+                    id: 'run-external',
+                    type: 'run',
+                    run_kind: 'external',
+                    command: 'nmap darklab.sh',
+                    label: 'nmap darklab.sh',
+                    started: '2026-01-01T00:00:00Z',
+                    created: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                  {
+                    id: 'run-builtin',
+                    type: 'run',
+                    run_kind: 'builtin',
+                    command: 'theme list',
+                    label: 'theme list',
+                    started: '2026-01-01T00:00:00Z',
+                    created: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                  {
+                    id: 'snap-viewer',
+                    type: 'snapshot',
+                    label: 'viewer snapshot',
+                    created: '2026-01-01T00:00:00Z',
+                  },
+                ],
+                runs: [],
+              }),
+          })
+        }
+        if (url === '/history/run-builtin?json&preview=1') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                id: 'run-builtin',
+                run_kind: 'builtin',
+                command: 'theme list',
+                output_entries: [{ text: 'theme output', cls: '' }],
+                exit_code: 0,
+                started: '2026-01-01T00:00:00Z',
+              }),
+          })
+        }
+        if (url === '/projects?include_archived=1') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [] }) })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entries = document.querySelectorAll('#history-list .history-entry')
+    expect(entries[0].querySelector('[data-action="edit-metadata"]')).toBeNull()
+    expect(entries[0].querySelector('[data-action="delete"]')).toBeNull()
+    expect(entries[0].querySelector('.history-action-menu')?.textContent).not.toContain('edit')
+    expect(entries[0].querySelector('.history-action-menu')?.textContent).not.toContain('delete')
+    expect(entries[1].querySelector('[data-action="delete"]')).toBeNull()
+    expect(entries[2].querySelector('[data-action="edit-metadata"]')).toBeNull()
+    expect(entries[2].querySelector('[data-action="delete"]')).toBeNull()
+
+    entries[1].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    await Promise.resolve()
+
+    expect(document.querySelector('[data-history-run-action="edit-metadata"]')).toBeNull()
+    expect(document.querySelector('.history-run-section-header')?.textContent).toBe('Metadata')
+  })
+
   it('renders snapshot rows with open and copy-link actions', async () => {
     const openMetadataEditor = vi.fn()
     const { refreshHistoryPanel } = loadHistoryPanel({
@@ -4568,6 +4653,33 @@ describe('history panel actions', () => {
 
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to delete run')
     expect(document.querySelectorAll('#history-list .history-entry')).toHaveLength(1)
+  })
+
+  it('shows a team-scope denial when history delete is rejected by the server', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('one'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/history/run-1/atlas-cleanup-preview') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ cleanup: {} }) })
+      }
+      if (url === '/history/run-1' && options.method === 'DELETE') {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: 'team_forbidden' }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [] }) })
+    })
+    const { confirmHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
+
+    confirmHistAction('delete', 'run-1', 'ping darklab.sh')
+    await new Promise((resolve) => setImmediate(resolve))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.getElementById('permalink-toast').textContent)
+      .toBe("View-only team members can't delete team history. Switch to Personal or ask for operator access.")
   })
 
   it('executeHistAction shows a failure toast when clearing non-favorite history fails', async () => {

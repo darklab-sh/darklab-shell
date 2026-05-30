@@ -145,6 +145,56 @@
       return empty;
     }
 
+    function actionCapability(action) {
+      const triageActions = new Set([
+        'bulk-delete-project-findings',
+        'edit-finding-metadata',
+      ]);
+      const mutateActions = new Set([
+        'use',
+        'clear',
+        'archive',
+        'unarchive',
+        'delete',
+        'edit-project-metadata',
+        'bulk-unlink-project-entities',
+        'unlink-project-entity',
+        'open-entity-picker',
+        'entity-picker-add',
+        'new-target',
+        'edit-target',
+        'delete-target',
+        'confirm-target',
+        'dismiss-target',
+        'edit-run-metadata',
+        'edit-artifact-metadata',
+        'link-last-run',
+        'unlink-run',
+        'package-edit',
+        'package-repackage',
+        'package-delete',
+        'package-wizard-open',
+        'package-wizard-next',
+      ]);
+      const normalized = String(action || '');
+      if (triageActions.has(normalized)) return 'triage_findings';
+      if (mutateActions.has(normalized)) return 'mutate_projects';
+      return '';
+    }
+
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(capability) {
+      const action = capability === 'triage_findings' ? 'triage team findings' : 'change team projects';
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
     function metaRow(label, value) {
       const row = document.createElement('div');
       row.className = 'project-explorer-meta-row panel-row';
@@ -227,6 +277,11 @@
       btn.textContent = label;
       btn.dataset.projectAction = action;
       if (projectId) btn.dataset.projectId = projectId;
+      const capability = actionCapability(action);
+      if (capability && !activeTeamScopeCan(capability)) {
+        btn.disabled = true;
+        btn.title = teamScopeDeniedMessage(capability);
+      }
       ctx.bindProjectRuntimePressable?.(btn);
       return btn;
     }

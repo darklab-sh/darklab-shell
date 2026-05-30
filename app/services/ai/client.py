@@ -199,10 +199,12 @@ class OpenAICompatibleClient:
         cfg: dict | None = None,
         *,
         session_token: str | None = None,
+        secret_scope_token: str | None = None,
         progress_callback: AIProgressCallback | None = None,
     ):
         self.cfg = ai_cfg(cfg)
         self.session_token = session_token
+        self.secret_scope_token = secret_scope_token or session_token
         self.progress_callback = progress_callback
         self.base_url = self.cfg["base_url"]
         self.model = self.cfg["model"]
@@ -211,11 +213,16 @@ class OpenAICompatibleClient:
 
     def _api_key(self) -> str:
         secret_name = str(self.cfg.get("api_key_secret_name") or "").strip()
-        if secret_name and self.session_token:
+        if secret_name and self.secret_scope_token:
             try:
                 from services.secrets.storage import get_secret_value_for_env  # noqa: PLC0415
 
-                value = get_secret_value_for_env(self.session_token, secret_name)
+                value = get_secret_value_for_env(
+                    self.secret_scope_token,
+                    secret_name,
+                    audit_session_id=self.session_token or "",
+                    team_id=self.secret_scope_token if self.secret_scope_token != self.session_token else "",
+                )
                 if value:
                     return value
             except Exception:

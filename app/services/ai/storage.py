@@ -55,6 +55,7 @@ def cached_completed_assist(
     run_id: str,
     variant: str,
     *,
+    team_id: str = "",
     model: str,
     prompt_version: str,
     context_hash: str,
@@ -62,12 +63,20 @@ def cached_completed_assist(
 ) -> dict[str, Any] | None:
     with _timed_db_operation("ai_cache_lookup"):
         with _connection_scope(conn) as active_conn:
-            row = active_conn.execute(
-                "SELECT * FROM ai_run_assists WHERE session_id = ? AND run_id = ? "
-                "AND variant = ? AND model = ? AND prompt_version = ? AND context_hash = ? "
-                "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
-                (session_id, run_id, variant, model, prompt_version, context_hash),
-            ).fetchone()
+            if team_id:
+                row = active_conn.execute(
+                    "SELECT * FROM ai_run_assists WHERE team_id = ? AND run_id = ? "
+                    "AND variant = ? AND model = ? AND prompt_version = ? AND context_hash = ? "
+                    "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
+                    (team_id, run_id, variant, model, prompt_version, context_hash),
+                ).fetchone()
+            else:
+                row = active_conn.execute(
+                    "SELECT * FROM ai_run_assists WHERE (team_id IS NULL OR team_id = '') AND session_id = ? "
+                    "AND run_id = ? AND variant = ? AND model = ? AND prompt_version = ? AND context_hash = ? "
+                    "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
+                    (session_id, run_id, variant, model, prompt_version, context_hash),
+                ).fetchone()
             return _decode_assist_row(row) if row else None
 
 
@@ -76,18 +85,27 @@ def active_assist(
     run_id: str,
     variant: str,
     *,
+    team_id: str = "",
     model: str,
     prompt_version: str,
     conn=None,
 ) -> dict[str, Any] | None:
     with _timed_db_operation("ai_active_lookup"):
         with _connection_scope(conn) as active_conn:
-            row = active_conn.execute(
-                "SELECT * FROM ai_run_assists WHERE session_id = ? AND run_id = ? "
-                "AND variant = ? AND model = ? AND prompt_version = ? "
-                "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
-                (session_id, run_id, variant, model, prompt_version),
-            ).fetchone()
+            if team_id:
+                row = active_conn.execute(
+                    "SELECT * FROM ai_run_assists WHERE team_id = ? AND run_id = ? "
+                    "AND variant = ? AND model = ? AND prompt_version = ? "
+                    "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
+                    (team_id, run_id, variant, model, prompt_version),
+                ).fetchone()
+            else:
+                row = active_conn.execute(
+                    "SELECT * FROM ai_run_assists WHERE (team_id IS NULL OR team_id = '') AND session_id = ? "
+                    "AND run_id = ? AND variant = ? AND model = ? AND prompt_version = ? "
+                    "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
+                    (session_id, run_id, variant, model, prompt_version),
+                ).fetchone()
             return _decode_assist_row(row) if row else None
 
 
@@ -97,6 +115,7 @@ def enqueue_assist(
     variant: str,
     context_result,
     *,
+    team_id: str = "",
     cfg: dict | None = None,
     model: str | None = None,
     prompt_version: str,
@@ -118,6 +137,7 @@ def enqueue_assist(
                     session_id,
                     run_id,
                     variant,
+                    team_id=team_id,
                     model=resolved_model,
                     prompt_version=prompt_version,
                     context_hash=context_result.context_hash,
@@ -130,6 +150,7 @@ def enqueue_assist(
                 session_id,
                 run_id,
                 variant,
+                team_id=team_id,
                 model=resolved_model,
                 prompt_version=prompt_version,
                 conn=active_conn,
@@ -142,15 +163,16 @@ def enqueue_assist(
             assist_id = f"ai_{uuid.uuid4().hex}"
             active_conn.execute(
                 "INSERT INTO ai_run_assists "
-                "(id, run_id, session_id, variant, prompt_version, prompt_version_source, "
+                "(id, run_id, session_id, team_id, variant, prompt_version, prompt_version_source, "
                 "payload_schema_version, model, context_hash, status, active_project_id, "
                 "project_target_snapshot, payload, input_chars, estimated_input_tokens, "
                 "redacted_bytes, pre_redaction_bytes, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     assist_id,
                     run_id,
                     session_id,
+                    team_id,
                     variant,
                     prompt_version,
                     prompt_version_source,
@@ -330,14 +352,28 @@ def reclaim_stale_assists(*, stale_after_seconds: int = 300) -> int:
             return int(cur.rowcount or 0)
 
 
-def list_recent_assists_for_run(session_id: str, run_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+def list_recent_assists_for_run(
+    session_id: str,
+    run_id: str,
+    *,
+    team_id: str = "",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
     with _timed_db_operation("ai_list_recent_assists"):
         with db_connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM ai_run_assists WHERE session_id = ? AND run_id = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (session_id, run_id, max(1, min(100, int(limit)))),
-            ).fetchall()
+            normalized_limit = max(1, min(100, int(limit)))
+            if team_id:
+                rows = conn.execute(
+                    "SELECT * FROM ai_run_assists WHERE team_id = ? AND run_id = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (team_id, run_id, normalized_limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM ai_run_assists WHERE (team_id IS NULL OR team_id = '') "
+                    "AND session_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (session_id, run_id, normalized_limit),
+                ).fetchall()
         return [_decode_assist_row(row) for row in rows]
 
 

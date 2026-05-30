@@ -20,8 +20,16 @@ def schedule_fire_payload(fire: ScheduleFire) -> dict[str, Any]:
     return asdict(fire)
 
 
-def get_user_schedule_for_session(schedule_id: str, session_id: str) -> Schedule | None:
+def get_user_schedule_for_owner(schedule_id: str, session_id: str, *, team_id: str = "") -> Schedule | None:
     schedule = get_schedule(schedule_id)
-    if schedule is None or schedule.session_token != session_id or schedule.owner_kind != OWNER_KIND_USER:
+    if schedule is None or schedule.owner_kind != OWNER_KIND_USER:
+        return None
+    if team_id:
+        return schedule if schedule.team_id == team_id else None
+    if schedule.team_id or schedule.session_token != session_id:
         return None
     return schedule
+
+
+def get_user_schedule_for_session(schedule_id: str, session_id: str) -> Schedule | None:
+    return get_user_schedule_for_owner(schedule_id, session_id, team_id="")
