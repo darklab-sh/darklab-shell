@@ -6795,7 +6795,7 @@ class TestDiagRoute:
                 "sessionprocs:*":  ["sessionprocs:s1"],
             },
             xlen_map={f"runstream:{run_id}": 17},
-            get_map={f"procmeta:{run_id}": meta_payload},
+            get_map={f"procmeta:{run_id}": meta_payload, f"proc:{run_id}": "123"},
             sismember_map={"sessionprocs:s1": {run_id}},
             info_data={
                 "memory":      {"used_memory_human": "1.2M", "used_memory_peak_human": "2.0M",
@@ -6858,7 +6858,9 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 data = json.loads(client.get("/diag?format=json").data)
-        assert data["redis"]["stats"]["orphans"] == {"probed": 1, "orphaned": 1}
+        assert data["redis"]["stats"]["orphans"] == {"probed": 1, "orphaned": 1, "cleaned": 1}
+        fake.delete.assert_called_once_with("procmeta:r2", "proc:r2")
+        fake.srem.assert_called_once_with("sessionprocs:s2", "r2")
 
     def test_redis_namespace_count_marks_capped_when_scan_hits_limit(self):
         client = self._allowed_client()

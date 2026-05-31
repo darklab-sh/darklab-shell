@@ -356,6 +356,8 @@ def load_config(conf_dir=None):
         "interactive_pty_max_concurrent_per_session": 4,
         "interactive_pty_input_rate_limit_per_minute": 500,
         "interactive_pty_input_rate_limit_per_second": 10,
+        "interactive_pty_resize_rate_limit_per_minute": 600,
+        "interactive_pty_resize_rate_limit_per_second": 30,
         "interactive_pty_buffer_limit": 512,
         "interactive_pty_input_max_bytes": 4096,
         "interactive_pty_heartbeat_seconds": 15,

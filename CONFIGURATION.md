@@ -224,6 +224,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_negative_cache_securitytrails_quota_seconds` | `21600` | Server-side only. Fallback cache window for SecurityTrails quota-exhausted responses when no reset time is available |
 | `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
 | `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
+| `interactive_pty_resize_rate_limit_per_minute` | `600` | Max interactive PTY resize requests per minute per IP. This is separate from `/runs` because normal browser layout changes can produce short resize bursts |
+| `interactive_pty_resize_rate_limit_per_second` | `30` | Max interactive PTY resize request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |
 | `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the saved run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` means unlimited |
 | `high_volume_output_line_threshold` | `50000` | Browser-facing. Pauses live rendering for brokered command output after this many received lines. Output keeps counting, kill controls stay available, and backend preview/full-output storage still follows the normal output settings. `0` disables the pause |
@@ -347,7 +349,7 @@ Each chapter supports:
 - `id` - stable chapter identifier used by both renderers
 - `title` - short display title
 - `summary` - end-user copy for the chapter
-- `sample` - optional command-chip value for the terminal `tour` command; terminal samples open in a new tab, while the visual tour may replace this with an app action such as opening History, Workflows, Projects, Files, Options, or FAQ
+- `sample` - optional command-chip value for the terminal `tour` command; terminal samples open in a new tab, while the visual tour may replace this with an app action such as opening History, Workflows, Projects, Teams, Files, Options, or FAQ
 - `illustration` - optional key for the visual tour renderer
 - `requires` - optional exact config key such as `workspace_enabled` or `interactive_pty_enabled`; chapters are hidden when that feature is disabled
 

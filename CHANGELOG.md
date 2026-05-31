@@ -84,7 +84,23 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Docs:** updated README, FEATURES, ARCHITECTURE, CONFIGURATION, DECISIONS, API docs, focused feature docs, test inventory, and release drafts in current-state language for team scope, roles, explicit team secrets, archived-team automation behavior, API/CLI commands, run scope-mismatch feedback, and the dedicated Team-Mode feature reference.
   - **Tests:** added broad backend, browser, API, CLI, terminal, Postgres, logging, OpenAPI, and Playwright coverage for team schema/migrations, owner predicates, scope isolation, cross-member shared reads/writes, role denials, archived-team behavior, team secrets/provider use, project/Atlas/package/automation/notification/AI/workflow paths, CLI output and error shapes, terminal commands, route guardrails, browser read-only affordance guards, Files scope-switch/read-only controls, and the real browser multi-operator flow.
 
+- **Team-Mode tour chapter** — the shared terminal and visual onboarding tour now introduces active personal/team scope.
+  - **What:** bumped the tour content version, added a Team-Mode chapter with a `team help` terminal sample, added a desktop visual scope card, and wired the visual tour action to open the Options Teams tab.
+  - **Tests:** updated visual tour unit coverage for the Team-Mode card and action.
+
 ### Changed
+
+- **Redis client upgrade guard** — made the app's Redis client behavior explicit ahead of redis-py 8 testing.
+  - **What:** Redis connection setup is back to decoded responses only, leaving redis-py's native protocol, read-timeout, and connect-timeout defaults in place. The dependency list still pins `redis` directly and avoids Flask-Limiter's Redis extra while `limits[redis]` caps redis-py below 8.
+  - **Tests:** removed the temporary kwargs-only Redis client tests after the compatibility shim was removed; existing Redis-backed route and worker coverage remains in place.
+
+- **Interactive PTY resize throttling** — normal PTY layout changes no longer trip the generic run burst limit.
+  - **What:** PTY resize posts now use a dedicated resize rate-limit bucket and the browser coalesces same-size/intermediate resize events before sending the final terminal size.
+  - **Tests:** extended PTY route and browser-terminal coverage for the dedicated resize limit and resize coalescing.
+
+- **Diagnostics Redis orphan cleanup** — `/diag` now cleans dead active-run metadata while reporting Redis orphan probes.
+  - **What:** Redis diagnostics remove `procmeta:*` rows whose session index no longer references the run and whose `proc:*` key is already gone, and the page shows how many stale rows were cleaned. Normal active-run listing paths also run the same cleanup on a short throttle, so stale metadata is pruned during regular UI/API/status checks instead of depending on an operator opening `/diag`.
+  - **Tests:** updated Redis diagnostics route coverage for live proc metadata and stale orphan cleanup, and added active-run listing coverage for unindexed stale metadata cleanup.
 
 - **Confirmation action contract** — documented the shared confirmation primitive's destructive action role.
   - **What:** `ARCHITECTURE.md` now includes `role: 'destructive'` in the `showConfirm()` action contract, matching the existing `btn-destructive` behavior used by team management and other destructive confirmation flows.

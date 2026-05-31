@@ -610,6 +610,9 @@
         <td>
           <span class="{{ 'diag-fail' if rstats.orphans.orphaned else 'diag-ok' }}">{{ rstats.orphans.orphaned }}</span>
           <span class="diag-muted">of {{ rstats.orphans.probed }} probed</span>
+          {% if rstats.orphans.cleaned %}
+          <span class="diag-muted">· cleaned {{ rstats.orphans.cleaned }}</span>
+          {% endif %}
         </td>
       </tr>
       {% endif %}

@@ -10,9 +10,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
-  - [Atlas Enhancements](#atlas-enhancements)
-  - [Future Project Workspace enhancements](#future-project-workspace-enhancements)
-  - [Future interactive PTY enhancements](#future-interactive-pty-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
   - [Audit log surface](#audit-log-surface)
@@ -49,52 +46,36 @@ No technical debt items are currently tracked.
 
 ## Feature Enhancements
 
-### API / CLI Enhancements
+These are possible future improvements, split by whether they look worth carrying forward.
+
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
-  - Not for v1.1, but worth scoping — once outbound notifications land, the headless API becomes the natural place to receive `pull-request-merged` / `engagement-kicked-off` webhooks that auto-create projects.
-### Atlas Enhancements
-- **Future**
-  - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
-  - Auto-promote rules — entities matching saved patterns auto-promote into a project.
-  - Time-travel view: "what did the Atlas look like a week ago?" using retained snapshots.
-  - Side-by-side entity comparison (their runs, findings, intel snapshots).
-  - Cross-session Atlas view for operators managing multiple sessions or shared infrastructure.
-  - Atlas import from external triage tools.
-
-### Future Project Workspace enhancements
-- **Security and lifecycle**
-  - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
-- **Capture, tagging, and navigation**
-  - Add a compact project switcher near the prompt with recently used projects and a Create New action.
-- **Future-state mobile polish**
-  - Consider swipe gestures for target and finding rows only after overflow-menu interactions are shipped and tested.
-- **Findings and comparison**
-  - Extend comparison beyond run-to-run finding/artifact diffs to snapshots and package artifacts.
-- **Evidence packages**
-  - Materialize evidence package archives at creation time if byte-for-byte repeat downloads become important.
-  - Make package presets config-driven so new bundle profiles, such as internal review or external handoff, can be added without code changes.
-  - Add richer per-finding remediation or verification fields if findings evolve beyond raw output capture.
-  - Add richer target references in package exports, including derived relationships that are not directly visible in selected finding text.
-  - Add richer provenance metadata and round-trip import hints for labels, notes, targets, findings, and packages.
-  - Explore fuller direct template reuse for package run transcript pages without reintroducing app-hosted asset links.
-  - Add generated re-package names that preserve the original selection while incrementing the package label or timestamp.
-
-### Future interactive PTY enhancements
-- **Future lifecycle and resilience**
-  - Revisit transport after real usage. The current pass uses Redis-brokered SSE plus narrow POST input/resize endpoints to avoid adding a WebSocket server dependency; WebSocket may still be useful if latency, throughput, or bidirectional control behavior becomes a real limitation.
-- **Future security**
-  - Defer asciinema-style raw byte replay and input auditing until real usage shows they are needed.
-- **Future architecture**
-  - Split `pty.js` into smaller modules once PTY work resumes in depth. Natural boundaries are orchestration/command detection, modal wiring/timer/status, and xterm session/resize handling.
-  - Split `pty_service.py` once more PTY server behavior accumulates. Capture, run lifecycle, Redis stream transport, control-stream draining, and metadata storage are natural module boundaries.
-  - Consider dropping the base `#pty-overlay` from `index.html` and building every PTY modal through `_ptyBuildOverlay`. Tab overlays are now normalized and reused, so this is cleanup rather than a leak fix; the benefit would be removing the remaining ID/class selector duality in `_ptyModalEls`.
-  - Verify or document PTY modal positioning and mobile-sheet behavior with the overlay scoped inside `.tab-panel`. PTY startup is disabled on mobile, but the shared modal/mobile-sheet CSS still deserves a viewport sanity check if the modal layout changes again.
-  - Introduce a small PTY host interface object for browser tests. `pty.js` still reaches into many runner globals; a host object would make tests less brittle and reduce global-surface coupling.
-  - Add broader browser unit coverage for PTY tab state transitions and disabled normal-terminal behaviors as future PTY features are added.
-- **Future polish and operational visibility**
-  - The reader loop polls Redis every 200 ms via `xread block=1` for control events. With many concurrent PTYs this is wasted ops. Switch the control channel to Redis Pub/Sub (or a longer block window) so idle PTYs cost zero ops while output latency stays unaffected.
-  - Skip the unconditional `_store_pty_snapshot(run, force=True)` in `pty_run_snapshot` when the request hits the worker that owns the PTY. The route already returns the live in-memory payload to the caller, and the next reader-loop tick will publish to Redis naturally; the extra Redis SET costs one round-trip per attach for cross-worker freshness that is rarely consumed.
-  - Consider pausing xterm rendering for hidden-tab PTYs. xterm.js running in a `display: none` panel still processes writes and grows scrollback (capped at 1000 lines, but still wasted CPU). Either drop incoming `output` chunks into the modal only when visible (queue and replay on tab focus) or accept the cost as small enough to ignore — worth measuring under a long-running ffuf in a backgrounded tab before spending engineering on it.
+  - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
+- **Atlas auto-promote rules.**
+  - Saved patterns that promote matching entities into a project would reduce repeated triage work.
+- **Cross-session Atlas view.**
+  - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
+- **Atlas import from external triage tools.**
+  - Gives teams a practical bridge from existing tooling into darklab_shell instead of forcing all enrichment to start inside the app.
+- **Compact project switcher near the prompt.**
+  - Recently used projects plus a Create New action would make capture and run-linking feel faster during active work.
+- **Extend comparison beyond run-to-run finding and artifact diffs.**
+  - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
+- **Config-driven package presets.**
+  - Lets operators add internal-review or external-handoff bundle profiles without code changes.
+- **Richer per-finding remediation or verification fields.**
+  - Worth keeping if findings keep moving toward report-ready triage instead of raw output capture.
+- **Richer target references in package exports.**
+  - Useful when selected findings rely on derived relationships that are not directly visible in the finding text.
+- **Richer provenance metadata and round-trip import hints.**
+  - Helps labels, notes, targets, findings, and packages survive export/import workflows with less manual repair.
+- **Revisit PTY transport after real usage.**
+  - The current Redis-brokered SSE plus POST endpoints keep deployment simple, but WebSockets may be worth it if latency, throughput, or bidirectional control becomes a real limitation.
+- **Split `pty.js` and `pty_service.py` if PTY work grows again.**
+  - Worth doing when new PTY behavior lands; orchestration, modal wiring, xterm session handling, lifecycle, transport, and metadata storage are natural boundaries.
+- **Introduce a small PTY host interface object and broader PTY browser coverage.**
+  - Would make PTY tests less brittle and keep future tab-state or disabled-terminal changes from drifting.
+- **Reduce idle PTY control-channel work if concurrency becomes real.**
+  - Redis Pub/Sub, a longer block window, or avoiding unnecessary attach-time snapshot writes would be worthwhile if many PTYs are active at once.
 
 ## Research
 

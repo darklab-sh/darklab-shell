@@ -10596,6 +10596,40 @@ class TestActiveRunMetadata:
         assert fake_redis.get("proc:run-live") == 33333
         assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
 
+    def test_active_runs_for_session_periodically_cleans_unindexed_stale_metadata(self):
+        fake_redis = process._FakeRedisClient()
+        stale = {
+            "run_id": "run-unindexed-stale",
+            "pid": 11111,
+            "session_id": "session-1",
+            "command": "ping darklab.sh",
+            "started": "2026-01-01T00:00:00Z",
+            "process_namespace_id": "container-current",
+        }
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_process_namespace_id", return_value="container-current"),
+            mock.patch.object(process, "_active_run_is_alive", return_value=True),
+            mock.patch.object(process.time, "monotonic", return_value=1000.0),
+            mock.patch.object(process, "_last_active_run_cleanup_monotonic", 0.0),
+        ):
+            fake_redis.set("procmeta:run-unindexed-stale", process.json.dumps(stale))
+            process.active_run_register(
+                "run-live",
+                22222,
+                "session-1",
+                "curl -I darklab.sh",
+                "2026-01-01T00:00:01Z",
+            )
+            process.pid_register("run-live", 22222)
+
+            runs = process.active_runs_for_session("session-1")
+
+        assert [item["run_id"] for item in runs] == ["run-live"]
+        assert fake_redis.get("procmeta:run-unindexed-stale") is None
+        assert fake_redis.get("procmeta:run-live") is not None
+        assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
+
     def test_active_run_resource_usage_reports_cumulative_cpu_and_memory(self):
         class FakeTimes:
             def __init__(self, user, system):

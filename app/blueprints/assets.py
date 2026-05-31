@@ -406,6 +406,7 @@ def _diag_redis_stats(client):
         cursor = 0
         scanned = 0
         orphans = 0
+        cleaned = 0
         while scanned < _DIAG_REDIS_ORPHAN_PROBE_CAP:
             cursor, batch = client.scan(
                 cursor=cursor, match="procmeta:*", count=_DIAG_REDIS_SCAN_COUNT,
@@ -432,14 +433,22 @@ def _diag_redis_stats(client):
                     orphans += 1
                     continue
                 try:
-                    if not client.sismember(f"sessionprocs:{session_id}", run_id):
+                    session_key = f"sessionprocs:{session_id}"
+                    if not client.sismember(session_key, run_id):
                         orphans += 1
+                        proc_key = f"proc:{run_id}"
+                        if client.get(proc_key) is None:
+                            client.delete(key, proc_key)
+                            client.srem(session_key, run_id)
+                            cleaned += 1
                 except Exception as exc:
                     log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "orphan_membership", "error": str(exc)})
                     continue
             if not cursor:
                 break
         stats["orphans"] = {"probed": scanned, "orphaned": orphans}
+        if cleaned:
+            stats["orphans"]["cleaned"] = cleaned
     except Exception as exc:
         log.warning("DIAG_REDIS_SCAN_INCOMPLETE", extra={"stage": "orphan_probe", "error": str(exc)})
 

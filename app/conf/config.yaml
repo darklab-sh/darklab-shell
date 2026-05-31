@@ -587,6 +587,15 @@
 # Server default if unset: 10
 # interactive_pty_input_rate_limit_per_second: 10
 
+# Maximum number of interactive PTY resize requests per minute per IP. Resize
+# events are small and can arrive in bursts during normal browser layout changes.
+# Server default if unset: 600
+# interactive_pty_resize_rate_limit_per_minute: 600
+
+# Maximum number of interactive PTY resize requests per second per IP.
+# Server default if unset: 30
+# interactive_pty_resize_rate_limit_per_second: 30
+
 # ── Terminal ──────────────────────────────────────────────────────────────────
 
 # Maximum number of tabs a user can have open at once.

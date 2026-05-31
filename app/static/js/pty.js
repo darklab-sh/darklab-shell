@@ -7,6 +7,7 @@ const PTY_MIN_ROWS = 10;
 const PTY_MIN_COLS = 40;
 const PTY_INPUT_MAX_BYTES = 4096;
 const PTY_INPUT_BATCH_MS = 16;
+const PTY_RESIZE_POST_DELAY_MS = 120;
 const PTY_STALE_SNAPSHOT_NOTICE_SECONDS = 5;
 const _ptyModalState = {
   sessions: new Map(),
@@ -289,6 +290,8 @@ function _createPtyTerminalSession(screen, rows = PTY_DEFAULT_ROWS, cols = PTY_D
     resizeObserver: null,
     resizeListener: null,
     resizeDisposable: null,
+    resizePostTimer: null,
+    lastResizeKey: '',
   };
 }
 
@@ -314,11 +317,28 @@ function _ptySize(session) {
 function _ptyPostResize(session) {
   if (!session || !session.runId || typeof apiFetch !== 'function') return;
   if (!_ptySessionIsVisible(session)) return;
-  apiFetch(`/pty/runs/${encodeURIComponent(session.runId)}/resize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(_ptySize(session)),
-  }).catch(() => {});
+  const size = _ptySize(session);
+  const sizeKey = `${size.rows}x${size.cols}`;
+  if (session.lastResizeKey === sizeKey && !session.resizePostTimer) return;
+  if (session.resizePostTimer) {
+    clearTimeout(session.resizePostTimer);
+    session.resizePostTimer = null;
+  }
+  session.resizePostTimer = setTimeout(() => {
+    session.resizePostTimer = null;
+    if (!session.runId || !_ptySessionIsVisible(session)) return;
+    const latestSize = _ptySize(session);
+    const latestKey = `${latestSize.rows}x${latestSize.cols}`;
+    if (session.lastResizeKey === latestKey) return;
+    session.lastResizeKey = latestKey;
+    apiFetch(`/pty/runs/${encodeURIComponent(session.runId)}/resize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(latestSize),
+    }).catch(() => {
+      session.lastResizeKey = '';
+    });
+  }, PTY_RESIZE_POST_DELAY_MS);
 }
 
 function _ptySessionIsVisible(session) {
@@ -357,6 +377,10 @@ function _ptyInstallResizeHandlers(session) {
 function _ptyDisposeResizeHandlers(session) {
   if (!session) return;
   if (session.runId) _ptyFlushInputQueue(session.runId, session.tabId || '');
+  if (session.resizePostTimer) {
+    clearTimeout(session.resizePostTimer);
+    session.resizePostTimer = null;
+  }
   if (session.inputDisposable && typeof session.inputDisposable.dispose === 'function') {
     session.inputDisposable.dispose();
   }

@@ -8,6 +8,7 @@
     'compare_runs',
     'workflow_steps',
     'project_summary',
+    'team_scope',
     'atlas_entities',
     'files_panel',
     'pty_terminal',
@@ -24,6 +25,13 @@
     history: { label: 'Open History', opener: () => global.toggleHistoryPanelSurface?.(true) },
     workflows: { label: 'Open Workflows', opener: () => global.openWorkflows?.() },
     projects: { label: 'Open Projects', opener: () => global.openProjectWorkspace?.() },
+    team_mode: {
+      label: 'Open Teams',
+      opener: () => {
+        global.openOptions?.();
+        global.activateOptionsTab?.('teams', { persist: false, focus: true });
+      },
+    },
     atlas: { label: 'Open Atlas', opener: () => global.openAtlas?.({ source: 'tour' }) },
     session_files: { label: 'Open Files', opener: () => global.openWorkspace?.() },
     session_tokens: { label: 'Open Options', opener: () => global.openOptions?.() },
@@ -249,6 +257,28 @@
       chips.className = 'tour-mini-chip-row';
       chips.append(_createMiniPill('runs 9'), _createMiniPill('findings 137'), _createMiniPill('targets 10'));
       card.append(header, chips);
+      return card;
+    }
+
+    if (normalized === 'team_scope') {
+      const scope = document.createElement('div');
+      scope.className = 'tour-mini-row';
+      scope.append(_createMiniLine('ACTIVE SCOPE', 'is-command'), _createMiniPill('team', 'is-green'));
+
+      const team = document.createElement('div');
+      team.className = 'tour-atlas-entity-card';
+      const name = document.createElement('span');
+      name.className = 'tour-atlas-value';
+      name.textContent = 'Red Team';
+      const meta = document.createElement('span');
+      meta.className = 'tour-atlas-meta';
+      meta.textContent = 'operator · 4 members · shared runs';
+      const chips = document.createElement('div');
+      chips.className = 'tour-mini-chip-row';
+      chips.append(_createMiniPill('Projects', 'is-green'), _createMiniPill('Atlas'), _createMiniPill('Files'));
+      team.append(name, meta, chips);
+
+      card.append(scope, team);
       return card;
     }
 

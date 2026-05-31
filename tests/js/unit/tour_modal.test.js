@@ -121,9 +121,10 @@ describe('tour modal renderer', () => {
     const openHistory = vi.fn()
     const openWorkflows = vi.fn()
     const openProjects = vi.fn()
+    const openOptions = vi.fn()
+    const activateOptionsTab = vi.fn()
     const openAtlas = vi.fn()
     const openFiles = vi.fn()
-    const openOptions = vi.fn()
     const openFaq = vi.fn()
     const modalConfig = {
       tour_enabled: true,
@@ -133,6 +134,7 @@ describe('tour modal renderer', () => {
         { id: 'history', title: 'History', sample: 'history', illustration: 'history_rows' },
         { id: 'workflows', title: 'Guided Workflows', sample: 'workflow list', illustration: 'workflow_steps' },
         { id: 'projects', title: 'Projects', sample: 'project help', illustration: 'project_summary' },
+        { id: 'team_mode', title: 'Team-Mode', sample: 'team help', illustration: 'team_scope' },
         {
           id: 'atlas',
           title: 'Atlas',
@@ -153,9 +155,10 @@ describe('tour modal renderer', () => {
         toggleHistoryPanelSurface: openHistory,
         openWorkflows,
         openProjectWorkspace: openProjects,
+        openOptions,
+        activateOptionsTab,
         openAtlas,
         openWorkspace: openFiles,
-        openOptions,
         openFaq,
       },
     })
@@ -169,6 +172,7 @@ describe('tour modal renderer', () => {
       ['history', openHistory, [true]],
       ['workflows', openWorkflows, []],
       ['projects', openProjects, []],
+      ['team_mode', openOptions, []],
       ['atlas', openAtlas, [{ source: 'tour' }]],
       ['session_files', openFiles, []],
       ['session_tokens', openOptions, []],
@@ -182,6 +186,9 @@ describe('tour modal renderer', () => {
       }
       document.querySelector('.tour-sample-chip')?.dispatchEvent(new window.Event('click', { bubbles: true }))
       expect(spy).toHaveBeenLastCalledWith(...args)
+      if (chapterId === 'team_mode') {
+        expect(activateOptionsTab).toHaveBeenLastCalledWith('teams', { persist: false, focus: true })
+      }
       expect(document.getElementById('tour-overlay')?.classList.contains('open')).toBe(false)
     })
   })
@@ -218,6 +225,7 @@ describe('tour modal renderer', () => {
       'compare_runs',
       'workflow_steps',
       'project_summary',
+      'team_scope',
       'atlas_entities',
       'files_panel',
       'pty_terminal',
@@ -240,6 +248,9 @@ describe('tour modal renderer', () => {
     expect(atlasNode.querySelectorAll('.tour-atlas-tab')).toHaveLength(3)
     expect(atlasNode.querySelector('.tour-atlas-tab.is-active')?.textContent).toContain('Hosts/IPs')
     expect(atlasNode.querySelector('.tour-atlas-value')?.textContent).toBe('104.21.4.35')
+    const teamNode = _renderTourIllustration('team_scope')
+    expect(teamNode.querySelector('.tour-atlas-value')?.textContent).toBe('Red Team')
+    expect(teamNode.textContent).toContain('operator')
     expect(_renderTourIllustration('unknown').classList.contains('tour-visual-terminal_stream')).toBe(true)
   })
 

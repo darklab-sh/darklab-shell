@@ -244,6 +244,7 @@ def _redis_stream_id_after(left: str, right: str) -> bool:
         return str(left) > str(right)
     return (left_ms, left_seq) > (right_ms, right_seq)
 
+
 redis_client = None
 if _FAKE_REDIS_ENABLED:
     REDIS_URL = REDIS_URL or "memory://"
@@ -282,6 +283,8 @@ _pid_lock = threading.Lock()
 # PID entries expire after 4 hours as a safety net for orphaned entries
 # left behind if a worker crashes mid-stream.
 _PID_TTL = 14400
+_ACTIVE_RUN_CLEANUP_INTERVAL_SECONDS = 60.0
+_last_active_run_cleanup_monotonic = 0.0
 
 
 def _active_run_owner_stale_seconds() -> int:
@@ -829,6 +832,29 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
     return {"metadata_removed": removed_meta, "session_members_removed": removed_members}
 
 
+def _maybe_cleanup_stale_active_run_metadata() -> None:
+    """Periodically prune stale Redis active-run rows from normal read paths."""
+    global _last_active_run_cleanup_monotonic
+    if not redis_client:
+        return
+    now = time.monotonic()
+    if now - _last_active_run_cleanup_monotonic < _ACTIVE_RUN_CLEANUP_INTERVAL_SECONDS:
+        return
+    _last_active_run_cleanup_monotonic = now
+    try:
+        result = cleanup_stale_active_run_metadata()
+    except Exception:
+        log.warning("ACTIVE_RUN_METADATA_CLEANUP_ERROR", exc_info=True)
+        return
+    removed = int(result.get("metadata_removed", 0) or 0)
+    members = int(result.get("session_members_removed", 0) or 0)
+    if removed or members:
+        log.info("ACTIVE_RUN_METADATA_CLEANUP", extra={
+            "metadata_removed": removed,
+            "session_members_removed": members,
+        })
+
+
 def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = "") -> dict[str, object]:
     pid = int(item.get("pid", 0) or 0)
     run_id = str(item.get("run_id", ""))
@@ -860,6 +886,7 @@ def active_runs_for_session(session_id: str, client_id: str = "", team_id: str |
         return []
 
     if redis_client:
+        _maybe_cleanup_stale_active_run_metadata()
         session_key = f"sessionprocs:{session_id}"
         run_ids = sorted(_redis_smembers_strings(session_key))
         items = []
@@ -930,6 +957,7 @@ def active_runs_for_team(team_id: str, client_id: str = "") -> list[dict]:
         return []
 
     if redis_client:
+        _maybe_cleanup_stale_active_run_metadata()
         items = []
         stale_redis: list[tuple[str, str]] = []
         for meta_key in _redis_scan_strings("procmeta:*"):

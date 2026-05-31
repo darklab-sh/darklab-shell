@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,434
+- behavior tests: 3,435
 - docs/inventory meta-tests: 34
-- `pytest`: 1924 (1890 behavior + 34 meta)
+- `pytest`: 1925 (1891 behavior + 34 meta)
 - `vitest`: 1313
 - `playwright`: 254
-- total: 3,491
+- total: 3,492
 
 This document is organized in two parts:
 
@@ -779,6 +779,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
 | `TestActiveRunMetadata.test_cleanup_stale_active_run_metadata_removes_orphans_and_previous_container_rows` | Verifies startup active-run cleanup removes Redis metadata left by dead containers while preserving live rows for the current container. |
+| `TestActiveRunMetadata.test_active_runs_for_session_periodically_cleans_unindexed_stale_metadata` | Verifies normal active-run listing periodically removes unindexed stale Redis metadata. |
 | `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Status Monitor display. |
 | `TestInteractivePtyRegistry.test_live_registry_publishes_each_supported_interactive_tool` | Verifies that `commands.yaml` exposes the expected interactive PTY tools (`nc`, `telnet`, `mtr`, `ffuf`, `masscan`) with their trigger flag and runtime settings. |
 | `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
@@ -1820,7 +1821,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestInteractivePtyRuns.test_snapshot_interactive_pty_uses_specific_failure_statuses` | Verifies that PTY snapshot failures use specific HTTP statuses for missing, closed, stale, and not-yet-available runs. |
 | `TestInteractivePtyRuns.test_kill_routes_pty_killed_event_to_pty_stream` | Verifies that `/kill` publishes PTY kill notices through the PTY event stream instead of the normal run stream. |
 | `TestInteractivePtyRuns.test_interactive_pty_control_routes_are_rate_limited` | Verifies that PTY input and resize control routes use the shared rate limiter. |
-| `TestInteractivePtyRuns.test_interactive_pty_input_route_uses_dedicated_rate_limit` | Verifies that PTY input uses the dedicated interactive typing rate limit instead of the normal `/runs` limit. |
+| `TestInteractivePtyRuns.test_interactive_pty_control_routes_use_dedicated_rate_limits` | Verifies that PTY input and resize routes use dedicated interactive-control rate limits instead of the normal `/runs` limit. |
 | `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
 | `TestRunStreaming.test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up` | Verifies that the broker worker publishes notices, filtered output, exit metadata, and cleanup calls. |
 | `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |

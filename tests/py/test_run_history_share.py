@@ -585,12 +585,15 @@ class TestInteractivePtyRuns:
         assert "__wrapper-limiter-instance" in run_routes.send_interactive_pty_input.__dict__
         assert "__wrapper-limiter-instance" in run_routes.resize_interactive_pty_run.__dict__
 
-    def test_interactive_pty_input_route_uses_dedicated_rate_limit(self):
+    def test_interactive_pty_control_routes_use_dedicated_rate_limits(self):
         with mock.patch.dict(run_routes.CFG, {
             "interactive_pty_input_rate_limit_per_minute": 500,
             "interactive_pty_input_rate_limit_per_second": 10,
+            "interactive_pty_resize_rate_limit_per_minute": 600,
+            "interactive_pty_resize_rate_limit_per_second": 30,
         }):
             assert run_routes._interactive_pty_input_limit() == "500 per minute; 10 per second"
+            assert run_routes._interactive_pty_resize_limit() == "600 per minute; 30 per second"
 
 
 # ── /runs streaming ───────────────────────────────────────────────────────────

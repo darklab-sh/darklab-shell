@@ -1119,14 +1119,14 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Onboarding Tour
 
-**Purpose:** an optional guided introduction that helps new users learn the main shell, history, comparison, workflow, project, files, PTY, options, and FAQ flows without leaving the app.
+**Purpose:** an optional guided introduction that helps new users learn the main shell, history, comparison, workflow, project, team, files, PTY, options, and FAQ flows without leaving the app.
 
 **Behavior:**
 
 - The welcome flow can point users at the tour, and users can start it again with the `tour` built-in command or the visual tour link in FAQ.
 - The terminal `tour` command types each chapter into the transcript, pauses after each chapter, and lets the user press any key to continue or `q` to stop.
 - Terminal tour `Try this` chips open the sample command in a new tab so the tour tab stays readable while the user experiments.
-- The desktop visual tour uses a carousel with app-shaped previews. `Try this` actions close the carousel and open the matching app surface when one exists, such as History, Workflows, Projects, Files, Options, or FAQ.
+- The desktop visual tour uses a carousel with app-shaped previews. `Try this` actions close the carousel and open the matching app surface when one exists, such as History, Workflows, Projects, Teams, Files, Options, or FAQ.
 - Feature-gated chapters are hidden when their feature is unavailable. Interactive Tools stays hidden on mobile because interactive PTY sessions are desktop-only.
 
 **Configuration:** `app/conf/tour.yaml` stores chapter text, sample commands, and visual illustration keys. See [CONFIGURATION.md](CONFIGURATION.md#tour-configuration) for the file format.

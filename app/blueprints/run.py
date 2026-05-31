@@ -1484,6 +1484,12 @@ def _interactive_pty_input_limit() -> str:
     return f"{per_minute} per minute; {per_second} per second"
 
 
+def _interactive_pty_resize_limit() -> str:
+    per_minute = _coerce_positive_int(CFG.get("interactive_pty_resize_rate_limit_per_minute"), 600)
+    per_second = _coerce_positive_int(CFG.get("interactive_pty_resize_rate_limit_per_second"), 30)
+    return f"{per_minute} per minute; {per_second} per second"
+
+
 def _active_interactive_pty_count(session_id: str) -> int:
     return sum(
         1 for item in active_runs_for_session(session_id)
@@ -2527,9 +2533,7 @@ def send_interactive_pty_input(run_id):
 
 
 @run_bp.route("/pty/runs/<run_id>/resize", methods=["POST"])
-@limiter.limit(lambda: (
-    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
-))
+@limiter.limit(_interactive_pty_resize_limit)
 def resize_interactive_pty_run(run_id):
     session_id = get_session_id()
     try:
