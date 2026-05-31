@@ -164,7 +164,7 @@ If SQLite grows quickly, first check whether retention is set correctly. Then ch
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

@@ -174,7 +174,7 @@ Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, includ
 - Files/workspace storage recipes
 - production host tuning notes
 
-SQLite is the default backend for local and single-user installs. Postgres is supported for larger deployments; with Compose, set both the `.env` values that start the `postgres` service and the app database settings described in [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection). If you're moving an existing install to Postgres, use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow after you've backed up the SQLite data directory.
+SQLite is the default backend for local and single-user installs. Postgres is supported for larger deployments; with Compose, set both the `.env` values that start the `postgres` service and the app database settings described in [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection). If you're moving an existing install to Postgres, use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow after you've backed up the SQLite data directory. Existing Compose-managed Postgres volumes from older major versions should use the same guide's export/import upgrade path before starting the newer Postgres service.
 
 Theme authoring details stay in [THEME.md](THEME.md), and command registry integration details stay in [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
@@ -397,7 +397,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - Outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](docs/schedules.md) - Scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - Change-detection watcher baseline, diff, scheduler, and notification behavior
@@ -947,7 +947,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── api.md                 # Headless API and bundled CLI usage guide
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   ├── notifications.md       # Outbound notification channels, payloads, retries, and setup guide
-│   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover helper and validation workflow
+│   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 │   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior

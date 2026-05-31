@@ -90,9 +90,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Redis client upgrade guard** — made the app's Redis client behavior explicit ahead of redis-py 8 testing.
-  - **What:** Redis connection setup is back to decoded responses only, leaving redis-py's native protocol, read-timeout, and connect-timeout defaults in place. The dependency list still pins `redis` directly and avoids Flask-Limiter's Redis extra while `limits[redis]` caps redis-py below 8.
-  - **Tests:** removed the temporary kwargs-only Redis client tests after the compatibility shim was removed; existing Redis-backed route and worker coverage remains in place.
+- **Bundled Postgres 18 service** — moved the optional Compose, CI, and disposable test Postgres images from 17 to 18.
+  - **Before:** the bundled Compose profile mounted `postgres-data` at the old `/var/lib/postgresql/data` image path used by Postgres 17 and earlier.
+  - **After:** the bundled service uses Postgres 18's `/var/lib/postgresql` volume mount so the official image stores data in its versioned layout. The operator docs now describe the export/import path for existing Compose-managed Postgres 17 volumes instead of recommending a Docker `pg_upgrade` wrapper.
+  - **Tests:** no new cases; the existing opt-in Postgres lane now defaults to `postgres:18-alpine`, and the docs test covers the updated migration and documentation-map text.
 
 - **Interactive PTY resize throttling** — normal PTY layout changes no longer trip the generic run burst limit.
   - **What:** PTY resize posts now use a dedicated resize rate-limit bucket and the browser coalesces same-size/intermediate resize events before sending the final terminal size.

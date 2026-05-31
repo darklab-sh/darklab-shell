@@ -1,12 +1,84 @@
-# SQLite to Postgres Migration
+# Postgres Migration and Upgrade
 
 darklab_shell keeps SQLite as the default backend for local and single-user installs. Postgres is the recommended backend for heavier multi-user deployments, but moving from SQLite to Postgres is an explicit offline cutover. The app does not convert databases during startup.
 
 Use `scripts/migrate_sqlite_to_postgres.py` when you're ready to copy a stopped SQLite database into a fresh Postgres database.
 
-Postgres backend configuration lives in [CONFIGURATION.md](../CONFIGURATION.md#database-backend-selection). Use this guide for the migration itself, then switch `DATABASE_BACKEND` and `DATABASE_URL` after validation passes.
+Postgres backend configuration lives in [CONFIGURATION.md](../CONFIGURATION.md#database-backend-selection). Use this guide for SQLite-to-Postgres cutovers and bundled Postgres major-version upgrades, then switch `DATABASE_BACKEND` and `DATABASE_URL` after validation passes.
 
-## What The Helper Copies
+## Bundled Postgres Major Upgrades
+
+The bundled Compose service uses the official Postgres image. Major-version upgrades are explicit maintenance tasks: export the existing app database, recreate the named Postgres volume with the new image layout, restore the export, and validate the app before deleting the backup.
+
+Postgres 18 changed the official Docker image's data layout. The bundled service mounts the `postgres-data` volume at `/var/lib/postgresql`, and the image stores the cluster under `/var/lib/postgresql/18/docker`. Older darklab_shell Compose installs mounted the same named volume at `/var/lib/postgresql/data` for Postgres 17. Don't start the Postgres 18 service against that old volume shape and hope the entrypoint sorts it out; dump the database first and restore into a fresh Postgres 18 volume.
+
+The commands below keep the database private to the Compose network and don't publish port `5432`.
+
+Create the export before starting the upgraded Postgres 18 service. The safest flow is to make this dump while your existing Postgres 17 Compose service is still running from the old checkout. If you've already pulled the upgraded Compose file but the old container is still running, `docker compose exec` can still dump from that running container. Don't run `docker compose up postgres` from the upgraded checkout until the dump exists.
+
+```bash
+mkdir -p backups
+docker compose stop shell
+docker compose --profile postgres ps postgres
+
+docker compose --profile postgres exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' \
+  > backups/darklab-postgres-pre18.dump
+```
+
+Confirm the dump exists and is non-empty before touching the volume:
+
+```bash
+ls -lh backups/darklab-postgres-pre18.dump
+```
+
+Stop and remove the old Postgres container, then remove only the Compose-managed `postgres-data` volume. The exact volume name includes your Compose project name, so inspect it before removing it:
+
+```bash
+docker compose --profile postgres stop postgres
+docker compose --profile postgres rm -f postgres
+
+docker volume ls --filter label=com.docker.compose.volume=postgres-data
+docker volume rm <postgres-data-volume-name>
+```
+
+Start Postgres again so the Postgres 18 image creates a fresh cluster in the new layout, then restore the dump:
+
+```bash
+docker compose --profile postgres up -d postgres
+
+docker compose --profile postgres exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --role="$POSTGRES_USER"' \
+  < backups/darklab-postgres-pre18.dump
+```
+
+Validate the restored database:
+
+```bash
+docker compose --profile postgres exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SHOW server_version;"'
+
+docker compose --profile postgres exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version, name FROM schema_migrations ORDER BY version;"'
+
+bash scripts/run_postgres_tests.sh --compose
+```
+
+After validation passes, start the app with the Postgres backend:
+
+```bash
+docker compose up -d shell
+```
+
+Keep `backups/darklab-postgres-pre18.dump` until you've used the restored app under real traffic. Rollback is recreating a Postgres 17 service and restoring the same dump into a fresh Postgres 17 volume, or restoring the volume snapshot you made before the upgrade.
+
+If `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` differ from the defaults, keep `.env`, `DATABASE_URL`, and the restore commands aligned. The dump/restore flow assumes the app database and owner role are created by the official image from those environment variables.
+
+## SQLite to Postgres Cutover
+
+Use these sections when you're moving an existing SQLite install into a fresh Postgres database.
+
+### What The Helper Copies
 
 The migration helper:
 
@@ -24,7 +96,7 @@ The helper does not merge unrelated databases by default. The destination schema
 
 Legacy SQLite databases may contain duplicate finding occurrence rows from older capture paths. The Postgres schema enforces one occurrence per `(finding_id, run_id, line_number)`, so the helper keeps the earliest matching source row and reports the number of skipped duplicate `findings_occurrences` rows at the end of the run. The helper also disables the Postgres legacy finding-insert trigger during the bulk copy so copied `findings` rows do not pre-create duplicate occurrence rows before the source `findings_occurrences` table is copied.
 
-## Before You Start
+### Before You Start
 
 Stop writes before copying. The safest path is:
 
@@ -41,7 +113,7 @@ Encrypted secrets need special care. The copied ciphertext only works if the Pos
 
 The `--artifact-root` value is the app data root, not the `run-output` folder itself. For the default container layout, use `/data`: the helper reads `history.db` from that root, checks full-run output under `/data/run-output`, and checks large body-store files under `/data/body-store`.
 
-## Run From The Compose Network
+### Run From The Compose Network
 
 When using the bundled Compose stack, Postgres does not publish `5432` to the host. That's intentional. You do not need to add a temporary `ports:` entry for migration.
 
@@ -86,7 +158,7 @@ DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 
 If you also use `app/conf/config.local.yaml`, keep its `database_backend` and `database_url` values aligned with `.env`. Environment variables win, so a stale `.env` value overrides `config.local.yaml`.
 
-## Host-Accessible Example
+### Host-Accessible Example
 
 If you're using an external Postgres host or a separately published staging database, you can run the helper directly from the checkout:
 
@@ -140,7 +212,7 @@ If a previous migration was interrupted and you're continuing into the same dest
 
 `--batch-size` controls how many rows are inserted per batch. The default is `500`, which is a good starting point for normal migrations. Lower it if a staging database or network path struggles with large batches; raise it only after a successful dry run when you want to reduce round trips.
 
-## Dry Run
+### Dry Run
 
 Use `--dry-run` to check SQLite table discovery, encrypted-secret preflight, and file references without opening Postgres:
 
@@ -152,11 +224,11 @@ python scripts/migrate_sqlite_to_postgres.py \
   --dry-run
 ```
 
-## Search Indexes
+### Search Indexes
 
 SQLite FTS5 data is not copied. Postgres search uses backend-specific indexes created by the app migrations instead. The helper still accepts `--skip-search-backfill` for older saved commands, but current migrations already create the `pg_trgm` extension and GIN trigram indexes for `runs.command`, `runs.output_search_text`, `entities.canonical_value`, `findings.title`, `findings.raw_line`, and `findings.tool_root`.
 
-## Rollback
+### Rollback
 
 Rollback is the original SQLite snapshot plus the original artifact directory. Do not delete them until the Postgres deployment has been validated under real use.
 

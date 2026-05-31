@@ -145,7 +145,7 @@ Useful places to inspect scheduler behavior:
 - [docs/api.md](api.md) - API and `darklab schedule` CLI usage
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](notifications.md) - outbound notification channels, triggers, and retry behavior
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](../tests/README.md) - test coverage appendix and focused test commands

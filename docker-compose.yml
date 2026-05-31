@@ -14,7 +14,7 @@ services:
       start_period: 5s
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: darklab-postgres
     restart: unless-stopped
     profiles:
@@ -24,7 +24,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-darklab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darklab_dev_password}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-darklab} -d ${POSTGRES_DB:-darklab_shell}"]
       interval: 30s

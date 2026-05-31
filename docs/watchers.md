@@ -194,7 +194,7 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

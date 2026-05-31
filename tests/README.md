@@ -4119,7 +4119,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [docs/api.md](../docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](../docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](../docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](../docs/postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](../docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](../docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](../docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior

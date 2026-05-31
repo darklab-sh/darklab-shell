@@ -786,7 +786,7 @@ POSTGRES_PASSWORD=<redacted>
 DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 ```
 
-`COMPOSE_PROFILES=postgres` enables the profile-gated `postgres` service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
+`COMPOSE_PROFILES=postgres` enables the profile-gated Postgres 18 service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
 
 For the bundled llama.cpp server, include the `llama` profile:
 
@@ -828,6 +828,7 @@ Postgres connection notes:
 - URL-encode special characters in the password before putting it in `DATABASE_URL`.
 - App Postgres connections disable JIT by default because the UI favors predictable low-latency page requests over long analytical queries. Set `DATABASE_POSTGRES_JIT=true` only after measuring that your workload benefits from it.
 - If `POSTGRES_PASSWORD` changes after the `postgres-data` volume already exists, Postgres does not automatically change the existing role password. Change the role password manually or recreate the volume intentionally.
+- The bundled Postgres service uses the Postgres 18 Docker image layout and mounts `postgres-data` at `/var/lib/postgresql`. If you have an older darklab_shell `postgres-data` volume created under Postgres 17's `/var/lib/postgresql/data` layout, export it before upgrading and restore into a fresh Postgres 18 volume. See [docs/postgres-migration.md](docs/postgres-migration.md#bundled-postgres-major-upgrades).
 - Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
 
 For an existing SQLite install, run the offline migration before switching the app over. See [docs/postgres-migration.md](docs/postgres-migration.md).
@@ -854,7 +855,7 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 ## Docker Compose Files
 
-The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, Redis, the writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated `postgres` service with a named volume and healthcheck for the production backend track:
+The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, Redis, the writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
 
 ```bash
 docker compose --profile postgres up -d postgres
@@ -1117,7 +1118,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior

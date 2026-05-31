@@ -115,7 +115,7 @@ EOF
   postgres_user=${POSTGRES_USER:-darklab}
   postgres_password=${POSTGRES_PASSWORD:-darklab_dev_password}
   postgres_db=${POSTGRES_DB:-darklab_shell}
-  postgres_image=${DARKLAB_TEST_POSTGRES_IMAGE:-postgres:17-alpine}
+  postgres_image=${DARKLAB_TEST_POSTGRES_IMAGE:-postgres:18-alpine}
   container_name=${DARKLAB_TEST_POSTGRES_CONTAINER_NAME:-darklab-shell-postgres-test-$$}
 
   started_container=$(
