@@ -134,7 +134,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `ai_feature_summary` | `false` | Feature flag for Run Details AI summaries |
 | `ai_feature_next_commands` | `false` | Feature flag for Run Details AI next-command drafts. Accepted suggestions can be copied after validation |
 | `ai_feature_run_suggestions` | `false` | Feature flag for Run buttons on accepted AI suggestions. The button submits through the normal composer path, so command policy still applies |
-| `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
+| `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved. In Compose deployments, `RESTRICTED_COMMAND_INPUT_CIDRS` overrides this value and also feeds the scanner-user egress block |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
@@ -685,6 +685,7 @@ cp .env.example .env
 ```env
 # APP_PORT=8888
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
+# RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -736,6 +737,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
+| `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |

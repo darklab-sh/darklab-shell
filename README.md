@@ -293,8 +293,11 @@ darklab_shell uses layered controls rather than trusting the browser alone:
 - loopback targets like `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked
 - shell chaining operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution are blocked when the allowlist is active
 - container startup also adds an OS-level guard so `scanner` cannot connect back to the app port
+- optional `RESTRICTED_COMMAND_INPUT_CIDRS` values reject obvious blocked targets in command validation and add scanner-user egress deny rules in the container
 
 This section is intentionally operator-focused. For the developer-facing details behind cross-user signalling, Redis-backed multi-worker kill, and the `nmap` capability model, use [ARCHITECTURE.md](ARCHITECTURE.md).
+
+`RESTRICTED_COMMAND_INPUT_CIDRS` is the recommended Compose setting when the app runs behind a NAT, VPN, or firewall that can reach internal networks. The app layer catches literal IPs, CIDRs, literal-IP URLs, host:port values, and declared target files before a command starts; the container rule is the backstop for DNS names, CNAMEs, and tool-managed resolver inputs. The rule is scoped to the `scanner` user so app-owned Redis, Postgres, AI, metrics, and notification traffic can keep using Docker-internal networks.
 
 ### Read-only filesystem
 

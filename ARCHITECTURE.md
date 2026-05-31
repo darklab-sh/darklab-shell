@@ -1000,7 +1000,7 @@ The run path applies policy before any subprocess launch:
 - command validation blocks filesystem references to `/data` and `/tmp` before subprocess launch
 - loopback targets such as `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked at both the client and server
 - when the allowlist is active, shell operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution stay blocked so users cannot chain into disallowed commands
-- optional `restricted_command_input_cidrs` settings reject literal IP/CIDR values in metadata-known target slots before launch, including URL hosts, host:port values, overlapping CIDR arguments, and app-readable workspace input files supplied through declared read flags
+- optional `restricted_command_input_cidrs` settings reject literal IP/CIDR values in metadata-known target slots before launch, including URL hosts, host:port values, overlapping CIDR arguments, and app-readable workspace input files supplied through declared read flags. `RESTRICTED_COMMAND_INPUT_CIDRS` is the Compose-friendly override; it also feeds scanner-user container OUTPUT deny rules so DNS/CNAME and tool-managed resolver paths hit a network-layer block even when the app cannot safely prove the hostname target before launch.
 
 These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptations` and applied by the shared command layer through `rewrite_command()` (no user-visible notice unless specified):
 
@@ -1969,12 +1969,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,432
+- behavior tests: 3,434
 - docs/inventory meta-tests: 34
-- `pytest`: 1922 (1888 behavior + 34 meta)
+- `pytest`: 1924 (1890 behavior + 34 meta)
 - `vitest`: 1313
 - `playwright`: 254
-- total: 3,489
+- total: 3,491
 
 ### Testing Architecture
 

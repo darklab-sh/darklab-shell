@@ -49,6 +49,30 @@ chmod -R 755 /tmp/.config /tmp/.cache
 # kernel module is absent in unusual environments.
 iptables -A OUTPUT -m owner --uid-owner scanner -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null || true
 
+# Optional operator-defined scanner egress block. This is the network-layer
+# backstop for targets that arrive through DNS, CNAMEs, tool-managed resolver
+# input, or raw workspace files where command parsing cannot prove intent.
+if [ -n "${RESTRICTED_COMMAND_INPUT_CIDRS:-}" ]; then
+    printf '%s\n' "$RESTRICTED_COMMAND_INPUT_CIDRS" | tr ',' '\n' | while IFS= read -r restricted_cidr; do
+        restricted_cidr="$(printf '%s' "$restricted_cidr" | xargs)"
+        [ -n "$restricted_cidr" ] || continue
+        case "$restricted_cidr" in
+            *:*)
+                if command -v ip6tables >/dev/null 2>&1; then
+                    ip6tables -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                        || ip6tables -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                        || echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
+                fi
+                ;;
+            *)
+                iptables -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                    || iptables -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                    || echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
+                ;;
+        esac
+    done
+fi
+
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
 WEB_THREADS="${WEB_THREADS:-4}"
 export WEB_CONCURRENCY WEB_THREADS

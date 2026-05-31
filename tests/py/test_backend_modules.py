@@ -2101,6 +2101,21 @@ class TestLoadConfig:
             extra={"cidr": "not-a-cidr"},
         )
 
+    def test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
+            "RESTRICTED_COMMAND_INPUT_CIDRS": "10.0.0.0/8, not-a-cidr, 169.254.169.254/32",
+        }):
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write("restricted_command_input_cidrs:\n  - 192.168.0.0/16\n")
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert cfg["restricted_command_input_cidrs"] == ["10.0.0.0/8", "169.254.169.254/32"]
+        warning.assert_called_once_with(
+            "RESTRICTED_COMMAND_INPUT_CIDR_INVALID",
+            extra={"cidr": "not-a-cidr"},
+        )
+
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = os.path.join(tmp, "config.yaml")
@@ -7347,6 +7362,18 @@ class TestEntrypointWorkspaceRepair:
         assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
+
+    def test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only(self):
+        entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        shell_env = TestAIRuntimeWiring._compose_environment(compose["services"]["shell"])
+
+        assert "RESTRICTED_COMMAND_INPUT_CIDRS" in entrypoint
+        assert "iptables -C OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert "iptables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert "ip6tables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" in entrypoint
+        assert shell_env["RESTRICTED_COMMAND_INPUT_CIDRS"] == "${RESTRICTED_COMMAND_INPUT_CIDRS:-}"
 
     def test_gunicorn_uses_prometheus_multiprocess_cleanup_hook(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()

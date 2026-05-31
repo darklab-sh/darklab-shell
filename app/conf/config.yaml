@@ -413,6 +413,9 @@
 #   ::1/128            — IPv6 loopback address
 #
 # Server default if unset: [] (disabled)
+# In Compose deployments, RESTRICTED_COMMAND_INPUT_CIDRS overrides this value
+# and also feeds the scanner-user container egress block, so set it in .env
+# when you want the app policy and network policy to use the same CIDRs.
 # restricted_command_input_cidrs:
 #   - 169.254.169.254/32
 

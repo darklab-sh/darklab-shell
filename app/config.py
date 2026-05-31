@@ -118,7 +118,7 @@ def _normalize_app_name(value):
     return normalized[:APP_NAME_MAX_CHARS].rstrip() or PROJECT_NAME
 
 
-def _normalize_ai_base_url_allowed_cidrs(value):
+def _normalize_cidr_list(value, warning_event):
     if isinstance(value, str):
         raw_values = [item.strip() for item in value.split(",") if item.strip()]
     elif isinstance(value, (list, tuple, set)):
@@ -130,10 +130,18 @@ def _normalize_ai_base_url_allowed_cidrs(value):
         try:
             ipaddress.ip_network(cidr, strict=False)
         except ValueError:
-            log.warning("AI_BASE_URL_ALLOWED_CIDR_INVALID", extra={"cidr": cidr[:120]})
+            log.warning(warning_event, extra={"cidr": cidr[:120]})
             continue
         normalized.append(cidr)
     return normalized
+
+
+def _normalize_ai_base_url_allowed_cidrs(value):
+    return _normalize_cidr_list(value, "AI_BASE_URL_ALLOWED_CIDR_INVALID")
+
+
+def _normalize_restricted_command_input_cidrs(value):
+    return _normalize_cidr_list(value, "RESTRICTED_COMMAND_INPUT_CIDR_INVALID")
 
 
 def load_config(conf_dir=None):
@@ -384,6 +392,11 @@ def load_config(conf_dir=None):
     env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
     if env_prometheus_multiproc_dir:
         defaults["prometheus_multiproc_dir"] = env_prometheus_multiproc_dir
+    env_restricted_command_input_cidrs = str(os.environ.get("RESTRICTED_COMMAND_INPUT_CIDRS") or "").strip()
+    if env_restricted_command_input_cidrs:
+        defaults["restricted_command_input_cidrs"] = [
+            item.strip() for item in env_restricted_command_input_cidrs.split(",") if item.strip()
+        ]
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         defaults["database_backend"] = env_database_backend
@@ -433,6 +446,9 @@ def load_config(conf_dir=None):
             defaults[cfg_key] = raw
     defaults["ai_base_url_allowed_cidrs"] = _normalize_ai_base_url_allowed_cidrs(
         defaults.get("ai_base_url_allowed_cidrs")
+    )
+    defaults["restricted_command_input_cidrs"] = _normalize_restricted_command_input_cidrs(
+        defaults.get("restricted_command_input_cidrs")
     )
     defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
     defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)

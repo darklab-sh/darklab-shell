@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,432
+- behavior tests: 3,434
 - docs/inventory meta-tests: 34
-- `pytest`: 1922 (1888 behavior + 34 meta)
+- `pytest`: 1924 (1890 behavior + 34 meta)
 - `vitest`: 1313
 - `playwright`: 254
-- total: 3,489
+- total: 3,491
 
 This document is organized in two parts:
 
@@ -484,6 +484,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSplitChainedCommands.test_empty_parts_stripped` | Checks empty parts stripped handling. |
 | `TestSplitChainedCommands.test_empty_string_returns_empty_list` | Checks that empty string returns empty list. |
 | `TestLoadConfig.test_database_env_overrides_yaml_backend_settings` | Verifies database environment variables override YAML backend settings and pool sizes. |
+| `TestLoadConfig.test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values` | Verifies that `RESTRICTED_COMMAND_INPUT_CIDRS` overrides YAML policy, preserves valid CIDRs, and warns on malformed values. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
@@ -629,6 +630,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
+| `TestEntrypointWorkspaceRepair.test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only` | Verifies that the container entrypoint and Compose environment wire restricted CIDRs into scanner-user-only egress deny rules. |
 | `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
 | `TestAIRuntimeWiring.test_ai_worker_entrypoint_is_gated_and_supervised` | Verifies that the AI worker entrypoint is disabled by default, gated by `AI_WORKER_ENABLED`, runs as `appuser`, and restarts after exits. |
 | `TestAIRuntimeWiring.test_compose_ai_profile_wires_shell_to_llama_sidecar` | Verifies that the Compose llama profile, shell AI environment, optional dependency, healthcheck, and model cache volume stay wired together. |
