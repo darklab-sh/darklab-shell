@@ -134,7 +134,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Tighter toolbar labels** — the line-number and timestamp toggles drop their `: on`/`: off` suffix (the active-dot indicator already shows state), and the search button no longer repeats the findings count carried by the badge beside it. The timestamp button still shows its mode (`timestamps: elapsed`/`timestamps: clock`) when active, and both toggles now expose `aria-pressed` so state stays available to assistive tech.
 
+- **Active Project HUD switcher** — the Active Project HUD chip now opens a compact searchable switcher instead of jumping straight into the Projects modal. The menu shows the current active project or `No project`, loads bounded active/MRU/search results from `/projects?mode=switcher`, lets users select or clear active-project focus without a page refresh, and keeps **Create project** plus **Open Projects** as deeper-work actions. Team viewers can select or clear focus without gaining project mutation rights, while project creation stays locked to roles that can mutate projects.
+  - **Tests:** updated Shell Chrome coverage so the HUD chip opens the switcher, focuses search, keeps menu keydown events from leaking to document-level handlers, closes from HUD re-click and terminal-area outside clicks, disables project creation in view-only scope, refreshes across personal/team scope changes, selects and clears a project through `/projects/active`, restores focus to the chip on Escape, and **Open Projects** still opens the Projects modal. Added route coverage for active/MRU ordering, server-side search, stale recent-project pruning, and viewer active-project focus permissions. Added Playwright coverage that keeps switcher search text out of the terminal input and verifies the next external run links to the newly selected active project.
+
 ### Fixed
+
+- **Fast-exiting interactive PTY stream replay** — Redis-backed PTY streams now try to replay any already-published output and exit events before stale-run cleanup can prune an open-looking run, so very short invalid interactive commands show their real terminal error and exit code instead of falling back to a missing-transcript notice.
+  - **Tests:** added broker-service coverage for a fast-exiting PTY whose process metadata is already gone while completed Redis stream events are still available.
 
 - **Redis 8 read-only sidecar persistence** — the bundled Redis service now disables RDB/AOF persistence when running under a read-only root filesystem.
   - **Root cause:** Redis 8 attempted its default RDB background save without a writable `/data` path, entered `MISCONF`, and rejected mutating commands needed by rate limits, run broker state, and AI coordination.

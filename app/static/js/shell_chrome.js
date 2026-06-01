@@ -511,17 +511,395 @@
 
   window.addEventListener('resize', positionRailMoreMenu);
 
-  function _openProjectsFromHud(event) {
+  let hudProjectMenu = null;
+  let hudProjectMenuSearchInput = null;
+  let hudProjectMenuProjects = null;
+  let hudProjectMenuNote = null;
+  let hudProjectMenuSearchTimer = null;
+  let hudProjectMenuRequestId = 0;
+
+  function _isHudProjectMenuOpen() {
+    return !!(hudProjectMenu && !hudProjectMenu.classList.contains('u-hidden'));
+  }
+
+  function _openProjectsFromHudMenu(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
+    closeHudProjectMenu();
     if (typeof global.openProjectWorkspace === 'function') {
       void global.openProjectWorkspace();
     }
   }
 
-  hudProjectCell?.addEventListener('click', _openProjectsFromHud);
-  hudProjectCell?.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') _openProjectsFromHud(event);
+  function _canCreateProjectFromHud() {
+    return typeof global.activeTeamScopeCan === 'function' ? global.activeTeamScopeCan('mutate_projects') : true;
+  }
+
+  function _projectCreateDeniedTitle() {
+    return typeof global.teamScopeDeniedMessage === 'function'
+      ? global.teamScopeDeniedMessage('create team projects')
+      : "View-only team members can't create team projects. Switch to Personal or ask for operator access.";
+  }
+
+  function _showHudProjectToast(message, tone = 'info') {
+    if (typeof showToast === 'function') showToast(message, tone);
+  }
+
+  async function _hudProjectResponseMessage(resp, fallback) {
+    try {
+      const data = await resp.json();
+      return data?.error || data?.message || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function _createHudProjectMenuButton({ label, action, title = '', disabled = false, selected = false, onActivate }) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dropdown-item dropdown-item-compact';
+    btn.dataset.action = action || '';
+    btn.setAttribute('role', selected ? 'menuitemradio' : 'menuitem');
+    if (selected) btn.setAttribute('aria-checked', 'true');
+    btn.textContent = label;
+    if (title) btn.title = title;
+    if (disabled) {
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+    }
+    if (typeof bindPressable === 'function') {
+      bindPressable(btn, {
+        refocusComposer: false,
+        onActivate,
+      });
+    } else if (typeof onActivate === 'function') {
+      btn.addEventListener('click', onActivate);
+    }
+    return btn;
+  }
+
+  function _positionHudProjectMenu() {
+    if (!hudProjectMenu || !hudProjectCell || !_isHudProjectMenuOpen()) return;
+    const rect = hudProjectCell.getBoundingClientRect();
+    const menuWidth = hudProjectMenu.offsetWidth || 260;
+    const viewportWidth = global.innerWidth || document.documentElement.clientWidth || 0;
+    const left = Math.max(8, Math.min(rect.left, Math.max(8, viewportWidth - menuWidth - 8)));
+    hudProjectMenu.style.left = `${left}px`;
+    hudProjectMenu.style.bottom = `${Math.max(8, (global.innerHeight || 0) - rect.top - 1)}px`;
+  }
+
+  function closeHudProjectMenu({ restoreFocus = false } = {}) {
+    if (!hudProjectMenu) return;
+    if (hudProjectMenuSearchTimer) {
+      global.clearTimeout?.(hudProjectMenuSearchTimer);
+      hudProjectMenuSearchTimer = null;
+    }
+    hudProjectMenuRequestId += 1;
+    hudProjectMenu.classList.add('u-hidden');
+    hudProjectCell?.classList.remove('open');
+    hudProjectCell?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && hudProjectCell && typeof hudProjectCell.focus === 'function') {
+      hudProjectCell.focus({ preventScroll: true });
+    }
+  }
+
+  function _focusHudProjectMenuItem(delta) {
+    if (!hudProjectMenu) return;
+    const items = Array.from(hudProjectMenu.querySelectorAll('.dropdown-item:not([disabled])'));
+    if (!items.length) return;
+    const currentIdx = items.indexOf(document.activeElement);
+    const fallbackIdx = delta > 0 ? -1 : 0;
+    const nextIdx = (currentIdx >= 0 ? currentIdx : fallbackIdx) + delta;
+    items[(nextIdx + items.length) % items.length]?.focus({ preventScroll: true });
+  }
+
+  function _setHudProjectMenuNote(text) {
+    if (!hudProjectMenuNote) return;
+    hudProjectMenuNote.textContent = text || '';
+    hudProjectMenuNote.classList.toggle('u-hidden', !text);
+  }
+
+  function _scheduleHudProjectMenuLoad(query) {
+    if (hudProjectMenuSearchTimer) {
+      global.clearTimeout?.(hudProjectMenuSearchTimer);
+      hudProjectMenuSearchTimer = null;
+    }
+    hudProjectMenuSearchTimer = global.setTimeout?.(() => {
+      hudProjectMenuSearchTimer = null;
+      void _loadHudProjectMenu(query);
+    }, 120) || null;
+  }
+
+  async function _selectHudProject(project, event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!project || !project.id) return;
+    try {
+      const resp = await apiFetch('/projects/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: project.id }),
+      });
+      if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to set active project.'));
+      const data = await resp.json();
+      _setActiveProject(data?.project || project);
+      closeHudProjectMenu();
+      _showHudProjectToast('Active project updated.');
+    } catch (err) {
+      const message = err?.message || 'Unable to set active project.';
+      _setHudProjectMenuNote(message);
+      if (typeof logClientError === 'function') logClientError('failed to set active project from HUD switcher', err);
+      _showHudProjectToast(message, 'error');
+    }
+  }
+
+  async function _clearHudProject(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    try {
+      const resp = await apiFetch('/projects/active', { method: 'DELETE' });
+      if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to clear active project.'));
+      _setActiveProject(null);
+      closeHudProjectMenu();
+      _showHudProjectToast('Active project cleared.');
+    } catch (err) {
+      const message = err?.message || 'Unable to clear active project.';
+      _setHudProjectMenuNote(message);
+      if (typeof logClientError === 'function') logClientError('failed to clear active project from HUD switcher', err);
+      _showHudProjectToast(message, 'error');
+    }
+  }
+
+  function _openCreateProjectFromHudMenu(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!_canCreateProjectFromHud()) {
+      const message = _projectCreateDeniedTitle();
+      _setHudProjectMenuNote(message);
+      _showHudProjectToast(message, 'error');
+      return;
+    }
+    closeHudProjectMenu();
+    if (typeof global.openProjectWorkspace === 'function') {
+      void global.openProjectWorkspace();
+    }
+  }
+
+  function _renderHudProjectMenuProjects(projects, query = '') {
+    if (!hudProjectMenuProjects) return;
+    hudProjectMenuProjects.textContent = '';
+    const activeProject = _activeProject();
+    const activeProjectId = activeProject?.id ? String(activeProject.id) : '';
+    const rows = Array.isArray(projects) ? projects : [];
+
+    if (activeProjectId) {
+      hudProjectMenuProjects.appendChild(_createHudProjectMenuButton({
+        label: 'No project',
+        action: 'clear-active-project',
+        title: 'Clear active project',
+        onActivate: _clearHudProject,
+      }));
+    }
+
+    rows.forEach((project) => {
+      if (!project || !project.id) return;
+      const name = _projectDisplayName(project) || String(project.id);
+      const selected = String(project.id) === activeProjectId;
+      hudProjectMenuProjects.appendChild(_createHudProjectMenuButton({
+        label: selected ? `${name} (active)` : name,
+        action: 'select-project',
+        title: selected ? `Active project: ${name}` : `Set active project: ${name}`,
+        selected,
+        onActivate: event => _selectHudProject(project, event),
+      }));
+    });
+
+    if (!hudProjectMenuProjects.children.length) {
+      _setHudProjectMenuNote(query ? 'No matching projects.' : 'No projects yet.');
+    } else {
+      _setHudProjectMenuNote('');
+    }
+    _positionHudProjectMenu();
+  }
+
+  async function _loadHudProjectMenu(query = '') {
+    if (!hudProjectMenuProjects) return;
+    const requestId = ++hudProjectMenuRequestId;
+    const trimmedQuery = String(query || '').trim();
+    const params = new URLSearchParams({ mode: 'switcher', limit: '8' });
+    if (trimmedQuery) params.set('q', trimmedQuery);
+    if (!hudProjectMenuProjects.children.length) {
+      _setHudProjectMenuNote('Loading projects...');
+    }
+    try {
+      const resp = await apiFetch(`/projects?${params.toString()}`, { cache: 'no-store' });
+      if (requestId !== hudProjectMenuRequestId) return;
+      if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to load projects.'));
+      const data = await resp.json();
+      if (requestId !== hudProjectMenuRequestId) return;
+      _renderHudProjectMenuProjects(data?.projects || [], trimmedQuery);
+    } catch (err) {
+      if (requestId !== hudProjectMenuRequestId) return;
+      const message = err?.message || 'Unable to load projects.';
+      hudProjectMenuProjects.textContent = '';
+      _setHudProjectMenuNote(message);
+      if (typeof logClientError === 'function') logClientError('failed to load HUD project switcher', err);
+    }
+  }
+
+  function _refreshHudProjectCreateAction() {
+    const createBtn = hudProjectMenu?.querySelector('[data-action="create-project"]');
+    if (!createBtn) return;
+    const allowed = _canCreateProjectFromHud();
+    createBtn.disabled = !allowed;
+    createBtn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+    createBtn.title = allowed ? 'Open Projects to create a project' : _projectCreateDeniedTitle();
+  }
+
+  function _ensureHudProjectMenu() {
+    if (hudProjectMenu) return hudProjectMenu;
+    const menu = document.createElement('div');
+    menu.id = 'hud-project-menu';
+    menu.className = 'hud-project-menu dropdown-surface dropdown-up u-hidden';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Active project switcher');
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'hud-project-search';
+    search.placeholder = 'search projects';
+    search.setAttribute('aria-label', 'Search projects');
+    search.autocomplete = 'off';
+    search.spellcheck = false;
+    search.addEventListener('click', event => event.stopPropagation());
+    search.addEventListener('input', event => {
+      event.stopPropagation();
+      _scheduleHudProjectMenuLoad(search.value);
+    });
+    search.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHudProjectMenu({ restoreFocus: true });
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(-1);
+      } else if (event.key === 'Tab') {
+        closeHudProjectMenu();
+      }
+    });
+    menu.appendChild(search);
+
+    const projectsSection = document.createElement('div');
+    projectsSection.className = 'hud-project-menu-section';
+    menu.appendChild(projectsSection);
+
+    const note = document.createElement('div');
+    note.className = 'hud-project-menu-note u-hidden';
+    menu.appendChild(note);
+
+    const divider = document.createElement('div');
+    divider.className = 'hud-project-menu-divider';
+    menu.appendChild(divider);
+
+    const createProject = _createHudProjectMenuButton({
+      label: 'Create project',
+      action: 'create-project',
+      title: 'Open Projects to create a project',
+      disabled: !_canCreateProjectFromHud(),
+      onActivate: _openCreateProjectFromHudMenu,
+    });
+    menu.appendChild(createProject);
+
+    const openProjects = _createHudProjectMenuButton({
+      label: 'Open Projects',
+      action: 'open-projects',
+      onActivate: _openProjectsFromHudMenu,
+    });
+    menu.appendChild(openProjects);
+
+    menu.addEventListener('click', event => event.stopPropagation());
+    menu.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHudProjectMenu({ restoreFocus: true });
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(-1);
+      } else if (event.key === 'Tab') {
+        closeHudProjectMenu();
+      }
+    });
+
+    document.body.appendChild(menu);
+    hudProjectMenu = menu;
+    hudProjectMenuSearchInput = search;
+    hudProjectMenuProjects = projectsSection;
+    hudProjectMenuNote = note;
+
+    if (typeof bindOutsideClickClose === 'function') {
+      bindOutsideClickClose(menu, {
+        capture: true,
+        triggers: hudProjectCell,
+        isOpen: _isHudProjectMenuOpen,
+        onClose: () => closeHudProjectMenu(),
+      });
+    }
+    return hudProjectMenu;
+  }
+
+  function toggleHudProjectMenu(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    _closeHudSaveMenu();
+    _ensureHudProjectMenu();
+    if (_isHudProjectMenuOpen()) {
+      closeHudProjectMenu({ restoreFocus: true });
+      return;
+    }
+    hudProjectMenu.classList.remove('u-hidden');
+    hudProjectCell?.classList.add('open');
+    hudProjectCell?.setAttribute('aria-expanded', 'true');
+    _refreshHudProjectCreateAction();
+    if (hudProjectMenuSearchInput) hudProjectMenuSearchInput.value = '';
+    _renderHudProjectMenuProjects([], '');
+    void _loadHudProjectMenu('');
+    _positionHudProjectMenu();
+    requestAnimationFrame(_positionHudProjectMenu);
+    hudProjectMenuSearchInput?.focus({ preventScroll: true });
+  }
+
+  if (hudProjectCell && typeof bindPressable === 'function') {
+    bindPressable(hudProjectCell, {
+      refocusComposer: false,
+      onActivate: toggleHudProjectMenu,
+    });
+  } else {
+    hudProjectCell?.addEventListener('click', toggleHudProjectMenu);
+    hudProjectCell?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') toggleHudProjectMenu(event);
+    });
+  }
+  global.addEventListener?.('resize', _positionHudProjectMenu);
+  global.addEventListener?.('scroll', _positionHudProjectMenu, true);
+  document.addEventListener?.('app:active-project-changed', () => {
+    if (!_isHudProjectMenuOpen()) return;
+    _refreshHudProjectCreateAction();
+    void _loadHudProjectMenu(hudProjectMenuSearchInput?.value || '');
+  });
+  document.addEventListener?.('app:scope-changed', () => {
+    closeHudProjectMenu();
+    loadActiveProjectContext().catch(() => {});
+  });
+  document.addEventListener?.('app:scope-capabilities-changed', () => {
+    _refreshHudProjectCreateAction();
   });
 
   // ── HUD action buttons ──────────────────────────────────────────
@@ -613,6 +991,7 @@
     const saveWrap = document.createElement('div');
     saveWrap.className = 'hud-save-wrap';
     const saveBtn = _makeHudBtn('save', 'save-menu', () => {
+      closeHudProjectMenu();
       saveWrap.classList.toggle('open');
     }, 'btn btn-secondary btn-compact', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');

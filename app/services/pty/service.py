@@ -1260,10 +1260,10 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
     meta = _load_pty_meta_for_scope(run_id, session_id, team_id)
     if not meta:
         return
-    if _prune_stale_open_pty(run_id, session_id, team_id, meta):
-        yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
-        return
     if not redis_client:
+        if _prune_stale_open_pty(run_id, session_id, team_id, meta):
+            yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
+            return
         run = get_pty_run(run_id, session_id, team_id=team_id)
         if not run:
             return
@@ -1272,16 +1272,22 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
 
     current_id = _normalize_event_id(after)
     block_ms = max(1, int(float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
+    first_read = True
     while True:
         try:
             rows = cast(
                 list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
-                redis_client.xread({_stream_key(run_id): current_id}, count=_pty_stream_fetch_count(), block=block_ms),
+                redis_client.xread(
+                    {_stream_key(run_id): current_id},
+                    count=_pty_stream_fetch_count(),
+                    block=1 if first_read else block_ms,
+                ),
             )
         except (RedisTimeoutError, RedisConnectionError) as exc:
             if not _is_redis_idle_timeout_error(exc):
                 raise
             rows = []
+        first_read = False
         if not rows:
             meta = _load_pty_meta_for_scope(run_id, session_id, team_id)
             if not meta:

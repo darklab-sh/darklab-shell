@@ -54,8 +54,6 @@ These are possible future improvements, split by whether they look worth carryin
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
 - **Atlas import from external triage tools.**
   - Gives teams a practical bridge from existing tooling into darklab_shell instead of forcing all enrichment to start inside the app.
-- **Compact project switcher near the prompt.**
-  - Recently used projects plus a Create New action would make capture and run-linking feel faster during active work.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
 - **Config-driven package presets.**

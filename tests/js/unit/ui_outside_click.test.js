@@ -257,6 +257,20 @@ describe('bindOutsideClickClose', () => {
       dispatchClick(insideScope)
       expect(onClose).toHaveBeenCalledTimes(1)
     })
+
+    it('can close during capture before a child stops bubbling', () => {
+      const panel = makeDiv()
+      const outside = makeDiv()
+      const onClose = vi.fn()
+      outside.addEventListener('click', event => event.stopPropagation())
+      g.bindOutsideClickClose(panel, {
+        capture: true,
+        isOpen: () => true,
+        onClose,
+      })
+      dispatchClick(outside)
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('handle API', () => {

@@ -79,6 +79,7 @@ from services.projects.queries import (
     list_project_entities,
     list_project_runs,
     list_projects_page,
+    list_projects_switcher,
     list_projects,
 )
 from services.projects.targets import (
@@ -341,6 +342,23 @@ def projects_list():
         return error_response
     include_archived = str(request.args.get("include_archived") or "").lower() in {"1", "true", "yes"}
     include_counts = str(request.args.get("include_counts") or "").lower() in {"1", "true", "yes"}
+    mode = str(request.args.get("mode") or "").strip().lower()
+    if mode == "switcher":
+        limit = _parse_int(request.args.get("limit"), 8, minimum=1, maximum=20)
+        page = list_projects_switcher(
+            session_id,
+            query=request.args.get("q") or request.args.get("query") or "",
+            limit=limit,
+            team_id=team_id,
+        )
+        log.debug("PROJECTS_SWITCHER_VIEWED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "count": len(page["projects"]),
+            "total": page["total"],
+            "query": page.get("query") or "",
+        })
+        return jsonify(page)
     if "limit" in request.args or "offset" in request.args or include_counts:
         limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=100)
         offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
@@ -400,7 +418,7 @@ def projects_active_get():
 @projects_bp.route("/projects/active", methods=["POST"])
 @limiter.limit(_project_write_limit)
 def projects_active_set():
-    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    session_id, team_id, error_response = _project_owner()
     if error_response:
         return error_response
     data = request.get_json(silent=True) or {}
@@ -421,7 +439,7 @@ def projects_active_set():
 @projects_bp.route("/projects/active", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
 def projects_active_clear():
-    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    session_id, team_id, error_response = _project_owner()
     if error_response:
         return error_response
     cleared = clear_active_project(session_id, team_id=team_id)

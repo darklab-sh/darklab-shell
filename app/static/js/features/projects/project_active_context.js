@@ -23,9 +23,12 @@
     function render() {
       const name = ctx.projectDisplayName(activeProject);
       const visible = !!name;
-      if (ctx.hudProjectCell) ctx.hudProjectCell.classList.toggle('u-hidden', !visible);
+      if (ctx.hudProjectCell) {
+        ctx.hudProjectCell.classList.remove('u-hidden');
+        ctx.hudProjectCell.classList.toggle('hud-project-empty', !visible);
+      }
       if (ctx.hudProjectEl) {
-        ctx.hudProjectEl.textContent = visible ? name : '—';
+        ctx.hudProjectEl.textContent = visible ? name : 'No project';
         ctx.hudProjectEl.title = visible ? `Active project: ${name}` : 'No active project';
         ctx.setValueColor(ctx.hudProjectEl, visible ? null : 'hud-muted');
       }

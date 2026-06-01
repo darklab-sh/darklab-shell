@@ -10933,6 +10933,38 @@ class TestPtyBrokerService:
         assert "live hop" in chunk
         assert '"type": "output"' in chunk
 
+    def test_pty_stream_replays_completed_redis_events_before_stale_prune(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-fast-exit"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "telnet --interactive telnet towel.blinkenlights.nl",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service, "active_runs_for_session", return_value=[]):
+            pty_service.publish_pty_event(run_id, "output", {"text": "Server lookup failure"})
+            pty_service.publish_pty_event(run_id, "exit", {"code": 1, "elapsed": 0.1, "interactive": True})
+            stream = pty_service.stream_pty_events(run_id, "session-1")
+            chunks = [next(stream), next(stream)]
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+
+        assert "Server lookup failure" in chunks[0]
+        assert '"type": "output"' in chunks[0]
+        assert '"code": 1' in chunks[1]
+        assert '"type": "exit"' in chunks[1]
+        assert "PTY run is no longer active" not in "".join(chunks)
+
     def test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run(self):
         class FakeProc:
             pid = 4242

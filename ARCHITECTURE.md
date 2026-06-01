@@ -450,7 +450,7 @@ mapped through the same compare-line indexes used by finding jump actions.
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/projects` | Returns active-scope projects, excluding archived projects unless requested. |
+| `GET` | `/projects` | Returns active-scope projects, excluding archived projects unless requested. `mode=switcher` returns a bounded active-project switcher list with active/MRU ordering or server-side name search. |
 | `POST` | `/projects` | Creates an active-scope project/case folder. |
 | `GET` | `/projects/active` | Returns the active personal/team scope's active project context, or null when none is set. |
 | `POST` | `/projects/active` | Sets the active project context after validating active-scope ownership. |
@@ -622,7 +622,7 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 - `bindPressable(el, { onActivate, refocusComposer, preventFocusTheft, preventScroll, defer, clearPressStyle })` in `ui_pressable.js` is the single contract for press-to-activate surfaces. Click + `Enter`/`Space` activation (keyboard only on non-`<button>` elements so native buttons don't double-fire), post-activation blur + canonical composer refocus (opt-out via `refocusComposer: false`), `preventFocusTheft` on primary-contact pointerdown, and `clearPressStyle` double-`requestAnimationFrame` for `role="button"` divs whose sticky `:hover`/`:active` residue doesn't clear on blur. Idempotent via `data-pressable-bound`.
 - `bindDisclosure(trigger, { panel, openClass, hiddenClass, initialOpen, onToggle, stopPropagation, ...pressableOpts })` in `ui_disclosure.js` composes `bindPressable` for the trigger and owns `aria-expanded` sync + panel class lifecycle + `onToggle` emission. Returns an imperative handle (`isOpen / open / close / toggle`). `panel: null` lets the caller own visibility (used by rail section headers where `applySectionsState()` is the sole writer of `.closed`). Idempotent via `data-disclosure-bound`.
 - `bindDismissible(el, { level, isOpen, onClose, closeButtons, closeOnBackdrop, backdropEl })` in `ui_dismissible.js` owns scrim-backed modal/sheet dismissal and registers the surface with a shared level-priority dispatcher. `closeTopmostDismissible()` collapses the Escape cascade: priority `modal > sheet > panel`, within-level most-recent-open wins, returns `true` if it closed something so the keydown handler can `preventDefault`. Backdrop semantics: default `e.target === el`; sheets with a detached scrim pass `backdropEl: <scrim>`; `closeOnBackdrop: false` disables (used by the history panel, which is a side panel rather than a modal). Composes `bindPressable` for each close button and idempotent via `data-dismissible-bound`.
-- `bindOutsideClickClose(panel, { triggers, isOpen, onClose, exemptSelectors, scope })` in `ui_outside_click.js` owns ambient document-level (or scope-overridden) outside-click dismissal for unbacked panels. Companion to `bindDismissible`: `bindDismissible` owns backed surfaces, `bindOutsideClickClose` owns menus whose trigger sits outside the surface. Encodes the trigger-exemption contract (clicks on registered `triggers` are treated as "inside" via `.contains()`, replacing hand-rolled `e.stopPropagation()` patterns), `exemptSelectors` ancestor-based exemption via `.closest()`, `panel: null` for sibling-set cases (multiple peer dropdowns on a shared parent), and `scope` override for per-sheet listeners.
+- `bindOutsideClickClose(panel, { triggers, isOpen, onClose, exemptSelectors, scope, capture })` in `ui_outside_click.js` owns ambient document-level (or scope-overridden) outside-click dismissal for unbacked panels. Companion to `bindDismissible`: `bindDismissible` owns backed surfaces, `bindOutsideClickClose` owns menus whose trigger sits outside the surface. Encodes the trigger-exemption contract (clicks on registered `triggers` are treated as "inside" via `.contains()`, replacing hand-rolled `e.stopPropagation()` patterns), `exemptSelectors` ancestor-based exemption via `.closest()`, `panel: null` for sibling-set cases (multiple peer dropdowns on a shared parent), `scope` override for per-sheet listeners, and `capture: true` for menus that must close even when the clicked surface stops bubbling.
 
 **App-native Select Primitive.** Native `<select>` popup styling is not themeable consistently across browsers, so user-facing select controls are progressively enhanced into app-native dropdowns by `enhanceAppSelects()` in `ui_helpers.js`. The original `<select>` remains in the DOM as the state owner and accessibility fallback, while the visible `.app-select` wrapper renders a themed button/listbox menu using `dropdown_*` and `chrome_control_*` tokens.
 
@@ -1990,12 +1990,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,465
+- behavior tests: 3,469
 - docs/inventory meta-tests: 34
-- `pytest`: 1950 (1916 behavior + 34 meta)
-- `vitest`: 1315
-- `playwright`: 257
-- total: 3,522
+- `pytest`: 1952 (1918 behavior + 34 meta)
+- `vitest`: 1316
+- `playwright`: 258
+- total: 3,526
 
 ### Testing Architecture
 

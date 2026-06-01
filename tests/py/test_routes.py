@@ -1224,6 +1224,17 @@ class TestTeamRoutes:
                 headers=viewer_headers,
                 json={"name": "Blocked edit"},
             )
+            viewer_active_set = client.post(
+                "/projects/active",
+                headers=viewer_headers,
+                json={"project_id": project_id},
+            )
+            viewer_active_get = client.get("/projects/active", headers=viewer_headers)
+            viewer_personal_switcher = client.get(
+                "/projects?mode=switcher",
+                headers={"X-Session-ID": viewer_token},
+            )
+            viewer_active_clear = client.delete("/projects/active", headers=viewer_headers)
             operator_target_create = client.post(
                 f"/projects/{project_id}/targets",
                 headers=operator_headers,
@@ -1266,6 +1277,16 @@ class TestTeamRoutes:
             assert operator_client_run.status_code == 200
             assert viewer_project_create.status_code == 403
             assert viewer_project_update.status_code == 403
+            assert viewer_active_set.status_code == 200
+            assert viewer_active_set.get_json()["project"]["id"] == project_id
+            assert viewer_active_get.status_code == 200
+            assert viewer_active_get.get_json()["project"]["id"] == project_id
+            assert viewer_personal_switcher.status_code == 200
+            assert project_id not in {
+                project["id"] for project in viewer_personal_switcher.get_json()["projects"]
+            }
+            assert viewer_active_clear.status_code == 200
+            assert viewer_active_clear.get_json()["cleared"] is True
             assert operator_target_create.status_code == 201
             assert viewer_target_create.status_code == 403
             assert operator_label_create.status_code == 201
@@ -4000,6 +4021,50 @@ class TestProjectRoutes:
         assert "deleted CLI Case Renamed" in _builtin_line_text(delete_lines[0])
         deleted_list_lines, _ = execute_builtin_command("project list --all", cli_session)
         assert "cli-case-renamed" not in _builtin_lines_text(deleted_list_lines)
+
+    def test_projects_switcher_uses_active_mru_search_and_stale_pruning(self):
+        client = get_client()
+        session_id = self._session_id("project-switcher")
+        alpha = self._create_project(client, session_id, "Alpha Case")
+        beta = self._create_project(client, session_id, "Beta Case")
+        gamma = self._create_project(client, session_id, "Gamma Needle")
+        zzz = self._create_project(client, session_id, "Zzz Needle")
+
+        for project in (beta, alpha):
+            resp = client.post(
+                "/projects/active",
+                json={"project_id": project["id"]},
+                headers={"X-Session-ID": session_id},
+            )
+            assert resp.status_code == 200
+
+        empty_page = json.loads(client.get(
+            "/projects?mode=switcher&limit=3",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [project["id"] for project in empty_page["projects"][:2]] == [alpha["id"], beta["id"]]
+        assert empty_page["active_project_id"] == alpha["id"]
+        assert empty_page["limit"] == 3
+
+        search_page = json.loads(client.get(
+            "/projects?mode=switcher&q=needle&limit=2",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [project["id"] for project in search_page["projects"]] == [gamma["id"], zzz["id"]]
+        assert search_page["active_project_id"] == alpha["id"]
+        assert search_page["query"] == "needle"
+
+        archived = client.put(
+            f"/projects/{beta['id']}",
+            json={"status": "archived"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert archived.status_code == 200
+        pruned_page = json.loads(client.get(
+            "/projects?mode=switcher&limit=4",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert beta["id"] not in {project["id"] for project in pruned_page["projects"]}
 
     def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
         client = get_client()

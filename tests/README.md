@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,465
+- behavior tests: 3,469
 - docs/inventory meta-tests: 34
-- `pytest`: 1950 (1916 behavior + 34 meta)
-- `vitest`: 1315
-- `playwright`: 257
-- total: 3,522
+- `pytest`: 1952 (1918 behavior + 34 meta)
+- `vitest`: 1316
+- `playwright`: 258
+- total: 3,526
 
 This document is organized in two parts:
 
@@ -788,6 +788,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
 | `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that personal and team-scoped PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
 | `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
+| `TestPtyBrokerService.test_pty_stream_replays_completed_redis_events_before_stale_prune` | Verifies that fast-exiting Redis-backed PTYs replay completed output and exit events before stale-run cleanup can prune the stream. |
 | `TestPtyBrokerService.test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run` | Verifies that PTY reattach snapshots can be served from Redis by a worker that does not own the PTY file descriptor. |
 | `TestPtyBrokerService.test_pty_snapshot_reports_age_for_distributed_reattach` | Verifies that Redis-backed PTY snapshots report their age so the browser can show stale reattach notices. |
 | `TestPtyBrokerService.test_pty_owner_claim_publishes_displaced_event_for_previous_client` | Verifies that a new browser-client PTY attach publishes one displacement event for the previous owner tab. |
@@ -1479,6 +1480,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere` | Verifies project deletion keeps entity-owned findings intact when the entity remains linked through another project. |
 | `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
 | `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
+| `TestProjectRoutes.test_projects_switcher_uses_active_mru_search_and_stale_pruning` | Verifies the compact project switcher endpoint returns active/MRU ordering, server-side search results, and prunes archived recent projects. |
 | `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
 | `TestProjectRoutes.test_entity_note_routes_enforce_session_and_payload_boundaries` | Verifies entity note routes reject cross-session access and invalid note payloads while preserving the owner note. |
 | `TestProjectRoutes.test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs` | Verifies project run comparison rejects one-run, same-run, unlinked, cross-session, missing-baseline, and missing-project requests. |
@@ -3210,8 +3212,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
 | `renders mobile project tab content with mobile row actions` | Verifies that mobile Projects detail tabs render summary metadata, targets, runs, findings, artifacts, packages, and mobile row action affordances. |
 | `opens the mobile project compare stepper and runs a baseline label comparison` | Verifies that the mobile Projects run-compare stepper can compare a selected run against a baseline label using the project compare endpoint. |
-| `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
-| `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists. |
+| `opens the active project HUD switcher and keeps Projects as a menu action` | Verifies that the active project HUD chip opens the searchable switcher menu, focuses search, prevents menu keydown leakage, closes from HUD re-click and terminal-area outside clicks, gates project creation by team capability, reloads scoped results after personal/team scope changes, selects and clears a project through the active-project route, restores focus on Escape, and keeps the Projects modal action available. |
+| `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists while the HUD still shows the `No project` switcher state. |
 | `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |
 | `unarchives archived projects without changing the active project` | Verifies that archived projects can be restored from the Projects modal without claiming the active project slot. |
 | `deletes a project from the project explorer after confirmation` | Verifies that the Projects modal confirms destructive project deletion and refreshes the list afterward. |
@@ -3580,6 +3582,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not close when the click target is nested inside an exempt selector` | Verifies exempt selectors match via closest(). |
 | `accepts an array of exempt selectors` | Verifies multiple exempt selectors are supported. |
 | `only fires when clicks land inside the scope` | Verifies scope override scopes the listener to a subtree. |
+| `can close during capture before a child stops bubbling` | Verifies capture-mode outside-click dismissal still closes when the clicked surface stops event bubbling. |
 | `dispose() removes the listener so further clicks do not close` | Verifies dispose detaches the handler. |
 | `dispose() on a scope-override handle removes the listener from that scope` | Verifies dispose on a scoped handle removes the listener from its scope. |
 
@@ -3823,6 +3826,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `stacks actions when there are 3 or more actions regardless of viewport` | Opens a 3-action confirm at desktop viewport and asserts `.modal-actions-stacked` is applied — the action-count branch of `_shouldStack()` is independent of viewport width. |
 | `onActivate keeps the dialog open when the callback returns false` | Wires an `onActivate` returning false on the primary action, clicks it twice, and asserts the modal stays visible and the callback ran twice — pins the gate-close contract so validation errors can stay on screen. |
 | `HUD save-menu: trigger toggles, inside-panel click stays open, outside click closes` | Verifies the bindOutsideClickClose contract on the HUD save-menu: trigger click toggles, inside-panel click stays open (helper treats inside clicks as non-dismissing), outside click at document.body dismisses. |
+| `active project HUD switcher keeps keyboard input scoped and captures the next run` | Verifies the real HUD project switcher keeps typed search text out of the terminal command input, switches the active project, and links the next external run to the selected project. |
 
 #### `kill.spec.js`
 

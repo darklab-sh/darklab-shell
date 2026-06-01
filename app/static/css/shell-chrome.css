@@ -784,6 +784,69 @@
     white-space: nowrap;
   }
 
+  .hud-project-menu {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    min-width: 260px;
+    max-width: min(360px, calc(100vw - 16px));
+    padding: 6px;
+    border-radius: 3px 3px 0 0;
+    z-index: 460;
+  }
+
+  .hud-project-menu.u-hidden {
+    display: none;
+  }
+
+  .hud-project-menu .dropdown-item {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hud-project-search {
+    background: var(--theme-dropdown-bg);
+    border: 1px solid var(--theme-dropdown-border);
+    border-radius: 3px;
+    color: var(--text);
+    font: inherit;
+    margin: 2px 2px 6px;
+    min-height: 30px;
+    padding: 6px 8px;
+    width: calc(100% - 4px);
+  }
+
+  .hud-project-search:focus-visible {
+    border-color: var(--border-bright);
+    outline: none;
+  }
+
+  .hud-project-menu-section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  .hud-project-menu-divider {
+    border-top: 1px solid var(--theme-dropdown-border);
+    margin: 6px 2px;
+  }
+
+  .hud-project-menu-note {
+    color: var(--text-muted);
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+
+  .hud-project-menu .dropdown-item[disabled] {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
   .hud-scope-cell {
     min-width: 116px;
   }

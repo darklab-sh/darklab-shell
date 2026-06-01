@@ -171,6 +171,7 @@ function loadShellChrome({
   fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
   bindMobileSheet = null,
+  bindOutsideClickClose = () => {},
   bindPressable = (el, options = {}) => {
     if (el?.dataset) el.dataset.pressableBound = '1'
     if (typeof options.onActivate === 'function') {
@@ -497,7 +498,7 @@ function loadShellChrome({
       } })
     },
     bindPressable,
-    () => {},
+    bindOutsideClickClose,
     () => {},
     () => 'tab-1',
     () => null,
@@ -1886,18 +1887,50 @@ describe('shell chrome project workspace', () => {
     }
   })
 
-  it('opens projects from the active project HUD chip', async () => {
-    const apiFetch = vi.fn((url) => {
+  it('opens the active project HUD switcher and keeps Projects as a menu action', async () => {
+    let scope = 'personal'
+    let canCreateProjects = false
+    const projectsByScope = {
+      personal: [
+        { id: 'project-1', name: 'darklab.sh', status: 'active' },
+        { id: 'project-2', name: 'api.darklab.sh', status: 'active' },
+      ],
+      team: [
+        { id: 'team-project-1', name: 'team.darklab.sh', status: 'active' },
+      ],
+    }
+    const activeProjectByScope = {
+      personal: projectsByScope.personal[0],
+      team: null,
+    }
+    const projects = [
+      activeProjectByScope.personal,
+      { id: 'project-2', name: 'api.darklab.sh', status: 'active' },
+    ]
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
+        if (options.method === 'POST') {
+          const body = JSON.parse(options.body)
+          activeProjectByScope[scope] = projectsByScope[scope].find(project => project.id === body.project_id) || null
+        } else if (options.method === 'DELETE') {
+          activeProjectByScope[scope] = null
+        }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh', status: 'active' } }),
+          json: () => Promise.resolve({ project: activeProjectByScope[scope] }),
+        })
+      }
+      if (String(url).startsWith('/projects?mode=switcher')) {
+        const scopedProjects = projectsByScope[scope]
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: scopedProjects, total: scopedProjects.length, limit: 8, query: '' }),
         })
       }
       if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+          json: () => Promise.resolve({ projects }),
         })
       }
       if (url === '/projects/project-1/summary') {
@@ -1915,14 +1948,132 @@ describe('shell chrome project workspace', () => {
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    loadShellChrome({ apiFetch })
+    const bindOutsideClickClose = vi.fn((panel, options) => {
+      const handler = (event) => {
+        if (!options.isOpen()) return
+        const target = event.target
+        if (panel?.contains?.(target)) return
+        if (options.triggers?.contains?.(target)) return
+        options.onClose()
+      }
+      document.addEventListener('click', handler, !!options.capture)
+      return { dispose: vi.fn() }
+    })
+    loadShellChrome({
+      apiFetch,
+      bindOutsideClickClose,
+      activeTeamScopeCan: capability => capability !== 'mutate_projects' || canCreateProjects,
+    })
 
     await tick()
     document.getElementById('hud-project-cell').click()
     await tick()
+
+    const menu = document.getElementById('hud-project-menu')
+    expect(menu).not.toBeNull()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('hud-project-cell').getAttribute('aria-expanded')).toBe('true')
+    expect(menu.querySelector('.hud-project-search')).toBe(document.activeElement)
+    expect(menu.querySelector('[data-action="select-project"]')?.textContent).toContain('darklab.sh')
+    expect(menu.querySelector('[data-action="create-project"]').disabled).toBe(true)
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+    expect(bindOutsideClickClose).toHaveBeenCalledWith(menu, expect.objectContaining({ capture: true }))
+
+    document.getElementById('hud-project-cell').click()
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+
+    const terminalSurface = document.createElement('div')
+    terminalSurface.addEventListener('click', event => event.stopPropagation())
+    document.body.appendChild(terminalSurface)
+    terminalSurface.click()
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+
+    canCreateProjects = true
+    document.dispatchEvent(new CustomEvent('app:scope-capabilities-changed'))
+    expect(menu.querySelector('[data-action="create-project"]').disabled).toBe(false)
+
+    const leakedKeydown = vi.fn()
+    document.addEventListener('keydown', leakedKeydown)
+    menu.querySelector('.hud-project-search')
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    expect(leakedKeydown).not.toHaveBeenCalled()
+    menu.querySelector('.hud-project-search')
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(menu.querySelector('[data-action="open-projects"]')).toBe(document.activeElement)
+    expect(leakedKeydown).not.toHaveBeenCalled()
+    document.removeEventListener('keydown', leakedKeydown)
+
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hud-project-cell')).toBe(document.activeElement)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+
+    Array.from(menu.querySelectorAll('[data-action="select-project"]'))
+      .find(btn => btn.textContent.includes('api.darklab.sh'))
+      .click()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: 'project-2' }),
+    })
+    expect(document.getElementById('hud-project').textContent).toBe('api.darklab.sh')
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+
+    scope = 'team'
+    document.dispatchEvent(new CustomEvent('app:scope-changed', { detail: { team_id: 'team-1', label: 'Darklab Team' } }))
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hud-project').textContent).toBe('No project')
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.textContent).toContain('team.darklab.sh')
+    expect(menu.textContent).not.toContain('api.darklab.sh')
+
+    scope = 'personal'
+    document.dispatchEvent(new CustomEvent('app:scope-changed', { detail: { team_id: '', label: 'Personal' } }))
+    await tick()
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    menu.querySelector('[data-action="clear-active-project"]').click()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/active', { method: 'DELETE' })
+    expect(document.getElementById('hud-project').textContent).toBe('No project')
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    menu.querySelector('[data-action="open-projects"]').click()
+    await tick()
     await tick()
 
     expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(true)
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hud-project-cell').getAttribute('aria-expanded')).toBe('false')
     expect(apiFetch).toHaveBeenCalledWith(
       expect.stringContaining('/projects?include_archived=1'),
       { cache: 'no-store' },
@@ -1945,6 +2096,8 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
 
+    expect(document.getElementById('hud-project-cell').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('hud-project').textContent).toBe('No project')
     expect(document.getElementById('project-workspace-body').textContent).toContain('No projects yet')
     expect(document.getElementById('project-explorer-body').textContent).toContain('Create or select a project')
     expect(document.getElementById('project-notes-form').classList.contains('u-hidden')).toBe(true)
