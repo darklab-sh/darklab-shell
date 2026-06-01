@@ -8,21 +8,46 @@ chmod 700 /data 2>/dev/null || true
 # Normalize the optional per-session workspace mount before dropping to
 # appuser. Bind mounts are commonly root-owned on first boot, so app-mediated
 # workspace files need their shared appuser/scanner group restored here.
+repair_workspace_root() {
+    workspace_root="$1"
+    create_root="$2"
+    if [ "$create_root" = "1" ]; then
+        mkdir -p "$workspace_root" 2>/dev/null || true
+    elif [ ! -d "$workspace_root" ]; then
+        return
+    fi
+    chown appuser:appuser "$workspace_root" 2>/dev/null || true
+    chmod 730 "$workspace_root" 2>/dev/null || true
+    find "$workspace_root" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chown appuser:appuser {} \; -exec chmod 3730 {} \; 2>/dev/null || true
+    # shellcheck disable=SC2156  # session dirs are passed as sh -c positional parameters via {} +
+    find "$workspace_root" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -c '
+        for session_dir do
+            for child in "$session_dir"/*; do
+                [ -e "$child" ] || continue
+                if [ -d "$child" ] && [ ! -L "$child" ]; then
+                    chown scanner:appuser "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                    chmod 3770 "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                elif [ -f "$child" ]; then
+                    chown scanner:appuser "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                    chmod 640 "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                fi
+            done
+            find "$session_dir" -mindepth 1 -exec chown scanner:appuser {} \;
+            find "$session_dir" -mindepth 1 -type d -exec chmod 3770 {} \;
+            find "$session_dir" -mindepth 1 -type f -exec chmod 640 {} \;
+        done
+    ' sh {} + || true
+}
+
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
-mkdir -p "$WORKSPACE_ROOT" 2>/dev/null || true
-chown appuser:appuser "$WORKSPACE_ROOT" 2>/dev/null || true
-chmod 730 "$WORKSPACE_ROOT" 2>/dev/null || true
-find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chown appuser:appuser {} \; -exec chmod 3730 {} \; 2>/dev/null || true
-# shellcheck disable=SC2156  # session dirs are passed as sh -c positional parameters via {} +
-find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -c '
-    for session_dir do
-        find "$session_dir" -mindepth 1 -maxdepth 1 -type d -exec chown scanner:appuser {} \; -exec chmod 3770 {} \;
-        find "$session_dir" -mindepth 1 -maxdepth 1 -type f -exec chown scanner:appuser {} \; -exec chmod 640 {} \;
-        find "$session_dir" -mindepth 1 -exec chown scanner:appuser {} \;
-        find "$session_dir" -mindepth 1 -type d -exec chmod 3770 {} \;
-        find "$session_dir" -mindepth 1 -type f -exec chmod 640 {} \;
-    done
-' sh {} + 2>/dev/null || true
+repair_workspace_root "$WORKSPACE_ROOT" 1
+if [ "$WORKSPACE_ROOT" != "/workspaces" ]; then
+    repair_workspace_root /workspaces 0
+fi
 
 # Ensure /tmp is world-writable so the scanner user can write tool cache/config
 # (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount

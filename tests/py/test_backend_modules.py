@@ -7312,6 +7312,39 @@ class TestSessionWorkspace:
             assert removed == 1
             assert not root.exists()
 
+    def test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure(self, monkeypatch):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("stale-output-session", cfg)
+            stale_child = root / "nuclei"
+            stale_child.mkdir()
+            os.utime(root, (1000, 1000))
+            original_rmtree = workspace_module.shutil.rmtree
+            original_iterdir = Path.iterdir
+
+            def fake_rmtree(path, *args, **kwargs):
+                if Path(path) == root and stale_child.exists():
+                    raise PermissionError("permission denied")
+                return original_rmtree(path, *args, **kwargs)
+
+            def fake_iterdir(path):
+                if Path(path) == stale_child:
+                    raise PermissionError("permission denied")
+                return original_iterdir(path)
+
+            monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
+            monkeypatch.setattr(Path, "iterdir", fake_iterdir)
+            monkeypatch.setattr(
+                workspace_module,
+                "_repair_workspace_tree_for_cleanup",
+                mock.Mock(side_effect=PermissionError("permission denied")),
+            )
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not root.exists()
+
     def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
@@ -7361,13 +7394,14 @@ class TestEntrypointWorkspaceRepair:
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
 
         assert "chown -R appuser:appuser \"$WORKSPACE_ROOT\"" not in entrypoint
-        assert "chown appuser:appuser \"$WORKSPACE_ROOT\"" in entrypoint
+        assert "repair_workspace_root \"$WORKSPACE_ROOT\" 1" in entrypoint
+        assert "repair_workspace_root /workspaces 0" in entrypoint
+        assert "chown appuser:appuser \"$workspace_root\"" in entrypoint
         assert "-exec chown appuser:appuser {} \\;" in entrypoint
         assert "find \"$WORKSPACE_ROOT\" -mindepth 2 -exec chown scanner:appuser" not in entrypoint
-        assert (
-            "find \"$session_dir\" -mindepth 1 -maxdepth 1 -type d "
-            "-exec chown scanner:appuser {} \\; -exec chmod 3770"
-        ) in entrypoint
+        assert "for child in \"$session_dir\"/*" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
@@ -7383,6 +7417,17 @@ class TestEntrypointWorkspaceRepair:
         assert "ip6tables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
         assert "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" in entrypoint
         assert shell_env["RESTRICTED_COMMAND_INPUT_CIDRS"] == "${RESTRICTED_COMMAND_INPUT_CIDRS:-}"
+
+    def test_compose_redis_is_ephemeral_under_read_only_root(self):
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        redis_service = compose["services"]["redis"]
+        redis_command = [str(item) for item in redis_service.get("command", [])]
+
+        assert redis_service.get("read_only") is True
+        assert redis_command[:1] == ["redis-server"]
+        assert redis_command[redis_command.index("--save") + 1] == ""
+        assert redis_command[redis_command.index("--appendonly") + 1] == "no"
+        assert redis_command[redis_command.index("--stop-writes-on-bgsave-error") + 1] == "no"
 
     def test_gunicorn_uses_prometheus_multiprocess_cleanup_hook(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()

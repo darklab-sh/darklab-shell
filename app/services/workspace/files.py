@@ -1008,6 +1008,29 @@ def _repair_workspace_tree_for_cleanup(path: Path) -> None:
                 continue
 
 
+def _remove_unreadable_direct_child_directories(path: Path) -> None:
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return
+    for child in children:
+        try:
+            child_stat = child.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(child_stat.st_mode) or not stat.S_ISDIR(child_stat.st_mode):
+            continue
+        try:
+            list(child.iterdir())
+        except PermissionError:
+            try:
+                child.rmdir()
+            except (FileNotFoundError, OSError):
+                continue
+        except OSError:
+            continue
+
+
 def _scanner_owned_cleanup_targets(path: Path) -> list[Path]:
     targets: list[Path] = []
     try:
@@ -1058,12 +1081,20 @@ def _remove_inactive_workspace_directory(path: Path) -> None:
         shutil.rmtree(path)
         return
     except OSError:
-        _repair_workspace_tree_for_cleanup(path)
+        try:
+            _repair_workspace_tree_for_cleanup(path)
+        except OSError:
+            _remove_unreadable_direct_child_directories(path)
     try:
         shutil.rmtree(path)
         return
     except OSError:
-        for target in _scanner_owned_cleanup_targets(path):
+        try:
+            targets = _scanner_owned_cleanup_targets(path)
+        except OSError:
+            _remove_unreadable_direct_child_directories(path)
+            targets = []
+        for target in targets:
             _remove_workspace_cleanup_target(target)
     shutil.rmtree(path)
 

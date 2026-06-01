@@ -93,7 +93,7 @@ Before you begin, make sure you have:
 - Python 3.14+
 - pip3
 - Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- (Optional) Redis 6.2+ (for `GETDEL` support). If not configured or available, the app falls back to in-process mode
+- (Optional) Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. If not configured or available, the app falls back to in-process mode
 
 Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter, redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
 
@@ -278,6 +278,8 @@ docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --bu
 ```
 
 The production overlay adds reverse-proxy-aware environment values, GELF Docker log transport, an external Docker network model, persistent workspace storage at `/workspaces`, scanner-friendly `ulimits` and network sysctls, and optional Gunicorn sizing through `.env`.
+
+The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
 

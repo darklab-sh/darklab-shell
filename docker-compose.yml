@@ -3,6 +3,17 @@ services:
     image: redis:8-alpine
     container_name: darklab-redis
     restart: unless-stopped
+    # Redis is coordination/cache state for this stack, not durable app data.
+    # Disable persistence so Redis 8 does not try to write RDB/AOF files under
+    # the read-only root filesystem and enter MISCONF.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --stop-writes-on-bgsave-error
+      - "no"
     read_only: true
     tmpfs:
       - /tmp

@@ -136,10 +136,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Redis 8 read-only sidecar persistence** — the bundled Redis service now disables RDB/AOF persistence when running under a read-only root filesystem.
+  - **Root cause:** Redis 8 attempted its default RDB background save without a writable `/data` path, entered `MISCONF`, and rejected mutating commands needed by rate limits, run broker state, and AI coordination.
+  - **Fix:** Compose starts Redis with `--save ""`, `--appendonly no`, and `--stop-writes-on-bgsave-error no`, keeping Redis ephemeral to match its coordination/cache role while durable app data stays in SQLite/Postgres, `/data`, and workspace volumes.
+  - **Tests:** added Compose wiring coverage that pins the read-only Redis service to the ephemeral configuration.
+
 - **Atlas toolbar dropdown layout** — Atlas export menus now stay anchored and readable from the modal, and the saved-view selector keeps a usable width when it only has the placeholder option.
   - **Tests:** updated Atlas overlay coverage for the portaled export menu and the saved-view selector wrapper.
-- **Workspace cleanup permissions** — inactive workspace cleanup now repairs scanner-owned child directories before removing expired session workspaces, and the container entrypoint repairs immediate workspace children before recursive normalization so stale numeric-UID command output folders become traversable on restart. Any remaining cleanup skip logs render the path and reason directly in the log line.
-  - **Tests:** extended workspace cleanup coverage so unreadable expired workspaces are skipped with visible path/reason logging, removable expired workspaces are still evicted, scanner-owned child directories are repaired before cleanup retries, and entrypoint repair pins the immediate-child normalization pass.
+- **Workspace cleanup permissions** — inactive workspace cleanup now repairs scanner-owned child directories before removing expired session workspaces, removes empty unreadable direct child directories when recursive repair cannot enter stale tool output, and the container entrypoint repairs immediate workspace children before recursive normalization so stale numeric-UID command output folders become traversable on restart. The entrypoint also repairs an existing `/workspaces` mount when local config points the app there without exporting `WORKSPACE_ROOT`, and startup repair failures now log `WORKSPACE_REPAIR_FAILED` with the failed path and stage. Any remaining cleanup skip logs render the path and reason directly in the log line.
+  - **Tests:** extended workspace cleanup coverage so unreadable expired workspaces are skipped with visible path/reason logging, removable expired workspaces are still evicted, scanner-owned child directories are repaired before cleanup retries, empty unreadable direct child directories can be removed after repair failure, and entrypoint repair pins the immediate-child normalization plus `/workspaces` fallback pass.
 - **Findings Board run opens** — clicking **Open** on a Findings Board card now closes the board after handing the source run to Run Details, so the run doesn't open behind the modal.
   - **Tests:** extended the Findings Board unit coverage to assert run opens restore the correct line and dismiss the board.
 - **History bulk-select drawer stability** — clicking **Select all** or **Clear** in History bulk mode no longer bubbles into document-level outside-click handlers after the toolbar re-renders.

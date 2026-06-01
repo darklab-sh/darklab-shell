@@ -863,13 +863,15 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 ## Docker Compose Files
 
-The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, Redis, the writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
+The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
 
 ```bash
 docker compose --profile postgres up -d postgres
 ```
 
 The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. When `database_backend` is `postgres`, startup runs the app-owned schema migrations and normal app database calls route through the Postgres pool.
+
+The bundled Redis service runs with a read-only root filesystem and persistence disabled (`--save ""`, `--appendonly no`). It stores coordination, broker, rate-limit, and cache-like state; durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
 The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
 
@@ -1003,7 +1005,7 @@ echo "net.netfilter.nf_conntrack_max=131072" | sudo tee /etc/sysctl.d/99-conntra
 
 ### Redis memory overcommit
 
-Redis may warn that memory overcommit must be enabled. Apply immediately:
+The bundled Redis service disables RDB/AOF persistence, but Redis can still warn that memory overcommit must be enabled, especially if you point the app at a custom persistent Redis. Apply immediately:
 
 ```bash
 sudo sysctl vm.overcommit_memory=1
