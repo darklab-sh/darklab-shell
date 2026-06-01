@@ -113,6 +113,8 @@ The textual fallback is intentionally more sensitive than the structured classif
 
 Watchers do not have a separate timer. The scheduler worker claims due watcher-owned schedule rows, starts the watched command through the same brokered run path as scheduled commands, and records a pending watcher fire.
 
+If a watcher-fired command is still active when you open or reload the UI, it stays in the Status Monitor instead of automatically taking over the terminal. Use **Attach** from Status Monitor when you want to watch that run live.
+
 When the run finalizes, the watcher finalization hook:
 
 - compares the completed run against the baseline

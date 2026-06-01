@@ -92,9 +92,13 @@ function _isRunStillActive(runId) {
   return _fetchActiveRun(runId).then(Boolean);
 }
 
-function _fetchActiveRun(runId) {
+function _activeRunsUrl({ includeScheduled = false } = {}) {
+  return includeScheduled ? '/history/active?include_scheduled=1' : '/history/active';
+}
+
+function _fetchActiveRun(runId, { includeScheduled = false } = {}) {
   if (!runId || typeof apiFetch !== 'function') return Promise.resolve(null);
-  return apiFetch('/history/active')
+  return apiFetch(_activeRunsUrl({ includeScheduled }))
     .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
     .then(data => {
       const normalized = String(runId || '');
@@ -139,7 +143,9 @@ function _markStalledAndInactive(tabId) {
 function _handleStreamEndedWithoutExit(tabId) {
   _clearStalledTimeout(tabId);
   const runId = _tabRunGeneration(tabId);
-  return _fetchActiveRun(runId).then(activeRun => {
+  const existingTab = getTab(tabId);
+  const includeScheduled = !!(existingTab && existingTab.scheduledRun);
+  return _fetchActiveRun(runId, { includeScheduled }).then(activeRun => {
     const t = getTab(tabId);
     if (!t || t.killed) return;
     if (activeRun) {
@@ -270,6 +276,7 @@ function _activeReconnectTabs() {
 
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
+  if (run.scheduled) return false;
   if (_isActiveRunDetachedForRestore(run.run_id)) return false;
   if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
@@ -335,6 +342,8 @@ function _reattachActiveRunToTab(
   const runId = String(run.run_id || '');
   t.runId = runId;
   t.historyRunId = runId;
+  t.scheduledRun = !!run.scheduled;
+  t.scheduleId = String(run.schedule_id || '');
   t.reconnectedRun = true;
   t.attachMode = mode;
   t.killed = false;
@@ -443,6 +452,8 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   }
   t.runId = run.run_id;
   t.historyRunId = run.run_id;
+  t.scheduledRun = !!run.scheduled;
+  t.scheduleId = String(run.schedule_id || '');
   t.lastEventId = '';
   t.attachMode = mode;
   t.reconnectedRun = true;

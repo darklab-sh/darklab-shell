@@ -26,6 +26,29 @@ docker compose --profile postgres exec -T postgres sh -c \
   > backups/darklab-postgres-pre18.dump
 ```
 
+If you already stopped the whole stack before making the dump, don't start the upgraded Postgres service against the old volume. The Postgres 18 Compose service uses the new `/var/lib/postgresql` mount, while the old Postgres 17 volume expects `/var/lib/postgresql/data`. Start a temporary Postgres 17 container against the old volume just long enough to make the dump:
+
+```bash
+mkdir -p backups
+docker volume ls --filter label=com.docker.compose.volume=postgres-data
+
+docker run -d --name darklab-postgres17-dump \
+  --env-file .env \
+  -v <postgres-data-volume-name>:/var/lib/postgresql/data \
+  postgres:17-alpine
+
+docker exec darklab-postgres17-dump sh -c \
+  'POSTGRES_USER="${POSTGRES_USER:-darklab}"; POSTGRES_DB="${POSTGRES_DB:-darklab_shell}"; until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done'
+
+docker exec -i darklab-postgres17-dump sh -c \
+  'POSTGRES_USER="${POSTGRES_USER:-darklab}"; POSTGRES_DB="${POSTGRES_DB:-darklab_shell}"; pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' \
+  > backups/darklab-postgres-pre18.dump
+
+docker rm -f darklab-postgres17-dump
+```
+
+Replace `<postgres-data-volume-name>` with the volume reported by `docker volume ls`. Keep the main Compose Postgres service stopped while this temporary container is using the volume.
+
 Confirm the dump exists and is non-empty before touching the volume:
 
 ```bash
@@ -52,9 +75,13 @@ docker compose --profile postgres exec -T postgres sh -c \
   < backups/darklab-postgres-pre18.dump
 ```
 
-Validate the restored database:
+Apply any app-owned migrations that were added after the dump was created, then validate the restored database:
 
 ```bash
+docker compose --profile postgres run --rm --no-deps --entrypoint python \
+  -e DATABASE_BACKEND=postgres \
+  shell -c "from config import CFG; from core.database_backend import connect_postgres; from core.migrations import MIGRATIONS; from core.migrations.runner import run_migrations_with_advisory_lock; ctx = connect_postgres(CFG); conn = ctx.__enter__(); applied = run_migrations_with_advisory_lock(conn, MIGRATIONS); conn.commit(); ctx.__exit__(None, None, None); print(f'postgres migrations current; applied={len(applied)}')"
+
 docker compose --profile postgres exec postgres sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SHOW server_version;"'
 
@@ -62,6 +89,17 @@ docker compose --profile postgres exec postgres sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version, name FROM schema_migrations ORDER BY version;"'
 
 bash scripts/run_postgres_tests.sh --compose
+```
+
+The migration step is important when you restore a Postgres 17 dump into a newer checkout. The app normally applies pending Postgres migrations on startup, but this validation flow intentionally keeps the app stopped until the database has been checked. `bash scripts/run_postgres_tests.sh --compose` also applies pending app migrations before running pytest, so a direct test run is safe; the explicit command above keeps the following `schema_migrations` check easy to understand.
+
+If you use an alternate Compose file, put the `-f` option before the subcommand in direct Docker commands, or pass the same Compose command to the helper:
+
+```bash
+docker compose -f docker-compose.local.yml --profile postgres exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version, name FROM schema_migrations ORDER BY version;"'
+
+DOCKER_COMPOSE="docker compose -f docker-compose.local.yml" bash scripts/run_postgres_tests.sh --compose
 ```
 
 After validation passes, start the app with the Postgres backend:
@@ -246,7 +284,7 @@ To force a specific host-accessible database, set `DARKLAB_TEST_POSTGRES_DSN` or
 bash scripts/run_postgres_tests.sh --compose
 ```
 
-The `--compose` command starts the profile-gated `postgres` service, mounts the checkout into a disposable `shell` container, installs dev test dependencies in that one-off container, and runs the Postgres smoke, route, backend-module, output-search, and migration-helper checks without exposing the database to the host OS.
+The `--compose` command starts the profile-gated `postgres` service, mounts the checkout into a disposable `shell` container, installs dev test dependencies in that one-off container, applies pending app-owned Postgres migrations, and runs the Postgres smoke, route, backend-module, output-search, and migration-helper checks without exposing the database to the host OS. It uses `DARKLAB_TEST_POSTGRES_DSN` when explicitly set; otherwise it uses the Compose-provided `DATABASE_URL` inside the one-off `shell` container, falling back to the running `postgres` service's `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` values. That means `.env`-only Compose deployments do not need to export the same password in the host shell. The pytest process itself is forced back to the default SQLite app backend so SQLite-focused tests in the lane do not accidentally run against a staging `.env` with `DATABASE_BACKEND=postgres`; the Postgres-specific tests still use `DARKLAB_TEST_POSTGRES_DSN`. Its temporary Python environment is created inside the container under `/data` by default, then removed when the run exits; this avoids hardened `/tmp` mounts that are writable but cannot load binary Python wheels. Set `DARKLAB_TEST_COMPOSE_VENV_PARENT` if your staging layout needs a different executable scratch directory.
 
 ---
 

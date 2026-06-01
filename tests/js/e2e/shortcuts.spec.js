@@ -625,7 +625,7 @@ test.describe('desktop chrome keyboard shortcuts', () => {
   })
 
   test('Alt+M toggles the Status Monitor from the composer', async ({ page }) => {
-    await page.route('**/history/active', route => route.fulfill({
+    await page.route('**/history/active**', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({

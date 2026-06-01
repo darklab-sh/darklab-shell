@@ -390,7 +390,7 @@ test.describe('Status Monitor', () => {
   })
 
   test('active rows sit under the pulse strip with wide telemetry', async ({ page }) => {
-    await page.route('**/history/active', async (route) => {
+    await page.route('**/history/active**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

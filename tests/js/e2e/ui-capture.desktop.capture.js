@@ -61,8 +61,8 @@ async function runCaptureCommandAndGetRunId(page, command) {
 
 async function prepareStatusMonitorTelemetryScene(page) {
   let activePollCount = 0
-  await page.unroute('**/history/active').catch(() => {})
-  await page.route('**/history/active', route => {
+  await page.unroute('**/history/active**').catch(() => {})
+  await page.route('**/history/active**', route => {
     activePollCount += 1
     route.fulfill({
       status: 200,

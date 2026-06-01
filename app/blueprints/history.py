@@ -106,6 +106,10 @@ def _apply_schedule_ref(run: dict[str, Any], schedule_ref: dict[str, str] | None
     run["schedule_label"] = str(ref.get("watcher_label" if owner_kind == OWNER_KIND_WATCHER else "schedule_label") or "")
 
 
+def _truthy_request_arg(name: str) -> bool:
+    return str(request.args.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _team_capability_error_response(exc: TeamPermissionDenied):
     return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
 
@@ -1315,8 +1319,24 @@ def get_active_history_runs():
         return jsonify(payload), status
     client_id = str(request.headers.get("X-Client-ID", "") or "").strip()[:128]
     runs = active_runs_for_session(session_id, client_id=client_id, team_id=owner_scope.team_id)
+    include_scheduled = _truthy_request_arg("include_scheduled")
+    if runs:
+        run_ids = [str(run.get("run_id") or "") for run in runs if str(run.get("run_id") or "")]
+        with db_connect() as conn:
+            scheduled_by_run = schedule_refs_by_run(conn, run_ids)
+        filtered_runs = []
+        for run in runs:
+            run_id = str(run.get("run_id") or "")
+            schedule_ref = scheduled_by_run.get(run_id)
+            _apply_schedule_ref(run, schedule_ref)
+            if include_scheduled or not run.get("scheduled"):
+                filtered_runs.append(run)
+        runs = filtered_runs
     log.debug("ACTIVE_RUNS_VIEWED", extra={
-        "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": len(runs),
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": len(runs),
+        "include_scheduled": include_scheduled,
     })
     return jsonify({"runs": runs})
 

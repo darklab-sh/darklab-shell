@@ -367,6 +367,56 @@ class TestSchedulesRoutes:
         assert payload["items"][0]["scheduled"] is True
         assert payload["items"][0]["schedule_id"] == schedule_id
 
+    def test_active_history_skips_scheduled_runs_unless_requested(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_active_restore"
+        scheduled_run_id = "run_scheduled_active_restore"
+        manual_run_id = "run_manual_active_restore"
+        _register_token(token)
+        created = _create_schedule(client, token)
+        schedule_id = created.get_json()["schedule"]["id"]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO schedule_fires (id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES (?, ?, 'user', '', ?, ?, 'fired', 'started scheduled run')",
+                (
+                    "fire_scheduled_active_restore",
+                    schedule_id,
+                    "2026-05-20T00:00:00+00:00",
+                    scheduled_run_id,
+                ),
+            )
+            conn.commit()
+
+        def active_runs(_session_id, **_kwargs):
+            return [
+                {
+                    "run_id": scheduled_run_id,
+                    "command": "ping -c 1 darklab.sh",
+                    "started": "2026-05-20T00:00:00+00:00",
+                },
+                {
+                    "run_id": manual_run_id,
+                    "command": "curl https://darklab.sh",
+                    "started": "2026-05-20T00:00:01+00:00",
+                },
+            ]
+
+        with mock.patch("blueprints.history.active_runs_for_session", side_effect=active_runs):
+            default_resp = client.get("/history/active", headers={"X-Session-ID": token})
+            inclusive_resp = client.get("/history/active?include_scheduled=1", headers={"X-Session-ID": token})
+
+        default_payload = default_resp.get_json()
+        inclusive_payload = inclusive_resp.get_json()
+
+        assert default_resp.status_code == 200
+        assert [run["run_id"] for run in default_payload["runs"]] == [manual_run_id]
+        assert inclusive_resp.status_code == 200
+        assert [run["run_id"] for run in inclusive_payload["runs"]] == [scheduled_run_id, manual_run_id]
+        assert inclusive_payload["runs"][0]["scheduled"] is True
+        assert inclusive_payload["runs"][0]["schedule_id"] == schedule_id
+        assert inclusive_payload["runs"][1]["scheduled"] is False
+
     def test_schedule_create_enforces_session_cap(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_cap"

@@ -374,7 +374,7 @@ test.describe('tab command recall', () => {
       })
     })
 
-    await page.route('**/history/active', async (route) => {
+    await page.route('**/history/active**', async (route) => {
       if (!activeRunStarted) {
         await route.fulfill({
           status: 200,

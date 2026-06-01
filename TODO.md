@@ -30,7 +30,120 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Atlas Import from External Triage Tools
+
+Build an import path that lets operators bring entities and findings from external triage tools into Atlas without pretending those results came from an in-app run.
+
+#### Scope
+- Import structured external results into Atlas entities, Atlas findings, and optional project links.
+- Support personal and team scopes with the same visibility and capability rules used by Projects and Atlas today.
+- Preserve import provenance so users can see which tool/file created or updated each imported item.
+- Start with explicit, documented formats instead of a broad "upload anything" parser.
+- Keep imported data separate from run history: imports can create Atlas records, but they do not create fake runs, transcripts, or command artifacts.
+
+#### Non-goals
+- Do not execute external tools, fetch remote URLs, or poll third-party services during import.
+- Do not accept archive uploads in the first implementation.
+- Do not auto-trust imported severity, review state, labels, or notes without clear user confirmation.
+- Do not try to round-trip every field from every vendor format. Keep the first pass small and predictable.
+
+#### Requirements
+- Provide a preview-before-apply flow showing total rows, valid rows, skipped rows, duplicate matches, new entities, updated entities, new findings, and warnings.
+- Apply imports idempotently by reusing existing Atlas canonicalization, finding signature, and project-link helpers wherever possible.
+- Store enough provenance to answer "where did this come from?": source tool, import name, uploaded filename, original row/line number when available, external id when available, and import timestamp.
+- Gate apply actions behind the same mutation capabilities used for project/Atlas changes. Read-only users may view existing imported data but cannot apply a new import.
+- Bound import work with configurable limits for upload size, row count, finding count, warning count, and preview result size.
+- Treat all imported text as untrusted: sanitize display fields, reject path-like upload names as storage paths, and keep redaction rules active for package/export flows.
+- Make failures observable with structured logs for preview rejection, apply rejection, parser errors, and successful apply summaries.
+
+#### Phase 0 - Format and Ownership Decisions
+- Pick the first supported formats:
+  - Generic CSV for entities and findings with a documented column schema.
+  - Generic JSONL for entities and findings with a documented object schema.
+  - One external-tool adapter, preferably Nuclei JSONL, because it maps naturally to finding-like data.
+- Decide whether `httpx`, `naabu`, and `subfinder` adapters are part of the initial release or follow-up work.
+- Define the canonical import fields for entities and findings before writing parsers:
+  - Entity fields: kind, value, confidence, source detail, optional tags, optional observed-at timestamp.
+  - Finding fields: title, severity, description/evidence, affected entity/value, external id, references, source detail, optional observed-at timestamp.
+- Decide whether previews are persisted as short-lived import drafts or computed on demand from the uploaded file.
+- Decide whether successful imports need a first-class import history table or can start with provenance metadata on created/updated records.
+
+#### Phase 1 - Data Model and Provenance Contract
+- Add the persistence needed for import provenance:
+  - Import batch metadata with id, scope, actor, source tool, import name, filename, created timestamp, applied timestamp, status, counts, and warning summary.
+  - Per-row provenance only if it is needed to explain skipped rows or link imported Atlas records back to a specific source line.
+- Add migrations for SQLite and Postgres together.
+- Reuse existing Atlas entity and finding tables rather than introducing parallel imported-entity tables.
+- Reuse existing project link insertion helpers so project links stay idempotent and quota-aware.
+- Define how imported findings map to review state:
+  - Imported findings should default to the same unreviewed/new state as detected findings unless the user explicitly chooses another supported mapping.
+  - False-positive or dismissed states from external tools should import as metadata/warnings first, not as trusted local triage state.
+- Define how duplicate detection works:
+  - Entities dedupe through existing canonical values.
+  - Findings dedupe through the existing finding signature path where possible.
+  - If an external id is present, store it as provenance but do not make it the only dedupe key.
+
+#### Phase 2 - Parser and Normalization Service
+- Build a small parser service that accepts a file stream plus an explicit format id.
+- Validate format-specific schemas and return row-level errors without applying any changes.
+- Normalize domains, IPs, URLs, CVEs, hashes, and finding severities with the same helpers used by Atlas capture.
+- Keep adapter logic narrow:
+  - Generic CSV and JSONL adapters map fields directly from documented schema names.
+  - Tool adapters translate known external fields into the canonical import fields.
+- Add guardrails for large or noisy files:
+  - Stop parsing after the configured row limit.
+  - Cap stored warning samples.
+  - Return a clear preview error when limits are exceeded.
+- Ensure parser errors are safe to show in the UI and detailed enough in logs for operators to debug malformed files.
+
+#### Phase 3 - Preview and Apply API
+- Add preview and apply endpoints under the existing project/Atlas API shape.
+- Require callers to pass the target scope, optional project id, format id, source tool, and import name.
+- Preview response should include:
+  - Counts for valid, skipped, duplicate, new, and update candidates.
+  - A bounded sample of parsed entities/findings.
+  - A bounded sample of row warnings/errors.
+  - The apply options available for the current user and scope.
+- Apply request should include the preview token or draft id plus explicit options:
+  - Import entities.
+  - Import findings.
+  - Link imported records to a project.
+  - Create or update project targets from imported domains/IPs/URLs.
+- Re-check permissions, limits, and source file integrity at apply time; do not trust an old preview blindly.
+- Return actual applied counts, not just preview counts, because project quotas and duplicates can change between preview and apply.
+
+#### Phase 4 - UI Flow
+- Add an `Import` action to Atlas and project entity/finding surfaces where it fits existing controls.
+- Use a modal flow with clear steps:
+  - Choose format/source.
+  - Select file and import name.
+  - Review preview counts, samples, warnings, and apply options.
+  - Apply and show the resulting counts.
+- Keep the UI consistent with existing modal and dropdown primitives in the front-end design system.
+- Make warnings visible without overwhelming the user:
+  - Show a concise summary near the apply action.
+  - Provide a scrollable row-warning sample for debugging.
+- After apply, refresh the affected Atlas/project lists without requiring a full page reload.
+- Show imported provenance in entity/finding detail views with plain labels such as `Imported from Nuclei JSONL`.
+- If project target creation is enabled, make it opt-in and explain the count of targets that will be created or updated before applying.
+
+#### Phase 5 - Team Mode and Safety Edges
+- Confirm team-scope imports respect team membership and mutation capabilities.
+- Ensure imports cannot leak personal-scope data into team projects or team-scope data into personal projects.
+- Confirm deleted, archived, or inaccessible projects cannot be used as import targets.
+- Add concurrency protections so repeated apply clicks or two users applying the same draft cannot create duplicate entities/findings/links.
+- Add cleanup for abandoned upload drafts if preview files are persisted.
+- Add operator configuration for import limits with sensible defaults.
+
+#### Phase 6 - Tests, Logging, and Documentation
+- Add parser tests for valid CSV, valid JSONL, malformed rows, unsupported entity kinds, invalid severities, duplicate rows, and limit handling.
+- Add backend route tests for preview, apply, permission rejection, stale preview rejection, project quota behavior, and idempotent re-apply.
+- Add Postgres migration coverage alongside SQLite coverage.
+- Add JavaScript unit tests for the modal flow, warning display, apply options, and post-apply refresh.
+- Add Playwright coverage for a browser import path using a small fixture file.
+- Add logging tests or assertions for preview/apply success and rejection events where the existing test style supports it.
+- Update user-facing docs when implemented, including supported formats, import limits, team permissions, and how imported provenance appears in Atlas.
+- Update release notes and test counts when tests land.
 
 ## Known Issues
 
@@ -52,8 +165,6 @@ These are possible future improvements, split by whether they look worth carryin
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
 - **Cross-session Atlas view.**
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
-- **Atlas import from external triage tools.**
-  - Gives teams a practical bridge from existing tooling into darklab_shell instead of forcing all enrichment to start inside the app.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
 - **Richer per-finding remediation or verification fields.**

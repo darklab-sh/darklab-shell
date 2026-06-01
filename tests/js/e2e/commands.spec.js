@@ -81,7 +81,7 @@ test.describe('interactive PTY command execution', () => {
           })
         }
 
-        if (url.endsWith('/history/active') && window.localStorage.getItem('__ptyExposeActiveRun') === '1') {
+        if (new URL(url, window.location.origin).pathname === '/history/active' && window.localStorage.getItem('__ptyExposeActiveRun') === '1') {
           return new Response(JSON.stringify({
             runs: [{
               run_id: 'pty-smoke-run',

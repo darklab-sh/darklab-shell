@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,481
+- behavior tests: 3,484
 - docs/inventory meta-tests: 34
-- `pytest`: 1964 (1930 behavior + 34 meta)
-- `vitest`: 1316
+- `pytest`: 1965 (1931 behavior + 34 meta)
+- `vitest`: 1318
 - `playwright`: 258
-- total: 3,538
+- total: 3,541
 
 This document is organized in two parts:
 
@@ -2006,6 +2006,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSchedulesRoutes.test_schedule_patch_revalidates_changed_command` | Verifies schedule updates re-run command validation when the command changes. |
 | `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire, exposes the fire audit route, and advances schedule metadata without depending on the scheduler worker. |
 | `TestSchedulesRoutes.test_schedule_fire_links_completed_run_in_history` | Verifies a fired schedule's completed run appears in History with a scheduled badge and originating schedule id. |
+| `TestSchedulesRoutes.test_active_history_skips_scheduled_runs_unless_requested` | Verifies scheduled active runs stay out of the default reload-recovery list while remaining available to inclusive Status Monitor active-run reads. |
 | `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
 | `TestSchedulesRoutes.test_schedule_create_and_patch_normalize_edge_inputs` | Verifies browser schedule routes normalize disabled string booleans, trim labels, reject invalid timezones and blank commands, and preserve paused schedules during cadence updates. |
 | `TestSchedulesRoutes.test_schedule_fires_pagination_bounds` | Verifies schedule fire audit pagination returns stable limits, offsets, totals, has-more flags, and newest-first rows. |
@@ -3021,9 +3022,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
 | `restoreActiveRunsAfterReload reuses the restored original tab for the same active run` | Verifies that active-run reload recovery reuses the restored original tab, resumes after the last seen broker event, and avoids duplicating the command echo. |
 | `reattaches a detached normal stream in the original running tab` | Verifies that a normal command stream that ends without an exit while the backend run remains active reattaches in the same tab with a stream-recovery notice. |
+| `checks scheduled manually attached streams against the inclusive active list` | Verifies that a scheduled run manually attached from Status Monitor uses the inclusive active-run list during stream recovery. |
 | `shows run stream JSON messages instead of machine error codes` | Verifies that broker stream failures prefer user-facing JSON messages, such as scope-mismatch guidance, over machine error codes. |
 | `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
+| `restoreActiveRunsAfterReload skips scheduled runs` | Verifies that scheduled active runs are not automatically restored into terminal tabs on page reload. |
 | `attachActiveRunFromMonitor opens an attached subscribed tab with kill controls` | Verifies that Status Monitor Attach opens a live subscribed tab with normal kill controls. |
 | `attachActiveRunFromMonitor subscribes without claiming ownership` | Verifies that Status Monitor Attach subscribes directly to the broker stream without calling an ownership route. |
 | `keeps subscribed tabs killable on owner metadata and reports remote kills` | Verifies that owner metadata does not hide kill controls and that remote killed events render a clear notice. |

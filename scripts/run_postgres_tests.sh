@@ -194,9 +194,22 @@ fi
 postgres_user=${POSTGRES_USER:-darklab}
 postgres_password=${POSTGRES_PASSWORD:-darklab_dev_password}
 postgres_db=${POSTGRES_DB:-darklab_shell}
-dsn=${DARKLAB_TEST_POSTGRES_DSN:-postgresql://${postgres_user}:${postgres_password}@postgres:5432/${postgres_db}}
+dsn=${DARKLAB_TEST_POSTGRES_DSN:-}
+compose_venv_parent=${DARKLAB_TEST_COMPOSE_VENV_PARENT:-/data}
 
 "${compose_cmd[@]}" --profile postgres up -d postgres
+
+if [ -z "$dsn" ]; then
+  # The single-quoted command is evaluated inside the Compose Postgres container.
+  # shellcheck disable=SC2016
+  compose_postgres_env=$(
+    "${compose_cmd[@]}" --profile postgres exec -T postgres sh -c \
+      'printf "%s\n%s\n%s\n" "${POSTGRES_USER:-darklab}" "${POSTGRES_PASSWORD:-darklab_dev_password}" "${POSTGRES_DB:-darklab_shell}"'
+  )
+  postgres_user=$(printf '%s\n' "$compose_postgres_env" | sed -n '1p')
+  postgres_password=$(printf '%s\n' "$compose_postgres_env" | sed -n '2p')
+  postgres_db=$(printf '%s\n' "$compose_postgres_env" | sed -n '3p')
+fi
 
 # The single-quoted script is evaluated inside the one-off Compose container.
 # shellcheck disable=SC2016
@@ -205,6 +218,42 @@ exec "${compose_cmd[@]}" --profile postgres run --rm --no-deps \
   --workdir /workspace \
   --entrypoint bash \
   -e DARKLAB_TEST_POSTGRES_DSN="$dsn" \
+  -e DARKLAB_TEST_POSTGRES_USER="$postgres_user" \
+  -e DARKLAB_TEST_POSTGRES_PASSWORD="$postgres_password" \
+  -e DARKLAB_TEST_POSTGRES_DB="$postgres_db" \
+  -e DARKLAB_TEST_COMPOSE_VENV_PARENT="$compose_venv_parent" \
   -e APP_DATA_DIR=/tmp/darklab_shell-postgres-tests-data \
-  shell -lc 'venv=/tmp/darklab_shell-postgres-tests-venv && python -m venv "$venv" && "$venv/bin/python" -m pip install -q -r app/requirements.txt -r requirements-dev.txt && PYTHON_BIN="$venv/bin/python" bash scripts/run_postgres_tests.sh --wait-only && "$venv/bin/python" -m pytest "$@"' \
+  shell -lc '
+venv_parent="${DARKLAB_TEST_COMPOSE_VENV_PARENT:-/data}"
+mkdir -p "$venv_parent"
+venv="$(mktemp -d "$venv_parent/darklab_shell-postgres-tests-venv.XXXXXX")"
+cleanup_venv() { rm -rf "$venv"; }
+trap cleanup_venv EXIT
+python -m venv "$venv"
+"$venv/bin/python" -m pip install -q -r app/requirements.txt -r requirements-dev.txt
+if [ -z "${DARKLAB_TEST_POSTGRES_DSN:-}" ]; then
+  if [ -n "${DATABASE_URL:-}" ]; then
+    export DARKLAB_TEST_POSTGRES_DSN="$DATABASE_URL"
+  else
+    export DARKLAB_TEST_POSTGRES_DSN="postgresql://${DARKLAB_TEST_POSTGRES_USER:-darklab}:${DARKLAB_TEST_POSTGRES_PASSWORD:-darklab_dev_password}@postgres:5432/${DARKLAB_TEST_POSTGRES_DB:-darklab_shell}"
+  fi
+fi
+PYTHON_BIN="$venv/bin/python" bash scripts/run_postgres_tests.sh --wait-only
+DATABASE_BACKEND=postgres DATABASE_URL="$DARKLAB_TEST_POSTGRES_DSN" "$venv/bin/python" - <<'"'"'PY'"'"'
+from config import CFG
+from core.database_backend import connect_postgres
+from core.migrations import MIGRATIONS
+from core.migrations.runner import run_migrations_with_advisory_lock
+
+with connect_postgres(CFG) as conn:
+    applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    conn.commit()
+
+if applied:
+    print(f"[postgres-tests] applied migrations: {'"'"','"'"'.join(applied)}", flush=True)
+else:
+    print("[postgres-tests] postgres migrations current", flush=True)
+PY
+DATABASE_BACKEND=sqlite DATABASE_URL= "$venv/bin/python" -m pytest "$@"
+' \
   _ "${pytest_args[@]}"

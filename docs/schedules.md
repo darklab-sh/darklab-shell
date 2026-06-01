@@ -56,6 +56,8 @@ Due schedules are fired by the scheduler worker, not by Flask request handlers. 
 
 Each fire writes a `schedule_fires` audit row. Successful fires store the run id on the audit row and on the schedule. History rows and Run Details use that link to show a `scheduled` badge, and clicking the badge reopens the originating schedule.
 
+If a scheduled run is still active when you open or reload the UI, it stays in the Status Monitor instead of automatically taking over the terminal. Use **Attach** from Status Monitor when you want to watch that run live.
+
 Manual **Run now** actions use the same fire-audit path. They run directly from the request that the operator initiated, so they do not depend on the background scheduler process being healthy.
 
 ## Missed Fires

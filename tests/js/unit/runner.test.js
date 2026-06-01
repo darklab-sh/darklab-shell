@@ -1387,6 +1387,55 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('[reattached to active run after stream recovery]', 'notice', 'tab-1')
   })
 
+  it('checks scheduled manually attached streams against the inclusive active list', async () => {
+    const firstStream = brokerStreamResponse([
+      'id: 1-5',
+      'data: {"type":"output","text":"before disconnect","event_id":"1-5"}',
+      '',
+    ].join('\n') + '\n')
+    const secondStream = pendingBrokerStreamResponse()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-1/stream?tab_id=tab-1') return Promise.resolve(firstStream)
+      if (url === '/history/active?include_scheduled=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            runs: [{
+              run_id: 'run-1',
+              command: 'ping darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              scheduled: true,
+              schedule_id: 'sch-1',
+            }],
+          }),
+        })
+      }
+      if (url === '/runs/run-1/stream?tab_id=tab-1&after=1-5') return Promise.resolve(secondStream)
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _subscribeRunStream, tabs } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        command: 'ping darklab.sh',
+        scheduledRun: true,
+        rawLines: [{ text: 'ping darklab.sh', cls: 'prompt-echo' }],
+        pendingKill: false,
+        killed: false,
+      }],
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-1', 'tab-1')).resolves.toBe(true)
+    await flushPromises()
+
+    expect(tabs[0].st).toBe('running')
+    expect(apiFetch).toHaveBeenCalledWith('/history/active?include_scheduled=1')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
+  })
+
   it('shows run stream JSON messages instead of machine error codes', async () => {
     const appendLine = vi.fn()
     const apiFetch = vi.fn((url) => {
@@ -1504,6 +1553,28 @@ describe('runner helpers', () => {
 
     expect(createTab).toHaveBeenCalledWith()
     expect(tabs[0].historyRunId).toBe('run-old')
+  })
+
+  it('restoreActiveRunsAfterReload skips scheduled runs', () => {
+    const createTab = vi.fn(() => 'tab-2')
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      createTab,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-scheduled',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        scheduled: true,
+        owned_by_this_client: true,
+      },
+    ])
+
+    expect(restored).toBe(false)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('idle')
   })
 
   it('attachActiveRunFromMonitor opens an attached subscribed tab with kill controls', async () => {

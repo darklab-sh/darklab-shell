@@ -146,6 +146,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Scheduled active-run auto-attach** — scheduled and watcher-fired commands that are still running when the UI opens now remain in Status Monitor instead of automatically taking over the terminal.
+  - **Fix:** `/history/active` filters scheduled active runs by default for browser reload recovery, while Status Monitor requests the inclusive active-run list so **Attach** and **Kill** still work for automation-owned commands.
+  - **Tests:** added schedule route coverage for default vs inclusive active-run responses, plus runner/status monitor unit coverage for scheduled restore skips and inclusive manual-attach recovery.
+
 - **Fast-exiting interactive PTY stream replay** — Redis-backed PTY streams now try to replay any already-published output and exit events before stale-run cleanup can prune an open-looking run, so very short invalid interactive commands show their real terminal error and exit code instead of falling back to a missing-transcript notice.
   - **Tests:** added broker-service coverage for a fast-exiting PTY whose process metadata is already gone while completed Redis stream events are still available.
 
@@ -153,6 +157,13 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Root cause:** Redis 8 attempted its default RDB background save without a writable `/data` path, entered `MISCONF`, and rejected mutating commands needed by rate limits, run broker state, and AI coordination.
   - **Fix:** Compose starts Redis with `--save ""`, `--appendonly no`, and `--stop-writes-on-bgsave-error no`, keeping Redis ephemeral to match its coordination/cache role while durable app data stays in SQLite/Postgres, `/data`, and workspace volumes.
   - **Tests:** added Compose wiring coverage that pins the read-only Redis service to the ephemeral configuration.
+
+- **Compose Postgres test helper on hardened `/tmp` mounts** — `bash scripts/run_postgres_tests.sh --compose` now creates its throwaway dependency venv under an executable container scratch directory instead of `/tmp`.
+  - **Root cause:** some staging/container hosts mount `/tmp` as writable but `noexec`, which lets the helper install `psycopg[binary]` but prevents Python from mapping the wheel's shared library during the readiness probe.
+  - **Fix:** the Compose lane creates a per-run venv under `/data` by default, removes it on exit, and exposes `DARKLAB_TEST_COMPOSE_VENV_PARENT` for deployments that need a different executable scratch path. It also resolves the test DSN from the Compose-provided `DATABASE_URL` or the running Postgres service environment when `DARKLAB_TEST_POSTGRES_DSN` is not explicitly set, so `.env`-only passwords do not need to be exported in the host shell. Before pytest starts, the helper now applies pending app-owned Postgres migrations so validation does not fail just because the app has not started yet after a dump/restore upgrade. The pytest process is then forced back to the default SQLite app backend so SQLite-focused tests in the Postgres lane do not inherit a staging `.env` with `DATABASE_BACKEND=postgres`.
+
+- **Postgres 17 to 18 upgrade docs for already-stopped stacks** — the major-version upgrade guide now includes a recovery path for operators who stopped the whole stack before making the pre-18 dump.
+  - **Fix:** documented using a temporary `postgres:17-alpine` container mounted at the old `/var/lib/postgresql/data` path to create `backups/darklab-postgres-pre18.dump`, so operators do not have to edit the upgraded Compose file just to recover the old database long enough for export.
 
 - **Run broker idle Redis timeouts** — quiet command output no longer causes a spurious browser stream-recovery notice or leaves smoke-test warmups without their terminal event when Redis reports an idle read timeout.
   - **Root cause:** Redis stream reads could time out before the broker heartbeat window, and Redis 8/redis-py may surface that idle blocked-read as either `TimeoutError` or `ConnectionError("Timeout reading from socket")`; both paths could end the HTTP stream even though the command was still healthy.

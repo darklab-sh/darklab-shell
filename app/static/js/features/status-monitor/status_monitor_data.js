@@ -11,7 +11,7 @@ window.DarklabStatusMonitorData = (() => {
     }
 
     async function loadActiveRuns() {
-      const resp = await apiFetch('/history/active');
+      const resp = await apiFetch('/history/active?include_scheduled=1');
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
       return Array.isArray(data?.runs) ? data.runs : [];

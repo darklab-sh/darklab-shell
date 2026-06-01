@@ -13137,7 +13137,19 @@ class TestHistoryRoute:
             )
 
         assert resp.status_code == 200
-        assert json.loads(resp.data) == {"runs": active_runs}
+        assert json.loads(resp.data) == {
+            "runs": [
+                {
+                    **active_runs[0],
+                    "schedule_id": "",
+                    "scheduled": False,
+                    "schedule_owner_kind": "",
+                    "schedule_owner_id": "",
+                    "watcher_id": "",
+                    "schedule_label": "",
+                }
+            ]
+        }
         active_mock.assert_called_once_with(session, client_id="client-1", team_id="")
 
     def test_compare_candidates_rank_exact_command_before_same_target(self):

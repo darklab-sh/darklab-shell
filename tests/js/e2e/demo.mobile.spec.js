@@ -339,7 +339,7 @@ async function killActiveRunFromStatusMonitor(page) {
   // telemetry card has rich data. Drop that mock before confirming the kill;
   // otherwise the stream-close handler can briefly believe the killed run is
   // still active and auto-restore its saved history transcript.
-  await page.unroute('**/history/active').catch(() => {})
+  await page.unroute('**/history/active**').catch(() => {})
   await page.locator('#confirm-host [data-confirm-action-id="kill"]').click()
   await page.locator('#confirm-host').waitFor({ state: 'hidden', timeout: 10_000 })
   await page.waitForFunction(
@@ -552,8 +552,8 @@ async function prepareDemoStatusMonitorTelemetry(page, command) {
       started: new Date(startMs).toISOString(),
     }
   })
-  await page.unroute('**/history/active').catch(() => {})
-  await page.route('**/history/active', route => {
+  await page.unroute('**/history/active**').catch(() => {})
+  await page.route('**/history/active**', route => {
     activePollCount += 1
     route.fulfill({
       status: 200,
