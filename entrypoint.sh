@@ -16,6 +16,8 @@ find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chow
 # shellcheck disable=SC2156  # session dirs are passed as sh -c positional parameters via {} +
 find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -c '
     for session_dir do
+        find "$session_dir" -mindepth 1 -maxdepth 1 -type d -exec chown scanner:appuser {} \; -exec chmod 3770 {} \;
+        find "$session_dir" -mindepth 1 -maxdepth 1 -type f -exec chown scanner:appuser {} \; -exec chmod 640 {} \;
         find "$session_dir" -mindepth 1 -exec chown scanner:appuser {} \;
         find "$session_dir" -mindepth 1 -type d -exec chmod 3770 {} \;
         find "$session_dir" -mindepth 1 -type f -exec chmod 640 {} \;

@@ -166,6 +166,7 @@ function loadShellChrome({
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   showToast = vi.fn(),
+  logClientError = vi.fn(),
   appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
@@ -373,6 +374,7 @@ function loadShellChrome({
     'performance',
     'fetch',
     'apiFetch',
+    'logClientError',
     'localStorage',
     'setInterval',
     'clearInterval',
@@ -409,6 +411,8 @@ function loadShellChrome({
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
       window.bindPressable = bindPressable;
+      window.bindDisclosure = bindDisclosure;
+      global.bindDisclosure = bindDisclosure;
       window.bindDismissible = global.bindDismissible;
       window.bindMobileSheet = global.bindMobileSheet;
       window.enhanceAppSelects = global.enhanceAppSelects;
@@ -463,6 +467,7 @@ function loadShellChrome({
       ok: true,
       json: () => Promise.resolve({ project: null, projects: [], counts: {} }),
     }),
+    logClientError,
     window.localStorage,
     (fn) => {
       intervalCallbacks.push(fn)
@@ -471,14 +476,25 @@ function loadShellChrome({
     () => {},
     name => preferences[name] || '',
     (name, value) => { preferences[name] = String(value) },
-    (el, options) => {
+    (el, options = {}) => {
       let open = !!options.initialOpen
-      el.setAttribute('aria-expanded', open ? 'true' : 'false')
-      el.addEventListener('click', () => {
-        open = !open
+      const panel = options.panel || null
+      const openClass = Object.prototype.hasOwnProperty.call(options, 'openClass') ? options.openClass : 'open'
+      const hiddenClass = options.hiddenClass || null
+      const sync = () => {
         el.setAttribute('aria-expanded', open ? 'true' : 'false')
+        if (panel?.classList) {
+          if (openClass) panel.classList.toggle(openClass, open)
+          if (hiddenClass) panel.classList.toggle(hiddenClass, !open)
+        }
+      }
+      sync()
+      if (el.dataset) el.dataset.disclosureBound = '1'
+      bindPressable(el, { onActivate: () => {
+        open = !open
+        sync()
         options.onToggle?.(open)
-      })
+      } })
     },
     bindPressable,
     () => {},
@@ -522,10 +538,12 @@ function loadShellChrome({
     showWorkspaceViewer,
     showConfirm,
     showToast,
+    logClientError,
     bindDismissible,
     bindMobileSheet,
     projectFindingsData: global.DarklabProjectFindingsData,
     openProjectWorkspace: global.openProjectWorkspace,
+    openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
     syncAppSelect,
@@ -946,6 +964,273 @@ describe('shell chrome project workspace', () => {
     expect(projectListFetches).toBe(projectListFetchesBeforeDelete)
   })
 
+  it('renders Project auto-promote rules with preview, save, apply, and source detail chips', async () => {
+    const projects = [{ id: 'project-1', name: 'Rules Project', status: 'active' }]
+    const rules = [{
+      id: 'rule-1',
+      name: 'Owned domains',
+      enabled: true,
+      apply_on_run: true,
+      target_entity_kind: 'domain',
+      match_mode: 'domain_suffix',
+      pattern: 'darklab.sh',
+      filters: {},
+      last_applied_at: '2026-05-31T00:00:00Z',
+      linked_count: 1,
+    }]
+    const entityPage = {
+      entities: [{
+        id: 'ent-1',
+        type: 'domain',
+        canonical_value: 'darklab.sh',
+        occurrence_count: 2,
+        run_count: 1,
+        source: 'auto_promote_rule',
+        source_detail: { rule_name: 'Owned domains' },
+      }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+      counts_by_type: { domain: 1 },
+    }
+    const previewPayload = {
+      matched_count: 2,
+      shown_match_count: 2,
+      matched_in_scan_count: 2,
+      match_count_is_capped: true,
+      total_matches: null,
+      total_matches_known: false,
+      new_link_count: 1,
+      already_linked_count: 1,
+      skipped_suppressed_count: 0,
+      quota_limited_count: 0,
+      candidate_scan_truncated: true,
+      candidate_scan_limited_count: 1,
+      candidate_scan_count: 5000,
+      candidate_scan_limit: 5000,
+      truncated: true,
+      matches: [],
+    }
+    let autoPromoteFailure = null
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (
+        autoPromoteFailure
+        && String(url).includes(autoPromoteFailure.path)
+        && (!autoPromoteFailure.method || options.method === autoPromoteFailure.method)
+      ) {
+        return Promise.reject(autoPromoteFailure.error)
+      }
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project: projects[0] }) })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: projects[0],
+            counts: { runs: 0, entities: 1, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            entity_counts: { domain: 1 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/entities?')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(entityPage) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ rules }) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules/preview') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, preview: previewPayload }) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules' && options.method === 'POST') {
+        const payload = JSON.parse(options.body)
+        rules.push({ ...payload, id: 'rule-2', filters: payload.filters || {}, linked_count: 0, created: '2026-05-31T01:00:00Z' })
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, rule: rules.at(-1) }) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules/rule-2/apply') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, result: previewPayload }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn(() => Promise.resolve('apply'))
+    const shell = loadShellChrome({ apiFetch, showConfirm })
+
+    await shell.openProjectAutoPromoteRuleFromAtlas({
+      project_id: 'project-1',
+      name: 'Atlas view: /admin/',
+      target_entity_kind: 'url',
+      match_mode: 'contains',
+      pattern: '/admin/',
+      filters: {
+        source_command_roots: [],
+        source_run_ids: ['run-1'],
+        include_suppressed: true,
+        first_seen_after_rule_created: false,
+      },
+    })
+    await tick()
+    document.querySelector('[data-project-tab="entities"]').click()
+    await tick()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Auto-promoted: Owned domains')
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules', { cache: 'no-store' })
+    let field = name => [...document.querySelectorAll(`[data-project-auto-promote-field="${name}"]`)].at(-1)
+    const projectAction = action => [...document.querySelectorAll(`[data-project-action="${action}"]`)].at(-1)
+    expect(field('name').value).toBe('Atlas view: /admin/')
+    expect(field('target_entity_kind').value).toBe('url')
+    expect(field('match_mode').value).toBe('contains')
+    expect(field('pattern').value).toBe('/admin/')
+    expect(field('source_run_ids').value).toBe('run-1')
+    expect(field('include_suppressed').checked).toBe(true)
+
+    projectAction('cancel-project-auto-promote-rule').click()
+    await tick()
+
+    projectAction('new-project-auto-promote-rule').click()
+    await tick()
+    field = name => [...document.querySelectorAll(`[data-project-auto-promote-field="${name}"]`)].at(-1)
+    expect(projectAction('toggle-project-auto-promote-rules')?.getAttribute('aria-expanded')).toBe('true')
+    expect(projectAction('toggle-project-auto-promote-rules')?.getAttribute('aria-controls')).toBeTruthy()
+    const editorForm = [...document.querySelectorAll('.project-auto-promote-editor')].at(-1)
+    const submitEvent = new Event('submit', { bubbles: true, cancelable: true })
+    expect(editorForm.dispatchEvent(submitEvent)).toBe(false)
+    expect(submitEvent.defaultPrevented).toBe(true)
+    let filterTrigger = [...document.querySelectorAll('.project-auto-promote-filters-trigger')].at(-1)
+    expect(document.querySelector('.project-auto-promote-filters summary')).toBeNull()
+    expect(filterTrigger?.dataset.disclosureBound).toBe('1')
+    expect(filterTrigger?.dataset.pressableBound).toBe('1')
+    expect(filterTrigger?.getAttribute('aria-expanded')).toBe('false')
+    expect([...document.querySelectorAll('.project-auto-promote-filters-panel')].at(-1).hidden).toBe(true)
+    filterTrigger.click()
+    await tick()
+    filterTrigger = [...document.querySelectorAll('.project-auto-promote-filters-trigger')].at(-1)
+    expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
+    expect([...document.querySelectorAll('.project-auto-promote-filters-panel')].at(-1).hidden).toBe(false)
+    field('source_command_roots').value = 'nmap'
+    field('source_command_roots').dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+    filterTrigger = [...document.querySelectorAll('.project-auto-promote-filters-trigger')].at(-1)
+    expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
+    expect(field('source_command_roots').value).toBe('nmap')
+    const optionValues = name => [...field(name).options].map(option => option.value)
+    expect(optionValues('match_mode')).toContain('domain_suffix')
+    expect(optionValues('match_mode')).not.toContain('cidr')
+    field('target_entity_kind').value = 'ip'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(optionValues('match_mode')).toContain('cidr')
+    expect(optionValues('match_mode')).not.toContain('domain_suffix')
+    expect(field('match_mode').value).toBe('exact')
+    field('target_entity_kind').value = 'any'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(optionValues('match_mode')).toEqual(expect.arrayContaining(['domain_suffix', 'cidr']))
+    field('target_entity_kind').value = 'hash'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(optionValues('match_mode')).not.toEqual(expect.arrayContaining(['domain_suffix']))
+    expect(optionValues('match_mode')).not.toEqual(expect.arrayContaining(['cidr']))
+    field('target_entity_kind').value = 'domain'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    field('match_mode').value = 'domain_suffix'
+    field('match_mode').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    field('name').value = 'New domains'
+    field('name').dispatchEvent(new Event('input', { bubbles: true }))
+    field('pattern').value = 'example.com'
+    field('pattern').dispatchEvent(new Event('input', { bubbles: true }))
+    field('apply_on_run').checked = true
+    field('apply_on_run').dispatchEvent(new Event('change', { bubbles: true }))
+    field('applyAfterSave').checked = true
+    field('applyAfterSave').dispatchEvent(new Event('change', { bubbles: true }))
+    shell.showToast.mockClear()
+    projectAction('save-project-auto-promote-rule').click()
+    await tick()
+    expect(shell.showToast).toHaveBeenCalledWith('Preview the rule before saving.', 'error')
+    projectAction('preview-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+    expect([...document.querySelectorAll('.project-auto-promote-preview')].at(-1).textContent).toContain('2 shown')
+    expect([...document.querySelectorAll('.project-auto-promote-preview')].at(-1).textContent).toContain('scanned first 5,000 candidates')
+    field('name').value = 'Renamed domains'
+    field('name').dispatchEvent(new Event('input', { bubbles: true }))
+    field('apply_on_run').checked = false
+    field('apply_on_run').dispatchEvent(new Event('change', { bubbles: true }))
+    shell.showToast.mockClear()
+    projectAction('save-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules/preview', expect.objectContaining({
+      method: 'POST',
+    }))
+    const previewCalls = apiFetch.mock.calls.filter(([url]) => url === '/projects/project-1/auto-promote-rules/preview')
+    expect(previewCalls).toHaveLength(2)
+    expect(JSON.parse(previewCalls[1][1].body).created).toBe('2026-05-31T01:00:00Z')
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules/rule-2/apply', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      actions: expect.arrayContaining([expect.objectContaining({ id: 'apply' })]),
+    }))
+    expect(shell.showToast).toHaveBeenCalledWith(expect.stringContaining('Auto-promote rule saved and applied'), 'success')
+    expect([...document.querySelectorAll('.project-auto-promote-panel')].at(-1)?.textContent).toContain('Renamed domains')
+
+    const failWith = (path, method = '', message = 'network failed') => {
+      autoPromoteFailure = { path, method, error: new Error(message) }
+      shell.logClientError.mockClear()
+      shell.showToast.mockClear()
+      return autoPromoteFailure.error
+    }
+    const expectSafeAutoPromoteLog = (message, error) => {
+      expect(shell.logClientError).toHaveBeenCalledWith(message, error)
+      const context = shell.logClientError.mock.calls.at(-1)[0]
+      expect(context).not.toContain('darklab.sh')
+      expect(context).not.toContain('Owned domains')
+      expect(context).not.toContain('Renamed domains')
+    }
+
+    let failure = failWith('/auto-promote-rules/preview', 'POST')
+    projectAction('preview-stored-project-auto-promote-rule').click()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule stored preview failed project_id=project-1 rule_id=rule-2', failure)
+
+    failure = failWith('/auto-promote-rules/rule-2/apply', 'POST')
+    projectAction('apply-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule apply failed project_id=project-1 rule_id=rule-2', failure)
+
+    failure = failWith('/auto-promote-rules/rule-2', 'DELETE')
+    showConfirm.mockResolvedValueOnce('delete')
+    projectAction('delete-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule delete failed project_id=project-1 rule_id=rule-2', failure)
+
+    autoPromoteFailure = null
+    projectAction('edit-project-auto-promote-rule').click()
+    await tick()
+    projectAction('preview-project-auto-promote-rule').click()
+    await tick()
+    failure = failWith('/auto-promote-rules/rule-2', 'PUT')
+    projectAction('save-project-auto-promote-rule').click()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule save failed project_id=project-1 rule_id=rule-2', failure)
+  })
+
   it('renders the mobile project list with active-first rows and collapsed archived projects', async () => {
     document.body.classList.add('mobile-terminal-mode')
     const inertDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'inert')
@@ -1150,6 +1435,16 @@ describe('shell chrome project workspace', () => {
   it('drills into mobile project detail tabs and returns to the list', async () => {
     document.body.classList.add('mobile-terminal-mode')
     const projects = [{ id: 'project-1', name: 'darklab.sh', status: 'active' }]
+    const rules = [{
+      id: 'rule-1',
+      name: 'Owned domains',
+      enabled: true,
+      apply_on_run: true,
+      target_entity_kind: 'domain',
+      match_mode: 'domain_suffix',
+      pattern: 'darklab.sh',
+      filters: {},
+    }]
     const apiFetch = vi.fn((url) => {
       if (url === '/projects/active') {
         return Promise.resolve({
@@ -1165,13 +1460,34 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project: projects[0],
-            counts: { runs: 1001, findings: 5, artifacts: 9, packages: 2, targets: 1, notes: 0 },
+            counts: { runs: 1001, findings: 5, entities: 1, artifacts: 9, packages: 2, targets: 1, notes: 0 },
+            entity_counts: { domain: 1 },
             runs: [],
             targets: [],
             artifacts: [],
             packages: [],
           }),
         })
+      }
+      if (String(url).startsWith('/projects/project-1/entities?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            entities: [{
+              id: 'ent-1',
+              type: 'domain',
+              canonical_value: 'darklab.sh',
+              occurrence_count: 2,
+            }],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            counts_by_type: { domain: 1 },
+          }),
+        })
+      }
+      if (url === '/projects/project-1/auto-promote-rules') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ rules }) })
       }
       if (String(url).startsWith('/projects/project-1/targets?')) {
         return Promise.resolve({
@@ -1212,6 +1528,17 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(document.getElementById('project-mobile-detail-body').textContent).toContain('No evidence packages yet')
       expect(document.getElementById('project-mobile-detail-body').querySelector('[data-project-action="package-wizard-open"]')).not.toBeNull()
+
+      document.querySelector('[data-project-mobile-detail-tab="entities"]').click()
+      await tick()
+      await tick()
+      const detailBody = document.getElementById('project-mobile-detail-body')
+      expect(detailBody.querySelector('[data-project-action="toggle-project-auto-promote-rules"]')).not.toBeNull()
+      detailBody.querySelector('[data-project-action="toggle-project-auto-promote-rules"]').click()
+      await tick()
+      await tick()
+      expect(detailBody.querySelector('.project-auto-promote-panel')?.textContent).toContain('Owned domains')
+      expect(detailBody.querySelector('.project-auto-promote-panel')?.textContent).toContain('New rule')
 
       document.querySelector('[data-project-mobile-action="back-to-list"]').click()
       await tick()
@@ -4273,11 +4600,47 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
+      if (url === '/projects/project-1/auto-promote-rules') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            rules: [{
+              id: 'rule-view',
+              name: 'View-only rule',
+              enabled: true,
+              apply_on_run: true,
+              target_entity_kind: 'ip',
+              match_mode: 'exact',
+              pattern: '198.51.100.10',
+              filters: {},
+            }],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/auto-promote-rules/preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            preview: {
+              matched_count: 1,
+              total_matches: 1,
+              new_link_count: 0,
+              already_linked_count: 1,
+              skipped_suppressed_count: 0,
+              quota_limited_count: 0,
+              matches: [],
+            },
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: projectFindings, total: 1 }) })
     })
+    const showConfirm = vi.fn(() => Promise.resolve('apply'))
     const shell = loadShellChrome({
       apiFetch,
       activeTeamScopeCan: capability => !['mutate_projects', 'triage_findings'].includes(capability),
+      showConfirm,
     })
 
     await shell.openProjectWorkspace()
@@ -4291,6 +4654,47 @@ describe('shell chrome project workspace', () => {
     entitySelectToggle.click()
     await tick()
     expect(document.querySelector('[data-project-entity-select]')).toBeNull()
+
+    const rulesToggle = document.querySelector('[data-project-action="toggle-project-auto-promote-rules"]')
+    expect(rulesToggle?.getAttribute('aria-expanded')).toBe('false')
+    rulesToggle.click()
+    await tick()
+    await tick()
+    expect(document.querySelector('[data-project-action="toggle-project-auto-promote-rules"]')?.getAttribute('aria-expanded')).toBe('true')
+    const rulePanel = document.querySelector('.project-auto-promote-panel')
+    expect(rulePanel?.textContent).toContain('View-only rule')
+    expect(rulePanel.querySelector('.badge-tone-green')?.textContent).toBe('enabled')
+    const newRule = rulePanel.querySelector('[data-project-action="new-project-auto-promote-rule"]')
+    const rulePreview = rulePanel.querySelector('[data-project-action="preview-stored-project-auto-promote-rule"]')
+    const ruleEdit = rulePanel.querySelector('[data-project-action="edit-project-auto-promote-rule"]')
+    const ruleApply = rulePanel.querySelector('[data-project-action="apply-project-auto-promote-rule"]')
+    const ruleDelete = rulePanel.querySelector('[data-project-action="delete-project-auto-promote-rule"]')
+    expect(newRule.disabled).toBe(true)
+    expect(rulePreview.disabled).toBe(false)
+    expect(ruleEdit.disabled).toBe(true)
+    expect(ruleApply.disabled).toBe(true)
+    expect(ruleDelete.disabled).toBe(true)
+    shell.showToast.mockClear()
+    apiFetch.mockClear()
+    rulePreview.click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules/preview', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Auto-promote preview: 1 match · 0 new · 1 linked.',
+      'success',
+    )
+    ruleApply.disabled = false
+    shell.showToast.mockClear()
+    ruleApply.click()
+    await tick()
+    expect(showConfirm).not.toHaveBeenCalled()
+    expect(shell.showToast).toHaveBeenCalledWith(
+      "View-only team members can't change team projects. Switch to Personal or ask for operator access.",
+      'error',
+    )
 
     document.querySelector('[data-project-tab="findings"]').click()
     await tick()

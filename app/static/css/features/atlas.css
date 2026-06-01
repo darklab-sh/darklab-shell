@@ -247,20 +247,20 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-saved-view-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(3, max-content);
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
   max-width: 100%;
 }
 
-.atlas-saved-view-select {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
+.atlas-saved-view-select-cell {
+  flex: 1 1 220px;
+  min-width: min(220px, 100%);
 }
 
+.atlas-saved-view-select,
 .atlas-saved-view-select + .app-select {
   width: 100%;
   min-width: 0;

@@ -1609,6 +1609,24 @@ describe('runner helpers', () => {
       project_name: 'Demo',
       count: 2,
     })
+
+    _handleRunStreamMessage({
+      type: 'notice',
+      text: '[project] auto-promoted 1 Atlas entity',
+      project_auto_promoted: true,
+      project_id: 'project-1',
+      project_ids: ['project-1'],
+      entity_count: 1,
+      promoted_count: 1,
+    }, 'tab-1')
+
+    expect(notifyProjectWorkspaceChanged).toHaveBeenCalledWith('auto-promoted', 'project-1')
+    expect(emitUiEvent).toHaveBeenCalledWith('app:project-auto-promoted', {
+      project_id: 'project-1',
+      project_ids: ['project-1'],
+      count: 1,
+      promoted_count: 1,
+    })
   })
 
   it('parses typed stream output and logs unknown schema values once per stream', () => {

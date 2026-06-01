@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,435
+- behavior tests: 3,461
 - docs/inventory meta-tests: 34
-- `pytest`: 1925 (1891 behavior + 34 meta)
-- `vitest`: 1313
-- `playwright`: 254
-- total: 3,492
+- `pytest`: 1947 (1913 behavior + 34 meta)
+- `vitest`: 1314
+- `playwright`: 257
+- total: 3,518
 
 This document is organized in two parts:
 
@@ -931,6 +931,23 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
 | `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
+| `TestDatabaseInit.test_auto_promote_rule_apply_reuses_project_link_idempotency` | Verifies Atlas auto-promote apply reuses project-link deduplication and records rule source details. |
+| `TestDatabaseInit.test_auto_promote_create_obeys_project_rule_quota` | Verifies Project auto-promote rule creation stops at the configured per-project rule quota. |
+| `TestDatabaseInit.test_auto_promote_rule_promotes_pending_auto_discovered_project_target` | Verifies Atlas auto-promote apply confirms matching pending auto-discovered Project targets. |
+| `TestDatabaseInit.test_auto_promote_rule_preview_filters_by_source_command_root` | Verifies auto-promote previews can restrict matches to entities seen behind a specific command root. |
+| `TestDatabaseInit.test_auto_promote_rule_preview_filters_by_source_run_id` | Verifies auto-promote previews can restrict matches to entities seen in a specific source run. |
+| `TestDatabaseInit.test_auto_promote_apply_skips_suppressed_count_rescan` | Verifies auto-promote apply avoids the extra suppressed-count scan used only by interactive previews. |
+| `TestDatabaseInit.test_auto_promote_contains_treats_sql_wildcards_literally` | Verifies contains-mode auto-promote rules treat SQL wildcard characters as literal pattern text. |
+| `TestDatabaseInit.test_auto_promote_exact_any_matches_canonical_entity_values` | Verifies exact Any-kind auto-promote rules compare user-entered patterns against canonical Atlas entity values. |
+| `TestDatabaseInit.test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs` | Verifies backend matching accepts the domain-suffix and CIDR entity-kind pairs exposed by the rule editor. |
+| `TestDatabaseInit.test_auto_promote_first_seen_after_rule_created_uses_preview_timestamp_for_drafts` | Verifies first-seen-after-rule-created previews use a server timestamp for unsaved draft rules. |
+| `TestDatabaseInit.test_auto_promote_first_seen_after_rule_created_uses_stored_rule_timestamp` | Verifies first-seen-after-rule-created previews use the saved rule timestamp for stored rules. |
+| `TestDatabaseInit.test_auto_promote_rule_validation_rejects_unsafe_or_broad_rules` | Verifies auto-promote rule validation rejects regex mode, invalid match-kind pairs, and broad wildcard rules. |
+| `TestDatabaseInit.test_auto_promote_rule_matches_ipv6_cidr` | Verifies auto-promote CIDR matching includes IPv6 Atlas IP entities. |
+| `TestDatabaseInit.test_auto_promote_non_sql_match_reports_candidate_scan_limit` | Verifies non-SQL auto-promote match modes report when candidate scanning stops at the configured window. |
+| `TestDatabaseInit.test_auto_promote_run_apply_uses_match_cap` | Verifies run-triggered auto-promote applies only the configured number of matches per rule and reports cap limiting. |
+| `TestDatabaseInit.test_auto_promote_apply_quota_exhaustion_still_promotes_pending_links` | Verifies auto-promote applies can confirm pending links even when new Atlas entity link quota is exhausted. |
+| `TestDatabaseInit.test_auto_promote_run_rule_cap_limits_across_projects` | Verifies run-triggered auto-promote honors the per-run rule cap across multiple projects. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |
 | `TestDatabaseInit.test_creates_project_workspace_indexes` | Verifies that project workspace query-shape indexes are created during database bootstrap. |
 | `TestDatabaseInit.test_workspace_metadata_migration_separates_personal_and_team_scopes` | Verifies legacy workspace-file label and note metadata migrates to separate personal/team uniqueness scopes. |
@@ -1429,6 +1446,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestTeamRoutes.test_active_team_scope_isolates_history_runs_and_recent_values` | Verifies active team scope isolates history, Run Details, recent values, and client-side saved runs from personal scope. |
 | `TestTeamRoutes.test_history_bulk_delete_and_clear_respect_active_team_scope` | Verifies single-run delete, bulk-delete, and clear-history actions use the active personal/team scope and reject team viewers before deleting shared history. |
 | `TestTeamRoutes.test_team_viewers_cannot_run_commands_or_mutate_projects_and_findings` | Verifies team viewers cannot start team-scoped runs, mutate team projects, or change team finding metadata while operators can. |
+| `TestTeamRoutes.test_team_viewers_can_preview_auto_promote_rules_but_not_mutate_them` | Verifies team viewers can list and preview Project auto-promote rules but cannot create, update, apply, or delete them. |
 | `TestTeamRoutes.test_active_team_scope_shares_user_workflows_with_role_gated_writes` | Verifies active team scope shares saved workflows across team members while keeping personal workflows isolated and team writes role-gated. |
 | `TestTeamRoutes.test_active_team_scope_shares_projects_and_team_run_links` | Verifies active team scope shares Projects and team-owned run links with team members, finalizes team runs into team Projects, and keeps personal Projects isolated. |
 | `TestTeamRoutes.test_project_slugs_are_unique_inside_personal_and_team_scopes` | Verifies one token can reuse the same Project slug in personal and team scopes while duplicates still suffix inside each scope. |
@@ -1468,6 +1486,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_findings_can_exclude_collapsed_command_groups` | Verifies collapsed Project Findings command groups are excluded from the paged row query while their collapsed counts remain available. |
 | `TestProjectRoutes.test_bulk_project_links_report_mixed_results_and_keep_legacy_response` | Verifies bulk project links report per-run add/remove/reject results while legacy single-link callers keep their response shape. |
 | `TestProjectRoutes.test_project_run_link_can_include_source_atlas_entities` | Verifies run project links can preview and optionally link Atlas entities found in the same source run. |
+| `TestProjectRoutes.test_project_auto_promote_rule_routes_preview_apply_and_delete` | Verifies Project auto-promote rule routes can preview, create, list, update, apply idempotently, delete rules, and keep promoted links explained. |
+| `TestProjectRoutes.test_project_auto_promote_disabled_rules_reject_preview_and_apply` | Verifies disabled Project auto-promote rules can be stored but reject preview and apply requests. |
+| `TestProjectRoutes.test_completed_run_auto_promote_rules_apply_to_run_entities` | Verifies completed runs apply enabled auto-promote rules to newly materialized Atlas entities before active-project bulk linking. |
+| `TestProjectRoutes.test_completed_run_auto_promote_failure_is_non_fatal` | Verifies auto-promote failures during run finalization do not prevent run or Atlas entity persistence. |
 | `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run, non-curated Atlas entity links from the project while keeping curated entities. |
 | `TestProjectRoutes.test_bulk_project_links_reject_too_many_entity_ids` | Verifies bulk project link requests reject payloads over the server-side run limit. |
 | `TestProjectRoutes.test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached` | Verifies bulk project links report `policy_blocked` when the project link limit is reached mid-batch. |
@@ -3178,6 +3200,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps inactive project list pagination visually hidden` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability. |
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `pages and filters the project Details targets browser` | Verifies that the Project Details target browser paginates, filters, keeps target counts stable, and updates target rows without a full modal reload. |
+| `renders Project auto-promote rules with preview, save, apply, and source detail chips` | Verifies that the Project Entities Rules panel previews and saves a rule, applies it after confirmation, and labels auto-promoted entity rows with the matching rule name. |
 | `renders the mobile project list with active-first rows and collapsed archived projects` | Verifies that the mobile Projects list pins the active project first, truncates label chips, keeps archived projects collapsed, and lets count chips select the matching project tab. |
 | `creates projects from the mobile create sheet` | Verifies that the mobile Projects create entry point opens its sheet, creates a project, selects it as active, and returns to the list. |
 | `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
@@ -4053,6 +4076,9 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
 | `creates an active project, manages targets, and edits linked run metadata` | Verifies that the Projects modal can create and activate a project, persist project labels/notes, add/edit/delete targets, link the last run, and save linked-run metadata in a live browser. |
+| `creates, previews, applies, and shows an Atlas auto-promote rule` | Verifies that the Projects modal can preview, create, refresh, apply, and display an Atlas auto-promote rule and its promoted entity in a live browser. |
+| `refreshes an open project when a run stream auto-promotes an Atlas entity` | Verifies that a live command stream can auto-promote a matching Atlas entity and refresh an already-open Projects modal without a page reload. |
+| `opens a prefilled Project auto-promote rule from Atlas` | Verifies that Atlas can hand the current filtered view to Projects and open a prefilled auto-promote rule editor in a live browser. |
 | `creates, edits, downloads, and deletes a project evidence package` | Verifies that the Projects modal package wizard creates a linked-run evidence package with labels/notes, and that package edit, manifest, download, and delete actions work in a live browser. |
 | `edits finding and artifact metadata and previews project artifacts` | Verifies that seeded project findings and run artifacts can be edited, previewed, downloaded, filtered by source run, and unlinked through the Projects modal in a live browser. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |

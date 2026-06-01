@@ -6,6 +6,7 @@ import {
   ensurePromptReady,
   openRailAction,
   runCommand,
+  waitForActiveOutputSettled,
   waitForHistoryRuns,
   browserSessionId,
   seedExternalHistoryRuns,
@@ -155,6 +156,55 @@ print(json.dumps({"runId": run_id, "artifactId": artifact_id, "findingId": findi
   })
   if (result.status !== 0) {
     throw new Error(`Failed to seed project evidence fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
+function seedAutoPromoteAtlasEntity(testInfo, { sessionId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+from pathlib import Path
+import json
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id = sys.argv[1:3]
+run_id = "run_auto_promote_e2e_" + uuid.uuid4().hex[:16]
+entity_id = "ent_auto_promote_e2e_" + uuid.uuid4().hex[:16]
+entity_value = "portal.autopromote-e2e.test"
+now = "2026-05-31 00:00:00"
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 1, 0, 0)",
+        (run_id, session_id, "nmap portal.autopromote-e2e.test", json.dumps(["portal.autopromote-e2e.test"])),
+    )
+    conn.execute(
+        "INSERT INTO entities "
+        "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+        "VALUES (?, ?, 'domain', ?, ?, ?, ?, ?)",
+        (entity_id, session_id, entity_value, "sig-" + entity_id, now, now, now),
+    )
+    conn.execute(
+        "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (entity_id, run_id, now, now),
+    )
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({"entityId": entity_id, "entityValue": entity_value, "runId": run_id}))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed auto-promote fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
   }
   return JSON.parse(result.stdout)
 }
@@ -465,6 +515,34 @@ test.describe('project workspace modal', () => {
     await expect(tab).toHaveClass(/\bis-active\b/, { timeout: 15_000 })
   }
 
+  async function submitRunnerCommandWithProjectsOpen(page, cmd, { timeout = 45_000 } = {}) {
+    const beforeLineCount = await page.evaluate(() => {
+      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      return Array.isArray(tab?.rawLines) ? tab.rawLines.length : 0
+    })
+    const submitted = await page.evaluate((command) => {
+      if (typeof submitComposerCommand !== 'function') return 'missing'
+      return submitComposerCommand(command, { dismissKeyboard: false, focusAfterSubmit: false })
+    }, cmd)
+    expect(submitted).toBe(true)
+    await page.waitForFunction(
+      ({ expectedCmd, previousLineCount }) => {
+        const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+        if (!tab || tab.st === 'running') return false
+        const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : []
+        const output = document.querySelector('.tab-panel.active .output')
+        const text = output ? output.textContent || '' : ''
+        const sawNewLine = rawLines.length > previousLineCount
+        const sawEcho = text.includes(`$${expectedCmd}`) || text.includes(`$ ${expectedCmd}`)
+        if (tab.command === expectedCmd && sawNewLine) return true
+        return sawNewLine && sawEcho
+      },
+      { expectedCmd: cmd, previousLineCount: beforeLineCount },
+      { timeout },
+    )
+    await waitForActiveOutputSettled(page, { timeout })
+  }
+
   async function expectProjectTargetEditorReady(page, submitText) {
     const editor = page.locator('#project-target-editor-overlay')
     await expect(editor).toHaveClass(/\bopen\b/)
@@ -663,6 +741,153 @@ test.describe('project workspace modal', () => {
       && (run.labels || []).some((label) => label.label === 'reviewed')
       && run.note?.body === 'Run triaged from Playwright'
     ))).toBe(true)
+  })
+
+  test('creates, previews, applies, and shows an Atlas auto-promote rule', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    const sessionId = await browserSessionId(page)
+    const fixture = seedAutoPromoteAtlasEntity(testInfo, { sessionId })
+    await openProjectsModal(page)
+
+    await createActiveProject(page, `Auto Promote ${Date.now()}`)
+    await switchProjectTab(page, 'entities')
+    await expect(page.locator('#project-explorer-body')).toContainText('No Atlas entities are linked')
+
+    await page.locator('[data-project-action="toggle-project-auto-promote-rules"]').click()
+    const panel = page.locator('#project-explorer-body .project-auto-promote-panel').last()
+    await expect(panel).toBeVisible()
+    const projectId = await readActiveProject(page).then(active => active.project?.id || '')
+    expect(projectId).toBeTruthy()
+
+    await panel.locator('[data-project-action="new-project-auto-promote-rule"]').click()
+    const editor = panel.locator('.project-auto-promote-editor').last()
+    await expect(editor).toBeVisible()
+    await editor.locator('[data-project-auto-promote-field="name"]').fill('E2E owned domains')
+    await editor.locator('[data-project-auto-promote-field="target_entity_kind"]').selectOption('domain')
+    await editor.locator('[data-project-auto-promote-field="match_mode"]').selectOption('domain_suffix')
+    await editor.locator('[data-project-auto-promote-field="pattern"]').fill('autopromote-e2e.test')
+
+    await expect(editor.locator('.project-auto-promote-preview')).toContainText('Preview required before save.')
+
+    const saveButton = editor.locator('[data-project-action="save-project-auto-promote-rule"]')
+    await expect(saveButton).toBeEnabled()
+    await saveButton.scrollIntoViewIfNeeded()
+    await saveButton.click()
+    await expect(page.locator('#permalink-toast')).toContainText('Preview the rule before saving.')
+
+    const previewButton = editor.locator('[data-project-action="preview-project-auto-promote-rule"]')
+    await expect(previewButton).toBeEnabled()
+    await expect(previewButton).toHaveAttribute('data-project-id', projectId)
+    await previewButton.scrollIntoViewIfNeeded()
+    const previewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/auto-promote-rules/preview`
+    })
+    await previewButton.click()
+    expect((await previewResponse).ok()).toBe(true)
+    await expect(editor.locator('.project-auto-promote-preview')).toContainText('1 match')
+    await expect(editor.locator('.project-auto-promote-preview')).toContainText('1 new')
+
+    await expect(saveButton).toBeEnabled()
+    await saveButton.scrollIntoViewIfNeeded()
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/auto-promote-rules`
+    })
+    await saveButton.click()
+    const created = await createResponse
+    expect(created.ok()).toBe(true)
+    const ruleId = (await created.json()).rule?.id || ''
+    expect(ruleId).toBeTruthy()
+    await expect(panel).toContainText('E2E owned domains')
+
+    const applyResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/auto-promote-rules/${ruleId}/apply`
+    })
+    await panel.locator(`[data-project-action="apply-project-auto-promote-rule"][data-rule-id="${ruleId}"]`).click()
+    await expect(page.locator('#confirm-host')).toContainText('Apply "E2E owned domains"')
+    await confirmWorkspaceAction(page, 'apply')
+    expect((await applyResponse).ok()).toBe(true)
+
+    await page.getByRole('tab', { name: /Domains\s*1/ }).click()
+    await expect(page.locator('#project-explorer-body')).toContainText(fixture.entityValue)
+    await expect(page.locator('#project-explorer-body')).toContainText('Auto-promoted: E2E owned domains')
+  })
+
+  test('refreshes an open project when a run stream auto-promotes an Atlas entity', async ({ page }) => {
+    test.setTimeout(75_000)
+    await openProjectsModal(page)
+
+    const projectId = await createActiveProject(page, `Auto Promote Stream ${Date.now()}`)
+    await switchProjectTab(page, 'entities')
+    await expect(page.locator('#project-explorer-body')).toContainText('No Atlas entities are linked')
+
+    const suffix = `stream-${Date.now()}.autopromote-e2e.test`
+    const entityValue = `portal.${suffix}`
+    const createdRule = await page.evaluate(async ({ id, pattern }) => {
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/auto-promote-rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'E2E stream domains',
+          enabled: true,
+          apply_on_run: true,
+          target_entity_kind: 'domain',
+          match_mode: 'domain_suffix',
+          pattern,
+          filters: {},
+        }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      return { ok: resp.ok, status: resp.status, data }
+    }, { id: projectId, pattern: suffix })
+    expect(createdRule).toMatchObject({ ok: true, status: 201 })
+    expect(createdRule.data.rule?.id).toBeTruthy()
+
+    await submitRunnerCommandWithProjectsOpen(page, `ping -c 1 ${entityValue}`)
+
+    const output = page.locator('.tab-panel.active .output')
+    await expect(output).toContainText('[project] auto-promoted 1 Atlas entity', { timeout: 45_000 })
+    await expect(page.getByRole('tab', { name: /Domains\s*1/ })).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('tab', { name: /Domains\s*1/ }).click()
+    await expect(page.locator('#project-explorer-body')).toContainText(entityValue, { timeout: 15_000 })
+    await expect(page.locator('#project-explorer-body')).toContainText('Auto-promoted: E2E stream domains')
+  })
+
+  test('opens a prefilled Project auto-promote rule from Atlas', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    const sessionId = await browserSessionId(page)
+    const fixture = seedAutoPromoteAtlasEntity(testInfo, { sessionId })
+    await openProjectsModal(page)
+    await createActiveProject(page, `Atlas Handoff ${Date.now()}`)
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('.rail-nav [data-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('[data-atlas-tab="domain"]').click()
+    await expect(page.locator('[data-atlas-tab="domain"]')).toHaveClass(/\bis-active\b/)
+    await page.locator('#atlas-search').fill(fixture.entityValue)
+    await expect(page.locator('#atlas-list')).toContainText(fixture.entityValue, { timeout: 15_000 })
+
+    await page.locator('#atlas-saved-view-create-rule').click()
+
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/, { timeout: 15_000 })
+    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('[data-project-tab="entities"]')).toHaveClass(/\bis-active\b/)
+    const editor = page.locator('#project-explorer-body .project-auto-promote-editor').last()
+    await expect(editor).toBeVisible()
+    await expect(editor.locator('[data-project-auto-promote-field="name"]')).toHaveValue(
+      `Atlas view: ${fixture.entityValue}`,
+    )
+    await expect(editor.locator('[data-project-auto-promote-field="target_entity_kind"]')).toHaveValue('domain')
+    await expect(editor.locator('[data-project-auto-promote-field="match_mode"]')).toHaveValue('contains')
+    await expect(editor.locator('[data-project-auto-promote-field="pattern"]')).toHaveValue(fixture.entityValue)
+    await expect(editor.locator('[data-project-auto-promote-field="include_suppressed"]')).not.toBeChecked()
   })
 
   test('creates, edits, downloads, and deletes a project evidence package', async ({ page }, testInfo) => {

@@ -53,6 +53,7 @@
       ctx.overlay.classList.remove('u-hidden');
       ctx.overlay.classList.add('open');
       ctx.overlay.setAttribute('aria-hidden', 'false');
+      ctx.syncProjectWorkspaceNestedSuppression();
       ctx.installProjectMobileKeyboardGuards();
       ctx.focusProjectNestedSheet(ctx.overlay, ctx.labelsInput);
     }

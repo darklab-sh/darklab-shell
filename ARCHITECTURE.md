@@ -466,6 +466,12 @@ mapped through the same compare-line indexes used by finding jump actions.
 | `DELETE` | `/projects/<project_id>/links` | Removes supported run or Atlas entity links from a project. Run-unlink payloads can also remove same-run disposable Atlas entity links, with a separate opt-in for curated entity links. |
 | `POST` | `/projects/<project_id>/links/run-entities/preview` | Counts Atlas entities that can be added with selected run links. |
 | `POST` | `/projects/<project_id>/links/run-entities/remove-preview` | Counts same-run disposable and curated Atlas entity links, plus related project finding impact, before selected run links are removed. |
+| `GET` | `/projects/<project_id>/auto-promote-rules` | Lists project-owned Atlas auto-promote rules. |
+| `POST` | `/projects/<project_id>/auto-promote-rules/preview` | Previews Atlas entities that would match an auto-promote rule payload without creating links. |
+| `POST` | `/projects/<project_id>/auto-promote-rules` | Creates a project-owned Atlas auto-promote rule. |
+| `PUT` | `/projects/<project_id>/auto-promote-rules/<rule_id>` | Updates one project-owned Atlas auto-promote rule. |
+| `DELETE` | `/projects/<project_id>/auto-promote-rules/<rule_id>` | Deletes one project-owned Atlas auto-promote rule without removing links it previously created. |
+| `POST` | `/projects/<project_id>/auto-promote-rules/<rule_id>/apply` | Applies one stored auto-promote rule to current Atlas entities and creates any missing project links. |
 | `GET` | `/projects/<project_id>/targets` | Lists project-scoped targets. |
 | `POST` | `/projects/<project_id>/targets` | Adds an idempotent project target. |
 | `PUT` | `/projects/<project_id>/targets/<target_id>` | Updates one project target. |
@@ -605,6 +611,8 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 
 `project_filters.js` also owns the Project workspace filter state, finding filter query parameters, and the filtered Runs, Findings, and Artifacts collections used by the modal.
 
+`project_entities.js` also owns the Project Entities auto-promote rules panel, including rule list rendering, preview/save/apply/delete browser flows, and the source-detail chip shown on auto-promoted entity rows.
+
 **Session Entity Atlas surface.** Atlas is a top-level overlay backed by its own service, schema, and routes. The full surface contract — entity dedup, transcript-token wiring, intel snapshots, findings triage, run-delete cleanup, and bulk-delete confirmations — lives in **Atlas and Entity Model**.
 
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` + four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. Every module loads before the domain scripts that consume it, so every downstream module sees the helpers as plain globals — no wiring glue at call sites.
@@ -737,7 +745,7 @@ Pill-shaped UI uses two separate primitives so visual affordance matches behavio
 
 #### Form And Control Primitive Family
 
-Text fields and compact filter controls compose `.form-control` and `.control-row` instead of rebuilding input chrome per surface. `.form-control` owns the shared `chrome_control_*` background/border, mono font, radius, padding, and focus border. `.form-control-compact` is used for dense History/search controls, while `.form-control-quiet` keeps the search input visually light inside the search strip.
+Text fields and compact filter controls compose `.form-control`, `.form-select`, `.form-check`, and `.control-row` instead of rebuilding input chrome per surface. `.form-control` owns the shared `chrome_control_*` background/border, mono font, radius, padding, and focus border. `.form-select` and `.form-check` are the matching native select and checkbox/radio wrappers for editor-style forms. `.form-control-compact` is used for dense History/search controls, while `.form-control-quiet` keeps the search input visually light inside the search strip.
 
 `.control-row` is for row-shaped controls that are not plain text inputs, such as app-native select triggers and mobile recents filter rows. It is also part of the pressable primitive allowlist because several control rows are rendered as `<button>` dropdown/toggle triggers. `.control-row-touch` keeps mobile sheet controls large enough for touch without changing desktop filter density. The mobile command composer (`#mobile-cmd`) intentionally remains a local exception because its keyboard anchoring, caret behavior, and viewport sizing are more fragile than normal form controls.
 
@@ -1709,12 +1717,18 @@ The current event inventory is:
 | DEBUG | `SCHEDULE_FIRES_LISTED` | browser schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
 | DEBUG | `API_SCHEDULES_LISTED` | API schedule routes | ip, session, team_id, count, limit, offset |
 | DEBUG | `API_SCHEDULE_FIRES_LISTED` | API schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
+| DEBUG | `PROJECT_AUTO_PROMOTE_RULE_PREVIEWED` | Project auto-promote preview route | ip, session, team_id, actor_member_id, actor_role, project_id, target_entity_kind, match_mode, matched/new/promotable/quota/cap counts, limit, truncated |
+| DEBUG | `PROJECT_AUTO_PROMOTE_MATCH_SCAN` | Project auto-promote matching service | session, team_id, project_id, rule_id, target_entity_kind, match_mode, source filter counts, sql_matched, include_suppressed, scan/candidate/match/quota/cap counts, limit, truncated |
+| DEBUG | `PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, source filter counts, linked/promoted/already-linked/new/quota/cap counts, limit, truncated |
 | DEBUG | `AI_CONTEXT_BUILT` | AI context assembly | run_id, session, variant, output_source, output_truncated, max_input_chars, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes, useful, omitted_sections, section_count, context_hash |
 | DEBUG | `AI_SUGGESTION_VALIDATION_COMPLETED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
 | DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
+| INFO | `PROJECT_AUTO_PROMOTE_RULE_CREATED` / `UPDATED` / `DELETED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, enabled, apply_on_run, target_entity_kind, match_mode |
+| INFO | `PROJECT_AUTO_PROMOTE_RULE_APPLIED` | Project auto-promote apply route | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, matched/linked/promoted/skipped/quota/cap counts, limit, truncated |
+| INFO | `PROJECT_AUTO_PROMOTE_RUN_APPLIED` | run finalization | run_id, session, team_id, project_ids, rule_ids, bounded rule_results, aggregate match/link/promote/quota/cap counts |
 | INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, status, fired_at, run_id, last_error |
 | INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
@@ -1797,6 +1811,11 @@ The current event inventory is:
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
+| WARN | `PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED` / `CREATE_REJECTED` / `UPDATE_REJECTED` / `APPLY_REJECTED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, status, reason |
+| WARN | `PROJECT_AUTO_PROMOTE_RULE_UPDATE_MISS` / `DELETE_MISS` / `APPLY_MISS` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, status, reason |
+| WARN | `PROJECT_AUTO_PROMOTE_QUOTA_LIMITED` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, quota_limited_count, linked_count, new_link_count, promoted_count |
+| WARN | `PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED` | Project auto-promote matching service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, matched/candidate/cap counts, candidate_scan_limit, limit, truncated |
+| WARN | `PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED` | Project auto-promote run-finalization service | session, team_id, run_id, rule_cap_limited_count, candidate_rule_count, rule_limit |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
 | WARN | `DIAG_REDIS_SCAN_INCOMPLETE` | `/diag` Redis probes | stage, error |
 | WARN | `INTEL_PROVIDERS_DISABLED` | Atlas intel refresh | session, entity_id, entity_type |
@@ -1852,10 +1871,12 @@ The current event inventory is:
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |
 | ERROR | `WATCHER_FINALIZE_ERROR` | run finalization watcher hook | run_id, session (+ traceback) |
 | ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
+| ERROR | `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` | Project auto-promote run-finalization service | session, team_id, run_id, project_id, rule_id, target_entity_kind, match_mode, limit (+ traceback) |
 | ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
 | ERROR | `NOTIFICATION_CHANNEL_SEND_EXCEPTION` | notification dispatcher | event_id, channel_id, kind, trigger (+ traceback) |
 | ERROR | `NOTIFICATION_WORKER_CRASHED` | notification worker | phase, limit, poll_seconds (+ traceback) |
@@ -1969,12 +1990,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,435
+- behavior tests: 3,461
 - docs/inventory meta-tests: 34
-- `pytest`: 1925 (1891 behavior + 34 meta)
-- `vitest`: 1313
-- `playwright`: 254
-- total: 3,492
+- `pytest`: 1947 (1913 behavior + 34 meta)
+- `vitest`: 1314
+- `playwright`: 257
+- total: 3,518
 
 ### Testing Architecture
 

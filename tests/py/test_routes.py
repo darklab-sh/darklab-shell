@@ -768,6 +768,12 @@ class TestTeamRoutes:
             payload = created.get_json()
             team_id = payload["team"]["id"]
             recovery_code = payload["recovery_code"]
+            project_created = client.post(
+                "/projects",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={"name": "Archived Auto Promote"},
+            )
+            project_id = project_created.get_json()["project"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
                 headers={"X-Session-ID": owner_token},
@@ -804,8 +810,19 @@ class TestTeamRoutes:
                 f"/session/teams/{team_id}/recovery/rotate",
                 headers={"X-Session-ID": owner_token},
             )
+            blocked_auto_rule = client.post(
+                f"/projects/{project_id}/auto-promote-rules",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                json={
+                    "name": "Blocked archived rule",
+                    "target_entity_kind": "domain",
+                    "match_mode": "exact",
+                    "pattern": "archived.example",
+                },
+            )
 
             assert created.status_code == 201
+            assert project_created.status_code == 201
             assert invite.status_code == 201
             assert archived.status_code == 200
             assert scoped_run.status_code == 409
@@ -817,6 +834,9 @@ class TestTeamRoutes:
             assert blocked_recovery_rotate.status_code == 409
             assert blocked_recovery_rotate.get_json()["error"] == "team_archived"
             assert "archived" in blocked_recovery_rotate.get_json()["message"]
+            assert blocked_auto_rule.status_code == 409
+            assert blocked_auto_rule.get_json()["error"] == "team_archived"
+            assert "archived" in blocked_auto_rule.get_json()["message"]
             assert invited_join.status_code == 409
             assert invited_join.get_json()["error"] == "team_archived"
             assert "archived" in invited_join.get_json()["message"]
@@ -1254,6 +1274,92 @@ class TestTeamRoutes:
             assert viewer_atlas_review.status_code == 403
             assert viewer_intel_refresh.status_code == 403
             assert viewer_brokered_run.get_json()["error"] == "team_forbidden"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_viewers_can_preview_auto_promote_rules_but_not_mutate_them(self, tmp_path):
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_auto_promote_owner"
+            viewer_token = "tok_team_auto_promote_viewer"
+            self._register_session_token(viewer_token)
+            created = self._create_team(client, owner_token, name="Auto Promote Operators")
+            team_id = created.get_json()["team"]["id"]
+            viewer_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "Auto-promote viewer"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
+            ).status_code == 201
+            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            project_created = client.post("/projects", headers=owner_headers, json={"name": "Auto Promote"})
+            project_id = project_created.get_json()["project"]["id"]
+            seen_at = "2026-05-28T15:30:00+00:00"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, team_id, type, canonical_value, signature_hash, "
+                    "first_seen_at, last_seen_at, created) "
+                    "VALUES ('ent_team_auto_promote', ?, ?, 'domain', 'team-auto.example', "
+                    "'sig_ent_team_auto_promote', ?, ?, ?)",
+                    (owner_token, team_id, seen_at, seen_at, seen_at),
+                )
+                conn.commit()
+            payload = {
+                "name": "Team auto domain",
+                "target_entity_kind": "domain",
+                "match_mode": "exact",
+                "pattern": "team-auto.example",
+            }
+            created_rule = client.post(
+                f"/projects/{project_id}/auto-promote-rules",
+                headers=owner_headers,
+                json=payload,
+            )
+            rule_id = created_rule.get_json()["rule"]["id"]
+
+            viewer_list = client.get(f"/projects/{project_id}/auto-promote-rules", headers=viewer_headers)
+            viewer_preview = client.post(
+                f"/projects/{project_id}/auto-promote-rules/preview",
+                headers=viewer_headers,
+                json=payload,
+            )
+            viewer_create = client.post(
+                f"/projects/{project_id}/auto-promote-rules",
+                headers=viewer_headers,
+                json=payload,
+            )
+            viewer_update = client.put(
+                f"/projects/{project_id}/auto-promote-rules/{rule_id}",
+                headers=viewer_headers,
+                json={**payload, "name": "Blocked"},
+            )
+            viewer_apply = client.post(
+                f"/projects/{project_id}/auto-promote-rules/{rule_id}/apply",
+                headers=viewer_headers,
+            )
+            viewer_delete = client.delete(
+                f"/projects/{project_id}/auto-promote-rules/{rule_id}",
+                headers=viewer_headers,
+            )
+
+            assert project_created.status_code == 201
+            assert created_rule.status_code == 201
+            assert viewer_list.status_code == 200
+            assert [item["id"] for item in viewer_list.get_json()["rules"]] == [rule_id]
+            assert viewer_preview.status_code == 200
+            assert viewer_preview.get_json()["preview"]["new_link_count"] == 1
+            assert viewer_create.status_code == 403
+            assert viewer_create.get_json()["error"] == "team_forbidden"
+            assert viewer_update.status_code == 403
+            assert viewer_apply.status_code == 403
+            assert viewer_delete.status_code == 403
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -3481,6 +3587,7 @@ class TestProjectRoutes:
         ):
             assert "__wrapper-limiter-instance" in view.__dict__
         assert "__wrapper-limiter-instance" in project_routes.projects_packages_download.__dict__
+        assert "__wrapper-limiter-instance" in project_routes.projects_auto_promote_rules_preview.__dict__
 
     def test_create_list_get_update_archive_and_delete_project(self):
         client = get_client()
@@ -3685,6 +3792,15 @@ class TestProjectRoutes:
         assert cleanup_target_resp.status_code == 201
         cleanup_target = json.loads(cleanup_target_resp.data)["target"]
         with sqlite3.connect(DB_PATH) as conn:
+            rule_id = "apr_project_delete_" + uuid.uuid4().hex[:16]
+            conn.execute(
+                "INSERT INTO project_auto_promote_rules "
+                "(id, project_id, name, enabled, target_entity_kind, match_mode, pattern, filters_json, "
+                "apply_on_run, created_by_session_id, created, updated) "
+                "VALUES (?, ?, 'Cleanup rule', 1, 'domain', 'domain_suffix', 'darklab.sh', '{}', 1, ?, "
+                "datetime('now'), datetime('now'))",
+                (rule_id, project["id"], session_id),
+            )
             conn.execute(
                 "INSERT INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, created) "
@@ -3706,6 +3822,10 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             assert conn.execute(
                 "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                (project["id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM project_auto_promote_rules WHERE project_id = ?",
                 (project["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
@@ -5247,6 +5367,498 @@ class TestProjectRoutes:
                 ).fetchall()
             }
         assert linked_entities == entity_ids
+
+    def test_project_auto_promote_rule_routes_preview_apply_and_delete(self):
+        client = get_client()
+        session_id = self._session_id("project-auto-promote")
+        project = self._create_project(client, session_id)
+        run_id = self._seed_run(session_id, "nmap darklab.sh")
+        entity_id = next(item["id"] for item in self._seed_run_entities(session_id, run_id) if item["type"] == "domain")
+        payload = {
+            "name": "Owned domain",
+            "target_entity_kind": "domain",
+            "match_mode": "domain_suffix",
+            "pattern": "darklab.sh",
+            "filters": {"source_command_roots": ["nmap"]},
+            "apply_on_run": True,
+        }
+
+        with (
+            mock.patch.object(project_routes.log, "debug") as debug_log,
+            mock.patch.object(project_routes.log, "info") as info_log,
+            mock.patch.object(project_routes.log, "warning") as warning_log,
+        ):
+            preview = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/preview",
+                json=payload,
+                headers={"X-Session-ID": session_id},
+            )
+            rejected_preview = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/preview",
+                json={**payload, "match_mode": "contains", "pattern": "a"},
+                headers={"X-Session-ID": session_id},
+            )
+            created = client.post(
+                f"/projects/{project['id']}/auto-promote-rules",
+                json=payload,
+                headers={"X-Session-ID": session_id},
+            )
+            rule = created.get_json()["rule"]
+            listed = client.get(
+                f"/projects/{project['id']}/auto-promote-rules",
+                headers={"X-Session-ID": session_id},
+            )
+            updated = client.put(
+                f"/projects/{project['id']}/auto-promote-rules/{rule['id']}",
+                json={**payload, "name": "Owned domain updated", "enabled": True},
+                headers={"X-Session-ID": session_id},
+            )
+            applied = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/{rule['id']}/apply",
+                headers={"X-Session-ID": session_id},
+            )
+            applied_again = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/{rule['id']}/apply",
+                headers={"X-Session-ID": session_id},
+            )
+            deleted = client.delete(
+                f"/projects/{project['id']}/auto-promote-rules/{rule['id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            deleted_again = client.delete(
+                f"/projects/{project['id']}/auto-promote-rules/{rule['id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            listed_after_delete = client.get(
+                f"/projects/{project['id']}/auto-promote-rules",
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert preview.status_code == 200
+        assert preview.get_json()["preview"]["new_link_count"] == 1
+        assert rejected_preview.status_code == 400
+        assert created.status_code == 201
+        assert rule["apply_on_run"] is True
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.get_json()["rules"]] == [rule["id"]]
+        assert updated.status_code == 200
+        assert updated.get_json()["rule"]["name"] == "Owned domain updated"
+        assert applied.status_code == 200
+        assert applied.get_json()["result"]["linked_count"] == 1
+        assert applied_again.status_code == 200
+        assert applied_again.get_json()["result"]["linked_count"] == 0
+        assert deleted.status_code == 200
+        assert deleted_again.status_code == 404
+        assert listed_after_delete.get_json()["rules"] == []
+        debug_events = {call.args[0]: call.kwargs["extra"] for call in debug_log.call_args_list}
+        assert "PROJECT_AUTO_PROMOTE_RULE_PREVIEWED" in debug_events
+        preview_extra = debug_events["PROJECT_AUTO_PROMOTE_RULE_PREVIEWED"]
+        assert preview_extra["target_entity_kind"] == "domain"
+        assert preview_extra["match_mode"] == "domain_suffix"
+        assert preview_extra["matched_count"] == 1
+        assert preview_extra["truncated"] is False
+        info_events = {call.args[0]: call.kwargs["extra"] for call in info_log.call_args_list}
+        assert info_events["PROJECT_AUTO_PROMOTE_RULE_CREATED"]["apply_on_run"] is True
+        assert info_events["PROJECT_AUTO_PROMOTE_RULE_UPDATED"]["enabled"] is True
+        assert info_events["PROJECT_AUTO_PROMOTE_RULE_DELETED"]["target_entity_kind"] == "domain"
+        apply_extras = [
+            call.kwargs["extra"]
+            for call in info_log.call_args_list
+            if call.args[0] == "PROJECT_AUTO_PROMOTE_RULE_APPLIED"
+        ]
+        applied_extra = next(extra for extra in apply_extras if extra["linked_count"] == 1)
+        assert applied_extra["linked_count"] == 1
+        assert "promoted_count" in applied_extra
+        assert "already_linked_count" in applied_extra
+        assert "skipped_suppressed_count" in applied_extra
+        assert "match_cap_limited_count" in applied_extra
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED"]["status"] == 400
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_DELETE_MISS"]["status"] == 404
+        all_extras = [call.kwargs["extra"] for call in (
+            debug_log.call_args_list + info_log.call_args_list + warning_log.call_args_list
+        )]
+        assert all("pattern" not in extra and "name" not in extra for extra in all_extras)
+        serialized_extras = json.dumps(all_extras)
+        assert "darklab.sh" not in serialized_extras
+        assert "Owned domain" not in serialized_extras
+        with db_connect() as conn:
+            link = conn.execute(
+                "SELECT entity_id, source, source_detail FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                (project["id"],),
+            ).fetchone()
+        assert link["entity_id"] == entity_id
+        assert link["source"] == "auto_promote_rule"
+        assert json.loads(link["source_detail"])["rule_name"] == "Owned domain updated"
+
+        fake_rule = {
+            "id": "apr_limit_probe",
+            "enabled": True,
+            "apply_on_run": False,
+            "target_entity_kind": "domain",
+            "match_mode": "contains",
+        }
+        fake_preview = {
+            "rule": fake_rule,
+            "matched_count": 0,
+            "shown_match_count": 0,
+            "new_link_count": 0,
+            "truncated": False,
+        }
+        fake_apply = {
+            "rule": fake_rule,
+            "matched_count": 0,
+            "linked_count": 0,
+            "promoted_count": 0,
+            "truncated": False,
+        }
+        with (
+            mock.patch.dict(project_routes.CFG, {
+                "max_project_auto_promote_preview_matches": 7,
+                "max_project_auto_promote_apply_matches": 9,
+            }, clear=False),
+            mock.patch.object(project_routes, "preview_auto_promote_rule", return_value=fake_preview) as preview_mock,
+            mock.patch.object(project_routes, "apply_auto_promote_rule", return_value=fake_apply) as apply_mock,
+        ):
+            preview_default_limit = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/preview",
+                json=payload,
+                headers={"X-Session-ID": f"{session_id}-preview-default-limit"},
+            )
+            preview_lower_limit = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/preview?limit=3",
+                json=payload,
+                headers={"X-Session-ID": f"{session_id}-preview-lower-limit"},
+            )
+            preview_capped_limit = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/preview?limit=99",
+                json=payload,
+                headers={"X-Session-ID": f"{session_id}-preview-capped-limit"},
+            )
+            apply_default_limit = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply",
+                headers={"X-Session-ID": f"{session_id}-apply-default-limit"},
+            )
+            apply_lower_limit = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply?limit=4",
+                headers={"X-Session-ID": f"{session_id}-apply-lower-limit"},
+            )
+            apply_capped_limit = client.post(
+                f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply?limit=99",
+                headers={"X-Session-ID": f"{session_id}-apply-capped-limit"},
+            )
+
+        assert preview_default_limit.status_code == 200
+        assert preview_lower_limit.status_code == 200
+        assert preview_capped_limit.status_code == 200
+        assert apply_default_limit.status_code == 200
+        assert apply_lower_limit.status_code == 200
+        assert apply_capped_limit.status_code == 200
+        assert [call.kwargs["limit"] for call in preview_mock.call_args_list] == [7, 3, 7]
+        assert [call.kwargs["limit"] for call in apply_mock.call_args_list] == [9, 4, 9]
+
+    def test_project_auto_promote_disabled_rules_reject_preview_and_apply(self):
+        client = get_client()
+        session_id = self._session_id("project-auto-promote-disabled")
+        project = self._create_project(client, session_id)
+        disabled_payload = {
+            "name": "Disabled domains",
+            "enabled": False,
+            "target_entity_kind": "domain",
+            "match_mode": "domain_suffix",
+            "pattern": "darklab.sh",
+        }
+
+        created = client.post(
+            f"/projects/{project['id']}/auto-promote-rules",
+            json=disabled_payload,
+            headers={"X-Session-ID": session_id},
+        )
+        assert created.status_code == 201
+        rule_id = created.get_json()["rule"]["id"]
+
+        preview = client.post(
+            f"/projects/{project['id']}/auto-promote-rules/preview",
+            json=disabled_payload,
+            headers={"X-Session-ID": session_id},
+        )
+        applied = client.post(
+            f"/projects/{project['id']}/auto-promote-rules/{rule_id}/apply",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert preview.status_code == 400
+        assert applied.status_code == 400
+        assert "disabled auto-promote rules" in preview.get_json()["error"]
+        assert "disabled auto-promote rules" in applied.get_json()["error"]
+
+    def test_completed_run_auto_promote_rules_apply_to_run_entities(self):
+        from blueprints import run as run_routes
+        from services.projects import auto_promote as project_auto_promote
+        from services.projects.crud import create_project
+
+        client = get_client()
+        session_id = self._session_id("project-auto-promote-finalize")
+        project = self._create_project(client, session_id)
+        active_set = client.post(
+            "/projects/active",
+            headers={"X-Session-ID": session_id},
+            json={"project_id": project["id"]},
+        )
+        enabled = client.post(
+            f"/projects/{project['id']}/auto-promote-rules",
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Finalize domains",
+                "target_entity_kind": "domain",
+                "match_mode": "domain_suffix",
+                "pattern": "darklab.sh",
+                "apply_on_run": True,
+            },
+        )
+        client.post(
+            f"/projects/{project['id']}/auto-promote-rules",
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Disabled IPs",
+                "enabled": False,
+                "target_entity_kind": "ip",
+                "match_mode": "cidr",
+                "pattern": "104.21.4.0/24",
+                "apply_on_run": True,
+            },
+        )
+        run_id = "run-auto-promote-finalize-" + uuid.uuid4().hex
+
+        class FakeCapture:
+            preview_lines = [{
+                "text": "darklab.sh 104.21.4.35",
+                "cls": "",
+                "entities": [
+                    {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                    {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
+                ],
+            }]
+            preview_truncated = False
+            output_line_count = 1
+            full_output_available = False
+            full_output_truncated = False
+            full_output_bytes = 0
+            artifact_rel_path = None
+
+            def finalize(self):
+                return None
+
+        with mock.patch.object(run_routes.log, "info") as info_log:
+            run_routes._save_completed_run(
+                run_id,
+                session_id,
+                "",
+                "nmap darklab.sh",
+                "2026-05-31T00:00:00Z",
+                "2026-05-31T00:00:01Z",
+                0,
+                FakeCapture(),
+                link_active_project=True,
+            )
+
+        assert active_set.status_code == 200
+        assert enabled.status_code == 201
+        auto_promote_log = next(
+            call.kwargs["extra"]
+            for call in info_log.call_args_list
+            if call.args[0] == "PROJECT_AUTO_PROMOTE_RUN_APPLIED"
+        )
+        assert auto_promote_log["project_ids"] == [project["id"]]
+        assert auto_promote_log["rule_ids"] == [enabled.get_json()["rule"]["id"]]
+        assert auto_promote_log["rule_results_truncated"] is False
+        assert auto_promote_log["rule_results"] == [{
+            "project_id": project["id"],
+            "rule_id": enabled.get_json()["rule"]["id"],
+            "matched_count": 1,
+            "linked_count": 1,
+            "promoted_count": 1,
+            "quota_limited_count": 0,
+            "match_cap_limited_count": 0,
+        }]
+        assert "Finalize domains" not in json.dumps(auto_promote_log)
+        assert "darklab.sh" not in json.dumps(auto_promote_log)
+        with db_connect() as conn:
+            rows = conn.execute(
+                "SELECT l.entity_id, l.source, l.source_detail, e.type "
+                "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+                "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+                "ORDER BY e.type",
+                (project["id"],),
+            ).fetchall()
+            run_link = conn.execute(
+                "SELECT source FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                (project["id"], run_id),
+            ).fetchone()
+        assert [(row["type"], row["source"]) for row in rows] == [
+            ("domain", "auto_promote_rule"),
+            ("ip", "active_project"),
+        ]
+        assert json.loads(rows[0]["source_detail"])["rule_name"] == "Finalize domains"
+        assert run_link["source"] == "active_project"
+
+        team_id = "team_auto_promote_finalize_" + uuid.uuid4().hex[:8]
+        team_project = create_project(session_id, {"name": "Team auto-promote"}, team_id=team_id)
+        archived_team_project = create_project(
+            session_id,
+            {"name": "Archived team auto-promote"},
+            team_id=team_id,
+        )
+        personal_project = self._create_project(client, session_id, name="Personal auto-promote")
+        assert team_project is not None
+        assert archived_team_project is not None
+        assert personal_project is not None
+        team_payload = {
+            "name": "Team finalize domains",
+            "target_entity_kind": "domain",
+            "match_mode": "domain_suffix",
+            "pattern": "team-auto.example",
+            "apply_on_run": True,
+        }
+        with db_connect() as conn:
+            personal_rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                session_id,
+                personal_project["id"],
+                team_payload,
+            )
+            team_rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                session_id,
+                team_project["id"],
+                team_payload,
+                team_id=team_id,
+            )
+            archived_rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                session_id,
+                archived_team_project["id"],
+                team_payload,
+                team_id=team_id,
+            )
+            conn.execute(
+                "UPDATE projects SET status = 'archived' WHERE id = ?",
+                (archived_team_project["id"],),
+            )
+            conn.commit()
+        team_run_id = "run-auto-promote-team-finalize-" + uuid.uuid4().hex
+
+        class TeamCapture:
+            preview_lines = [{
+                "text": "team-auto.example",
+                "cls": "",
+                "entities": [{
+                    "type": "domain",
+                    "value": "team-auto.example",
+                    "canonical_value": "team-auto.example",
+                }],
+            }]
+            preview_truncated = False
+            output_line_count = 1
+            full_output_available = False
+            full_output_truncated = False
+            full_output_bytes = 0
+            artifact_rel_path = None
+
+            def finalize(self):
+                return None
+
+        with mock.patch.object(run_routes.log, "info") as team_info_log:
+            run_routes._save_completed_run(
+                team_run_id,
+                session_id,
+                team_id,
+                "nmap team-auto.example",
+                "2026-05-31T00:10:00Z",
+                "2026-05-31T00:10:01Z",
+                0,
+                TeamCapture(),
+                link_active_project=False,
+            )
+
+        team_auto_promote_log = next(
+            call.kwargs["extra"]
+            for call in team_info_log.call_args_list
+            if call.args[0] == "PROJECT_AUTO_PROMOTE_RUN_APPLIED"
+        )
+        assert team_auto_promote_log["team_id"] == team_id
+        assert team_auto_promote_log["project_ids"] == [team_project["id"]]
+        assert team_auto_promote_log["rule_ids"] == [team_rule["id"]]
+        assert archived_rule["id"] not in team_auto_promote_log["rule_ids"]
+        assert personal_rule["id"] not in team_auto_promote_log["rule_ids"]
+        with db_connect() as conn:
+            link_counts = {
+                row["project_id"]: row["count"]
+                for row in conn.execute(
+                    "SELECT project_id, COUNT(*) AS count "
+                    "FROM project_links "
+                    "WHERE project_id IN (?, ?, ?) AND entity_type = 'atlas_entity' "
+                    "GROUP BY project_id",
+                    (team_project["id"], archived_team_project["id"], personal_project["id"]),
+                ).fetchall()
+            }
+            team_run = conn.execute(
+                "SELECT team_id FROM runs WHERE id = ?",
+                (team_run_id,),
+            ).fetchone()
+        assert team_run is not None
+        assert team_run["team_id"] == team_id
+        assert link_counts == {team_project["id"]: 1}
+
+    def test_completed_run_auto_promote_failure_is_non_fatal(self, monkeypatch):
+        from blueprints import run as run_routes
+
+        session_id = self._session_id("project-auto-promote-nonfatal")
+        run_id = "run-auto-promote-nonfatal-" + uuid.uuid4().hex
+
+        class FakeCapture:
+            preview_lines = [{
+                "text": "nonfatal.example",
+                "cls": "",
+                "entities": [{"type": "domain", "value": "nonfatal.example", "canonical_value": "nonfatal.example"}],
+            }]
+            preview_truncated = False
+            output_line_count = 1
+            full_output_available = False
+            full_output_truncated = False
+            full_output_bytes = 0
+            artifact_rel_path = None
+
+            def finalize(self):
+                return None
+
+        monkeypatch.setattr(
+            run_routes,
+            "apply_auto_promote_rules_for_run",
+            mock.Mock(side_effect=RuntimeError("auto-promote unavailable")),
+        )
+        run_routes._save_completed_run(
+            run_id,
+            session_id,
+            "",
+            "nmap nonfatal.example",
+            "2026-05-31T00:05:00Z",
+            "2026-05-31T00:05:01Z",
+            0,
+            FakeCapture(),
+            link_active_project=False,
+        )
+
+        with db_connect() as conn:
+            run = conn.execute("SELECT id FROM runs WHERE id = ?", (run_id,)).fetchone()
+            entity_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM entities WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()["count"]
+        assert run is not None
+        assert entity_count == 1
 
     def test_project_run_unlink_can_remove_non_curated_source_entities(self):
         client = get_client()

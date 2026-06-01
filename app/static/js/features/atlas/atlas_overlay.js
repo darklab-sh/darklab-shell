@@ -23,8 +23,10 @@
   const savedViewSaveBtn = document.getElementById('atlas-saved-view-save');
   const savedViewUpdateBtn = document.getElementById('atlas-saved-view-update');
   const savedViewDeleteBtn = document.getElementById('atlas-saved-view-delete');
+  const savedViewCreateRuleBtn = document.getElementById('atlas-saved-view-create-rule');
   const exportWrap = document.getElementById('atlas-export-wrap');
   const exportMenuBtn = document.getElementById('atlas-export-menu-btn');
+  const exportMenu = document.getElementById('atlas-export-menu');
   const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
   const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
@@ -323,6 +325,7 @@
   function hide({ refocus = true } = {}) {
     if (!overlay) return;
     abortReadRequests();
+    setExportMenuOpen(false);
     resetSelection({ selectMode: false, render: false });
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
@@ -593,6 +596,7 @@
     setSelectVisibility(findingBulkStatus, !findingsActive || !state.selectMode);
     findingBulkApplyBtn?.classList.toggle('u-hidden', !findingsActive || !state.selectMode);
     exportWrap?.classList.toggle('u-hidden', findingsActive);
+    if (findingsActive) setExportMenuOpen(false);
     findingBulkRow?.classList.toggle('u-hidden', !state.selectMode && !visibleItems.length);
     if (selectToggle) {
       selectToggle.checked = !!state.selectMode;
@@ -763,6 +767,7 @@
     if (savedViewSaveBtn) savedViewSaveBtn.disabled = state.savedViewsLoading;
     if (savedViewUpdateBtn) savedViewUpdateBtn.disabled = !state.selectedSavedViewId || state.savedViewsLoading;
     if (savedViewDeleteBtn) savedViewDeleteBtn.disabled = !state.selectedSavedViewId || state.savedViewsLoading;
+    if (savedViewCreateRuleBtn) savedViewCreateRuleBtn.disabled = state.savedViewsLoading;
   }
 
   function savedViewNameContent(defaultValue = '') {
@@ -934,6 +939,55 @@
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas view', err);
       showToastSafe('Failed to delete Atlas view', 'error');
+    }
+  }
+
+  function setExportMenuOpen(open) {
+    if (!exportWrap || !exportMenuBtn) return;
+    exportWrap.classList.toggle('open', !!open);
+    exportMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && exportMenu && typeof global.portalDropdownMenu === 'function') {
+      exportWrap.dataset.portalMenu = 'true';
+      global.portalDropdownMenu(exportWrap, exportMenuBtn, exportMenu);
+    } else if (!open && exportMenu && typeof global.unportalDropdownMenu === 'function') {
+      global.unportalDropdownMenu(exportMenu);
+    }
+  }
+
+  function currentAutoPromoteRuleDraft() {
+    const tab = currentTab();
+    const targetKind = String(tab && tab.type || 'any') || 'any';
+    const query = String(state.query || '').trim();
+    const projectId = String(state.projectId || '').trim();
+    const projectName = String(state.projectName || '').trim();
+    const filters = {
+      source_command_roots: [],
+      source_run_ids: state.runId ? [String(state.runId)] : [],
+      include_suppressed: state.suppressionFilter !== 'hide',
+      first_seen_after_rule_created: false,
+    };
+    return {
+      name: query ? `Atlas view: ${query.slice(0, 48)}` : 'Atlas view rule',
+      project_id: projectId,
+      project_name: projectName,
+      target_entity_kind: targetKind,
+      match_mode: query ? 'contains' : (targetKind === 'domain' ? 'domain_suffix' : 'exact'),
+      pattern: query,
+      filters,
+      atlas_view: currentSavedViewState('Atlas view rule'),
+    };
+  }
+
+  async function createRuleFromCurrentView() {
+    if (typeof global.openProjectAutoPromoteRuleFromAtlas !== 'function') {
+      showToastSafe('Projects are not ready yet', 'error');
+      return;
+    }
+    try {
+      await global.openProjectAutoPromoteRuleFromAtlas(currentAutoPromoteRuleDraft());
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to create auto-promote rule from atlas view', err);
+      showToastSafe(err && err.message ? err.message : 'Failed to create rule from Atlas view', 'error');
     }
   }
 
@@ -2267,6 +2321,9 @@
     savedViewDeleteBtn?.addEventListener('click', () => {
       deleteCurrentSavedView();
     });
+    savedViewCreateRuleBtn?.addEventListener('click', () => {
+      createRuleFromCurrentView();
+    });
     selectToggle?.addEventListener('change', () => {
       setSelectMode(!!selectToggle.checked);
     });
@@ -2289,17 +2346,14 @@
     exportMenuBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
       const open = !exportWrap?.classList.contains('open');
-      exportWrap?.classList.toggle('open', open);
-      exportMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      setExportMenuOpen(open);
     });
     exportCsvBtn?.addEventListener('click', () => {
-      exportWrap?.classList.remove('open');
-      exportMenuBtn?.setAttribute('aria-expanded', 'false');
+      setExportMenuOpen(false);
       exportEntities('csv');
     });
     exportJsonlBtn?.addEventListener('click', () => {
-      exportWrap?.classList.remove('open');
-      exportMenuBtn?.setAttribute('aria-expanded', 'false');
+      setExportMenuOpen(false);
       exportEntities('jsonl');
     });
     if (typeof global.bindOutsideClickClose === 'function' && exportWrap) {
@@ -2307,8 +2361,7 @@
         triggers: exportMenuBtn,
         isOpen: () => exportWrap.classList.contains('open'),
         onClose: () => {
-          exportWrap.classList.remove('open');
-          exportMenuBtn?.setAttribute('aria-expanded', 'false');
+          setExportMenuOpen(false);
         },
       });
     }
@@ -2367,6 +2420,8 @@
     saveCurrentView,
     updateCurrentSavedView,
     deleteCurrentSavedView,
+    currentAutoPromoteRuleDraft,
+    createRuleFromCurrentView,
     setSelectMode,
     selectAllVisibleItems,
     bulkUpdateFindings,

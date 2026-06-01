@@ -50,8 +50,6 @@ These are possible future improvements, split by whether they look worth carryin
 
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
-- **Atlas auto-promote rules.**
-  - Saved patterns that promote matching entities into a project would reduce repeated triage work.
 - **Cross-session Atlas view.**
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
 - **Atlas import from external triage tools.**

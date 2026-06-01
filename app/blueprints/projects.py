@@ -22,6 +22,15 @@ from services.projects.contracts import (
     ProjectWorkspaceQuotaExceeded,
 )
 from services.projects.active import clear_active_project, get_active_project, set_active_project
+from services.projects.auto_promote import (
+    apply_stored_rule as apply_auto_promote_rule,
+    create_rule as create_auto_promote_rule,
+    delete_rule as delete_auto_promote_rule,
+    get_rule as get_auto_promote_rule,
+    list_rules as list_auto_promote_rules,
+    preview_rule as preview_auto_promote_rule,
+    update_rule as update_auto_promote_rule,
+)
 from services.projects.crud import create_project, delete_project, update_project
 from services.projects.findings import (
     bulk_update_project_finding_review_states,
@@ -79,6 +88,7 @@ from services.projects.targets import (
     update_project_target,
 )
 from services.projects.artifacts import artifact_owner_context
+from services.projects.utils import cfg_int
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
 from services.workspace.files import (
@@ -116,12 +126,26 @@ def _project_write_limit():
     return f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
 
 
+def _project_auto_promote_preview_limit():
+    minute_limit = int(CFG.get("project_auto_promote_preview_rate_limit_per_minute") or 30)
+    second_limit = int(CFG.get("project_auto_promote_preview_rate_limit_per_second") or 2)
+    return f"{minute_limit} per minute; {second_limit} per second"
+
+
 def _parse_int(value, default, *, minimum=0, maximum=100):
     try:
         parsed = int(value)
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _project_auto_promote_match_limit(value, key, default, *, hard_max):
+    configured = cfg_int(key, default, cfg=CFG)
+    configured = max(1, min(configured, hard_max))
+    if value is None:
+        return configured
+    return _parse_int(value, configured, minimum=1, maximum=configured)
 
 
 def _evidence_package_download_limit():
@@ -132,13 +156,16 @@ def _evidence_package_download_limit():
 
 
 def _project_error_response(exc):
-    if isinstance(exc, ProjectWorkspaceNotFound):
-        status = 404
-    elif isinstance(exc, ProjectWorkspaceQuotaExceeded):
-        status = 409
-    else:
-        status = 400
+    status = _project_error_status(exc)
     return _project_json_error(str(exc), status)
+
+
+def _project_error_status(exc):
+    if isinstance(exc, ProjectWorkspaceNotFound):
+        return 404
+    if isinstance(exc, ProjectWorkspaceQuotaExceeded):
+        return 409
+    return 400
 
 
 def _project_json_error(message, status):
@@ -204,6 +231,91 @@ def _project_bulk_failures(results):
         if len(failures) >= BULK_AUDIT_FAILURE_LIMIT:
             break
     return failures
+
+
+def _project_team_log_context(session_id, team_id):
+    if not team_id:
+        return {}
+    context = {"team_id": team_id}
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError:
+        return context
+    member = scope.member or {}
+    context["team_id"] = scope.team_id
+    context["actor_member_id"] = member.get("id") or ""
+    context["actor_role"] = member.get("role") or ""
+    return context
+
+
+def _project_auto_promote_safe_rule(rule):
+    if not isinstance(rule, dict):
+        return {}
+    safe = {}
+    for key in ("enabled", "apply_on_run", "target_entity_kind", "match_mode"):
+        if key in rule:
+            safe[key] = rule.get(key)
+    return safe
+
+
+def _project_auto_promote_safe_payload(data):
+    if not isinstance(data, dict):
+        return {}
+    safe = {}
+    for key in ("enabled", "apply_on_run", "target_entity_kind", "match_mode"):
+        if key in data:
+            safe[key] = data.get(key)
+    return safe
+
+
+def _project_auto_promote_result_fields(result):
+    if not isinstance(result, dict):
+        return {}
+    fields = {}
+    for key in (
+        "matched_count",
+        "shown_match_count",
+        "matched_in_scan_count",
+        "already_linked_count",
+        "new_link_count",
+        "promotable_count",
+        "linked_count",
+        "promoted_count",
+        "skipped_suppressed_count",
+        "quota_limited_count",
+        "match_cap_limited_count",
+        "candidate_scan_limited_count",
+        "candidate_scan_count",
+        "candidate_scan_limit",
+        "limit",
+    ):
+        if key in result:
+            fields[key] = result.get(key)
+    fields["truncated"] = bool(result.get("truncated") or result.get("candidate_scan_truncated"))
+    return fields
+
+
+def _project_auto_promote_log_context(session_id, team_id, project_id, *, rule_id=""):
+    context = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+    }
+    if rule_id:
+        context["rule_id"] = rule_id
+    context.update(_project_team_log_context(session_id, team_id))
+    return context
+
+
+def _log_project_auto_promote_rejected(event, session_id, team_id, project_id, exc, *, rule_id="", data=None):
+    status = _project_error_status(exc)
+    log.warning(event, extra={
+        **_project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
+        **_project_auto_promote_safe_payload(data),
+        "status": status,
+        "reason": str(exc),
+    })
+    return status
 
 
 def _workspace_project_artifact_error_response(exc):
@@ -420,6 +532,203 @@ def projects_entities_list(project_id):
         team_id=team_id,
     )
     return _project_json_or_404(entities)
+
+
+@projects_bp.route("/projects/<project_id>/auto-promote-rules")
+def projects_auto_promote_rules_list(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    rules = list_auto_promote_rules(session_id, project_id, team_id=team_id)
+    return _project_json_or_404(rules, key="rules")
+
+
+@projects_bp.route("/projects/<project_id>/auto-promote-rules/preview", methods=["POST"])
+@limiter.limit(_project_auto_promote_preview_limit, key_func=get_session_id)
+def projects_auto_promote_rules_preview(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+    try:
+        preview = preview_auto_promote_rule(
+            session_id,
+            project_id,
+            data,
+            team_id=team_id,
+            limit=_project_auto_promote_match_limit(
+                request.args.get("limit"),
+                "max_project_auto_promote_preview_matches",
+                200,
+                hard_max=1000,
+            ),
+        )
+    except ProjectWorkspaceError as exc:
+        _log_project_auto_promote_rejected(
+            "PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED",
+            session_id,
+            team_id,
+            project_id,
+            exc,
+            data=data,
+        )
+        return _project_error_response(exc)
+    log.debug("PROJECT_AUTO_PROMOTE_RULE_PREVIEWED", extra={
+        **_project_auto_promote_log_context(session_id, team_id, project_id),
+        **_project_auto_promote_safe_rule(preview.get("rule") if isinstance(preview, dict) else {}),
+        **_project_auto_promote_result_fields(preview),
+    })
+    return jsonify({"ok": True, "preview": preview})
+
+
+@projects_bp.route("/projects/<project_id>/auto-promote-rules", methods=["POST"])
+@limiter.limit(_project_write_limit)
+def projects_auto_promote_rules_create(project_id):
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+    team_context = _project_team_log_context(session_id, team_id)
+    try:
+        rule = create_auto_promote_rule(
+            session_id,
+            project_id,
+            data,
+            team_id=team_id,
+            member_id=team_context.get("actor_member_id", ""),
+        )
+    except ProjectWorkspaceError as exc:
+        _log_project_auto_promote_rejected(
+            "PROJECT_AUTO_PROMOTE_RULE_CREATE_REJECTED",
+            session_id,
+            team_id,
+            project_id,
+            exc,
+            data=data,
+        )
+        return _project_error_response(exc)
+    log.info("PROJECT_AUTO_PROMOTE_RULE_CREATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "rule_id": rule["id"],
+        **_project_auto_promote_safe_rule(rule),
+        **team_context,
+    })
+    return jsonify({"ok": True, "rule": rule}), 201
+
+
+@projects_bp.route("/projects/<project_id>/auto-promote-rules/<rule_id>", methods=["PUT"])
+@limiter.limit(_project_write_limit)
+def projects_auto_promote_rules_update(project_id, rule_id):
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+    team_context = _project_team_log_context(session_id, team_id)
+    try:
+        rule = update_auto_promote_rule(session_id, project_id, rule_id, data, team_id=team_id)
+    except ProjectWorkspaceError as exc:
+        _log_project_auto_promote_rejected(
+            "PROJECT_AUTO_PROMOTE_RULE_UPDATE_REJECTED",
+            session_id,
+            team_id,
+            project_id,
+            exc,
+            rule_id=rule_id,
+            data=data,
+        )
+        return _project_error_response(exc)
+    if rule is None:
+        log.warning("PROJECT_AUTO_PROMOTE_RULE_UPDATE_MISS", extra={
+            **_project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
+            "status": 404,
+            "reason": "auto-promote rule not found",
+        })
+        return _project_not_found("auto-promote rule not found")
+    log.info("PROJECT_AUTO_PROMOTE_RULE_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "rule_id": rule_id,
+        **_project_auto_promote_safe_rule(rule),
+        **team_context,
+    })
+    return jsonify({"ok": True, "rule": rule})
+
+
+@projects_bp.route("/projects/<project_id>/auto-promote-rules/<rule_id>", methods=["DELETE"])
+@limiter.limit(_project_write_limit)
+def projects_auto_promote_rules_delete(project_id, rule_id):
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    rule_for_log = get_auto_promote_rule(session_id, project_id, rule_id, team_id=team_id)
+    deleted = delete_auto_promote_rule(session_id, project_id, rule_id, team_id=team_id)
+    if deleted is None:
+        log.warning("PROJECT_AUTO_PROMOTE_RULE_DELETE_MISS", extra={
+            **_project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
+            "status": 404,
+            "reason": "auto-promote rule not found",
+        })
+        return _project_not_found("auto-promote rule not found")
+    log.info("PROJECT_AUTO_PROMOTE_RULE_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "rule_id": rule_id,
+        **_project_auto_promote_safe_rule(rule_for_log),
+        **_project_team_log_context(session_id, team_id),
+    })
+    return jsonify({"ok": True})
+
+
+@projects_bp.route("/projects/<project_id>/auto-promote-rules/<rule_id>/apply", methods=["POST"])
+@limiter.limit(_project_write_limit)
+def projects_auto_promote_rules_apply(project_id, rule_id):
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    try:
+        result = apply_auto_promote_rule(
+            session_id,
+            project_id,
+            rule_id,
+            team_id=team_id,
+            limit=_project_auto_promote_match_limit(
+                request.args.get("limit"),
+                "max_project_auto_promote_apply_matches",
+                1000,
+                hard_max=5000,
+            ),
+        )
+    except ProjectWorkspaceError as exc:
+        _log_project_auto_promote_rejected(
+            "PROJECT_AUTO_PROMOTE_RULE_APPLY_REJECTED",
+            session_id,
+            team_id,
+            project_id,
+            exc,
+            rule_id=rule_id,
+        )
+        return _project_error_response(exc)
+    if result is None:
+        log.warning("PROJECT_AUTO_PROMOTE_RULE_APPLY_MISS", extra={
+            **_project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
+            "status": 404,
+            "reason": "auto-promote rule not found",
+        })
+        return _project_not_found("auto-promote rule not found")
+    log.info("PROJECT_AUTO_PROMOTE_RULE_APPLIED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "rule_id": rule_id,
+        **_project_auto_promote_safe_rule(result.get("rule") if isinstance(result, dict) else {}),
+        **_project_auto_promote_result_fields(result),
+        **_project_team_log_context(session_id, team_id),
+    })
+    return jsonify({"ok": True, "result": result})
 
 
 @projects_bp.route("/projects/<project_id>/links", methods=["POST"])

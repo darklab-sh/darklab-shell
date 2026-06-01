@@ -71,12 +71,20 @@ function setupAtlasDom() {
         <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden"></select>
         <select id="atlas-orphan-filter" class="form-select form-control-compact"></select>
         <select id="atlas-suppression-filter" class="form-select form-control-compact"></select>
-        <select id="atlas-saved-view-select" class="form-select form-control-compact"></select>
+        <div class="atlas-saved-view-select-cell">
+          <select id="atlas-saved-view-select" class="form-select form-control-compact atlas-saved-view-select"></select>
+        </div>
         <button id="atlas-saved-view-save" type="button">save</button>
         <button id="atlas-saved-view-update" type="button">update</button>
         <button id="atlas-saved-view-delete" type="button">delete</button>
-        <button id="atlas-export-csv-btn" type="button">csv</button>
-        <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
+        <button id="atlas-saved-view-create-rule" type="button">create rule</button>
+        <div id="atlas-export-wrap" class="atlas-export-wrap save-menu-wrap save-menu-down">
+          <button id="atlas-export-menu-btn" type="button" aria-expanded="false">export</button>
+          <div id="atlas-export-menu" class="atlas-export-menu save-menu dropdown-surface">
+            <button id="atlas-export-csv-btn" type="button">csv</button>
+            <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
+          </div>
+        </div>
         <button id="atlas-refresh-btn" type="button">refresh</button>
         <button id="atlas-clear-filters-btn" type="button">clear filters</button>
         <div class="atlas-shell">
@@ -113,6 +121,7 @@ function loadAtlas({
   activeProject = null,
   apiFetchImpl = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
+  openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
   useRealSelectEnhancer = false,
   activeTeamScopeCanImpl = () => true,
   teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
@@ -293,6 +302,7 @@ function loadAtlas({
           return true
         },
         refocusComposerAfterAction: vi.fn(),
+        openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
         downloadBlobAsAttachment,
         activeTeamScopeCan: activeTeamScopeCanImpl,
         teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
@@ -318,6 +328,7 @@ function loadAtlas({
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
+        window.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
         window.activeTeamScopeCan = activeTeamScopeCan;
         window.teamScopeDeniedMessage = teamScopeDeniedMessage;
@@ -326,6 +337,7 @@ function loadAtlas({
     apiFetch,
     showConfirm: showConfirmImpl,
     showToast,
+    openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
     syncAppSelect,
     enhanceAppSelects,
     downloadBlobAsAttachment,
@@ -386,15 +398,37 @@ describe('Atlas overlay', () => {
       if (input) input.value = 'High signal'
       return Promise.resolve('save')
     })
-    const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
+    const openProjectAutoPromoteRuleFromAtlas = vi.fn(() => Promise.resolve(true))
+    const { openAtlas } = loadAtlas({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+      openProjectAutoPromoteRuleFromAtlasImpl: openProjectAutoPromoteRuleFromAtlas,
+    })
 
     await openAtlas({ source: 'test', projectId: 'prj_keep', projectName: 'Keep Scope' })
-    window.DarklabAtlasOverlay.state.query = 'ssl'
+    window.DarklabAtlasOverlay.state.activeTab = 'ip'
+    window.DarklabAtlasOverlay.state.query = '107.178'
     window.DarklabAtlasOverlay.state.findingStatus = 'important'
     window.DarklabAtlasOverlay.state.orphanFilter = 'only'
     window.DarklabAtlasOverlay.state.suppressionFilter = 'only'
     window.DarklabAtlasOverlay.state.runId = 'run1'
     window.DarklabAtlasOverlay.state.runLabel = 'nmap 107.178.109.44'
+    document.getElementById('atlas-saved-view-create-rule').click()
+
+    await vi.waitFor(() => expect(openProjectAutoPromoteRuleFromAtlas).toHaveBeenCalled())
+    expect(openProjectAutoPromoteRuleFromAtlas).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Atlas view: 107.178',
+      project_id: 'prj_keep',
+      project_name: 'Keep Scope',
+      target_entity_kind: 'ip',
+      match_mode: 'contains',
+      pattern: '107.178',
+      filters: expect.objectContaining({
+        source_run_ids: ['run1'],
+        include_suppressed: true,
+      }),
+    }))
+    window.DarklabAtlasOverlay.state.activeTab = 'findings'
     document.getElementById('atlas-saved-view-save').click()
 
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/atlas/views', expect.objectContaining({ method: 'POST' })))
@@ -403,7 +437,7 @@ describe('Atlas overlay', () => {
       name: 'High signal',
       tab: 'findings',
       filters: {
-        query: 'ssl',
+        query: '107.178',
         orphan_filter: 'only',
         suppression_filter: 'only',
         finding_status: 'important',
@@ -417,7 +451,7 @@ describe('Atlas overlay', () => {
     select.value = 'atv_1111111111111111'
     select.dispatchEvent(new Event('change', { bubbles: true }))
 
-    await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('ssl'))
+    await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('107.178'))
     expect(window.DarklabAtlasOverlay.state.activeTab).toBe('findings')
     expect(document.querySelector('[data-atlas-tab="findings"]')?.classList.contains('is-active')).toBe(true)
     expect(window.DarklabAtlasOverlay.state.findingStatus).toBe('important')
@@ -467,6 +501,11 @@ describe('Atlas overlay', () => {
     expect(filter.nextElementSibling?.classList.contains('app-select')).toBe(true)
     expect(filter.nextElementSibling?.textContent).toContain('All findings')
     expect(filter.nextElementSibling?.querySelectorAll('.dropdown-item')).toHaveLength(6)
+    const savedViewCell = document.querySelector('.atlas-saved-view-select-cell')
+    const savedViewSelect = document.getElementById('atlas-saved-view-select')
+    expect(savedViewSelect.parentElement).toBe(savedViewCell)
+    expect(savedViewSelect.nextElementSibling?.classList.contains('app-select')).toBe(true)
+    expect(savedViewCell.querySelector('.app-select-trigger')?.textContent).toContain('Saved views')
 
     const review = document.querySelector('#atlas-detail .atlas-finding-review')
     expect(review).not.toBeNull()
@@ -1195,9 +1234,14 @@ describe('Atlas overlay', () => {
     const search = document.getElementById('atlas-search')
     search.value = '107.178'
     search.dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('atlas-export-menu-btn')?.click()
+    expect(document.getElementById('atlas-export-menu')?.parentElement).toBe(document.body)
+    expect(document.getElementById('atlas-export-menu-btn')?.getAttribute('aria-expanded')).toBe('true')
     document.getElementById('atlas-export-csv-btn')?.click()
 
     await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
+    expect(document.getElementById('atlas-export-menu')?.parentElement).toBe(document.getElementById('atlas-export-wrap'))
+    expect(document.getElementById('atlas-export-menu-btn')?.getAttribute('aria-expanded')).toBe('false')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),

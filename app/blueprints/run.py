@@ -118,6 +118,7 @@ from services.runs.workspace_artifacts import (
 )
 from core.output_signals import OutputSignalClassifier
 from services.projects.artifacts import record_run_file_artifacts
+from services.projects.auto_promote import apply_run_rules_on_conn as apply_auto_promote_rules_for_run
 from services.projects.findings import record_run_findings
 from services.projects.links import (
     link_active_project_run_entities,
@@ -151,6 +152,8 @@ from services.pty.transcript import shape_completed_pty_entries as _shape_comple
 log = logging.getLogger("shell")
 
 run_bp = Blueprint("run", __name__)
+
+AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT = 10
 
 
 class _RunSessionVisibility(TypedDict):
@@ -197,6 +200,38 @@ def _team_audit_fields(owner_scope) -> dict[str, str]:
         "actor_member_id": str(member.get("id") or ""),
         "team_role": str(member.get("role") or ""),
     }
+
+
+def _auto_promote_summary_results(summary) -> list[dict]:
+    if not isinstance(summary, dict):
+        return []
+    results = summary.get("results")
+    if not isinstance(results, list):
+        return []
+    return [result for result in results if isinstance(result, dict)]
+
+
+def _auto_promote_summary_ids(results: list[dict], key: str) -> list[str]:
+    return sorted({
+        str(result.get(key) or "")
+        for result in results
+        if str(result.get(key) or "")
+    })
+
+
+def _auto_promote_summary_log_results(results: list[dict]) -> list[dict[str, object]]:
+    safe_results = []
+    for result in results[:AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT]:
+        safe_results.append({
+            "project_id": str(result.get("project_id") or ""),
+            "rule_id": str(result.get("rule_id") or ""),
+            "matched_count": int(result.get("matched_count") or 0),
+            "linked_count": int(result.get("linked_count") or 0),
+            "promoted_count": int(result.get("promoted_count") or 0),
+            "quota_limited_count": int(result.get("quota_limited_count") or 0),
+            "match_cap_limited_count": int(result.get("match_cap_limited_count") or 0),
+        })
+    return safe_results
 
 
 def _validate_command_for_run(
@@ -714,6 +749,7 @@ def _save_completed_run(
         recorded_entities = []
         recorded_findings = []
         recorded_targets = []
+        auto_promote_summary = None
         persisted_entries = preview_lines
         workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
         # Index full output when available so early lines of long runs are searchable.
@@ -899,6 +935,26 @@ def _save_completed_run(
                     "session": get_log_session_id(session_id),
                     "cmd": command,
                 })
+            if recorded_entities:
+                try:
+                    auto_promote_summary = _run_finalize_savepoint(
+                        conn,
+                        "project_auto_promote_rules",
+                        lambda: apply_auto_promote_rules_for_run(
+                            conn,
+                            session_id,
+                            run_id,
+                            team_id=team_id,
+                        ),
+                    )
+                except Exception:
+                    auto_promote_summary = None
+                    log.error("PROJECT_AUTO_PROMOTE_RUN_ERROR", exc_info=True, extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "team_id": team_id,
+                        "cmd": command,
+                    })
             if active_project_link and recorded_entities:
                 try:
                     linked_entities = _link_active_project_run_entities_for_finalize(
@@ -958,12 +1014,39 @@ def _save_completed_run(
                 "session": get_log_session_id(session_id),
                 "count": len(recorded_entities),
             })
+        auto_promote_results = _auto_promote_summary_results(auto_promote_summary)
+        auto_promote_project_ids = _auto_promote_summary_ids(auto_promote_results, "project_id")
+        auto_promote_rule_ids = _auto_promote_summary_ids(auto_promote_results, "rule_id")
+        if auto_promote_summary and int(auto_promote_summary.get("rules_evaluated") or 0):
+            log.info("PROJECT_AUTO_PROMOTE_RUN_APPLIED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "project_ids": auto_promote_project_ids,
+                "rule_ids": auto_promote_rule_ids,
+                "rule_results": _auto_promote_summary_log_results(auto_promote_results),
+                "rule_results_truncated": len(auto_promote_results) > AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
+                "rules_evaluated": int(auto_promote_summary.get("rules_evaluated") or 0),
+                "projects_evaluated": int(auto_promote_summary.get("projects_evaluated") or 0),
+                "matched_count": int(auto_promote_summary.get("matched_count") or 0),
+                "linked_count": int(auto_promote_summary.get("linked_count") or 0),
+                "already_linked_count": int(auto_promote_summary.get("already_linked_count") or 0),
+                "skipped_suppressed_count": int(auto_promote_summary.get("skipped_suppressed_count") or 0),
+                "quota_limited_count": int(auto_promote_summary.get("quota_limited_count") or 0),
+                "match_cap_limited_count": int(auto_promote_summary.get("match_cap_limited_count") or 0),
+                "rule_cap_limited_count": int(auto_promote_summary.get("rule_cap_limited_count") or 0),
+            })
         if isinstance(finalize_summary, dict):
             finalize_summary.update({
                 "artifact_count": len(recorded_artifacts),
                 "finding_count": len(recorded_findings),
                 "atlas_entity_count": len(recorded_entities),
                 "project_target_count": len(recorded_targets),
+                "project_auto_promote_count": int(auto_promote_summary.get("linked_count") or 0)
+                if isinstance(auto_promote_summary, dict) else 0,
+                "project_auto_promote_promoted_count": int(auto_promote_summary.get("promoted_count") or 0)
+                if isinstance(auto_promote_summary, dict) else 0,
+                "project_auto_promote_project_ids": auto_promote_project_ids,
                 **_structured_output_summary_fields(persisted_entries),
             })
         return active_project_link
@@ -1041,7 +1124,7 @@ def _finalize_completed_run(
             "run_id": run_id,
             "session": get_log_session_id(session_id),
         })
-    return {"elapsed": elapsed, "active_project_link": active_project_link}
+    return {"elapsed": elapsed, "active_project_link": active_project_link, "finalize_summary": finalize_summary}
 
 
 def _persist_completed_pty_run(
@@ -2147,6 +2230,7 @@ def _brokered_real_run_worker(
         )
         elapsed = finalize_info["elapsed"]
         active_project_link = finalize_info.get("active_project_link")
+        finalize_summary = finalize_info.get("finalize_summary") if isinstance(finalize_info, dict) else {}
         if active_project_link:
             project_name = str(
                 active_project_link.get("project_name")
@@ -2192,6 +2276,24 @@ def _brokered_real_run_worker(
                     "project_entities_rejected": True,
                     "entity_count": rejected_entity_count,
                     "reason": "project_link_limit",
+                })
+        if isinstance(finalize_summary, dict):
+            auto_promote_count = int(finalize_summary.get("project_auto_promote_count") or 0)
+            if auto_promote_count:
+                promoted_count = int(finalize_summary.get("project_auto_promote_promoted_count") or 0)
+                project_ids = [
+                    str(project_id)
+                    for project_id in (finalize_summary.get("project_auto_promote_project_ids") or [])
+                    if str(project_id or "")
+                ]
+                entity_label = "Atlas entity" if auto_promote_count == 1 else "Atlas entities"
+                publish_run_event(run_id, "notice", {
+                    "text": f"[project] auto-promoted {auto_promote_count} {entity_label}",
+                    "project_id": project_ids[0] if len(project_ids) == 1 else "",
+                    "project_ids": project_ids,
+                    "project_auto_promoted": True,
+                    "entity_count": auto_promote_count,
+                    "promoted_count": promoted_count,
                 })
         publish_run_event(run_id, "exit", {
             "code": exit_code,

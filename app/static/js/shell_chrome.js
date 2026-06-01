@@ -1016,6 +1016,8 @@
       getPicker: projectWorkspaceState.entityPicker,
       setPicker: projectWorkspaceState.setEntityPicker,
       getSelectedProjectId: projectWorkspaceState.selectedId,
+      projectRows: projectWorkspaceState.rows,
+      projectIsArchived: _projectIsArchived,
       formatDate: _formatProjectDate,
       shortProjectRunId: _shortProjectRunId,
       makeProjectButton: _makeProjectButton,
@@ -1036,6 +1038,7 @@
       renderProjectMobileDetail: _renderProjectMobileDetail,
       mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
       logClientError: (message, err) => {
         if (typeof logClientError === 'function') logClientError(message, err);
       },
@@ -2686,6 +2689,80 @@
     await _projectWorkspaceShellController().open();
   }
 
+  function _autoPromoteProjectPickerContent(projects, preferredProjectId = '') {
+    const wrap = document.createElement('div');
+    wrap.className = 'history-project-picker';
+    const select = document.createElement('select');
+    select.className = 'form-select form-control-compact';
+    select.setAttribute('aria-label', 'Project');
+    projects.forEach((project) => {
+      const option = document.createElement('option');
+      option.value = String(project.id || '');
+      option.textContent = _projectDisplayName(project) || String(project.id || '');
+      select.appendChild(option);
+    });
+    if (preferredProjectId && projects.some(project => String(project.id || '') === preferredProjectId)) {
+      select.value = preferredProjectId;
+    }
+    const help = document.createElement('div');
+    help.className = 'history-project-picker-help';
+    help.textContent = 'Choose a project for the new auto-promote rule.';
+    wrap.append(select, help);
+    return { wrap, select };
+  }
+
+  async function _promptAutoPromoteRuleProject(preferredProjectId = '') {
+    if (typeof showConfirm !== 'function') return '';
+    const resp = await apiFetch('/projects?include_archived=1&include_counts=0&limit=100&offset=0', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const projects = (Array.isArray(data.projects) ? data.projects : [])
+      .filter(project => String(project && project.status || 'active') !== 'archived');
+    if (!projects.length) {
+      if (typeof showToast === 'function') showToast('Create an active project before creating an auto-promote rule.', 'error');
+      return '';
+    }
+    const activeProject = _activeProject();
+    const preferredId = preferredProjectId
+      || (activeProject && activeProject.id ? String(activeProject.id) : '');
+    const ordered = _orderedProjectRows(preferredId, projects);
+    const { wrap, select } = _autoPromoteProjectPickerContent(ordered, preferredId);
+    const choicePromise = showConfirm({
+      body: 'Create auto-promote rule from Atlas view',
+      content: wrap,
+      defaultFocus: select,
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'create', label: 'Create rule', role: 'primary' },
+      ],
+      refocusOnResolve: false,
+    });
+    if (typeof enhanceAppSelects === 'function') {
+      enhanceAppSelects(wrap);
+      if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+        wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
+      }
+    }
+    const choice = await choicePromise;
+    return choice === 'create' ? String(select.value || '') : '';
+  }
+
+  async function openProjectAutoPromoteRuleFromAtlas(draft = {}) {
+    const activeProject = _activeProject();
+    let projectId = String(draft.project_id || '').trim();
+    if (!projectId && activeProject && activeProject.id) projectId = String(activeProject.id);
+    if (!projectId) projectId = await _promptAutoPromoteRuleProject();
+    if (!projectId) return false;
+    await openProjectWorkspace();
+    projectWorkspaceState.setSelectedId(projectId);
+    projectWorkspaceState.setTab('entities');
+    await _ensureProjectSummary(projectId);
+    _projectEntitiesController().openAutoPromoteRuleFromAtlas(projectId, draft);
+    _renderProjectWorkspace();
+    _renderProjectExplorer();
+    return true;
+  }
+
   function closeProjectWorkspace({ refocus = true } = {}) {
     _projectWorkspaceShellController().close({ refocus });
   }
@@ -2934,6 +3011,7 @@
   global.getActiveProjectContext = _activeProject;
   global.refreshActiveProjectContext = loadActiveProjectContext;
   global.openProjectWorkspace = openProjectWorkspace;
+  global.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
   global.closeProjectWorkspace = closeProjectWorkspace;
   global.isProjectWorkspaceOpen = isProjectWorkspaceOpen;
   global.cycleProjectWorkspaceTab = cycleProjectWorkspaceTab;

@@ -151,6 +151,7 @@ def delete_project(session_id, project_id, *, team_id=""):
                 package_ids,
             )
         conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM project_auto_promote_rules WHERE project_id = ?", (project_id,))
         conn.execute(
             "DELETE FROM evidence_packages WHERE session_id = ? AND project_id = ?",
             (session_id, project_id),

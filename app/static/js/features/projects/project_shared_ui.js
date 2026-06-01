@@ -80,7 +80,10 @@
     }
 
     function entityMetadataChipClass(kind = 'label') {
-      const tone = String(kind || '') === 'note' ? 'badge-tone-cyan' : 'badge-tone-muted';
+      const normalized = String(kind || '');
+      const tone = normalized === 'note'
+        ? 'badge-tone-cyan'
+        : (normalized === 'success' ? 'badge-tone-green' : 'badge-tone-muted');
       return `project-explorer-metadata-chip badge ${tone}`;
     }
 
@@ -175,6 +178,11 @@
         'package-delete',
         'package-wizard-open',
         'package-wizard-next',
+        'new-project-auto-promote-rule',
+        'edit-project-auto-promote-rule',
+        'save-project-auto-promote-rule',
+        'apply-project-auto-promote-rule',
+        'delete-project-auto-promote-rule',
       ]);
       const normalized = String(action || '');
       if (triageActions.has(normalized)) return 'triage_findings';

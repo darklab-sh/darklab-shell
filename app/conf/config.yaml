@@ -178,6 +178,43 @@
 # Server default if unset: 5000
 # max_project_entities_per_project: 5000
 #
+# Maximum matches returned by one auto-promote rule preview.
+# Server default if unset: 200
+# max_project_auto_promote_preview_matches: 200
+#
+# Maximum Atlas entity candidates scanned for match modes that cannot be fully
+# filtered in SQL, such as CIDR.
+# Server default if unset: 5000
+# max_project_auto_promote_scan_candidates: 5000
+#
+# Maximum links one manual auto-promote apply can create.
+# Server default if unset: 1000
+# max_project_auto_promote_apply_matches: 1000
+#
+# Maximum Atlas entity matches one auto-promote rule can apply from a single
+# completed run. This keeps broad rules bounded during run finalization.
+# Server default if unset: 100
+# max_project_auto_promote_run_matches: 100
+#
+# Maximum enabled auto-promote rules evaluated for one completed run.
+# Server default if unset: 50
+# max_project_auto_promote_rules_per_run: 50
+#
+# Maximum auto-promote rules stored for one project. Set to 0 for unlimited,
+# though broad apply-on-run rules still cost work during run finalization.
+# Server default if unset: 100
+# max_project_auto_promote_rules_per_project: 100
+#
+# Per-session rate limit for auto-promote preview requests. Preview can scan
+# Atlas candidates for wildcard, domain-suffix, and CIDR rules, so it has a
+# dedicated read throttle separate from normal Project writes.
+# Server default if unset: 30
+# project_auto_promote_preview_rate_limit_per_minute: 30
+#
+# Per-session burst limit for auto-promote preview requests.
+# Server default if unset: 2
+# project_auto_promote_preview_rate_limit_per_second: 2
+#
 # Maximum manual or discovered project targets. Bulk-linked Atlas entities use
 # max_project_entities_per_project instead.
 # Server default if unset: 200

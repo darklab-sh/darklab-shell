@@ -30,6 +30,7 @@ from . import (
     v0023_team_code_hash_uniqueness,
     v0024_team_scope_atlas,
     v0025_team_scope_workspace_metadata,
+    v0026_project_auto_promote_rules,
 )
 from .runner import Migration
 
@@ -59,4 +60,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0023_team_code_hash_uniqueness.MIGRATION,
     v0024_team_scope_atlas.MIGRATION,
     v0025_team_scope_workspace_metadata.MIGRATION,
+    v0026_project_auto_promote_rules.MIGRATION,
 )

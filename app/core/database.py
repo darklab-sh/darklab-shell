@@ -63,6 +63,7 @@ PROJECT_LINK_SOURCES = frozenset({
     "auto_input_file",
     "manual",
     "active_project",
+    "auto_promote_rule",
     "package_flow",
     "migration",
 })
@@ -544,6 +545,29 @@ def _create_project_workspace_schema(conn):
             UNIQUE (project_id, entity_type, entity_id)
         )
     """)
+    # Keep this SQLite fresh-create shape aligned with the Postgres baseline and
+    # v0026 incremental migration. SQLite intentionally uses INTEGER booleans
+    # and the configured JSON text column, while Postgres uses BOOLEAN/JSONB.
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS project_auto_promote_rules (
+            id                 TEXT PRIMARY KEY,
+            project_id         TEXT NOT NULL,
+            name               TEXT NOT NULL,
+            enabled            INTEGER NOT NULL DEFAULT 1,
+            target_entity_kind TEXT NOT NULL DEFAULT 'any',
+            match_mode         TEXT NOT NULL,
+            pattern            TEXT NOT NULL,
+            filters_json       {_json_column_sql("{}")},
+            apply_on_run       INTEGER NOT NULL DEFAULT 0,
+            created_by_session_id TEXT NOT NULL DEFAULT '',
+            created_by_member_id  TEXT NOT NULL DEFAULT '',
+            created            TEXT NOT NULL,
+            updated            TEXT NOT NULL,
+            last_applied_at    TEXT NOT NULL DEFAULT '',
+            match_count        INTEGER NOT NULL DEFAULT 0,
+            linked_count       INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entities (
             id               TEXT PRIMARY KEY,
@@ -888,6 +912,14 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_project_links_entity_lookup "
         "ON project_links (entity_type, entity_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_project_updated "
+        "ON project_auto_promote_rules (project_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_run_scan "
+        "ON project_auto_promote_rules (project_id, enabled, apply_on_run)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen "

@@ -1087,6 +1087,22 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     if (msg.project_linked && notifyProjectChange) {
       notifyProjectChange('run-linked', msg.project_id || '');
     }
+    if (msg.project_entities_linked && notifyProjectChange) {
+      notifyProjectChange('entities-linked', msg.project_id || '');
+    }
+    if (msg.project_auto_promoted) {
+      if (notifyProjectChange) {
+        notifyProjectChange('auto-promoted', msg.project_id || '');
+      }
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-auto-promoted', {
+          project_id: msg.project_id || '',
+          project_ids: Array.isArray(msg.project_ids) ? msg.project_ids : [],
+          count: Number(msg.entity_count || msg.count || 0) || 0,
+          promoted_count: Number(msg.promoted_count || 0) || 0,
+        });
+      }
+    }
     if (msg.project_targets_discovered) {
       const rawCount = Number(msg.target_count || msg.count || 0);
       const count = Number.isFinite(rawCount) ? rawCount : 0;

@@ -289,6 +289,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0023",
         "0024",
         "0025",
+        "0026",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -308,14 +309,25 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             (table_name = 'session_preferences' AND column_name = 'preferences')
             OR (table_name = 'secrets' AND column_name = 'ciphertext')
             OR (table_name = 'runs' AND column_name = 'preview_truncated')
+            OR (table_name = 'project_auto_promote_rules' AND column_name IN (
+                'filters_json',
+                'enabled',
+                'apply_on_run',
+                'match_count',
+                'linked_count'
+            ))
         )
         """,
         (postgres_schema.schema,),
     ).fetchall()
 
-    assert {"runs", "entities", "entity_intel_snapshots", "schema_migrations"}.issubset({
-        row["table_name"] for row in table_rows
-    })
+    assert {
+        "runs",
+        "entities",
+        "entity_intel_snapshots",
+        "project_auto_promote_rules",
+        "schema_migrations",
+    }.issubset({row["table_name"] for row in table_rows})
     assert {
         (row["table_name"], row["column_name"], row["data_type"])
         for row in column_rows
@@ -323,6 +335,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("session_preferences", "preferences", "jsonb"),
         ("secrets", "ciphertext", "bytea"),
         ("runs", "preview_truncated", "boolean"),
+        ("project_auto_promote_rules", "filters_json", "jsonb"),
+        ("project_auto_promote_rules", "enabled", "boolean"),
+        ("project_auto_promote_rules", "apply_on_run", "boolean"),
+        ("project_auto_promote_rules", "match_count", "bigint"),
+        ("project_auto_promote_rules", "linked_count", "bigint"),
     }
     runs_index_rows = conn.execute(
         """
@@ -353,6 +370,19 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_findings_tool_root_trgm",
         "idx_entity_run_links_entity_seen",
     }.issubset({row["indexname"] for row in atlas_index_rows})
+    auto_promote_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename = 'project_auto_promote_rules'
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_project_auto_promote_rules_project_updated",
+        "idx_project_auto_promote_rules_run_scan",
+    }.issubset({row["indexname"] for row in auto_promote_index_rows})
 
 
 @pytest.mark.postgres

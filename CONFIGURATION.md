@@ -243,6 +243,14 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
 | `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
 | `max_project_entities_per_project` | `5000` | Server-side only. Maximum Atlas entities linked into one project |
+| `max_project_auto_promote_preview_matches` | `200` | Server-side only. Maximum matches returned by one auto-promote rule preview. API callers can request fewer matches with `limit`, but not more than this configured cap |
+| `max_project_auto_promote_scan_candidates` | `5000` | Server-side only. Maximum Atlas entity candidates scanned for match modes that cannot be fully filtered in SQL, such as CIDR |
+| `max_project_auto_promote_apply_matches` | `1000` | Server-side only. Maximum links one manual auto-promote apply can create. API callers can request a smaller apply window with `limit`, but not more than this configured cap |
+| `max_project_auto_promote_run_matches` | `100` | Server-side only. Maximum Atlas entity matches one auto-promote rule can apply from a single completed run |
+| `max_project_auto_promote_rules_per_run` | `50` | Server-side only. Maximum enabled auto-promote rules evaluated for one completed run |
+| `max_project_auto_promote_rules_per_project` | `100` | Server-side only. Maximum auto-promote rules stored for one project. `0` means unlimited |
+| `project_auto_promote_preview_rate_limit_per_minute` | `30` | Server-side only. Per-session rate limit for auto-promote preview requests |
+| `project_auto_promote_preview_rate_limit_per_second` | `2` | Server-side only. Per-session burst limit for auto-promote preview requests |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |

@@ -138,10 +138,12 @@
     }
 
     async function handleInput(event) {
+      if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
       ctx.packagesController?.().handleInput(event);
     }
 
     async function handleChange(event) {
+      if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
       if (ctx.packagesController?.().handleChange(event)) return;
       const findingViewModeControl = event.target.closest?.('[data-project-finding-view-mode]');
       if (findingViewModeControl) {
@@ -374,6 +376,7 @@
     }
 
     async function handleClick(event) {
+      if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
       if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
       if (mobileDetailTab) {

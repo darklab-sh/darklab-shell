@@ -390,6 +390,30 @@ MIGRATION = Migration(
             UNIQUE (project_id, entity_type, entity_id)
         )
         """,
+        # Keep this table/index shape aligned with the SQLite fresh-create
+        # schema and the v0026 incremental migration. Type differences are
+        # intentional: Postgres uses BOOLEAN/BIGINT/JSONB where SQLite uses
+        # INTEGER/TEXT-compatible storage.
+        """
+        CREATE TABLE IF NOT EXISTS project_auto_promote_rules (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            target_entity_kind TEXT NOT NULL DEFAULT 'any',
+            match_mode TEXT NOT NULL,
+            pattern TEXT NOT NULL,
+            filters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            apply_on_run BOOLEAN NOT NULL DEFAULT FALSE,
+            created_by_session_id TEXT NOT NULL DEFAULT '',
+            created_by_member_id TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL,
+            updated TEXT NOT NULL,
+            last_applied_at TEXT NOT NULL DEFAULT '',
+            match_count BIGINT NOT NULL DEFAULT 0,
+            linked_count BIGINT NOT NULL DEFAULT 0
+        )
+        """,
         """
         CREATE TABLE IF NOT EXISTS entities (
             id TEXT PRIMARY KEY,
@@ -679,6 +703,14 @@ MIGRATION = Migration(
         ON project_links (project_id, entity_type, created DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_project_links_entity_lookup ON project_links (entity_type, entity_id)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_project_updated
+        ON project_auto_promote_rules (project_id, updated DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_run_scan
+        ON project_auto_promote_rules (project_id, enabled, apply_on_run)
+        """,
         """
         CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen
         ON entities (session_id, type, last_seen_at DESC)

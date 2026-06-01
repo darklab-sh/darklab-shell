@@ -43,7 +43,9 @@ import services.pty.service as pty_service
 import services.runs.broker as run_broker
 import core.database as database
 import core.database_backend as database_backend
+from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 import services.projects.workspace as project_workspace
+import services.projects.auto_promote as project_auto_promote
 import app as shell_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
@@ -2693,6 +2695,7 @@ class TestPostgresMigrations:
         "watcher_fires",
         "projects",
         "project_links",
+        "project_auto_promote_rules",
         "entities",
         "entity_run_links",
         "entity_intel_snapshots",
@@ -2776,6 +2779,7 @@ class TestPostgresMigrations:
             "0023",
             "0024",
             "0025",
+            "0026",
         ]
         for table_name in (
             "runs",
@@ -2803,6 +2807,7 @@ class TestPostgresMigrations:
             "watcher_fires",
             "projects",
             "project_links",
+            "project_auto_promote_rules",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
@@ -7359,6 +7364,10 @@ class TestEntrypointWorkspaceRepair:
         assert "chown appuser:appuser \"$WORKSPACE_ROOT\"" in entrypoint
         assert "-exec chown appuser:appuser {} \\;" in entrypoint
         assert "find \"$WORKSPACE_ROOT\" -mindepth 2 -exec chown scanner:appuser" not in entrypoint
+        assert (
+            "find \"$session_dir\" -mindepth 1 -maxdepth 1 -type d "
+            "-exec chown scanner:appuser {} \\; -exec chmod 3770"
+        ) in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
@@ -13855,6 +13864,9 @@ class TestDatabaseInit:
             project_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('projects')").fetchall()
             }
+            auto_promote_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('project_auto_promote_rules')").fetchall()
+            }
             finding_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('findings')").fetchall()
             }
@@ -13872,6 +13884,7 @@ class TestDatabaseInit:
         assert {
             "projects",
             "project_links",
+            "project_auto_promote_rules",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
@@ -13885,6 +13898,7 @@ class TestDatabaseInit:
         assert "project_targets" not in tables
         assert "finding_targets" not in tables
         assert "notes" not in project_columns
+        assert {"target_entity_kind", "match_mode", "filters_json", "apply_on_run"}.issubset(auto_promote_columns)
         assert "content_sha256" in artifact_columns
         assert {
             "entity_id",
@@ -13913,6 +13927,7 @@ class TestDatabaseInit:
                     "session_preferences",
                     "user_workflows",
                     "project_links",
+                    "project_auto_promote_rules",
                     "entity_intel_snapshots",
                     "evidence_packages",
                 )
@@ -13923,6 +13938,7 @@ class TestDatabaseInit:
         assert column_types["user_workflows"]["inputs"] == "TEXT"
         assert column_types["user_workflows"]["steps"] == "TEXT"
         assert column_types["project_links"]["source_detail"] == "TEXT"
+        assert column_types["project_auto_promote_rules"]["filters_json"] == "TEXT"
         assert column_types["entity_intel_snapshots"]["data_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
 
@@ -14234,6 +14250,7 @@ class TestDatabaseInit:
         assert database.validate_project_link_source("active_project") == "active_project"
         assert database.validate_project_link_source("auto_command") == "auto_command"
         assert database.validate_project_link_source("auto_input_file") == "auto_input_file"
+        assert database.validate_project_link_source("auto_promote_rule") == "auto_promote_rule"
 
         with pytest.raises(ValueError):
             database.validate_project_entity_type("note")
@@ -14246,6 +14263,739 @@ class TestDatabaseInit:
         with pytest.raises(project_workspace.ProjectWorkspaceError) as exc:
             project_workspace._normalize_target_payload(payload)
         assert "target labels and notes use entity metadata routes" in str(exc.value)
+
+    def _auto_promote_test_conn(self, tmp):
+        db_path = self._fresh_db(tmp)
+        self._create_tables(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _insert_auto_promote_project(self, conn, project_id="prj-auto-promote", session_id="auto-session"):
+        slug = project_id.replace("_", "-")
+        conn.execute(
+            "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+            "VALUES (?, ?, 'Auto Promote', ?, '', 'active', ?, ?)",
+            (project_id, session_id, slug, "2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+        )
+
+    def _insert_auto_promote_entity(self, conn, entity_id, entity_type, canonical_value, session_id="auto-session"):
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                entity_id,
+                session_id,
+                entity_type,
+                canonical_value,
+                f"sig-{entity_id}",
+                "2026-05-31 00:00:00",
+                "2026-05-31 00:00:00",
+                "2026-05-31 00:00:00",
+            ),
+        )
+
+    def test_auto_promote_rule_apply_reuses_project_link_idempotency(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-alpha", "domain", "alpha.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-beta", "domain", "beta.example.com")
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Alpha domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "exact",
+                    "pattern": "Alpha.Example.Com.",
+                    "apply_on_run": True,
+                },
+            )
+
+            with (
+                mock.patch.object(project_auto_promote.log, "debug") as debug_log,
+                mock.patch.object(project_auto_promote.log, "warning") as warning_log,
+            ):
+                first = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                second = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            rows = conn.execute(
+                "SELECT entity_id, source, source_detail FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' ORDER BY entity_id"
+            ).fetchall()
+            conn.close()
+
+        assert first["linked_count"] == 1
+        assert second["linked_count"] == 0
+        assert [(row["entity_id"], row["source"]) for row in rows] == [
+            ("ent-auto-alpha", "auto_promote_rule")
+        ]
+        debug_events = {call.args[0]: call.kwargs["extra"] for call in debug_log.call_args_list}
+        assert "PROJECT_AUTO_PROMOTE_MATCH_SCAN" in debug_events
+        assert "PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY" in debug_events
+        link_summary = debug_events["PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY"]
+        assert link_summary["target_entity_kind"] == "domain"
+        assert link_summary["match_mode"] == "exact"
+        assert link_summary["linked_count"] == 0
+        assert warning_log.call_count == 0
+        serialized_extras = json.dumps([call.kwargs["extra"] for call in debug_log.call_args_list])
+        assert "Alpha domains" not in serialized_extras
+        assert "alpha.example.com" not in serialized_extras
+        detail = json.loads(rows[0]["source_detail"])
+        assert detail["rule_id"] == rule["id"]
+        assert detail["rule_name"] == "Alpha domains"
+
+    def test_auto_promote_create_obeys_project_rule_quota(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            payload = {
+                "name": "Alpha domains",
+                "target_entity_kind": "domain",
+                "match_mode": "contains",
+                "pattern": "example",
+            }
+            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
+                first = project_auto_promote.create_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
+                with pytest.raises(ProjectWorkspaceQuotaExceeded) as exc:
+                    project_auto_promote.create_rule_on_conn(
+                        conn,
+                        "auto-session",
+                        "prj-auto-promote",
+                        {**payload, "name": "Beta domains"},
+                    )
+            conn.close()
+
+        assert first["id"]
+        assert "project auto-promote rule quota exceeded" in str(exc.value)
+
+    def test_auto_promote_rule_promotes_pending_auto_discovered_project_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-graph", "domain", "graph.darklab.sh")
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, created) "
+                "VALUES ('pl-auto-graph', 'prj-auto-promote', 'atlas_entity', 'ent-auto-graph', "
+                "'auto_command', 0.7, 'pending', '{}', ?)",
+                ("2026-05-31 00:00:00",),
+            )
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Darklab domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "domain_suffix",
+                    "pattern": "darklab.sh",
+                    "apply_on_run": True,
+                },
+            )
+
+            preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            first = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            second = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            row = conn.execute(
+                "SELECT source, confidence, review_state, source_detail FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' AND entity_id = 'ent-auto-graph'"
+            ).fetchone()
+            conn.close()
+
+        assert preview["new_link_count"] == 0
+        assert preview["promotable_count"] == 1
+        assert preview["already_linked_count"] == 0
+        assert first["linked_count"] == 1
+        assert first["promoted_count"] == 1
+        assert second["linked_count"] == 0
+        assert second["promoted_count"] == 0
+        assert second["already_linked_count"] == 1
+        assert row["source"] == "auto_promote_rule"
+        assert row["confidence"] == 1.0
+        assert row["review_state"] == "confirmed"
+        assert json.loads(row["source_detail"])["rule_name"] == "Darklab domains"
+
+    def test_auto_promote_rule_preview_filters_by_source_command_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-nmap", "domain", "nmap.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-nuclei", "domain", "nuclei.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-suppressed", "domain", "suppressed.example.com")
+            conn.execute("UPDATE entities SET suppressed = 1 WHERE id = 'ent-auto-suppressed'")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES "
+                "('run-auto-nmap', 'auto-session', 'nmap nmap.example.com', ?, '[]'), "
+                "('run-auto-nuclei', 'auto-session', 'nuclei -u https://nuclei.example.com', ?, '[]'), "
+                "('run-auto-suppressed', 'auto-session', 'nmap suppressed.example.com', ?, '[]')",
+                ("2026-05-31 00:00:00", "2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES "
+                "('ent-auto-nmap', 'run-auto-nmap', ?, ?, 1), "
+                "('ent-auto-nuclei', 'run-auto-nuclei', ?, ?, 1), "
+                "('ent-auto-suppressed', 'run-auto-suppressed', ?, ?, 1)",
+                (
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                ),
+            )
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Nmap examples",
+                    "target_entity_kind": "any",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                    "filters": {"source_command_roots": ["nmap"]},
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-nmap"]
+        assert preview["skipped_suppressed_count"] == 1
+
+    def test_auto_promote_rule_preview_filters_by_source_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-first-run", "domain", "first.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-second-run", "domain", "second.example.com")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES "
+                "('run-auto-first', 'auto-session', 'nmap first.example.com', ?, '[]'), "
+                "('run-auto-second', 'auto-session', 'nuclei -u https://second.example.com', ?, '[]')",
+                ("2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES "
+                "('ent-auto-first-run', 'run-auto-first', ?, ?, 1), "
+                "('ent-auto-second-run', 'run-auto-second', ?, ?, 1)",
+                (
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                ),
+            )
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Specific run examples",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                    "filters": {"source_run_ids": ["run-auto-second"]},
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-second-run"]
+
+    def test_auto_promote_apply_skips_suppressed_count_rescan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-apply", "domain", "apply.example.com")
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Apply domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "apply.example",
+                },
+            )
+            original_candidate_rows = project_auto_promote._candidate_rows
+            with mock.patch.object(
+                project_auto_promote,
+                "_candidate_rows",
+                side_effect=original_candidate_rows,
+            ) as candidate_rows:
+                preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            conn.close()
+
+        assert preview["skipped_suppressed_count"] == 0
+        assert result["linked_count"] == 1
+        assert result["skipped_suppressed_count"] == 0
+        assert candidate_rows.call_count == 3
+
+    def test_auto_promote_contains_treats_sql_wildcards_literally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-percent", "url", "https://example.test/a%b")
+            self._insert_auto_promote_entity(conn, "ent-auto-percent-miss", "url", "https://example.test/axxb")
+            self._insert_auto_promote_entity(conn, "ent-auto-underscore", "url", "https://example.test/a_b")
+            self._insert_auto_promote_entity(conn, "ent-auto-underscore-miss", "url", "https://example.test/axb")
+            percent_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Literal percent",
+                    "target_entity_kind": "url",
+                    "match_mode": "contains",
+                    "pattern": "a%b",
+                },
+            )
+            underscore_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Literal underscore",
+                    "target_entity_kind": "url",
+                    "match_mode": "contains",
+                    "pattern": "a_b",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in percent_preview["matches"]] == ["ent-auto-percent"]
+        assert [item["id"] for item in underscore_preview["matches"]] == ["ent-auto-underscore"]
+
+    def test_auto_promote_exact_any_matches_canonical_entity_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-domain", "domain", "alpha.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-url", "url", "https://darklab.sh/admin")
+            domain_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any exact domain",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
+                    "pattern": "Alpha.Example.Com.",
+                },
+            )
+            url_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any exact URL",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
+                    "pattern": "HTTPS://DarkLab.SH/admin/",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in domain_preview["matches"]] == ["ent-auto-domain"]
+        assert [item["id"] for item in url_preview["matches"]] == ["ent-auto-url"]
+
+    def test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-domain-darklab", "domain", "graph.darklab.sh")
+            self._insert_auto_promote_entity(conn, "ent-auto-url-darklab", "url", "https://api.darklab.sh/admin")
+            self._insert_auto_promote_entity(conn, "ent-auto-url-other", "url", "https://example.test/admin")
+            self._insert_auto_promote_entity(conn, "ent-auto-ip-match", "ip", "192.0.2.55")
+            self._insert_auto_promote_entity(conn, "ent-auto-ip-miss", "ip", "198.51.100.55")
+            url_suffix_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "URL darklab hosts",
+                    "target_entity_kind": "url",
+                    "match_mode": "domain_suffix",
+                    "pattern": "darklab.sh",
+                },
+            )
+            any_suffix_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any darklab hosts",
+                    "target_entity_kind": "any",
+                    "match_mode": "domain_suffix",
+                    "pattern": "darklab.sh",
+                },
+            )
+            any_cidr_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any documentation IPs",
+                    "target_entity_kind": "any",
+                    "match_mode": "cidr",
+                    "pattern": "192.0.2.0/24",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in url_suffix_preview["matches"]] == ["ent-auto-url-darklab"]
+        assert {item["id"] for item in any_suffix_preview["matches"]} == {
+            "ent-auto-domain-darklab",
+            "ent-auto-url-darklab",
+        }
+        assert [item["id"] for item in any_cidr_preview["matches"]] == ["ent-auto-ip-match"]
+
+    def test_auto_promote_first_seen_after_rule_created_uses_preview_timestamp_for_drafts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-before", "domain", "before.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-after", "domain", "after.example.com")
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-before'",
+                ("2026-05-30 23:59:00",),
+            )
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-after'",
+                ("2026-05-31 00:01:00",),
+            )
+            payload = {
+                "name": "Fresh examples",
+                "target_entity_kind": "domain",
+                "match_mode": "contains",
+                "pattern": "example",
+                "filters": {"first_seen_after_rule_created": True},
+            }
+            with mock.patch.object(project_auto_promote, "_now", return_value="2026-05-31 00:00:00"):
+                draft_preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
+            existing_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {**payload, "created": "2026-05-30 23:00:00"},
+            )
+            conn.close()
+
+        assert draft_preview["rule"]["created"] == "2026-05-31 00:00:00"
+        assert [item["id"] for item in draft_preview["matches"]] == ["ent-auto-after"]
+        assert {item["id"] for item in existing_preview["matches"]} == {
+            "ent-auto-before",
+            "ent-auto-after",
+        }
+
+    def test_auto_promote_first_seen_after_rule_created_uses_stored_rule_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-stored-before", "domain", "stored-before.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-stored-after", "domain", "stored-after.example.com")
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-stored-before'",
+                ("2026-05-30 23:59:00",),
+            )
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-stored-after'",
+                ("2026-05-31 00:01:00",),
+            )
+            with mock.patch.object(project_auto_promote, "_now", return_value="2026-05-31 00:00:00"):
+                rule = project_auto_promote.create_rule_on_conn(
+                    conn,
+                    "auto-session",
+                    "prj-auto-promote",
+                    {
+                        "name": "Stored fresh examples",
+                        "target_entity_kind": "domain",
+                        "match_mode": "contains",
+                        "pattern": "example",
+                        "filters": {"first_seen_after_rule_created": True},
+                    },
+                )
+            preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            conn.close()
+
+        assert rule["created"] == "2026-05-31 00:00:00"
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-stored-after"]
+
+    def test_auto_promote_rule_validation_rejects_unsafe_or_broad_rules(self):
+        invalid_payloads = [
+            {
+                "name": "Regex",
+                "target_entity_kind": "domain",
+                "match_mode": "regex",
+                "pattern": "(.+)+",
+            },
+            {
+                "name": "Wrong CIDR",
+                "target_entity_kind": "domain",
+                "match_mode": "cidr",
+                "pattern": "192.0.2.0/24",
+            },
+            {
+                "name": "Wrong domain suffix",
+                "target_entity_kind": "ip",
+                "match_mode": "domain_suffix",
+                "pattern": "darklab.sh",
+            },
+            {
+                "name": "Too broad",
+                "target_entity_kind": "any",
+                "match_mode": "wildcard",
+                "pattern": "*a*",
+            },
+        ]
+
+        for payload in invalid_payloads:
+            with pytest.raises(project_workspace.ProjectWorkspaceError):
+                project_auto_promote.normalize_rule_payload(payload)
+
+    def test_auto_promote_rule_matches_ipv6_cidr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-v6-match", "ip", "2001:db8::1")
+            self._insert_auto_promote_entity(conn, "ent-auto-v6-miss", "ip", "2001:db9::1")
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "IPv6 lab",
+                    "target_entity_kind": "ip",
+                    "match_mode": "cidr",
+                    "pattern": "2001:db8::/32",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-v6-match"]
+
+    def test_auto_promote_non_sql_match_reports_candidate_scan_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-scan-one", "domain", "one.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-scan-two", "domain", "two.example.com")
+            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
+                preview = project_auto_promote.preview_rule_on_conn(
+                    conn,
+                    "auto-session",
+                    "prj-auto-promote",
+                    {
+                        "name": "Example suffix",
+                        "target_entity_kind": "domain",
+                        "match_mode": "domain_suffix",
+                        "pattern": "example.com",
+                    },
+                    limit=1,
+                )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-scan-one"]
+        assert preview["candidate_scan_truncated"] is True
+        assert preview["candidate_scan_limited_count"] == 1
+        assert preview["candidate_scan_count"] == 1
+        assert preview["candidate_scan_limit"] == 1
+        assert preview["matched_count"] == 1
+        assert preview["shown_match_count"] == 1
+        assert preview["matched_in_scan_count"] == 1
+        assert preview["match_count_is_capped"] is True
+        assert preview["total_matches"] is None
+        assert preview["total_matches_known"] is False
+        assert preview["truncated"] is True
+
+    def test_auto_promote_run_apply_uses_match_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-cap-one", "domain", "one.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-cap-two", "domain", "two.example.com")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES ('run-auto-cap', 'auto-session', 'nmap example.com', ?, '[]')",
+                ("2026-05-31 00:00:00",),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES "
+                "('ent-auto-cap-one', 'run-auto-cap', ?, ?, 1), "
+                "('ent-auto-cap-two', 'run-auto-cap', ?, ?, 1)",
+                (
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                ),
+            )
+            project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Example domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                    "apply_on_run": True,
+                },
+            )
+            with (
+                mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
+                mock.patch.object(project_auto_promote.log, "warning") as warning_log,
+            ):
+                summary = project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-cap")
+            linked_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' AND entity_type = 'atlas_entity'"
+            ).fetchone()["count"]
+            conn.close()
+
+        assert summary["rules_evaluated"] == 1
+        assert summary["linked_count"] == 1
+        assert summary["matched_count"] == 1
+        assert summary["match_cap_limited_count"] == 1
+        assert linked_count == 1
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED"]["run_id"] == "run-auto-cap"
+        assert warning_events["PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED"]["match_cap_limited_count"] == 1
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn, project_id="prj-auto-promote-error")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES ('run-auto-error', 'auto-session', 'nmap error.example', ?, '[]')",
+                ("2026-05-31 00:00:00",),
+            )
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote-error",
+                {
+                    "name": "Error domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "error",
+                    "apply_on_run": True,
+                },
+            )
+            with (
+                mock.patch.object(project_auto_promote, "apply_rule_on_conn", side_effect=RuntimeError("boom")),
+                mock.patch.object(project_auto_promote.log, "error") as error_log,
+                pytest.raises(RuntimeError),
+            ):
+                project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-error")
+            conn.close()
+
+        assert error_log.call_args.args[0] == "PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR"
+        error_extra = error_log.call_args.kwargs["extra"]
+        assert error_extra["project_id"] == "prj-auto-promote-error"
+        assert error_extra["rule_id"] == rule["id"]
+        assert error_extra["run_id"] == "run-auto-error"
+        assert error_extra["target_entity_kind"] == "domain"
+        assert error_extra["match_mode"] == "contains"
+
+    def test_auto_promote_apply_quota_exhaustion_still_promotes_pending_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-quota-pending", "domain", "pending.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-quota-new", "domain", "new.example.com")
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, created) "
+                "VALUES ('pl-auto-quota-pending', 'prj-auto-promote', 'atlas_entity', 'ent-auto-quota-pending', "
+                "'auto_command', 0.7, 'pending', '{}', ?)",
+                ("2026-05-31 00:00:00",),
+            )
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Quota examples",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                },
+            )
+            with mock.patch.dict(shell_app.CFG, {"max_project_entities_per_project": 1}, clear=False):
+                result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            rows = conn.execute(
+                "SELECT entity_id, source, review_state FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' ORDER BY entity_id"
+            ).fetchall()
+            conn.close()
+
+        assert result["linked_count"] == 1
+        assert result["promoted_count"] == 1
+        assert result["new_link_count"] == 1
+        assert result["quota_limited_count"] == 1
+        assert [(row["entity_id"], row["source"], row["review_state"]) for row in rows] == [
+            ("ent-auto-quota-pending", "auto_promote_rule", "confirmed")
+        ]
+
+    def test_auto_promote_run_rule_cap_limits_across_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            for project_id in ("prj-auto-one", "prj-auto-two", "prj-auto-three"):
+                self._insert_auto_promote_project(conn, project_id=project_id)
+            self._insert_auto_promote_entity(conn, "ent-auto-rule-cap", "domain", "rulecap.example.com")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES ('run-auto-rule-cap', 'auto-session', 'nmap rulecap.example.com', ?, '[]')",
+                ("2026-05-31 00:00:00",),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES ('ent-auto-rule-cap', 'run-auto-rule-cap', ?, ?, 1)",
+                ("2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+            )
+            for project_id in ("prj-auto-one", "prj-auto-two", "prj-auto-three"):
+                project_auto_promote.create_rule_on_conn(
+                    conn,
+                    "auto-session",
+                    project_id,
+                    {
+                        "name": f"{project_id} examples",
+                        "target_entity_kind": "domain",
+                        "match_mode": "contains",
+                        "pattern": "rulecap",
+                        "apply_on_run": True,
+                    },
+                )
+            with mock.patch.object(project_auto_promote.log, "warning") as warning_log:
+                summary = project_auto_promote.apply_run_rules_on_conn(
+                    conn,
+                    "auto-session",
+                    "run-auto-rule-cap",
+                    rule_limit=2,
+                )
+            linked_projects = {
+                row["project_id"]
+                for row in conn.execute(
+                    "SELECT project_id FROM project_links WHERE entity_id = 'ent-auto-rule-cap'"
+                ).fetchall()
+            }
+            conn.close()
+
+        assert summary["rules_evaluated"] == 2
+        assert summary["projects_evaluated"] == 2
+        assert summary["rule_cap_limited_count"] == 1
+        assert summary["linked_count"] == 2
+        assert len(linked_projects) == 2
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED"]["candidate_rule_count"] == 3
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED"]["rule_limit"] == 2
 
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -14276,6 +15026,9 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             project_indexes = {row[1] for row in conn.execute("PRAGMA index_list('projects')").fetchall()}
             link_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_links')").fetchall()}
+            auto_promote_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('project_auto_promote_rules')").fetchall()
+            }
             artifact_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('run_file_artifacts')").fetchall()
             }
@@ -14297,6 +15050,8 @@ class TestDatabaseInit:
         assert "idx_projects_team_slug_unique" in project_indexes
         assert "idx_project_links_project_entity_created" in link_indexes
         assert "idx_project_links_entity_lookup" in link_indexes
+        assert "idx_project_auto_promote_rules_project_updated" in auto_promote_indexes
+        assert "idx_project_auto_promote_rules_run_scan" in auto_promote_indexes
         assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
         assert "idx_findings_personal_signature" in finding_indexes
         assert "idx_findings_team_signature" in finding_indexes
