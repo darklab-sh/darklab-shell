@@ -259,6 +259,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
+| `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped presets |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior. See [docs/notifications.md](docs/notifications.md) for channel setup |
@@ -1101,12 +1102,60 @@ log_level: INFO
 
 Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
 
-### Customize FAQ, Welcome, Commands, and Workflows
+### Customize Package Presets
+
+Evidence package presets live in `app/conf/package_presets.yaml` by default. Set `package_presets_file` in `config.local.yaml` if you want to keep an operator-managed catalog somewhere else:
+
+```yaml
+# app/conf/config.local.yaml
+package_presets_file: package_presets.local.yaml
+```
+
+Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
+
+A preset controls the wizard defaults only. Users can still adjust the package before creating it, and package size limits, redaction rules, artifact safety checks, and project link validation still apply.
+
+```yaml
+# app/conf/package_presets.local.yaml
+version: 1
+presets:
+  - id: customer_handoff
+    label: Customer Handoff
+    description: Client-ready package with reviewed findings and redacted artifacts.
+    name_suffix: customer
+    redaction_mode: redacted
+    include_artifacts: true
+    include_private_notes: false
+    labels:
+      - client
+    notes: Ready for customer review.
+    selection:
+      runs: all
+      transcripts: with_findings
+      findings: non_false_positive
+      artifacts: selectable
+      targets: all
+```
+
+Supported selection policies are:
+
+| Field | Policies |
+| --- | --- |
+| `runs` | `all`, `none` |
+| `transcripts` | `all`, `none`, `with_findings` |
+| `findings` | `all`, `none`, `non_false_positive` |
+| `artifacts` | `all`, `none`, `selectable` |
+| `targets` | `all`, `none` |
+
+Preset ids must use lowercase letters, numbers, underscores, or hyphens. Keep the shipped `evidence`, `summary`, `full`, and `redacted` presets if you want old package manifests to stay easy to read.
+
+### Customize FAQ, Welcome, Commands, Workflows, and Package Presets
 
 - Add FAQ entries in `app/conf/faq.local.yaml`.
 - Add welcome samples in `app/conf/welcome.local.yaml`.
 - Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
 - Add deployment-specific workflows in `app/conf/workflows.local.yaml` or through the in-app workflow editor.
+- Add deployment-specific evidence package presets in `app/conf/package_presets.local.yaml` and point `package_presets_file` at that file.
 
 ---
 

@@ -2808,6 +2808,31 @@ describe('shell chrome project workspace', () => {
   it('hides project artifacts and raw package artifact inclusion when Files are disabled', async () => {
     const project = { id: 'project-1', name: 'darklab.sh', status: 'active' }
     const apiFetch = vi.fn((url) => {
+      if (url === '/projects/package-presets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            presets: [{
+              id: 'files_bundle',
+              label: 'Files Bundle',
+              description: 'Preset that requests artifacts when Files are enabled.',
+              name_suffix: 'files',
+              redaction_mode: 'raw',
+              include_artifacts: true,
+              include_private_notes: false,
+              labels: [],
+              notes: '',
+              selection: {
+                runs: 'all',
+                transcripts: 'none',
+                findings: 'none',
+                artifacts: 'selectable',
+                targets: 'none',
+              },
+            }],
+          }),
+        })
+      }
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
@@ -2859,6 +2884,8 @@ describe('shell chrome project workspace', () => {
     await tick()
     document.querySelector('[data-project-action="package-wizard-open"]').click()
     await tick()
+    await tick()
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Files Bundle')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     document.querySelector('[data-project-action="package-wizard-next"]').click()
@@ -3039,6 +3066,105 @@ describe('shell chrome project workspace', () => {
       resolvePackageDownloadBlob = resolve
     })
     const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/package-presets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            presets: [
+              {
+                id: 'evidence',
+                label: 'Evidence',
+                description: 'Reviewed findings, related transcripts, targets, and selected raw artifacts.',
+                name_suffix: 'evidence',
+                redaction_mode: 'raw',
+                include_artifacts: true,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'with_findings',
+                  findings: 'non_false_positive',
+                  artifacts: 'selectable',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'summary',
+                label: 'Summary',
+                description: 'Findings, targets, and metadata without transcript HTML or raw artifacts.',
+                name_suffix: 'summary',
+                redaction_mode: 'raw',
+                include_artifacts: false,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'none',
+                  findings: 'non_false_positive',
+                  artifacts: 'none',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'full',
+                label: 'Full Archive',
+                description: 'All linked runs, findings, targets, and available raw artifacts.',
+                name_suffix: 'full',
+                redaction_mode: 'raw',
+                include_artifacts: true,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'all',
+                  findings: 'all',
+                  artifacts: 'selectable',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'redacted',
+                label: 'Redacted',
+                description: 'Metadata, findings, targets, and transcripts with sensitive fields redacted.',
+                name_suffix: 'redacted',
+                redaction_mode: 'redacted',
+                include_artifacts: true,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'with_findings',
+                  findings: 'non_false_positive',
+                  artifacts: 'selectable',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'customer_handoff',
+                label: 'Customer Handoff',
+                description: 'Client-ready summary with default labels and private notes included.',
+                name_suffix: 'customer',
+                redaction_mode: 'redacted',
+                include_artifacts: false,
+                include_private_notes: true,
+                labels: ['client'],
+                notes: 'Share after review.',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'none',
+                  findings: 'non_false_positive',
+                  artifacts: 'none',
+                  targets: 'all',
+                },
+              },
+            ],
+          }),
+        })
+      }
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
@@ -4115,6 +4241,26 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-package-wizard-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preset')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Evidence')
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/package-presets', { cache: 'no-store' })
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Customer Handoff')
+    const customPreset = document.querySelector('input[name="project-package-preset"][value="customer_handoff"]')
+    customPreset.checked = true
+    customPreset.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('[data-project-package-field="labels"]').value).toBe('client')
+    expect(document.querySelector('[data-project-package-field="notes"]').value).toBe('Share after review.')
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-package-private-notes]').checked).toBe(true)
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-package-field="redaction_mode"]').value).toBe('redacted')
+    expect(document.querySelector('[data-project-package-include-artifacts]').checked).toBe(false)
+    document.querySelector('[data-project-action="package-wizard-back"]').click()
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-back"]').click()
+    await tick()
     const fullPreset = document.querySelector('input[name="project-package-preset"][value="full"]')
     fullPreset.checked = true
     fullPreset.dispatchEvent(new Event('change', { bubbles: true }))

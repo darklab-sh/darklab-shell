@@ -56,8 +56,6 @@ These are possible future improvements, split by whether they look worth carryin
   - Gives teams a practical bridge from existing tooling into darklab_shell instead of forcing all enrichment to start inside the app.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
-- **Config-driven package presets.**
-  - Lets operators add internal-review or external-handoff bundle profiles without code changes.
 - **Richer per-finding remediation or verification fields.**
   - Worth keeping if findings keep moving toward report-ready triage instead of raw output capture.
 - **Richer target references in package exports.**

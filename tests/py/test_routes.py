@@ -15,6 +15,7 @@ import os
 import re
 import sqlite3
 import tempfile
+import textwrap
 import time
 import uuid
 import zipfile
@@ -33,6 +34,7 @@ import config
 import core.process as process
 import services.runs.comparison as run_comparison
 import services.secrets.vault as secrets_vault
+import services.projects.package_presets as package_presets
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import quote_sqlite_identifier
@@ -1224,6 +1226,16 @@ class TestTeamRoutes:
                 headers=viewer_headers,
                 json={"name": "Blocked edit"},
             )
+            viewer_package_presets = client.get("/projects/package-presets", headers=viewer_headers)
+            viewer_package_create = client.post(
+                f"/projects/{project_id}/packages",
+                headers=viewer_headers,
+                json={
+                    "name": "Blocked Package",
+                    "preset": "evidence",
+                    "selection": {"run_ids": []},
+                },
+            )
             viewer_active_set = client.post(
                 "/projects/active",
                 headers=viewer_headers,
@@ -1277,6 +1289,14 @@ class TestTeamRoutes:
             assert operator_client_run.status_code == 200
             assert viewer_project_create.status_code == 403
             assert viewer_project_update.status_code == 403
+            assert viewer_package_presets.status_code == 200
+            assert [item["id"] for item in viewer_package_presets.get_json()["presets"]][:4] == [
+                "evidence",
+                "summary",
+                "full",
+                "redacted",
+            ]
+            assert viewer_package_create.status_code == 403
             assert viewer_active_set.status_code == 200
             assert viewer_active_set.get_json()["project"]["id"] == project_id
             assert viewer_active_get.status_code == 200
@@ -1295,6 +1315,7 @@ class TestTeamRoutes:
             assert viewer_atlas_review.status_code == 403
             assert viewer_intel_refresh.status_code == 403
             assert viewer_brokered_run.get_json()["error"] == "team_forbidden"
+            assert viewer_package_create.get_json()["error"] == "team_forbidden"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -3408,6 +3429,12 @@ class TestProjectRoutes:
     def _session_id(self, prefix="projects"):
         return f"{prefix}-" + uuid.uuid4().hex[:8]
 
+    def setup_method(self):
+        package_presets.clear_package_preset_catalog_cache()
+
+    def teardown_method(self):
+        package_presets.clear_package_preset_catalog_cache()
+
     def _create_project(self, client, session_id, name="External Review"):
         resp = client.post(
             "/projects",
@@ -4065,6 +4092,81 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert beta["id"] not in {project["id"] for project in pruned_page["projects"]}
+
+    def test_package_presets_route_returns_shipped_catalog(self):
+        client = get_client()
+        session_id = self._session_id("package-presets")
+
+        resp = client.get("/projects/package-presets", headers={"X-Session-ID": session_id})
+
+        assert resp.status_code == 200
+        body = json.loads(resp.data)
+        assert [preset["id"] for preset in body["presets"]] == ["evidence", "summary", "full", "redacted"]
+        assert body["presets"][0]["selection"]["findings"] == "non_false_positive"
+
+    def test_package_presets_route_returns_custom_catalog(self):
+        client = get_client()
+        session_id = self._session_id("package-presets-custom")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "package_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: brief
+                label: Brief
+                selection:
+                  runs: all
+                  transcripts: none
+                  findings: none
+                  artifacts: none
+                  targets: all
+            """))
+            with mock.patch.dict(project_routes.CFG, {"package_presets_file": str(path)}, clear=False):
+                resp = client.get("/projects/package-presets", headers={"X-Session-ID": session_id})
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["presets"][0]["id"] == "brief"
+
+    def test_package_creation_accepts_known_configured_preset(self):
+        client = get_client()
+        session_id = self._session_id("package-known-preset")
+        project = self._create_project(client, session_id)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "package_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: customer_handoff
+                label: Customer Handoff
+                selection:
+                  runs: all
+                  transcripts: none
+                  findings: none
+                  artifacts: none
+                  targets: all
+            """))
+            with mock.patch.dict(project_routes.CFG, {"package_presets_file": str(path)}, clear=False):
+                resp = client.post(
+                    f"/projects/{project['id']}/packages",
+                    json={"name": "Customer package", "preset": "customer_handoff"},
+                    headers={"X-Session-ID": session_id},
+                )
+
+        assert resp.status_code == 201
+        package = json.loads(resp.data)["package"]
+        assert package["manifest"]["preset"] == "customer_handoff"
+
+    def test_package_creation_rejects_unknown_preset(self):
+        client = get_client()
+        session_id = self._session_id("package-bad-preset")
+        project = self._create_project(client, session_id)
+
+        resp = client.post(
+            f"/projects/{project['id']}/packages",
+            json={"name": "Unknown preset", "preset": "unknown_customer"},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "package preset is not configured"
 
     def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
         client = get_client()

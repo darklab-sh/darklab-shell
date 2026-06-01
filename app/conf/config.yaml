@@ -246,6 +246,13 @@
 # Server default if unset: 100
 # evidence_package_max_artifacts: 100
 #
+# Evidence package preset catalog. Relative paths are resolved from app/conf,
+# and the catalog reloads when the file changes. If an operator override is
+# missing or invalid, the server logs a warning and falls back to the shipped
+# preset catalog.
+# Server default if unset: package_presets.yaml
+# package_presets_file: package_presets.yaml
+#
 # Evidence package download/build rate limits use the shared limiter and are
 # tighter than normal command/project writes because archive construction can
 # read many workspace files.

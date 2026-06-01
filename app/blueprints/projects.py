@@ -69,6 +69,7 @@ from services.projects.package_jobs import (
     get_evidence_package_archive_job,
     start_evidence_package_archive_job,
 )
+from services.projects.package_presets import list_package_presets
 from services.projects.queries import (
     get_evidence_package,
     get_project,
@@ -467,6 +468,26 @@ def projects_summary(project_id):
         return error_response
     summary = get_project_summary(session_id, project_id, team_id=team_id)
     return _project_json_or_404(summary)
+
+
+@projects_bp.route("/projects/package-presets")
+def projects_package_presets():
+    session_id, _team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    try:
+        presets = list_package_presets(CFG)
+    except ProjectWorkspaceError as exc:
+        log.error("PACKAGE_PRESETS_LOAD_FAILED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "error": str(exc),
+        })
+        return jsonify({
+            "error": "package_presets_unavailable",
+            "message": "Package presets are unavailable.",
+        }), 500
+    return jsonify({"presets": presets})
 
 
 @projects_bp.route("/projects/<project_id>", methods=["PUT"])

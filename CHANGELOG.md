@@ -10,6 +10,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Config-backed evidence package preset catalog** — added `app/conf/package_presets.yaml` and a hot-reloading server-side loader for evidence package preset metadata.
+  - The shipped catalog keeps the existing `evidence`, `summary`, `full`, and `redacted` preset ids while validating operator catalogs for stable ids, bounded display text, default labels/notes, redaction mode, artifact/private-note defaults, and named selection policies.
+  - Added `package_presets_file` so operators can point the server at a custom preset catalog; invalid overrides log `PACKAGE_PRESETS_OVERRIDE_INVALID` and fall back to the shipped presets.
+  - Added `GET /projects/package-presets` for the browser wizard and tightened new package creation so `preset` must be `custom` or a configured preset id, while existing package manifests still render stored preset ids as provenance.
+  - Updated the browser package wizard to render the configured catalog, apply preset default labels/notes/redaction/artifact/private-note options, and keep the existing client-side selection expansion as the source of truth.
+  - **Tests:** added pytest coverage for default/custom catalog loading, hot reload, duplicate ids, unknown policies, text/label caps, preset-count caps, fallback warning behavior, catalog route reads, configured-preset package creation, unknown-preset rejection, and team viewer permissions; extended the package wizard unit flow for configured preset rendering, Files-disabled artifact handling, and preset defaults.
+
 - **Command outcome summaries** — added deterministic app-native outcome summaries for supported noisy commands.
   - Added the synced `command-outcome-summaries` user option, with matching Options modal and terminal `config` controls.
   - Added the structured browser-side summary model and renderer so summaries can appear below completed output without mutating raw transcripts, signal counts, Atlas entity extraction, or stored history output.

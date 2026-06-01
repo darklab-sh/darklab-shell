@@ -43,9 +43,10 @@ import services.pty.service as pty_service
 import services.runs.broker as run_broker
 import core.database as database
 import core.database_backend as database_backend
-from services.projects.contracts import ProjectWorkspaceQuotaExceeded
+from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQuotaExceeded
 import services.projects.workspace as project_workspace
 import services.projects.auto_promote as project_auto_promote
+import services.projects.package_presets as package_presets
 import app as shell_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
@@ -2303,6 +2304,222 @@ class TestLoadConfig:
         assert args == ("WORKSPACE_ROOT_MISMATCH",)
         assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
+
+class TestPackagePresetCatalog:
+    def setup_method(self):
+        package_presets.clear_package_preset_catalog_cache()
+
+    def teardown_method(self):
+        package_presets.clear_package_preset_catalog_cache()
+
+    def test_default_package_presets_match_current_wizard_ids(self):
+        catalog = package_presets.load_package_preset_catalog({
+            "package_presets_file": str(REPO_ROOT / "app" / "conf" / "package_presets.yaml"),
+        })
+
+        presets = {preset["id"]: preset for preset in catalog.presets}
+        assert list(presets) == ["evidence", "summary", "full", "redacted"]
+        assert presets["evidence"]["selection"] == {
+            "runs": "all",
+            "transcripts": "with_findings",
+            "findings": "non_false_positive",
+            "artifacts": "selectable",
+            "targets": "all",
+        }
+        assert presets["summary"]["include_artifacts"] is False
+        full_selection = cast(dict[str, str], presets["full"]["selection"])
+        assert full_selection["findings"] == "all"
+        assert presets["redacted"]["redaction_mode"] == "redacted"
+        assert presets["full"]["name_suffix"] == "full"
+
+    def test_package_preset_loader_loads_custom_catalog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "custom_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            presets:
+              - id: brief
+                label: Brief
+                description: Small handoff package.
+                name_suffix: customer
+                redaction_mode: redacted
+                include_artifacts: false
+                include_private_notes: true
+                labels:
+                  - Customer
+                  - customer
+                notes: Include with customer handoff.
+                selection:
+                  runs: all
+                  transcripts: none
+                  findings: non_false_positive
+                  artifacts: none
+                  targets: all
+            """))
+
+            presets = package_presets.list_package_presets({"package_presets_file": str(path)})
+
+        assert presets == [{
+            "id": "brief",
+            "label": "Brief",
+            "description": "Small handoff package.",
+            "name_suffix": "customer",
+            "redaction_mode": "redacted",
+            "include_artifacts": False,
+            "include_private_notes": True,
+            "labels": ["Customer"],
+            "notes": "Include with customer handoff.",
+            "selection": {
+                "runs": "all",
+                "transcripts": "none",
+                "findings": "non_false_positive",
+                "artifacts": "none",
+                "targets": "all",
+            },
+        }]
+
+    def test_package_preset_loader_hot_reloads_when_file_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "package_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: first
+                label: First
+                selection:
+                  runs: all
+                  transcripts: none
+                  findings: none
+                  artifacts: none
+                  targets: all
+            """))
+            cfg = {"package_presets_file": str(path)}
+
+            assert package_presets.list_package_presets(cfg)[0]["label"] == "First"
+
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: second
+                label: Second preset
+                selection:
+                  runs: all
+                  transcripts: all
+                  findings: all
+                  artifacts: selectable
+                  targets: all
+            """))
+            os.utime(path, ns=(2_000_000_000, 2_000_000_000))
+
+            assert package_presets.list_package_presets(cfg)[0]["label"] == "Second preset"
+
+    def test_package_preset_loader_rejects_duplicate_ids(self):
+        with pytest.raises(ProjectWorkspaceError, match="duplicate package preset id"):
+            package_presets.normalize_package_preset_catalog({
+                "presets": [
+                    {
+                        "id": "evidence",
+                        "selection": {
+                            "runs": "all",
+                            "transcripts": "none",
+                            "findings": "none",
+                            "artifacts": "none",
+                            "targets": "all",
+                        },
+                    },
+                    {
+                        "id": "evidence",
+                        "selection": {
+                            "runs": "all",
+                            "transcripts": "none",
+                            "findings": "none",
+                            "artifacts": "none",
+                            "targets": "all",
+                        },
+                    },
+                ],
+            })
+
+    def test_package_preset_loader_rejects_unknown_policy(self):
+        with pytest.raises(ProjectWorkspaceError, match="findings policy"):
+            package_presets.normalize_package_preset_catalog({
+                "presets": [{
+                    "id": "bad_policy",
+                    "selection": {
+                        "runs": "all",
+                        "transcripts": "none",
+                        "findings": "reviewed",
+                        "artifacts": "none",
+                        "targets": "all",
+                    },
+                }],
+            })
+
+    def test_package_preset_loader_falls_back_to_defaults_for_bad_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "package_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: broken
+                selection: []
+            """))
+
+            with mock.patch.object(package_presets.log, "warning") as warning:
+                catalog = package_presets.load_package_preset_catalog({"package_presets_file": str(path)})
+
+        assert catalog.source_path.endswith("app/conf/package_presets.yaml")
+        assert [preset["id"] for preset in catalog.presets] == ["evidence", "summary", "full", "redacted"]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("PACKAGE_PRESETS_OVERRIDE_INVALID",)
+        assert warning.call_args.kwargs["extra"]["path"] == str(path)
+
+        package_presets.clear_package_preset_catalog_cache()
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(package_presets._config, "APP_CONF_DIR", str(tmp)), \
+                    mock.patch.object(package_presets.log, "warning") as missing_warning:
+                catalog = package_presets.load_package_preset_catalog({"package_presets_file": "package_presets.yaml"})
+
+        assert catalog.source_path.endswith("app/conf/package_presets.yaml")
+        assert [preset["id"] for preset in catalog.presets] == ["evidence", "summary", "full", "redacted"]
+        missing_warning.assert_called_once()
+        assert missing_warning.call_args.kwargs["extra"]["path"] == str(Path(tmp) / "package_presets.yaml")
+
+    def test_package_preset_loader_caps_display_lengths_and_default_labels(self):
+        long_label = "l" * (package_presets.PACKAGE_PRESET_LABEL_MAX_LEN + 10)
+        long_default_label = "d" * (package_presets.MAX_LABEL_LEN + 10)
+        catalog = package_presets.normalize_package_preset_catalog({
+            "presets": [{
+                "id": "lengths",
+                "label": long_label,
+                "labels": [long_default_label],
+                "selection": {
+                    "runs": "all",
+                    "transcripts": "none",
+                    "findings": "none",
+                    "artifacts": "none",
+                    "targets": "all",
+                },
+            }],
+        })
+
+        preset = catalog.presets[0]
+        assert preset["label"] == "l" * package_presets.PACKAGE_PRESET_LABEL_MAX_LEN
+        assert preset["labels"] == ["d" * package_presets.MAX_LABEL_LEN]
+
+    def test_package_preset_loader_rejects_too_many_presets(self):
+        selection = {
+            "runs": "all",
+            "transcripts": "none",
+            "findings": "none",
+            "artifacts": "none",
+            "targets": "all",
+        }
+        raw_presets = [
+            {"id": f"preset_{index}", "selection": selection}
+            for index in range(package_presets.PACKAGE_PRESET_MAX_PRESETS + 1)
+        ]
+
+        with pytest.raises(ProjectWorkspaceError, match="preset cap"):
+            package_presets.normalize_package_preset_catalog({"presets": raw_presets})
 
 
 class TestDatabaseBackend:

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,469
+- behavior tests: 3,481
 - docs/inventory meta-tests: 34
-- `pytest`: 1952 (1918 behavior + 34 meta)
+- `pytest`: 1964 (1930 behavior + 34 meta)
 - `vitest`: 1316
 - `playwright`: 258
-- total: 3,526
+- total: 3,538
 
 This document is organized in two parts:
 
@@ -494,6 +494,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
+| `TestPackagePresetCatalog.test_default_package_presets_match_current_wizard_ids` | Verifies the shipped package preset catalog keeps the four built-in preset ids and policies. |
+| `TestPackagePresetCatalog.test_package_preset_loader_loads_custom_catalog` | Verifies operator package preset catalogs normalize labels, notes, redaction, artifact, and policy defaults. |
+| `TestPackagePresetCatalog.test_package_preset_loader_hot_reloads_when_file_changes` | Verifies the package preset catalog reloads after its YAML file changes. |
+| `TestPackagePresetCatalog.test_package_preset_loader_rejects_duplicate_ids` | Verifies duplicate package preset ids are rejected during catalog normalization. |
+| `TestPackagePresetCatalog.test_package_preset_loader_rejects_unknown_policy` | Verifies unknown package preset selection policies are rejected. |
+| `TestPackagePresetCatalog.test_package_preset_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator package preset overrides log a warning and fall back to the shipped catalog. |
+| `TestPackagePresetCatalog.test_package_preset_loader_caps_display_lengths_and_default_labels` | Verifies package preset display text and default labels are bounded. |
+| `TestPackagePresetCatalog.test_package_preset_loader_rejects_too_many_presets` | Verifies package preset catalogs reject more entries than the configured catalog cap. |
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
 | `TestDatabaseBackend.test_postgres_pool_preserves_pgoptions_when_disabling_jit` | Verifies the Postgres pool preserves caller-provided connection options while adding the app's default JIT setting. |
@@ -1449,7 +1457,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestTeamRoutes.test_archived_team_rejects_invite_and_recovery_redeem` | Verifies archived teams reject browser invite and recovery-code redemption without adding late members or consuming codes. |
 | `TestTeamRoutes.test_active_team_scope_isolates_history_runs_and_recent_values` | Verifies active team scope isolates history, Run Details, recent values, and client-side saved runs from personal scope. |
 | `TestTeamRoutes.test_history_bulk_delete_and_clear_respect_active_team_scope` | Verifies single-run delete, bulk-delete, and clear-history actions use the active personal/team scope and reject team viewers before deleting shared history. |
-| `TestTeamRoutes.test_team_viewers_cannot_run_commands_or_mutate_projects_and_findings` | Verifies team viewers cannot start team-scoped runs, mutate team projects, or change team finding metadata while operators can. |
+| `TestTeamRoutes.test_team_viewers_cannot_run_commands_or_mutate_projects_and_findings` | Verifies team viewers cannot start team-scoped runs, mutate team projects/packages, or change team finding metadata while operators can, while read-only project helpers remain available. |
 | `TestTeamRoutes.test_team_viewers_can_preview_auto_promote_rules_but_not_mutate_them` | Verifies team viewers can list and preview Project auto-promote rules but cannot create, update, apply, or delete them. |
 | `TestTeamRoutes.test_active_team_scope_shares_user_workflows_with_role_gated_writes` | Verifies active team scope shares saved workflows across team members while keeping personal workflows isolated and team writes role-gated. |
 | `TestTeamRoutes.test_active_team_scope_shares_projects_and_team_run_links` | Verifies active team scope shares Projects and team-owned run links with team members, finalizes team runs into team Projects, and keeps personal Projects isolated. |
@@ -1481,6 +1489,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
 | `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
 | `TestProjectRoutes.test_projects_switcher_uses_active_mru_search_and_stale_pruning` | Verifies the compact project switcher endpoint returns active/MRU ordering, server-side search results, and prunes archived recent projects. |
+| `TestProjectRoutes.test_package_presets_route_returns_shipped_catalog` | Verifies the package preset catalog route returns the shipped preset ids and policies. |
+| `TestProjectRoutes.test_package_presets_route_returns_custom_catalog` | Verifies the package preset catalog route returns an operator-configured catalog. |
+| `TestProjectRoutes.test_package_creation_accepts_known_configured_preset` | Verifies package creation accepts a configured preset id and records it in the manifest. |
+| `TestProjectRoutes.test_package_creation_rejects_unknown_preset` | Verifies package creation rejects unknown preset ids with a clear 400 response. |
 | `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
 | `TestProjectRoutes.test_entity_note_routes_enforce_session_and_payload_boundaries` | Verifies entity note routes reject cross-session access and invalid note payloads while preserving the owner note. |
 | `TestProjectRoutes.test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs` | Verifies project run comparison rejects one-run, same-run, unlinked, cross-session, missing-baseline, and missing-project requests. |
@@ -3223,7 +3235,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reloads project findings after linked runs change` | Verifies that project findings refresh after runs are linked or unlinked from the project. |
 | `autosaves project notes while editing` | Verifies that project notes save automatically from the Details tab without an explicit Save button. |
 | `edits project labels from the details tab` | Verifies that project labels can be edited from the project Details tab and reflected in project header/sidebar chips. |
-| `hides project artifacts and raw package artifact inclusion when Files are disabled` | Verifies the Projects modal hides the Artifacts tab/run artifact jump chips and prevents raw artifact inclusion when Files are unavailable. |
+| `hides project artifacts and raw package artifact inclusion when Files are disabled` | Verifies the Projects modal hides the Artifacts tab/run artifact jump chips and prevents configured package presets from including raw artifacts when Files are unavailable. |
 | `opens a finding source run at the recorded line` | Verifies that project finding rows show target/review metadata, update review state without opening the run, and restore the source run at the persisted finding line number when clicked. |
 | `reorders project findings when the sort control changes` | Verifies that Projects modal finding sort modes visibly reorder finding rows by severity, target, and newest run. |
 | `locks finding review dropdowns and board dragging for view-only team members` | Verifies that view-only team scope disables Projects select mode, finding review controls, and Findings Board drag/drop triage. |
