@@ -231,11 +231,23 @@ function _setWatchersOpen(open) {
   overlay.classList.toggle('open', !!open);
   overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
   window.syncModalOverlayState?.();
+  if (open) _focusWatchersModal();
 }
 
 function isWatchersOverlayOpen() {
   const { overlay } = _watcherEls();
   return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _focusWatchersModal() {
+  const modal = document.getElementById('watchers-modal');
+  if (!modal || typeof modal.focus !== 'function' || !isWatchersOverlayOpen()) return;
+  if (modal.contains(document.activeElement)) return;
+  try {
+    modal.focus({ preventScroll: true });
+  } catch (_) {
+    modal.focus();
+  }
 }
 
 function _normalizeWatcherComparable(data = {}) {
@@ -1223,6 +1235,7 @@ async function refreshWatchersModal({ selectId = '', baselineRun = null } = {}) 
   } finally {
     _watchersState.loading = false;
     _renderWatchersModal();
+    _focusWatchersModal();
     await _loadWatcherPreview({ immediate: true });
     if (_watchersState.selectedId) await _loadWatcherFires(_watchersState.selectedId);
   }

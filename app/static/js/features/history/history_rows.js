@@ -199,15 +199,25 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('run'));
   if (run.scheduled || run.schedule_id) {
+    const scheduleOwnerKind = String(run.schedule_owner_kind || '');
+    const scheduleOwnerId = String(run.schedule_owner_id || run.watcher_id || '');
+    const isWatcherRun = scheduleOwnerKind === 'watcher' && scheduleOwnerId;
     const scheduledBadge = _historyMetaKindBadge('schedule', 'scheduled');
-    scheduledBadge.title = run.schedule_id ? `Schedule ${run.schedule_id}` : 'Scheduled run';
-    if (run.schedule_id) {
+    scheduledBadge.title = isWatcherRun
+      ? `Watcher ${scheduleOwnerId}`
+      : (run.schedule_id ? `Schedule ${run.schedule_id}` : 'Scheduled run');
+    if (run.schedule_id || isWatcherRun) {
       scheduledBadge.classList.add('chip-action');
       scheduledBadge.dataset.action = 'open-schedule';
       scheduledBadge.dataset.scheduleId = run.schedule_id;
+      scheduledBadge.dataset.scheduleOwnerKind = scheduleOwnerKind;
+      scheduledBadge.dataset.scheduleOwnerId = scheduleOwnerId;
       scheduledBadge.setAttribute('role', 'button');
       scheduledBadge.tabIndex = 0;
-      scheduledBadge.setAttribute('aria-label', `Open schedule ${run.schedule_id}`);
+      scheduledBadge.setAttribute(
+        'aria-label',
+        isWatcherRun ? `Open watcher ${scheduleOwnerId}` : `Open schedule ${run.schedule_id}`,
+      );
     }
     meta.appendChild(scheduledBadge);
   }

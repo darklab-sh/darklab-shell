@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterator, cast
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from config import CFG, SCANNER_PREFIX
 from core.process import (
     active_run_claim_owner_transition,
@@ -39,6 +42,7 @@ from services.pty.capture import (
     PtyTerminalCapture as _BasePtyTerminalCapture,
     _terminal_history_line_limit,
 )
+from services.runs.broker import _is_redis_idle_timeout_error
 from services.runs.output_model import LineKind, from_wire, line_event_from_legacy, to_wire
 from services.runs.output_store import unknown_line_event_collector
 from services import metrics as app_metrics
@@ -1269,10 +1273,15 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
     current_id = _normalize_event_id(after)
     block_ms = max(1, int(float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
     while True:
-        rows = cast(
-            list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
-            redis_client.xread({_stream_key(run_id): current_id}, count=_pty_stream_fetch_count(), block=block_ms),
-        )
+        try:
+            rows = cast(
+                list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
+                redis_client.xread({_stream_key(run_id): current_id}, count=_pty_stream_fetch_count(), block=block_ms),
+            )
+        except (RedisTimeoutError, RedisConnectionError) as exc:
+            if not _is_redis_idle_timeout_error(exc):
+                raise
+            rows = []
         if not rows:
             meta = _load_pty_meta_for_scope(run_id, session_id, team_id)
             if not meta:

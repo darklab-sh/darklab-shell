@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,463
+- behavior tests: 3,465
 - docs/inventory meta-tests: 34
-- `pytest`: 1949 (1915 behavior + 34 meta)
-- `vitest`: 1314
+- `pytest`: 1950 (1916 behavior + 34 meta)
+- `vitest`: 1315
 - `playwright`: 257
-- total: 3,520
+- total: 3,522
 
 This document is organized in two parts:
 
@@ -758,6 +758,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunBrokerMemoryStore.test_stream_run_events_replays_snapshot_before_waiting_for_live_events` | Verifies that broker stream subscriptions replay an initial snapshot before waiting for live events. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_skips_trim_notice_when_resuming_live_tail` | Verifies that broker streams skip trim notices when choosing the live-tail resume cursor. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_exits_cleanly_when_redis_stream_disconnects` | Verifies that broker streams end cleanly when Redis closes a blocked stream read during shutdown. |
+| `TestRunBrokerMemoryStore.test_stream_run_events_treats_redis_read_timeout_as_idle_heartbeat` | Verifies that broker streams treat Redis read timeouts as idle heartbeats instead of ending the browser stream. |
 | `TestRunBrokerMemoryStore.test_decode_payload_accepts_redis_bytes_fields` | Verifies that broker Redis payload decoding accepts byte-string stream fields. |
 | `TestRunBrokerMemoryStore.test_redis_store_decodes_bytes_event_ids_and_payloads` | Verifies that the Redis broker store decodes byte-string event IDs and payloads before replay filtering. |
 | `TestRunBrokerMemoryStore.test_redis_store_normalizes_invalid_resume_ids` | Verifies that Redis replay normalizes stale synthetic resume IDs before calling Redis stream APIs. |
@@ -2853,6 +2854,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not assign prefixes to synthetic summary lines` | Verifies that synthetic command-findings summary rows do not render timestamp or line-number prefixes. |
 | `combines line numbers and timestamps into a compact shared prefix` | Verifies that combines line numbers and timestamps into a compact shared prefix. |
 | `shows +0.0s for the active prompt in elapsed mode` | Verifies that the active prompt surfaces `+0.0s` when elapsed timestamps are enabled. |
+| `keeps the elapsed timestamp gutter stable after a full prefix resync` | Verifies that elapsed timestamp mode keeps the reserved gutter stable after a full prefix resync. |
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
@@ -3995,7 +3997,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `Alt+C toggles the Commands modal from the composer` | Alt+C opens and closes the Commands modal without leaking `ç` into the prompt. |
 | `Alt+P toggles the Projects modal from the composer` | Alt+P opens and closes the Projects modal without leaking `π` into the prompt. |
 | `Alt+M toggles the Status Monitor from the composer` | Alt+M opens and closes the status monitor without leaking `µ` into the prompt. |
-| `Alt+Shift+F toggles the Files modal from the composer` | Alt+Shift+F opens and closes Files without stealing the terminal's Alt+F word-forward chord. |
+| `Alt+Shift modal shortcuts move focus off the composer and keep Escape scoped to the modal` | Alt+Shift+F opens and closes Files, while Alt+Shift+S and Alt+Shift+W move focus into Schedules and Watchers so typing and Escape stay scoped to the modal. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
 

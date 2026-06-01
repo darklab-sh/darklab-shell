@@ -106,6 +106,7 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError, next_fire
+from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.route_helpers import (
     RouteBaselineRunNotCompleted,
     RouteBaselineRunNotFound,
@@ -124,7 +125,7 @@ from services.scheduler.service import (
     get_schedule,
     list_for_owner as list_schedules_for_owner,
     list_schedule_fires,
-    schedule_ids_by_run,
+    schedule_refs_by_run,
     update_schedule,
 )
 from services.secrets.vault import MasterKeyError, SecretDecryptError
@@ -621,6 +622,19 @@ def _run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tup
     return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')", [session_id]
 
 
+def _apply_schedule_ref(run: dict[str, Any], schedule_ref: dict[str, str] | None) -> None:
+    ref = schedule_ref or {}
+    schedule_id = str(ref.get("schedule_id") or "")
+    owner_kind = str(ref.get("owner_kind") or "")
+    owner_id = str(ref.get("owner_id") or "")
+    run["schedule_id"] = schedule_id
+    run["scheduled"] = bool(schedule_id)
+    run["schedule_owner_kind"] = owner_kind
+    run["schedule_owner_id"] = owner_id
+    run["watcher_id"] = owner_id if owner_kind == OWNER_KIND_WATCHER else ""
+    run["schedule_label"] = str(ref.get("watcher_label" if owner_kind == OWNER_KIND_WATCHER else "schedule_label") or "")
+
+
 def _project_owner_clause(session_id: str, team_id: str, *, alias: str = "p") -> tuple[str, list[Any]]:
     prefix = f"{alias}." if alias else ""
     if team_id:
@@ -943,14 +957,13 @@ def _history_rows(
         artifacts = _run_file_artifacts_by_run(conn, run_ids)
         metadata = _run_metadata_counts_by_run(conn, run_ids)
         atlas = _run_atlas_counts_by_run(conn, session_id, run_ids, team_id=team_id)
-        scheduled = schedule_ids_by_run(conn, run_ids)
+        scheduled = schedule_refs_by_run(conn, run_ids)
     for run in runs:
         run_id = str(run["id"])
         run["artifact_count"] = len(artifacts.get(run_id, []))
         run.update(metadata.get(run_id, {}))
         run.update(atlas.get(run_id, {}))
-        run["schedule_id"] = scheduled.get(run_id, "")
-        run["scheduled"] = bool(run["schedule_id"])
+        _apply_schedule_ref(run, scheduled.get(run_id))
     return runs, total
 
 
@@ -971,9 +984,7 @@ def _load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, An
         run["artifact_count"] = len(artifacts)
         run.update(_run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
         run.update(_run_atlas_counts_by_run(conn, session_id, [run_id], team_id=team_id).get(run_id, {}))
-        schedule_id = schedule_ids_by_run(conn, [run_id]).get(run_id, "")
-        run["schedule_id"] = schedule_id
-        run["scheduled"] = bool(schedule_id)
+        _apply_schedule_ref(run, schedule_refs_by_run(conn, [run_id]).get(run_id))
     return run
 
 

@@ -45,6 +45,15 @@ def _stream_key(run_id: str) -> str:
     return f"runstream:{run_id}"
 
 
+def _is_redis_idle_timeout_error(exc: BaseException) -> bool:
+    if isinstance(exc, RedisTimeoutError):
+        return True
+    if isinstance(exc, RedisConnectionError):
+        message = str(exc).lower()
+        return "timeout reading" in message or "timed out" in message
+    return False
+
+
 def _schema_sse() -> str:
     return f"event: schema\ndata: {json.dumps(SCHEMA_EVENT_PAYLOAD)}\n\n"
 
@@ -430,14 +439,19 @@ class _RedisRunBrokerStore:
         if not redis_client:
             return []
         after_id = _normalize_resume_event_id(after_id)
-        rows = cast(
-            list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
-            redis_client.xread(
-                {_stream_key(run_id): after_id},
-                count=100,
-                block=max(1, int(float(timeout or 0) * 1000)),
-            ),
-        )
+        try:
+            rows = cast(
+                list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
+                redis_client.xread(
+                    {_stream_key(run_id): after_id},
+                    count=100,
+                    block=max(1, int(float(timeout or 0) * 1000)),
+                ),
+            )
+        except (RedisTimeoutError, RedisConnectionError) as exc:
+            if _is_redis_idle_timeout_error(exc):
+                return []
+            raise
         events: list[BrokerEvent] = []
         for _key, stream_rows in rows or []:
             for event_id, fields in stream_rows:
@@ -667,7 +681,13 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
                 if event.payload.get("type") in TERMINAL_EVENT_TYPES:
                     return
         while True:
-            events = _store().wait_after(run_id, current_id, timeout=block_seconds)
+            try:
+                events = _store().wait_after(run_id, current_id, timeout=block_seconds)
+            except (RedisTimeoutError, RedisConnectionError) as exc:
+                if not _is_redis_idle_timeout_error(exc):
+                    raise
+                yield ": heartbeat\n\n"
+                continue
             if not events:
                 yield ": heartbeat\n\n"
                 continue

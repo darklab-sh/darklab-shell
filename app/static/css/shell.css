@@ -236,7 +236,7 @@ body.ts-clock .output .shell-prompt-wrap::before {
   top: 0;
   width: var(--output-prefix-width, 0ch);
   padding-right: 1ch;
-  text-align: left;
+  text-align: right;
   color: var(--muted);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -712,6 +712,13 @@ body.mobile-terminal-mode .output-follow-btn {
   display: flex;
   flex-direction: column;
   box-shadow: 0 24px 60px var(--theme-panel-shadow);
+}
+
+.modal-card:focus,
+.modal-card:focus-visible,
+.mobile-sheet-surface:focus,
+.mobile-sheet-surface:focus-visible {
+  outline: none;
 }
 
 #faq-modal {

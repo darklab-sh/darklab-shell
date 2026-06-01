@@ -4291,6 +4291,7 @@ class TestWatchersFoundation:
                 "SELECT status, run_id, reason FROM schedule_fires WHERE schedule_id = ?",
                 (watcher.schedule_id,),
             ).fetchall()
+            schedule_refs = schedule_service.schedule_refs_by_run(conn, ["run_fire"])
 
         assert status == "fired"
         assert refreshed is not None
@@ -4302,6 +4303,9 @@ class TestWatchersFoundation:
         assert [(row["status"], row["run_id"], row["reason"]) for row in schedule_fires] == [
             ("fired", "run_fire", "started watcher run"),
         ]
+        assert schedule_refs["run_fire"]["schedule_id"] == watcher.schedule_id
+        assert schedule_refs["run_fire"]["owner_kind"] == "watcher"
+        assert schedule_refs["run_fire"]["owner_id"] == watcher.id
 
     def test_watcher_full_cycle_captures_first_run_detects_change_notifies_and_accepts_baseline(
         self,
@@ -7402,9 +7406,16 @@ class TestEntrypointWorkspaceRepair:
         assert "for child in \"$session_dir\"/*" in entrypoint
         assert "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child" in entrypoint
         assert "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child" in entrypoint
-        assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
-        assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
-        assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" not in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -print0" in entrypoint
+        assert "xargs -0r chown scanner:appuser" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=recursive-chown path=$session_dir" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type d -print0" in entrypoint
+        assert "xargs -0r chmod 3770" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=recursive-dir-chmod path=$session_dir" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type f -print0" in entrypoint
+        assert "xargs -0r chmod 640" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=recursive-file-chmod path=$session_dir" in entrypoint
 
     def test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
@@ -10183,6 +10194,34 @@ class TestRunBrokerMemoryStore:
         assert events[0].startswith("event: schema\n")
         log_debug.assert_called_once()
         assert log_debug.call_args.args == ("BROKER_STREAM_CLIENT_GONE",)
+
+    def test_stream_run_events_treats_redis_read_timeout_as_idle_heartbeat(self):
+        for timeout_exc in (
+            run_broker.RedisTimeoutError("Timeout reading from socket"),
+            run_broker.RedisConnectionError("Timeout reading from socket"),
+        ):
+            class FakeStore:
+                def __init__(self):
+                    self.waits = 0
+
+                def replay(self, run_id):
+                    assert run_id == "run-1"
+                    return []
+
+                def wait_after(self, run_id, after_id, timeout):
+                    assert run_id == "run-1"
+                    assert after_id == "0-0"
+                    self.waits += 1
+                    if self.waits == 1:
+                        raise timeout_exc
+                    return [run_broker.BrokerEvent("2-0", {"type": "exit", "code": 0})]
+
+            with mock.patch.object(run_broker, "_store", return_value=FakeStore()):
+                events = list(run_broker.stream_run_events("run-1"))
+
+            assert events[0].startswith("event: schema\n")
+            assert events[1] == ": heartbeat\n\n"
+            assert '"type": "exit"' in events[2]
 
     def test_decode_payload_accepts_redis_bytes_fields(self):
         payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})

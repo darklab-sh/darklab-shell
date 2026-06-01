@@ -36,9 +36,15 @@ repair_workspace_root() {
                         || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
                 fi
             done
-            find "$session_dir" -mindepth 1 -exec chown scanner:appuser {} \;
-            find "$session_dir" -mindepth 1 -type d -exec chmod 3770 {} \;
-            find "$session_dir" -mindepth 1 -type f -exec chmod 640 {} \;
+            find "$session_dir" -mindepth 1 -print0 \
+                | xargs -0r chown scanner:appuser 2>/tmp/workspace-repair.err \
+                || echo "WORKSPACE_REPAIR_FAILED stage=recursive-chown path=$session_dir error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+            find "$session_dir" -mindepth 1 -type d -print0 \
+                | xargs -0r chmod 3770 2>/tmp/workspace-repair.err \
+                || echo "WORKSPACE_REPAIR_FAILED stage=recursive-dir-chmod path=$session_dir error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+            find "$session_dir" -mindepth 1 -type f -print0 \
+                | xargs -0r chmod 640 2>/tmp/workspace-repair.err \
+                || echo "WORKSPACE_REPAIR_FAILED stage=recursive-file-chmod path=$session_dir error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
         done
     ' sh {} + || true
 }

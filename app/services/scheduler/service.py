@@ -506,15 +506,27 @@ def list_schedule_fires(schedule_id: str, *, limit: int = 50, offset: int = 0, c
 
 
 def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
+    refs = schedule_refs_by_run(conn, run_ids)
+    return {
+        run_id: str(ref.get("schedule_id") or "")
+        for run_id, ref in refs.items()
+    }
+
+
+def schedule_refs_by_run(conn, run_ids: list[str]) -> dict[str, dict[str, str]]:
     ids = [str(run_id or "") for run_id in run_ids if str(run_id or "").strip()]
     if not ids:
         return {}
     placeholders = ", ".join("?" for _ in ids)
     try:
         rows = conn.execute(
-            "SELECT run_id, schedule_id FROM schedule_fires "  # nosec
-            f"WHERE status = ? AND run_id IN ({placeholders}) "
-            "ORDER BY fired_at DESC, id DESC",
+            "SELECT sf.run_id, sf.schedule_id, sf.owner_kind, sf.owner_id, "  # nosec
+            "s.label AS schedule_label, w.label AS watcher_label "
+            "FROM schedule_fires sf "
+            "LEFT JOIN schedules s ON s.id = sf.schedule_id "
+            "LEFT JOIN watchers w ON sf.owner_kind = 'watcher' AND w.id = sf.owner_id "
+            f"WHERE sf.status = ? AND sf.run_id IN ({placeholders}) "
+            "ORDER BY sf.fired_at DESC, sf.id DESC",
             (FIRE_STATUS_FIRED, *ids),
         ).fetchall()
     except Exception as exc:
@@ -525,12 +537,18 @@ def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
             })
             return {}
         raise
-    schedule_by_run: dict[str, str] = {}
+    schedule_by_run: dict[str, dict[str, str]] = {}
     for row in rows:
         run_id = str(_value(row, "run_id") or "")
         # Rows are newest first, so the first schedule for a run wins.
         if run_id and run_id not in schedule_by_run:
-            schedule_by_run[run_id] = str(_value(row, "schedule_id") or "")
+            schedule_by_run[run_id] = {
+                "schedule_id": str(_value(row, "schedule_id") or ""),
+                "owner_kind": str(_value(row, "owner_kind") or ""),
+                "owner_id": str(_value(row, "owner_id") or ""),
+                "schedule_label": str(_value(row, "schedule_label") or ""),
+                "watcher_label": str(_value(row, "watcher_label") or ""),
+            }
     return schedule_by_run
 
 

@@ -372,13 +372,32 @@ function _historyRunMetaRow(label, value) {
   return row;
 }
 
-function _historyRunScheduleLink(run) {
+function _historyRunScheduleSummary(run) {
+  const scheduleId = String(run?.schedule_id || '').trim();
+  const ownerKind = String(run?.schedule_owner_kind || '').trim();
+  const ownerId = String(run?.schedule_owner_id || run?.watcher_id || '').trim();
+  const isWatcherRun = ownerKind === 'watcher' && ownerId;
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-schedule-summary';
+  const label = document.createElement('span');
+  label.className = 'history-run-schedule-label';
+  const ownerLabel = String(run?.schedule_label || run?.schedule_name || '').trim();
+  label.textContent = ownerLabel || (isWatcherRun ? 'Watcher run' : 'Scheduled run');
+  wrap.appendChild(label);
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn btn-secondary btn-compact history-run-schedule-link';
   btn.dataset.historyRunAction = 'open-schedule';
-  btn.textContent = `scheduled · ${run.schedule_id}`;
-  return btn;
+  btn.textContent = isWatcherRun ? 'View watcher' : 'View schedule';
+  if (isWatcherRun) {
+    btn.title = `Open watcher ${ownerId}`;
+    btn.setAttribute('aria-label', `Open watcher ${ownerId}`);
+  } else if (scheduleId) {
+    btn.title = `Open schedule ${scheduleId}`;
+    btn.setAttribute('aria-label', `Open schedule ${scheduleId}`);
+  }
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 function _historyRunActionButton(label, action, { disabled = false, tone = 'secondary' } = {}) {
@@ -958,7 +977,7 @@ function _renderHistoryRunSummary(body, run) {
     ),
   ];
   if (run.schedule_id) {
-    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', _historyRunScheduleLink(run)));
+    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', _historyRunScheduleSummary(run)));
   }
   summary.append(...summaryRows);
   body.appendChild(summary);
@@ -2121,7 +2140,11 @@ async function _handleHistoryRunModalAction(action) {
     }
   } else if (action === 'open-schedule') {
     closeHistoryRunOverlay();
-    if (run.schedule_id && typeof openSchedulesModal === 'function') {
+    const ownerKind = String(run.schedule_owner_kind || '');
+    const watcherId = String(run.schedule_owner_id || run.watcher_id || '');
+    if (ownerKind === 'watcher' && watcherId && typeof openWatchersModal === 'function') {
+      void openWatchersModal({ watcherId });
+    } else if (run.schedule_id && typeof openSchedulesModal === 'function') {
       void openSchedulesModal({ scheduleId: run.schedule_id });
     }
   } else if (action === 'permalink') {

@@ -141,18 +141,39 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Fix:** Compose starts Redis with `--save ""`, `--appendonly no`, and `--stop-writes-on-bgsave-error no`, keeping Redis ephemeral to match its coordination/cache role while durable app data stays in SQLite/Postgres, `/data`, and workspace volumes.
   - **Tests:** added Compose wiring coverage that pins the read-only Redis service to the ephemeral configuration.
 
+- **Run broker idle Redis timeouts** — quiet command output no longer causes a spurious browser stream-recovery notice or leaves smoke-test warmups without their terminal event when Redis reports an idle read timeout.
+  - **Root cause:** Redis stream reads could time out before the broker heartbeat window, and Redis 8/redis-py may surface that idle blocked-read as either `TimeoutError` or `ConnectionError("Timeout reading from socket")`; both paths could end the HTTP stream even though the command was still healthy.
+  - **Fix:** run and PTY broker streams now treat both Redis idle timeout shapes as idle polls and emit heartbeats instead of closing the browser stream.
+  - **Tests:** added run-broker coverage that treats both Redis timeout exception shapes as idle heartbeats while preserving clean handling for real Redis stream disconnects.
+
+- **Elapsed timestamp gutter stability** — terminal rows no longer shift the prompt left/right when elapsed timestamps resync after blank prompts or command output.
+  - **Fix:** the full prefix resync path now keeps the same reserved elapsed gutter as the append path, and timestamp labels align to the right edge of that gutter so the visible prompt gap stays stable.
+  - **Tests:** added browser-output unit coverage for stable elapsed-prefix width after a full resync.
+
 - **Atlas toolbar dropdown layout** — Atlas export menus now stay anchored and readable from the modal, and the saved-view selector keeps a usable width when it only has the placeholder option.
   - **Tests:** updated Atlas overlay coverage for the portaled export menu and the saved-view selector wrapper.
-- **Workspace cleanup permissions** — inactive workspace cleanup now repairs scanner-owned child directories before removing expired session workspaces, removes empty unreadable direct child directories when recursive repair cannot enter stale tool output, and the container entrypoint repairs immediate workspace children before recursive normalization so stale numeric-UID command output folders become traversable on restart. The entrypoint also repairs an existing `/workspaces` mount when local config points the app there without exporting `WORKSPACE_ROOT`, and startup repair failures now log `WORKSPACE_REPAIR_FAILED` with the failed path and stage. Any remaining cleanup skip logs render the path and reason directly in the log line.
-  - **Tests:** extended workspace cleanup coverage so unreadable expired workspaces are skipped with visible path/reason logging, removable expired workspaces are still evicted, scanner-owned child directories are repaired before cleanup retries, empty unreadable direct child directories can be removed after repair failure, and entrypoint repair pins the immediate-child normalization plus `/workspaces` fallback pass.
+
+- **Run Details schedule summary** — scheduled runs now show a readable `Scheduled run` or `Watcher run` summary with the right owner action instead of wrapping the raw `sch_...` identifier inside the Summary card.
+  - **Tests:** extended Run Details unit coverage so the schedule card keeps the full id out of visible text while preserving it on the schedule action.
+
+- **Schedules and Watchers shortcut focus** — opening Schedules or Watchers from keyboard shortcuts now moves focus into the modal without drawing a selected-card border, so typing cannot leak into the terminal prompt and Escape closes the modal like menu-opened panels.
+  - **Tests:** extended modal unit coverage and the desktop shortcut Playwright coverage for focus, typing, and Escape behavior after shortcut-open.
+
+- **Workspace cleanup permissions** — inactive workspace cleanup now repairs scanner-owned child directories before removing expired session workspaces, removes empty unreadable direct child directories when recursive repair cannot enter stale tool output, and the container entrypoint repairs immediate workspace children before recursive normalization so stale numeric-UID command output folders become traversable on restart. The entrypoint also repairs an existing `/workspaces` mount when local config points the app there without exporting `WORKSPACE_ROOT`, avoids the GNU `find` `{}` error during recursive repair, and startup repair failures now log `WORKSPACE_REPAIR_FAILED` with the failed path and stage. Any remaining cleanup skip logs render the path and reason directly in the log line.
+  - **Tests:** extended workspace cleanup coverage so unreadable expired workspaces are skipped with visible path/reason logging, removable expired workspaces are still evicted, scanner-owned child directories are repaired before cleanup retries, empty unreadable direct child directories can be removed after repair failure, and entrypoint repair pins the immediate-child normalization, `/workspaces` fallback pass, and recursive repair command shape.
+
 - **Findings Board run opens** — clicking **Open** on a Findings Board card now closes the board after handing the source run to Run Details, so the run doesn't open behind the modal.
   - **Tests:** extended the Findings Board unit coverage to assert run opens restore the correct line and dismiss the board.
+
 - **History bulk-select drawer stability** — clicking **Select all** or **Clear** in History bulk mode no longer bubbles into document-level outside-click handlers after the toolbar re-renders.
   - **Tests:** updated the History bulk-selection unit coverage so Select all must keep document click handlers quiet while selecting the visible completed runs.
+
 - **Mobile menu schedule and watcher counts** — the mobile menu now shows saved-count hints for Schedules and Watchers, matching the existing count hints for History and Workflows.
   - **Tests:** updated the mobile menu Playwright coverage to assert Schedules and Watchers render their saved counts.
+
 - **Atlas intel refresh feedback** — Refresh intel now shows a blocking progress panel while configured intel providers run, disables duplicate refresh actions, and uses the same wording from Atlas detail, mobile Atlas, and transcript entity menus.
   - **Tests:** updated the Atlas overlay unit coverage to assert the loading panel and disabled refresh state.
+
 - **Grafana run-duration panel readability** — the example dashboard's top-5 average run-duration panel now uses an instant horizontal bar gauge over the selected dashboard range, so it stays capped at five tools and reads clearly in the Runs section.
 
 ---

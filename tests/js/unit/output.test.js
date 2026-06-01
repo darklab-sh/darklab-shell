@@ -35,6 +35,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     refreshCommandOutcomeSummaries,
     resetHighVolumeOutputState,
     _restoreOutputTailAfterLayout,
+    syncOutputPrefixes,
     _setTsMode,
     _setLnMode,
     buildPromptLabel,
@@ -896,6 +897,24 @@ describe('appendLine', () => {
     _setTsMode('elapsed')
 
     expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
+  })
+
+  it('keeps the elapsed timestamp gutter stable after a full prefix resync', () => {
+    const { appendLine, syncOutputPrefixes, _setTsMode } = loadOutputFns({
+      extraGlobals: {
+        tabs: [{ id: 'tab-1', st: 'idle', rawLines: [], runStart: 0 }],
+      },
+    })
+
+    _setTsMode('elapsed')
+    appendLine('', 'prompt-echo', 'tab-1')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('8ch')
+
+    syncOutputPrefixes()
+
+    expect(document.querySelector('.line.prompt-echo')?.dataset.prefix).toBe('+0.0s')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('8ch')
   })
 
   it('does nothing when there is no output container for the target tab', () => {

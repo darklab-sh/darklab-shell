@@ -234,7 +234,10 @@ function _syncOutputLinePrefixMetadata(out, tab = null) {
   const targetTab = tab || _tabForOutput(out);
   if (targetTab) targetTab._outputLineCounter = maxLineNumber;
   if (out.style) {
-    const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
+    const prefixWidth = Math.max(
+      _prefixWidthForOutput(out),
+      ...prefixStrings.map(s => String(s || '').length),
+    );
     out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
   }
 }

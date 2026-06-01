@@ -271,11 +271,23 @@ function _setSchedulesOpen(open) {
   overlay.classList.toggle('open', !!open);
   overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
   window.syncModalOverlayState?.();
+  if (open) _focusSchedulesModal();
 }
 
 function isSchedulesOverlayOpen() {
   const { overlay } = _scheduleEls();
   return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _focusSchedulesModal() {
+  const modal = document.getElementById('schedules-modal');
+  if (!modal || typeof modal.focus !== 'function' || !isSchedulesOverlayOpen()) return;
+  if (modal.contains(document.activeElement)) return;
+  try {
+    modal.focus({ preventScroll: true });
+  } catch (_) {
+    modal.focus();
+  }
 }
 
 function _normalizeScheduleComparable(data = {}) {
@@ -945,6 +957,7 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
   } finally {
     _schedulesState.loading = false;
     _renderSchedulesModal();
+    _focusSchedulesModal();
     await _loadSchedulePreview({ immediate: true });
     if (_schedulesState.selectedId) await _loadScheduleFires(_schedulesState.selectedId);
   }

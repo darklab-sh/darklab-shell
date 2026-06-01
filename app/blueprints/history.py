@@ -80,7 +80,8 @@ from services.runs.structured_filters import (
     run_matches_structured_filters,
     structured_filters_from_params,
 )
-from services.scheduler.service import schedule_ids_by_run
+from services.scheduler.models import OWNER_KIND_WATCHER
+from services.scheduler.service import schedule_refs_by_run
 from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body
 from services import metrics as app_metrics
 
@@ -90,6 +91,19 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
+
+
+def _apply_schedule_ref(run: dict[str, Any], schedule_ref: dict[str, str] | None) -> None:
+    ref = schedule_ref or {}
+    schedule_id = str(ref.get("schedule_id") or "")
+    owner_kind = str(ref.get("owner_kind") or "")
+    owner_id = str(ref.get("owner_id") or "")
+    run["schedule_id"] = schedule_id
+    run["scheduled"] = bool(schedule_id)
+    run["schedule_owner_kind"] = owner_kind
+    run["schedule_owner_id"] = owner_id
+    run["watcher_id"] = owner_id if owner_kind == OWNER_KIND_WATCHER else ""
+    run["schedule_label"] = str(ref.get("watcher_label" if owner_kind == OWNER_KIND_WATCHER else "schedule_label") or "")
 
 
 def _team_capability_error_response(exc: TeamPermissionDenied):
@@ -1109,7 +1123,7 @@ def get_history():
             [item["id"] for item in paged_runs],
             team_id=owner_scope.team_id,
         )
-        scheduled_by_run = schedule_ids_by_run(conn, [item["id"] for item in paged_runs])
+        scheduled_by_run = schedule_refs_by_run(conn, [item["id"] for item in paged_runs])
         labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         labels_by_snapshot = _entity_labels_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
@@ -1130,9 +1144,7 @@ def get_history():
                 "atlas_entity_count": 0,
                 "atlas_finding_count": 0,
             }))
-            schedule_id = scheduled_by_run.get(str(item["id"]), "")
-            item["schedule_id"] = schedule_id
-            item["scheduled"] = bool(schedule_id)
+            _apply_schedule_ref(item, scheduled_by_run.get(str(item["id"])))
         for item in paged_snapshots:
             item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
             item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
@@ -1733,7 +1745,7 @@ def get_run(run_id):
         findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
         labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
         notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
-        scheduled_by_run = schedule_ids_by_run(conn, [run_id]) if include_private_metadata else {}
+        scheduled_by_run = schedule_refs_by_run(conn, [run_id]) if include_private_metadata else {}
     if not include_private_metadata:
         run["output_entries"] = line_entries_from_events(omit_raw_only_line_entries(run["output_entries"]))
         run["output"] = [
@@ -1756,9 +1768,7 @@ def get_run(run_id):
         "atlas_entity_count": 0,
         "atlas_finding_count": 0,
     }))
-    schedule_id = scheduled_by_run.get(str(run_id), "")
-    run["schedule_id"] = schedule_id
-    run["scheduled"] = bool(schedule_id)
+    _apply_schedule_ref(run, scheduled_by_run.get(str(run_id)))
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,

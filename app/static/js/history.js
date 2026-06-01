@@ -1589,8 +1589,13 @@ function _historyRenderPanelData(data) {
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          const scheduleId = event.currentTarget?.dataset?.scheduleId || run.schedule_id || '';
-          if (scheduleId && typeof openSchedulesModal === 'function') {
+          const target = event.currentTarget;
+          const ownerKind = target?.dataset?.scheduleOwnerKind || run.schedule_owner_kind || '';
+          const watcherId = target?.dataset?.scheduleOwnerId || run.schedule_owner_id || run.watcher_id || '';
+          const scheduleId = target?.dataset?.scheduleId || run.schedule_id || '';
+          if (ownerKind === 'watcher' && watcherId && typeof openWatchersModal === 'function') {
+            void openWatchersModal({ watcherId });
+          } else if (scheduleId && typeof openSchedulesModal === 'function') {
             void openSchedulesModal({ scheduleId });
           }
         },

@@ -641,10 +641,13 @@ describe('history panel actions', () => {
           })
         }
         if (url === '/history/run-1?json&preview=1') {
+          const scheduleId = 'sch_c38d8b4eee00d435b91d1d7791e5ff70c'
           return Promise.resolve({
             json: () =>
               Promise.resolve({
                 command: 'ping darklab.sh',
+                schedule_id: scheduleId,
+                scheduled: true,
                 output: ['ok'],
                 output_entries: [{ text: 'ok', cls: '' }],
                 command_outcome_summary: {
@@ -924,6 +927,11 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-subtitle').textContent).toBe('ping darklab.sh')
+    const scheduleSummary = document.querySelector('.history-run-schedule-summary')
+    expect(scheduleSummary?.textContent).toBe('Scheduled runView schedule')
+    expect(scheduleSummary?.textContent).not.toContain('sch_c38d8b4eee00d435b91d1d7791e5ff70c')
+    expect(scheduleSummary?.querySelector('[data-history-run-action="open-schedule"]')?.getAttribute('title'))
+      .toBe('Open schedule sch_c38d8b4eee00d435b91d1d7791e5ff70c')
     expect([...document.querySelectorAll('.history-run-tab')].map(tab => tab.textContent)).toEqual([
       'Summary',
       'Output',

@@ -609,6 +609,21 @@ body #history-panel { background: var(--theme-chrome-bg); }
   overflow-wrap: anywhere;
 }
 
+.history-run-schedule-summary {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.history-run-schedule-label {
+  line-height: 1.3;
+}
+
+.history-run-schedule-link {
+  width: fit-content;
+}
+
 .history-run-section {
   display: flex;
   flex: 0 0 auto;

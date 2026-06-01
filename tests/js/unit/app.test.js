@@ -35,7 +35,7 @@ function loadSchedulesModalTestFns({
 } = {}) {
   document.body.innerHTML = `
     <div id="schedules-overlay" class="u-hidden">
-      <div id="schedules-modal">
+      <div id="schedules-modal" tabindex="-1">
         <button class="schedules-close" type="button"></button>
         <button id="schedules-new-btn" type="button"></button>
         <button id="schedules-refresh-btn" type="button"></button>
@@ -56,10 +56,11 @@ function loadSchedulesModalTestFns({
       showToast,
       openHistoryRunDetails,
       fetchAndRenderHistoryComparison,
+      _closeMajorOverlays: vi.fn(),
       bindDismissible,
       refocusComposerAfterAction: vi.fn(),
     },
-    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, closeSchedulesModal })',
+    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, openSchedulesModal, closeSchedulesModal })',
   )
   return {
     ...fns,
@@ -83,7 +84,7 @@ function loadWatchersModalTestFns({
 } = {}) {
   document.body.innerHTML = `
     <div id="watchers-overlay" class="u-hidden">
-      <div id="watchers-modal">
+      <div id="watchers-modal" tabindex="-1">
         <button class="watchers-close" type="button"></button>
         <button id="watchers-new-btn" type="button"></button>
         <button id="watchers-refresh-btn" type="button"></button>
@@ -533,14 +534,15 @@ describe('app helpers', () => {
     })
     const showToast = vi.fn()
     const fetchAndRenderHistoryComparison = vi.fn()
-    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({
+    const { _bindSchedulesModal, openSchedulesModal } = loadSchedulesModalTestFns({
       apiFetch,
       showToast,
       fetchAndRenderHistoryComparison,
     })
     _bindSchedulesModal()
 
-    await refreshSchedulesModal()
+    await openSchedulesModal()
+    expect(document.activeElement).toBe(document.getElementById('schedules-modal'))
     await vi.waitFor(() => expect(document.getElementById('schedules-detail').textContent).toContain('Action schedule'))
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Pause').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule paused', 'success'))
@@ -709,6 +711,7 @@ describe('app helpers', () => {
     _bindWatchersModal()
 
     await openWatchersModal({ baselineRun: { id: 'run_base', command: 'nmap -sV darklab.sh' } })
+    expect(document.activeElement).toBe(document.getElementById('watchers-modal'))
     await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
     const baselineHelp = document.querySelector('.watchers-help-trigger')
     expect(baselineHelp.textContent).toBe('?')
