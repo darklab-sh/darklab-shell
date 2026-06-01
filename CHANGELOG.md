@@ -146,6 +146,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Tour sample tab output routing** — commands launched from a `tour` sample chip now keep their prompt echo and live output in the sample tab while the tour waits in its original tab.
+  - **Fix:** the local-command capture wrapper now only captures output, command echoes, status updates, and client-run persistence for the tab that started the local command, forwarding other tabs normally.
+  - **Tests:** added runner unit coverage for a pending tour with a second tab streaming command output.
+
 - **Scheduled active-run auto-attach** — scheduled and watcher-fired commands that are still running when the UI opens now remain in Status Monitor instead of automatically taking over the terminal.
   - **Fix:** `/history/active` filters scheduled active runs by default for browser reload recovery, while Status Monitor requests the inclusive active-run list so **Attach** and **Kill** still work for automation-owned commands.
   - **Tests:** added schedule route coverage for default vs inclusive active-run responses, plus runner/status monitor unit coverage for scheduled restore skips and inclusive manual-attach recovery.

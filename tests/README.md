@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,484
+- behavior tests: 3,485
 - docs/inventory meta-tests: 34
 - `pytest`: 1965 (1931 behavior + 34 meta)
-- `vitest`: 1318
+- `vitest`: 1319
 - `playwright`: 258
-- total: 3,541
+- total: 3,542
 
 This document is organized in two parts:
 
@@ -3009,6 +3009,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
 | `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
 | `routes tour commands to the client-side tour handler` | Verifies that `tour` terminal commands are handled by the client tour renderer instead of going to the backend run path. |
+| `keeps another tab output visible while the tour is waiting` | Verifies that a pending terminal tour does not capture prompt echo or live output from a command running in another tab. |
 | `scrubs accidental secret set values before history, echo, and client persistence` | Verifies that accidental `secret set NAME VALUE` input is reduced to `secret set NAME` before recall history, transcript echo, and client-run persistence. |
 | `routes exit and quit commands to tab close without persisting a run` | Verifies that `exit` and `quit` close the active tab directly without adding history entries or posting client-side run artifacts. |
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |

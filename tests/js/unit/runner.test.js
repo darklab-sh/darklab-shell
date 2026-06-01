@@ -595,6 +595,40 @@ describe('client-side UI command pipe helpers', () => {
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
 
+  it('keeps another tab output visible while the tour is waiting', async () => {
+    let finishTour
+    const tourPromise = new Promise(resolve => { finishTour = resolve })
+    const handleTourCommand = vi.fn(() => tourPromise)
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs') return new Promise(() => {})
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+    })
+    const { submitCommand, _handleRunStreamMessage, activateTab } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+      activeTabId: 'tab-1',
+      appendLine,
+      apiFetch,
+      handleTourCommand,
+    })
+
+    submitCommand('tour')
+    await vi.waitFor(() => expect(handleTourCommand).toHaveBeenCalledWith('tour', 'tab-1'))
+
+    activateTab('tab-2')
+    submitCommand('ping darklab.sh')
+    _handleRunStreamMessage({ type: 'output', text: '64 bytes from darklab.sh' }, 'tab-2', {})
+
+    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', null, null)
+    expect(appendLine).toHaveBeenCalledWith('64 bytes from darklab.sh', '', 'tab-2', null)
+
+    finishTour(true)
+    await flushPromises()
+  })
+
   it('scrubs accidental secret set values before history, echo, and client persistence', async () => {
     const secretValue = 'plain-secret-value'
     const addToHistory = vi.fn()
@@ -801,10 +835,12 @@ function loadRunnerFns({
     if (dot) dot.className = `tab-status ${nextStatus}`
   })
   const clearTab = clearTabOverride || vi.fn()
+  let setRuntimeActiveTabIdForTest = null
   const activateTab = vi.fn((id) => {
     const tab = normalizedTabs.find((t) => t.id === id)
     if (tab) {
       activeTabId = id
+      if (typeof setRuntimeActiveTabIdForTest === 'function') setRuntimeActiveTabIdForTest(id)
       status.className = 'status-pill running'
       status.textContent = 'RUNNING'
     }
@@ -957,9 +993,11 @@ function loadRunnerFns({
     _clearStalledTimeout,
     _recoverStalledRun,
     _getPendingKillTabId: () => pendingKillTabId,
+    __setActiveTabIdForTest: (id) => { activeTabId = id; setActiveTabId(id); },
     }`,
     `${runnerInitCode}\nsetTabs(tabs); setActiveTabId(activeTabId);`,
   )
+  setRuntimeActiveTabIdForTest = fns.__setActiveTabIdForTest
 
   return {
     ...fns,
@@ -971,6 +1009,7 @@ function loadRunnerFns({
     setTabLabel,
     setTabStatus,
     clearTab,
+    activateTab,
     closeTab: closeTabOverride,
     cancelWelcome,
     showToast,

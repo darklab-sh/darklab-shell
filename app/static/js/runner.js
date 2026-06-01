@@ -1676,12 +1676,12 @@ function _finalizeClientSideCommandStatus(tabId, statusValue) {
   if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: exitCode });
 }
 
-function _persistClientSideRun(command, lineItems, statusValue) {
-  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, activeTabId);
+function _persistClientSideRun(command, lineItems, statusValue, tabId = activeTabId) {
+  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, tabId);
 }
 
-function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
-  _persistClientSideRun(command, lineItems, statusValue);
+function _persistSessionTokenRun(command, lineItems, statusValue = 'ok', tabId = activeTabId) {
+  _persistClientSideRun(command, lineItems, statusValue, tabId);
 }
 
 function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentValueCount = 0) {
@@ -2898,6 +2898,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   const originalAppendCommandEcho = appendCommandEcho;
   const originalRecordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
   const originalPersistSessionTokenRun = _persistSessionTokenRun;
+  const originalPersistClientSideRun = _persistClientSideRun;
   const originalSetStatus = setStatus;
   let finalStatus = 'idle';
   const tab = typeof getTab === 'function' ? getTab(tabId) : null;
@@ -2909,18 +2910,30 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
   appendCommandEcho(cmd, tabId);
   try {
-    appendCommandEcho = () => {};
     _recordSuccessfulLocalCommand = () => {};
     _persistSessionTokenRun = () => {};
+    _persistClientSideRun = () => {};
     setStatus = (statusValue) => {
-      finalStatus = statusValue;
+      if (typeof activeTabId === 'undefined' || activeTabId === tabId) {
+        finalStatus = statusValue;
+      }
       originalSetStatus(statusValue);
     };
-    appendLine = (text, cls = '', lineTabId = tabId, metadata = null) => {
+    appendCommandEcho = (echoCommand, echoTabId = null) => {
+      const targetTabId = echoTabId || (typeof activeTabId !== 'undefined' ? activeTabId : tabId);
+      if (targetTabId === tabId) return;
+      originalAppendCommandEcho(echoCommand, echoTabId);
+    };
+    appendLine = (text, cls = '', lineTabId = null, metadata = null) => {
+      const targetTabId = lineTabId || (typeof activeTabId !== 'undefined' ? activeTabId : tabId);
+      if (targetTabId !== tabId) {
+        originalAppendLine(text, cls, lineTabId, metadata);
+        return;
+      }
       capturedLines.push({
         text: String(text ?? ''),
         cls: String(cls || ''),
-        tabId: lineTabId,
+        tabId: targetTabId,
         metadata,
       });
     };
@@ -2931,6 +2944,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     appendCommandEcho = originalAppendCommandEcho;
     _recordSuccessfulLocalCommand = originalRecordSuccessfulLocalCommand;
     _persistSessionTokenRun = originalPersistSessionTokenRun;
+    _persistClientSideRun = originalPersistClientSideRun;
     setStatus = originalSetStatus;
   }
 
@@ -2946,7 +2960,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   if (!_pendingTerminalConfirm) {
     _finalizeClientSideCommandStatus(tabId, finalStatus);
     if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, outputLines, finalStatus);
+    _persistClientSideRun(cmd, outputLines, finalStatus, tabId);
   } else if (typeof setTabStatus === 'function') {
     setTabStatus(tabId, finalStatus === 'fail' ? 'fail' : 'idle');
   }
