@@ -335,6 +335,177 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   text-align: left;
 }
 
+.atlas-import-overlay {
+  z-index: 9;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--theme-bg) 54%, transparent);
+}
+
+.atlas-import-overlay:not(.u-hidden) {
+  display: flex;
+}
+
+.atlas-import-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 72px));
+  max-height: min(720px, calc(100vh - 72px));
+  overflow: hidden;
+}
+
+.atlas-import-subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.atlas-import-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.atlas-import-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.atlas-import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.atlas-import-grid .form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.atlas-import-grid .form-field > span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.atlas-import-file-field {
+  grid-column: 1 / -1;
+}
+
+.atlas-import-actions,
+.atlas-import-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.atlas-import-footer {
+  justify-content: flex-end;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--theme-panel-border);
+  background: var(--theme-panel-bg);
+}
+
+.atlas-import-count-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.atlas-import-count {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.atlas-import-count-value {
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.atlas-import-count-label,
+.atlas-import-sample-title,
+.atlas-import-option-label {
+  color: var(--theme-text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.atlas-import-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.atlas-import-option {
+  align-items: flex-start;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 6px;
+  background: var(--theme-panel-bg);
+}
+
+.atlas-import-option > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.atlas-import-option-note {
+  display: block;
+  font-size: 12px;
+}
+
+.atlas-import-samples {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.atlas-import-sample {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.atlas-import-sample-list,
+.atlas-import-warning-list {
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.atlas-import-sample-row,
+.atlas-import-warning-row {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.atlas-import-result {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+
 .atlas-orphan-filter {
   width: 100%;
   min-width: 0;

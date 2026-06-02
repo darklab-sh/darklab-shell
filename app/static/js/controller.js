@@ -284,6 +284,7 @@ function setupModalFocusTraps() {
     'command-registry-modal',
     'provider-status-modal',
     'findings-board-modal',
+    'atlas-import-modal',
     'project-workspace-modal',
     'project-target-editor-modal',
     'project-package-manifest-modal',

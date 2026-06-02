@@ -31,6 +31,7 @@ from . import (
     v0024_team_scope_atlas,
     v0025_team_scope_workspace_metadata,
     v0026_project_auto_promote_rules,
+    v0027_atlas_import_sources,
 )
 from .runner import Migration
 
@@ -61,4 +62,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0024_team_scope_atlas.MIGRATION,
     v0025_team_scope_workspace_metadata.MIGRATION,
     v0026_project_auto_promote_rules.MIGRATION,
+    v0027_atlas_import_sources.MIGRATION,
 )

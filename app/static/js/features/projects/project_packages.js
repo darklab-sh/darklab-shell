@@ -336,6 +336,45 @@
       return !!(ctx.wizardOverlay && ctx.wizardOverlay.classList.contains('open'));
     }
 
+    function updateWizardField(field, value) {
+      if (!wizard) return false;
+      if (field === 'name') {
+        wizard.name = String(value || '');
+        wizard.nameTouched = true;
+        return true;
+      }
+      if (field === 'description') {
+        wizard.description = String(value || '');
+        wizard.descriptionTouched = true;
+        return true;
+      }
+      if (field === 'labels') {
+        wizard.labels = String(value || '');
+        wizard.labelsTouched = true;
+        return true;
+      }
+      if (field === 'notes') {
+        wizard.notes = String(value || '');
+        wizard.notesTouched = true;
+        return true;
+      }
+      return false;
+    }
+
+    function syncVisibleWizardFields() {
+      if (!wizard || !ctx.wizardBody) return;
+      ctx.wizardBody.querySelectorAll('[data-project-package-field]').forEach((fieldEl) => {
+        const field = String(fieldEl.dataset.projectPackageField || '');
+        if (field === 'redaction_mode') {
+          const mode = String(fieldEl.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
+          wizard.redactionMode = mode;
+          wizard.redactionTouched = true;
+          return;
+        }
+        updateWizardField(field, fieldEl.value);
+      });
+    }
+
     function hideWizardOverlay() {
       if (!ctx.wizardOverlay) return;
       ctx.wizardOverlay.classList.add('u-hidden');
@@ -390,6 +429,7 @@
 
     function reapplyPresetDefaults(projectId, { preserveTouched = true } = {}) {
       if (!wizard || !isWizardActive(projectId)) return;
+      syncVisibleWizardFields();
       const previous = wizard;
       const refreshed = presetDefaults(previous.preset, summaryFor(projectId), ctx.projectFindingItems(projectId));
       refreshed.step = previous.step || refreshed.step;
@@ -1363,6 +1403,7 @@
 
     async function createFromWizard(projectId) {
       if (!wizard) return;
+      syncVisibleWizardFields();
       const body = payload();
       if (!body.name) {
         ctx.setProjectWorkspaceMessage?.('Package name is required.', { error: true });
@@ -1587,22 +1628,7 @@
       const packageField = event.target.closest?.('[data-project-package-field]');
       if (!packageField || !wizard) return false;
       const field = String(packageField.dataset.projectPackageField || '');
-      if (field === 'name') {
-        wizard.name = String(packageField.value || '');
-        wizard.nameTouched = true;
-      }
-      if (field === 'description') {
-        wizard.description = String(packageField.value || '');
-        wizard.descriptionTouched = true;
-      }
-      if (field === 'labels') {
-        wizard.labels = String(packageField.value || '');
-        wizard.labelsTouched = true;
-      }
-      if (field === 'notes') {
-        wizard.notes = String(packageField.value || '');
-        wizard.notesTouched = true;
-      }
+      updateWizardField(field, packageField.value);
       if (field === 'redaction_mode') {
         const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
         wizard.redactionMode = mode;
@@ -1700,6 +1726,7 @@
       }
       if (action === 'package-wizard-back') {
         if (wizard) {
+          syncVisibleWizardFields();
           wizard.step = Math.max(1, wizard.step - 1);
           wizard.notice = '';
         }
@@ -1740,6 +1767,7 @@
       }
       if (action === 'package-wizard-next') {
         if (!wizard) return true;
+        syncVisibleWizardFields();
         if (wizard.step >= 4) {
           await createFromWizard(projectId);
           return true;

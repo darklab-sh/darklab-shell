@@ -587,7 +587,9 @@ def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
     if path.exists() and path.is_file():
         target_mode = WORKSPACE_COMMAND_WRITE_FILE_MODE if mode in {"write", "read_write"} else WORKSPACE_FILE_MODE
         try:
-            os.chmod(path, target_mode)
+            _chmod_workspace_entry(path, target_mode)
+        except WorkspacePermissionDenied:
+            raise
         except OSError as exc:
             log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, target_mode, exc)
 

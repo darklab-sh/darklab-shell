@@ -890,6 +890,47 @@ test.describe('project workspace modal', () => {
     await expect(editor.locator('[data-project-auto-promote-field="include_suppressed"]')).not.toBeChecked()
   })
 
+  test('imports a small Nuclei JSONL file into Atlas from the browser', async ({ page }) => {
+    test.setTimeout(60_000)
+    const target = `import-${Date.now()}.atlas-e2e.test`
+    const payload = `${JSON.stringify({
+      'template-id': 'http/e2e-missing-header',
+      'matched-at': `https://${target}/login`,
+      info: {
+        name: 'E2E Nuclei Header Missing',
+        severity: 'medium',
+        description: 'Header is missing in the uploaded report.',
+      },
+      'matcher-name': 'header',
+    })}\n`
+
+    await page.locator('.rail-nav [data-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('#atlas-import-btn').click()
+    await expect(page.locator('#atlas-import-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('#atlas-import-format').selectOption('nuclei_jsonl')
+    await page.locator('#atlas-import-name').fill('Playwright Nuclei import')
+    await page.locator('#atlas-import-file').setInputFiles({
+      name: 'nuclei-e2e.jsonl',
+      mimeType: 'application/jsonl',
+      buffer: Buffer.from(payload, 'utf8'),
+    })
+    await page.locator('#atlas-import-preview-btn').click()
+    await expect(page.locator('#atlas-import-status')).toContainText('Preview ready', { timeout: 15_000 })
+    await expect(page.locator('#atlas-import-preview')).toContainText('E2E Nuclei Header Missing')
+    await expect(page.locator('[data-atlas-import-option="import_findings"]')).toBeChecked()
+    await page.locator('#atlas-import-apply').click()
+    await expect(page.locator('#permalink-toast')).toContainText('Atlas import applied', { timeout: 15_000 })
+    await expect(page.locator('#atlas-list')).toContainText('E2E Nuclei Header Missing', { timeout: 15_000 })
+    await page.locator('#atlas-import-close').click()
+    await expect(page.locator('#atlas-import-overlay')).not.toHaveClass(/\bopen\b/)
+    const importedFinding = page.locator('.atlas-finding-queue-row', { hasText: 'E2E Nuclei Header Missing' }).first()
+    await importedFinding.click()
+    await expect(page.locator('#atlas-detail')).toContainText('Import sources', { timeout: 15_000 })
+    await expect(page.locator('#atlas-detail')).toContainText('Playwright Nuclei import')
+    await expect(page.locator('#atlas-detail')).toContainText('Also seen in Nuclei JSONL import')
+  })
+
   test('creates, edits, downloads, and deletes a project evidence package', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     await openProjectsModal(page)

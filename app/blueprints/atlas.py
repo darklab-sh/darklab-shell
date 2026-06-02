@@ -14,6 +14,7 @@ from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.projects import preferences as project_preferences
 from services.atlas.intel_bridge import refresh_entity_intel
+from services.atlas.import_workflow import AtlasImportError, apply_atlas_import, preview_atlas_import
 from services.atlas.cleanup import (
     atlas_entity_delete_preview,
     atlas_finding_delete_preview,
@@ -62,6 +63,7 @@ ATLAS_SAVED_VIEW_FILTER_VALUES = {"hide", "all", "only"}
 ATLAS_SAVED_VIEW_MAX_COUNT = 30
 ATLAS_SAVED_VIEW_NAME_MAX_LEN = 60
 ATLAS_SAVED_VIEW_ID_RE = re.compile(r"^atv_[0-9a-f]{16,32}$")
+ATLAS_IMPORT_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 
 
 def _atlas_write_limit():
@@ -74,6 +76,38 @@ def _parse_int(value, default, *, minimum=0, maximum=200):
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _atlas_import_max_upload_bytes() -> int:
+    try:
+        configured_mb = int(CFG.get("atlas_import_max_upload_mb", 10))
+    except (TypeError, ValueError):
+        configured_mb = 10
+    return max(1, configured_mb) * 1024 * 1024
+
+
+def _atlas_import_request_limit_bytes() -> int:
+    return _atlas_import_max_upload_bytes() + ATLAS_IMPORT_MULTIPART_OVERHEAD_BYTES
+
+
+def _atlas_import_request_too_large_response(session_id, scope, member):
+    content_length = request.content_length
+    request_limit = _atlas_import_request_limit_bytes()
+    if content_length is None or content_length <= request_limit:
+        return None
+    max_upload_bytes = _atlas_import_max_upload_bytes()
+    log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
+        **_atlas_import_scope_fields(session_id, scope, member),
+        "reason": "request_too_large",
+        "content_length": int(content_length),
+        "max_upload_bytes": max_upload_bytes,
+        "request_limit_bytes": request_limit,
+        "status": 413,
+    })
+    return jsonify({
+        "error": "invalid_import_file",
+        "message": f"Import file exceeds the configured {max_upload_bytes} byte limit.",
+    }), 413
 
 
 def _atlas_permission_error_response(exc):
@@ -92,6 +126,142 @@ def _atlas_request_scope_response(session_id, required_capability=None):
         except TeamPermissionDenied as exc:
             return None, _atlas_permission_error_response(exc)
     return scope, None
+
+
+def _atlas_import_error_response(exc):
+    return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+
+
+def _atlas_import_option_flags(options):
+    raw = options if isinstance(options, dict) else {}
+    return {
+        "import_entities": bool(raw.get("import_entities")),
+        "import_findings": bool(raw.get("import_findings")),
+        "link_to_project": bool(raw.get("link_to_project")),
+        "create_project_targets": bool(raw.get("create_project_targets")),
+    }
+
+
+def _atlas_import_option_log_fields(options):
+    flags = _atlas_import_option_flags(options)
+    return {
+        **flags,
+        **{f"option_{key}": value for key, value in flags.items()},
+    }
+
+
+def _atlas_import_scope_fields(session_id, scope, member):
+    return {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": scope.team_id if scope else "",
+        "actor_member_id": str(member.get("id") or ""),
+        "actor_role": str(member.get("role") or ""),
+    }
+
+
+def _atlas_import_source_tool_key(value):
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    return normalized.strip("_")[:64]
+
+
+def _atlas_import_preview_log_fields(session_id, scope, member):
+    upload = request.files.get("file")
+    return {
+        **_atlas_import_scope_fields(session_id, scope, member),
+        "format_id": str(request.form.get("format_id") or "")[:64],
+        "source_tool_key": _atlas_import_source_tool_key(request.form.get("source_tool")),
+        "has_file": upload is not None,
+        "filename_present": bool(upload and upload.filename),
+        "content_length": int(request.content_length or 0),
+    }
+
+
+def _atlas_import_count_log_fields(counts):
+    raw = counts if isinstance(counts, dict) else {}
+    fields = {}
+    for key in (
+        "rows",
+        "valid",
+        "skipped",
+        "warnings",
+        "new",
+        "updated",
+        "entity_valid",
+        "entity_new",
+        "entity_duplicate",
+        "finding_valid",
+        "finding_new",
+        "finding_duplicate",
+        "finding_subject_entities_to_create",
+        "project_target_candidates",
+        "entities_created",
+        "entities_updated",
+        "findings_created",
+        "findings_updated",
+        "entity_links",
+        "finding_occurrences",
+        "project_links_added",
+        "project_links_existing",
+        "project_targets_created",
+        "project_targets_existing",
+    ):
+        if key in raw:
+            try:
+                fields[key] = int(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                fields[key] = 0
+    return fields
+
+
+def _log_atlas_import_preview_rejected(exc, *, session_id, scope, member):
+    log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
+        **_atlas_import_preview_log_fields(session_id, scope, member),
+        "reason": exc.code,
+        "status": exc.status_code,
+    })
+
+
+def _log_atlas_import_preview_succeeded(result, *, session_id, scope, member):
+    result = result if isinstance(result, dict) else {}
+    log.info("ATLAS_IMPORT_PREVIEW_SUCCEEDED", extra={
+        **_atlas_import_preview_log_fields(session_id, scope, member),
+        "draft_id": str(result.get("draft_id") or ""),
+        "expires_at": str(result.get("expires_at") or ""),
+        **_atlas_import_count_log_fields(result.get("counts")),
+    })
+
+
+def _log_atlas_import_apply_succeeded(result, *, session_id, scope, member, payload, options):
+    result = result if isinstance(result, dict) else {}
+    counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+    log.info("ATLAS_IMPORT_APPLY_SUCCEEDED", extra={
+        **_atlas_import_scope_fields(session_id, scope, member),
+        "draft_id": str(payload.get("draft_id") or "") if isinstance(payload, dict) else "",
+        "batch_id": str(result.get("batch_id") or ""),
+        "project_id": str(payload.get("project_id") or "") if isinstance(payload, dict) else "",
+        "already_applied": bool(result.get("already_applied")),
+        "format_id": str(result.get("format_id") or ""),
+        **_atlas_import_option_log_fields(options),
+        **_atlas_import_count_log_fields(counts),
+    })
+
+
+def _log_atlas_import_apply_rejected(exc, *, session_id, scope, member, payload, options):
+    project_id = str(payload.get("project_id") or "") if isinstance(payload, dict) else ""
+    log.warning("ATLAS_IMPORT_APPLY_REJECTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": scope.team_id if scope else "",
+        "actor_member_id": str(member.get("id") or ""),
+        "actor_role": str(member.get("role") or ""),
+        "draft_id": str(payload.get("draft_id") or "") if isinstance(payload, dict) else "",
+        "project_id": project_id,
+        "project_present": bool(project_id),
+        "reason": exc.code,
+        "status": exc.status_code,
+        **_atlas_import_option_log_fields(options),
+    })
 
 
 def _normalize_finding_ids(values):
@@ -371,6 +541,93 @@ def atlas_saved_view_delete(view_id):
         "view_id": normalized_id,
     })
     return jsonify({"ok": True, "views": kept})
+
+
+@atlas_bp.route("/atlas/imports/preview", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_import_preview():
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    scope, error_response = _atlas_request_scope_response(session_id)
+    if error_response:
+        return error_response
+    member = (scope.member or {}) if scope else {}
+    oversized_response = _atlas_import_request_too_large_response(session_id, scope, member)
+    if oversized_response is not None:
+        return oversized_response
+    upload = request.files.get("file")
+    if upload is None:
+        log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
+            **_atlas_import_preview_log_fields(session_id, scope, member),
+            "reason": "file_required",
+            "status": 400,
+        })
+        return jsonify({"error": "file_required", "message": "An import file is required."}), 400
+    try:
+        result = preview_atlas_import(
+            session_id=session_id,
+            team_id=scope.team_id if scope else "",
+            actor_member_id=str(member.get("id") or ""),
+            role=str(member.get("role") or ""),
+            file_content=upload.stream,
+            filename=upload.filename or "",
+            format_id=str(request.form.get("format_id") or ""),
+            source_tool=str(request.form.get("source_tool") or ""),
+            import_name=str(request.form.get("import_name") or ""),
+        )
+    except AtlasImportError as exc:
+        _log_atlas_import_preview_rejected(exc, session_id=session_id, scope=scope, member=member)
+        return _atlas_import_error_response(exc)
+    _log_atlas_import_preview_succeeded(result, session_id=session_id, scope=scope, member=member)
+    return jsonify(result)
+
+
+@atlas_bp.route("/atlas/imports/apply", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_import_apply():
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    scope, error_response = _atlas_request_scope_response(session_id)
+    if error_response:
+        return error_response
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_json", "message": "Apply payload must be a JSON object."}), 400
+    member = (scope.member or {}) if scope else {}
+    raw_options = payload.get("options")
+    apply_options = raw_options if isinstance(raw_options, dict) else {}
+    try:
+        result = apply_atlas_import(
+            session_id=session_id,
+            team_id=scope.team_id if scope else "",
+            actor_member_id=str(member.get("id") or ""),
+            role=str(member.get("role") or ""),
+            draft_id=str(payload.get("draft_id") or ""),
+            row_set_digest=str(payload.get("row_set_digest") or payload.get("normalized_rows_sha256") or ""),
+            options=apply_options,
+            project_id=str(payload.get("project_id") or ""),
+        )
+    except AtlasImportError as exc:
+        _log_atlas_import_apply_rejected(
+            exc,
+            session_id=session_id,
+            scope=scope,
+            member=member,
+            payload=payload,
+            options=apply_options,
+        )
+        return _atlas_import_error_response(exc)
+    _log_atlas_import_apply_succeeded(
+        result,
+        session_id=session_id,
+        scope=scope,
+        member=member,
+        payload=payload,
+        options=apply_options,
+    )
+    return jsonify(result)
 
 
 @atlas_bp.route("/atlas/runs")

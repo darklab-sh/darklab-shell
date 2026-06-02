@@ -190,6 +190,7 @@ def atlas_run_cleanup_preview(
         "  WHERE other_fo.finding_id = f.id "
         "  AND other_fo.run_id NOT IN (SELECT id FROM atlas_cleanup_run_ids)"
         ") "
+        "AND NOT EXISTS (SELECT 1 FROM atlas_finding_import_occurrences import_fo WHERE import_fo.finding_id = f.id) "
         "AND NOT EXISTS (SELECT 1 FROM atlas_cleanup_excluded_findings excluded WHERE excluded.id = f.id) "
     )
     finding_params = [session_id]
@@ -222,6 +223,7 @@ def atlas_run_cleanup_preview(
         "  WHERE other_erl.entity_id = e.id "
         "  AND other_erl.run_id NOT IN (SELECT id FROM atlas_cleanup_run_ids)"
         ") "
+        "AND NOT EXISTS (SELECT 1 FROM atlas_entity_import_links import_erl WHERE import_erl.entity_id = e.id) "
         "AND NOT EXISTS (SELECT 1 FROM atlas_cleanup_excluded_entities excluded WHERE excluded.id = e.id) "
     )
     entity_params = [session_id]
@@ -291,6 +293,10 @@ def delete_atlas_findings(conn, session_id: str, finding_ids: list[str] | tuple[
         f"DELETE FROM findings_occurrences WHERE finding_id IN ({owned_placeholders})",  # nosec
         owned,
     )
+    conn.execute(
+        f"DELETE FROM atlas_finding_import_occurrences WHERE finding_id IN ({owned_placeholders})",  # nosec
+        owned,
+    )
     cur = conn.execute(
         f"DELETE FROM findings WHERE session_id = ? AND id IN ({owned_placeholders})",  # nosec
         [session_id, *owned],
@@ -345,6 +351,10 @@ def delete_atlas_entities(conn, session_id: str, entity_ids: list[str] | tuple[s
         delete_text_body(row["data_json"])
     conn.execute(
         f"DELETE FROM entity_run_links WHERE entity_id IN ({owned_placeholders})",  # nosec
+        owned,
+    )
+    conn.execute(
+        f"DELETE FROM atlas_entity_import_links WHERE entity_id IN ({owned_placeholders})",  # nosec
         owned,
     )
     cur = conn.execute(

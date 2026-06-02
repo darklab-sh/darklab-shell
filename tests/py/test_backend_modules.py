@@ -34,7 +34,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import IO, cast
 
 import pytest
 import yaml
@@ -94,6 +94,14 @@ from services.runs.output_store import (
     load_run_output_events_for_run,
 )
 from services.atlas.materializer import materialize_run_entities
+from services.atlas.import_sources import (
+    insert_import_batch,
+    insert_import_draft,
+    upsert_entity_import_link,
+    upsert_finding_import_occurrence,
+)
+from services.atlas.import_parser import ImportParseError, ImportParserLimits, parse_import_file
+from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.workspace.files import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
     cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
@@ -2919,6 +2927,10 @@ class TestPostgresMigrations:
         "run_file_artifacts",
         "findings",
         "findings_occurrences",
+        "atlas_import_drafts",
+        "atlas_import_batches",
+        "atlas_entity_import_links",
+        "atlas_finding_import_occurrences",
         "entity_labels",
         "entity_notes",
         "evidence_packages",
@@ -2997,6 +3009,7 @@ class TestPostgresMigrations:
             "0024",
             "0025",
             "0026",
+            "0027",
         ]
         for table_name in (
             "runs",
@@ -3031,6 +3044,10 @@ class TestPostgresMigrations:
             "run_file_artifacts",
             "findings",
             "findings_occurrences",
+            "atlas_import_drafts",
+            "atlas_import_batches",
+            "atlas_entity_import_links",
+            "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
             "evidence_packages",
@@ -3101,6 +3118,8 @@ class TestPostgresMigrations:
         assert "occurrence_count" in postgres_sql
         assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
         assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in postgres_sql
+        assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
+        assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in postgres_sql
 
     def test_postgres_search_migration_adds_trigram_indexes(self):
         from core.migrations import MIGRATIONS
@@ -7224,6 +7243,25 @@ class TestSessionWorkspace:
 
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
+
+    def test_prepare_workspace_file_for_command_falls_back_for_scanner_owned_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "output.txt", "", cfg)
+            path = resolve_workspace_path("session-1", "output.txt", cfg)
+
+            with mock.patch("services.workspace.files._appuser_gid", return_value=996), \
+                    mock.patch("services.workspace.files.os.chown", side_effect=PermissionError), \
+                    mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
+                    mock.patch("services.workspace.files.subprocess.run") as run:
+                prepare_workspace_file_for_command(path, mode="write")
+
+            commands = [call.args[0] for call in run.call_args_list]
+            assert commands == [
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "660", str(path)],
+            ]
 
     def test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -14206,6 +14244,18 @@ class TestDatabaseInit:
             occurrence_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('findings_occurrences')").fetchall()
             }
+            import_draft_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_import_drafts')").fetchall()
+            }
+            import_batch_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_import_batches')").fetchall()
+            }
+            entity_import_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_entity_import_links')").fetchall()
+            }
+            finding_import_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_finding_import_occurrences')").fetchall()
+            }
             label_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('entity_labels')").fetchall()
             }
@@ -14224,6 +14274,10 @@ class TestDatabaseInit:
             "run_file_artifacts",
             "findings",
             "findings_occurrences",
+            "atlas_import_drafts",
+            "atlas_import_batches",
+            "atlas_entity_import_links",
+            "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
             "evidence_packages",
@@ -14243,6 +14297,10 @@ class TestDatabaseInit:
             "status",
         }.issubset(finding_columns)
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
+        assert {"id", "normalized_rows_json", "preview_counts_json", "warning_summary_json"}.issubset(import_draft_columns)
+        assert {"id", "counts_json", "warning_summary_json", "applied_at"}.issubset(import_batch_columns)
+        assert {"entity_id", "batch_id", "source_detail_json", "created_entity"}.issubset(entity_import_columns)
+        assert {"finding_id", "batch_id", "row_number", "source_detail_json"}.issubset(finding_import_columns)
         assert "team_id" in label_columns
         assert "team_id" in note_columns
 
@@ -14262,6 +14320,10 @@ class TestDatabaseInit:
                     "project_links",
                     "project_auto_promote_rules",
                     "entity_intel_snapshots",
+                    "atlas_import_drafts",
+                    "atlas_import_batches",
+                    "atlas_entity_import_links",
+                    "atlas_finding_import_occurrences",
                     "evidence_packages",
                 )
             }
@@ -14273,7 +14335,717 @@ class TestDatabaseInit:
         assert column_types["project_links"]["source_detail"] == "TEXT"
         assert column_types["project_auto_promote_rules"]["filters_json"] == "TEXT"
         assert column_types["entity_intel_snapshots"]["data_json"] == "TEXT"
+        assert column_types["atlas_import_drafts"]["normalized_rows_json"] == "TEXT"
+        assert column_types["atlas_import_drafts"]["preview_counts_json"] == "TEXT"
+        assert column_types["atlas_import_drafts"]["warning_summary_json"] == "TEXT"
+        assert column_types["atlas_import_batches"]["counts_json"] == "TEXT"
+        assert column_types["atlas_import_batches"]["warning_summary_json"] == "TEXT"
+        assert column_types["atlas_entity_import_links"]["source_detail_json"] == "TEXT"
+        assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
+
+    def test_atlas_import_source_helpers_are_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            insert_import_draft(
+                conn,
+                draft_id="draft-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                expires_at="2026-06-02T00:00:00+00:00",
+                normalized_rows=[{"kind": "finding"}],
+                preview_counts={"valid": 1},
+            )
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+                draft_id="draft-import",
+                counts={"applied": 1},
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', 'entity-sig', ?, ?, 0, ?)",
+                ("entity-import", "atlas-session", now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, subject_key, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, status, title, raw_line, created) "
+                "VALUES (?, ?, ?, 'domain:darklab.sh', 'finding-sig', ?, ?, 0, 'new', ?, ?, ?)",
+                (
+                    "finding-import",
+                    "atlas-session",
+                    "entity-import",
+                    now,
+                    now,
+                    "TLS certificate expires soon",
+                    "TLS certificate expires soon",
+                    now,
+                ),
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=1,
+                row_number=7,
+                source_detail={"plugin_id": "ssl-cert"},
+                created_entity=True,
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at="2026-06-01T00:01:00+00:00",
+                created=now,
+                occurrence_count=3,
+                row_number=8,
+                source_detail={"plugin_id": "ssl-cert"},
+                created_entity=True,
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-import",
+                batch_id="batch-import",
+                row_number=7,
+                observed_at=now,
+                created=now,
+                snippet="initial snippet",
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-import",
+                batch_id="batch-import",
+                row_number=7,
+                observed_at=now,
+                created=now,
+                snippet="updated snippet",
+            )
+            conn.commit()
+            draft_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_drafts").fetchone()["count"]
+            batch_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_batches").fetchone()["count"]
+            entity_link = conn.execute("SELECT * FROM atlas_entity_import_links").fetchone()
+            finding_occurrence = conn.execute("SELECT * FROM atlas_finding_import_occurrences").fetchone()
+            conn.close()
+
+        assert draft_count == 1
+        assert batch_count == 1
+        assert entity_link["occurrence_count"] == 3
+        assert entity_link["row_number"] == 7
+        assert finding_occurrence["snippet"] == "updated snippet"
+
+    def test_import_only_sources_recalculate_and_remain_visible(self):
+        from services.atlas.lookup import (
+            entity_detail,
+            entity_exists_in_scope,
+            finding_detail,
+            finding_exists_in_scope,
+            list_entities,
+            list_findings,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', 'entity-sig', '', '', 0, ?)",
+                ("entity-import", "atlas-session", now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, subject_key, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, status, title, raw_line, created) "
+                "VALUES (?, ?, ?, 'domain:darklab.sh', 'finding-sig', '', '', 0, 'new', ?, ?, ?)",
+                (
+                    "finding-import",
+                    "atlas-session",
+                    "entity-import",
+                    "TLS certificate expires soon",
+                    "TLS certificate expires soon",
+                    now,
+                ),
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=2,
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-import",
+                batch_id="batch-import",
+                row_number=12,
+                observed_at=now,
+                created=now,
+                snippet="TLS certificate expires soon",
+            )
+            recalculate_atlas_entities(conn, ["entity-import"])
+            recalculate_atlas_findings(conn, ["finding-import"])
+            conn.commit()
+            entity_row = conn.execute("SELECT occurrence_count, first_seen_at, last_seen_at FROM entities").fetchone()
+            finding_row = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id, first_seen_at, last_seen_at, line_number "
+                "FROM findings"
+            ).fetchone()
+            entity_visible = entity_exists_in_scope(conn, "atlas-session", "entity-import")
+            finding_visible = finding_exists_in_scope(conn, "atlas-session", "finding-import")
+            listed_entities = list_entities(conn, "atlas-session", limit=10)
+            listed_findings = list_findings(conn, "atlas-session", limit=10)
+            imported_entity_detail = entity_detail(conn, "atlas-session", "entity-import")
+            imported_finding_detail = finding_detail(conn, "atlas-session", "finding-import")
+            conn.close()
+
+        assert entity_row["occurrence_count"] == 2
+        assert entity_row["first_seen_at"] == now
+        assert entity_row["last_seen_at"] == now
+        assert finding_row["occurrence_count"] == 1
+        assert finding_row["run_id"] == ""
+        assert finding_row["first_run_id"] == ""
+        assert finding_row["last_run_id"] == ""
+        assert finding_row["first_seen_at"] == now
+        assert finding_row["last_seen_at"] == now
+        assert finding_row["line_number"] == 12
+        assert entity_visible is True
+        assert finding_visible is True
+        assert listed_entities["total"] == 1
+        assert [row["id"] for row in listed_entities["entities"]] == ["entity-import"]
+        assert listed_findings["total"] == 1
+        assert [row["id"] for row in listed_findings["findings"]] == ["finding-import"]
+        assert listed_findings["findings"][0]["import_sources"][0]["import_name"] == "Nessus staging scan"
+        assert imported_entity_detail is not None
+        assert imported_finding_detail is not None
+        assert imported_entity_detail["import_sources"][0]["source_tool"] == "nessus"
+        assert imported_entity_detail["import_sources"][0]["created_record"] is False
+        assert imported_finding_detail["finding"]["import_sources"][0]["occurrence_count"] == 1
+
+    def test_run_source_cleanup_preserves_import_backed_atlas_records(self):
+        from services.atlas.cleanup import detach_atlas_run_sources
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_search_text) "
+                "VALUES ('run-import-mixed', 'atlas-session', 'nmap darklab.sh', ?, '[]', 'darklab.sh')",
+                (now,),
+            )
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, created) "
+                "VALUES ('entity-mixed', 'atlas-session', 'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
+                (now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES ('entity-mixed', 'run-import-mixed', ?, ?, 1)",
+                (now, now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, first_run_id, last_run_id, "
+                "first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+                "VALUES ('finding-mixed', 'atlas-session', 'run-import-mixed', 'entity-mixed', "
+                "'domain:darklab.sh', 'finding-sig', 'run-import-mixed', 'run-import-mixed', "
+                "?, ?, 1, 'new', 'TLS certificate expires soon', 'TLS certificate expires soon', ?)",
+                (now, now, now),
+            )
+            conn.execute(
+                "UPDATE findings_occurrences SET line_number = 4, snippet = 'TLS certificate expires soon' "
+                "WHERE finding_id = 'finding-mixed' AND run_id = 'run-import-mixed'"
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-mixed",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=2,
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-mixed",
+                batch_id="batch-import",
+                row_number=12,
+                observed_at=now,
+                created=now,
+                snippet="TLS certificate expires soon",
+            )
+
+            result = detach_atlas_run_sources(conn, "atlas-session", ["run-import-mixed"])
+            entity_row = conn.execute(
+                "SELECT occurrence_count, first_seen_at, last_seen_at FROM entities WHERE id = 'entity-mixed'"
+            ).fetchone()
+            finding_row = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id, line_number "
+                "FROM findings WHERE id = 'finding-mixed'"
+            ).fetchone()
+            entity_run_link_count = conn.execute("SELECT COUNT(*) AS count FROM entity_run_links").fetchone()["count"]
+            finding_run_link_count = conn.execute("SELECT COUNT(*) AS count FROM findings_occurrences").fetchone()["count"]
+            entity_import_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
+            ).fetchone()["count"]
+            finding_import_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
+            ).fetchone()["count"]
+            conn.close()
+
+        assert result["deleted_entities"] == 0
+        assert result["deleted_findings"] == 0
+        assert result["detached_entities"] == 1
+        assert result["detached_findings"] == 1
+        assert entity_row["occurrence_count"] == 2
+        assert entity_row["first_seen_at"] == now
+        assert entity_row["last_seen_at"] == now
+        assert finding_row["occurrence_count"] == 1
+        assert finding_row["run_id"] == ""
+        assert finding_row["first_run_id"] == ""
+        assert finding_row["last_run_id"] == ""
+        assert finding_row["line_number"] == 12
+        assert entity_run_link_count == 0
+        assert finding_run_link_count == 0
+        assert entity_import_link_count == 1
+        assert finding_import_link_count == 1
+
+    def test_delete_atlas_entities_removes_import_links(self):
+        from services.atlas.cleanup import delete_atlas_entities
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, created) "
+                "VALUES ('entity-import', 'atlas-session', 'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
+                (now, now, now),
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=1,
+            )
+
+            result = delete_atlas_entities(conn, "atlas-session", ["entity-import"])
+            entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+            import_link_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_entity_import_links").fetchone()["count"]
+            conn.close()
+
+        assert result == {"entities": 1, "findings": 0}
+        assert entity_count == 0
+        assert import_link_count == 0
+
+    def test_atlas_import_parser_normalizes_generic_csv(self):
+        payload = "\n".join((
+            "row_type,entity_kind,entity_value,title,severity,description,evidence,references",
+            "entity,domain,DarkLab.SH,,,,,",
+            "finding,url,https://darklab.sh/login,Missing CSP,Medium,Header missing,No CSP,https://owasp.org",
+        ))
+
+        result = parse_import_file(payload, format_id="generic_csv")
+
+        assert result.row_count == 2
+        assert result.entities[0].canonical_value == "darklab.sh"
+        assert result.findings[0].severity == "medium"
+        assert result.findings[0].affected_entity is not None
+        assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
+        assert result.findings[0].references == ["https://owasp.org"]
+
+    def test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows(self):
+        payload = "\n".join((
+            '{"row_type":"entity","entity_kind":"ip","entity_value":"192.0.2.10"}',
+            "{not-json",
+            '{"row_type":"entity","entity_kind":"banana","entity_value":"darklab.sh"}',
+        ))
+
+        result = parse_import_file(payload, format_id="generic_jsonl")
+
+        assert result.row_count == 3
+        assert [entity.canonical_value for entity in result.entities] == ["192.0.2.10"]
+        assert result.skipped_count == 2
+        assert [warning.code for warning in result.warnings] == ["invalid_json", "invalid_entity_kind"]
+
+    def test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity(self):
+        payload = "\n".join((
+            json.dumps({"row_type": "entity", "entity_kind": "url", "entity_value": "HTTPS://DarkLab.SH/Login"}),
+            json.dumps({"row_type": "entity", "entity_kind": "host", "entity_value": "192.0.2.10"}),
+            json.dumps({"row_type": "entity", "entity_kind": "cve", "entity_value": "cve-2026-12345"}),
+            json.dumps({"row_type": "entity", "entity_kind": "hash", "entity_value": "a" * 64}),
+            json.dumps({
+                "row_type": "finding",
+                "subject": "third-party-app",
+                "title": "Unmapped external finding",
+                "severity": "urgent",
+                "evidence": "Tool reported a finding without a normalized entity.",
+            }),
+        ))
+
+        result = parse_import_file(payload, format_id="generic_jsonl")
+
+        assert [(entity.kind, entity.canonical_value) for entity in result.entities] == [
+            ("url", "https://darklab.sh/Login"),
+            ("ip", "192.0.2.10"),
+            ("cve", "CVE-2026-12345"),
+            ("hash", f"sha256:{'a' * 64}"),
+        ]
+        assert result.findings[0].affected_entity is None
+        assert result.findings[0].subject_key == "third-party-app"
+        assert result.findings[0].severity == ""
+
+    def test_atlas_import_parser_keeps_duplicate_generic_rows_stable_for_later_dedupe(self):
+        from services.intel.canonical import entity_signature
+        from services.projects.findings import _finding_signature, _normalize_finding_signal_key
+
+        payload = "\n".join((
+            "row_type,entity_kind,entity_value,title,severity,evidence,external_id",
+            "finding,domain,dup.darklab.sh,Duplicate finding,high,Same evidence,dup-1",
+            "finding,domain,DUP.darklab.sh,Duplicate finding,high,Same evidence,dup-1",
+        ))
+
+        result = parse_import_file(payload, format_id="generic_csv")
+        expected_subject = entity_signature("domain", "dup.darklab.sh")
+        expected_signature = _finding_signature(
+            "generic",
+            "finding",
+            "high",
+            _normalize_finding_signal_key("Duplicate finding\nSame evidence"),
+            expected_subject,
+        )
+
+        assert result.row_count == 2
+        assert [entity.canonical_value for entity in result.entities] == ["dup.darklab.sh", "dup.darklab.sh"]
+        assert [finding.subject_key for finding in result.findings] == [expected_subject, expected_subject]
+        assert [finding.signature_hash for finding in result.findings] == [
+            expected_signature,
+            expected_signature,
+        ]
+        assert [finding.row_number for finding in result.findings] == [1, 2]
+
+    def test_atlas_import_parser_normalizes_nuclei_jsonl(self):
+        payload = "\n".join((
+            json.dumps({
+                "template-id": "ssl/expired-cert",
+                "matched-at": "https://darklab.sh",
+                "info": {
+                    "name": "Expired TLS certificate",
+                    "severity": "high",
+                    "description": "Certificate is expired",
+                    "reference": ["https://example.com/ref"],
+                },
+                "matcher-name": "notAfter",
+            }),
+            json.dumps({
+                "template-id": "network/ssh-auth-methods",
+                "host": "192.168.1.5:6080/vnc.html",
+                "info": {"name": "SSH Auth Methods - Detection", "severity": "info"},
+            }),
+        ))
+
+        result = parse_import_file(payload + "\n", format_id="nuclei_jsonl")
+
+        assert result.row_count == 2
+        assert result.entities[0].kind == "url"
+        assert result.entities[0].canonical_value == "https://darklab.sh"
+        assert result.entities[1].kind == "ip"
+        assert result.entities[1].canonical_value == "192.168.1.5"
+        assert result.findings[0].external_id == "ssl/expired-cert"
+        assert result.findings[0].severity == "high"
+        assert result.findings[0].source_detail["template_id"] == "ssl/expired-cert"
+        assert result.warnings == []
+
+    def test_atlas_import_parser_streams_nessus_xml_and_extracts_cves(self):
+        payload = """
+        <NessusClientData_v2>
+          <Report name="example">
+            <ReportHost name="graph.darklab.sh">
+              <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
+                          pluginName="Example vulnerable service" severity="3">
+                <description>Service is vulnerable.</description>
+                <plugin_output>Banner evidence</plugin_output>
+                <cve>CVE-2026-12345</cve>
+                <see_also>https://example.com/advisory</see_also>
+              </ReportItem>
+            </ReportHost>
+            <ReportHost name="192.0.2.10">
+              <ReportItem port="22" protocol="tcp" svc_name="ssh" pluginID="5678"
+                          pluginName="SSH service detected" severity="0">
+                <description>SSH is reachable.</description>
+              </ReportItem>
+            </ReportHost>
+          </Report>
+        </NessusClientData_v2>
+        """
+
+        result = parse_import_file(payload, format_id="nessus_xml")
+
+        assert result.row_count == 2
+        assert {(entity.kind, entity.canonical_value) for entity in result.entities} == {
+            ("domain", "graph.darklab.sh"),
+            ("ip", "192.0.2.10"),
+            ("cve", "CVE-2026-12345"),
+        }
+        assert result.findings[0].severity == "high"
+        assert result.findings[0].affected_entity is not None
+        assert result.findings[0].affected_entity.canonical_value == "graph.darklab.sh"
+        assert result.findings[0].source_detail["plugin_id"] == "1234"
+
+    def test_atlas_import_parser_normalizes_zap_json_and_xml_reports(self):
+        json_payload = json.dumps({
+            "site": [{
+                "alerts": [{
+                    "pluginid": "10038",
+                    "alert": "Content Security Policy Header Not Set",
+                    "riskdesc": "Medium (High)",
+                    "desc": "CSP header is missing",
+                    "reference": "https://www.zaproxy.org/docs/alerts/10038/",
+                    "instances": [{"uri": "https://darklab.sh/login", "param": "q"}],
+                }],
+            }],
+        })
+        json_riskcode_payload = json.dumps({
+            "site": [{
+                "alerts": [{
+                    "pluginid": "10039",
+                    "alert": "Riskcode-only high alert",
+                    "riskcode": "3",
+                    "instances": [{"uri": "https://darklab.sh/riskcode"}],
+                }],
+            }],
+        })
+        xml_payload = """
+        <OWASPZAPReport>
+          <site>
+            <alerts>
+              <alertitem>
+                <pluginid>10020</pluginid>
+                <alert>X-Frame-Options Header Not Set</alert>
+                <riskdesc>Low (Medium)</riskdesc>
+                <desc>Header is missing</desc>
+                <instances>
+                  <instance>
+                    <uri>https://darklab.sh/admin</uri>
+                    <param>X-Frame-Options</param>
+                    <evidence>Missing header</evidence>
+                  </instance>
+                </instances>
+              </alertitem>
+            </alerts>
+          </site>
+        </OWASPZAPReport>
+        """
+        xml_riskcode_payload = """
+        <OWASPZAPReport>
+          <site>
+            <alerts>
+              <alertitem>
+                <pluginid>10040</pluginid>
+                <alert>XML riskcode-only high alert</alert>
+                <riskcode>3</riskcode>
+                <instances>
+                  <instance>
+                    <uri>https://darklab.sh/xml-riskcode</uri>
+                  </instance>
+                </instances>
+              </alertitem>
+            </alerts>
+          </site>
+        </OWASPZAPReport>
+        """
+
+        json_result = parse_import_file(json_payload, format_id="zap_json")
+        json_riskcode_result = parse_import_file(json_riskcode_payload, format_id="zap_json")
+        xml_result = parse_import_file(xml_payload, format_id="zap_xml")
+        xml_riskcode_result = parse_import_file(xml_riskcode_payload, format_id="zap_xml")
+
+        assert json_result.findings[0].severity == "medium"
+        assert json_riskcode_result.findings[0].severity == "high"
+        assert json_result.findings[0].affected_entity is not None
+        assert json_result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
+        assert xml_result.findings[0].severity == "low"
+        assert xml_riskcode_result.findings[0].severity == "high"
+        assert xml_result.findings[0].affected_entity is not None
+        assert xml_result.findings[0].affected_entity.canonical_value == "https://darklab.sh/admin"
+        assert xml_result.findings[0].evidence == "Missing header"
+        assert xml_result.findings[0].source_detail["param"] == "X-Frame-Options"
+
+    def test_atlas_import_parser_normalizes_burp_xml_report(self):
+        payload = """
+        <issues burpVersion="2026.1">
+          <issue>
+            <serialNumber>42</serialNumber>
+            <type>5242880</type>
+            <name>SQL injection</name>
+            <host>https://darklab.sh</host>
+            <path>/search?q=test</path>
+            <severity>High</severity>
+            <confidence>Firm</confidence>
+            <issueDetail>Parameter q appears injectable.</issueDetail>
+            <remediationDetail>Use parameterized queries.</remediationDetail>
+            <requestresponse>
+              <request method="GET" base64="false">GET /search?q=test HTTP/1.1
+Host: darklab.sh</request>
+              <response base64="false">HTTP/1.1 500 Internal Server Error
+SQL syntax error near q</response>
+            </requestresponse>
+          </issue>
+        </issues>
+        """
+
+        result = parse_import_file(payload, format_id="burp_xml")
+
+        assert result.row_count == 1
+        assert result.findings[0].severity == "high"
+        assert result.findings[0].external_id == "42"
+        assert result.findings[0].affected_entity is not None
+        assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/search?q=test"
+        assert "GET /search?q=test" in result.findings[0].evidence
+        assert "SQL syntax error near q" in result.findings[0].evidence
+
+    @pytest.mark.parametrize("payload", [
+        """<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+        <issues><issue><name>&xxe;</name></issue></issues>
+        """,
+        """<!DOCTYPE foo [ <!ENTITY ext SYSTEM "http://127.0.0.1:9/private"> ]>
+        <issues><issue><name>&ext;</name></issue></issues>
+        """,
+        """<!DOCTYPE lolz [
+        <!ENTITY lol "lol">
+        <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+        ]><issues><issue><name>&lol1;</name></issue></issues>
+        """,
+    ])
+    def test_atlas_import_parser_rejects_unsafe_xml_dtds(self, payload):
+
+        with pytest.raises(ImportParseError, match="unsafe"):
+            parse_import_file(payload, format_id="burp_xml")
+
+    def test_atlas_import_parser_enforces_row_and_element_limits(self):
+        csv_payload = "\n".join((
+            "row_type,entity_kind,entity_value",
+            "entity,domain,one.darklab.sh",
+            "entity,domain,two.darklab.sh",
+        ))
+        xml_payload = "<issues><issue><name>One</name></issue></issues>"
+
+        with pytest.raises(ImportParseError, match="row limit"):
+            parse_import_file(csv_payload, format_id="generic_csv", limits=ImportParserLimits(max_rows=1))
+        with pytest.raises(ImportParseError, match="XML element limit"):
+            parse_import_file(xml_payload, format_id="burp_xml", limits=ImportParserLimits(max_xml_elements=1))
+
+    def test_atlas_import_parser_enforces_upload_and_warning_limits(self):
+        warning_payload = "\n".join((
+            '{"row_type":"entity","entity_kind":"banana","entity_value":"one.example"}',
+            '{"row_type":"entity","entity_kind":"banana","entity_value":"two.example"}',
+        ))
+
+        with mock.patch("services.atlas.import_parser.log.debug") as mock_debug, \
+                mock.patch("services.atlas.import_parser.log.warning") as mock_warning:
+            result = parse_import_file(
+                warning_payload,
+                format_id="generic_jsonl",
+                limits=ImportParserLimits(max_warnings=1),
+            )
+
+        assert result.skipped_count == 2
+        assert len(result.warnings) == 1
+        assert result.warnings[0].code == "invalid_entity_kind"
+        assert result.suppressed_warning_count == 1
+        debug_events = [call.args[0] for call in mock_debug.call_args_list]
+        assert debug_events == ["ATLAS_IMPORT_PARSE_STARTED", "ATLAS_IMPORT_PARSE_COMPLETED"]
+        started_extra = mock_debug.call_args_list[0].kwargs["extra"]
+        completed_extra = mock_debug.call_args_list[1].kwargs["extra"]
+        assert started_extra["format_id"] == "generic_jsonl"
+        assert started_extra["upload_bytes"] == len(warning_payload.encode("utf-8"))
+        assert started_extra["max_warnings"] == 1
+        assert completed_extra["rows"] == 2
+        assert completed_extra["warning_count"] == 1
+        assert completed_extra["suppressed_warning_count"] == 1
+        assert completed_extra["warning_codes"] == {"invalid_entity_kind": 1}
+        truncated_extra = next(
+            call.kwargs["extra"]
+            for call in mock_warning.call_args_list
+            if call.args[0] == "ATLAS_IMPORT_WARNINGS_TRUNCATED"
+        )
+        assert truncated_extra["format_id"] == "generic_jsonl"
+        assert truncated_extra["skipped"] == 2
+        assert truncated_extra["warning_count"] == 1
+        assert truncated_extra["suppressed_warning_count"] == 1
+        assert truncated_extra["max_warnings"] == 1
+        assert truncated_extra["warning_codes"] == {"invalid_entity_kind": 1}
+        assert result.to_dict()["suppressed_warning_count"] == 1
+
+        class RecordingSource:
+            def __init__(self):
+                self.read_sizes = []
+
+            def read(self, size=-1):
+                self.read_sizes.append(size)
+                return b"x" * size
+
+        source = RecordingSource()
+        with pytest.raises(ImportParseError, match="byte limit"):
+            parse_import_file(b"x" * 5, format_id="generic_csv", limits=ImportParserLimits(max_upload_bytes=4))
+        with pytest.raises(ImportParseError, match="byte limit"):
+            parse_import_file(cast(IO[bytes], source), format_id="generic_csv", limits=ImportParserLimits(max_upload_bytes=4))
+        assert source.read_sizes == [5]
 
     def test_materializes_run_entities_from_output_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -15372,6 +16144,18 @@ class TestDatabaseInit:
             entity_run_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('entity_run_links')").fetchall()
             }
+            import_draft_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_import_drafts')").fetchall()
+            }
+            import_batch_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_import_batches')").fetchall()
+            }
+            entity_import_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_entity_import_links')").fetchall()
+            }
+            finding_import_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_finding_import_occurrences')").fetchall()
+            }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
@@ -15402,6 +16186,13 @@ class TestDatabaseInit:
         assert "idx_findings_occurrences_finding_seen" in occurrence_indexes
         assert "idx_entity_run_links_run" in entity_run_indexes
         assert "idx_entity_run_links_entity_seen" in entity_run_indexes
+        assert "idx_atlas_import_drafts_scope_created" in import_draft_indexes
+        assert "idx_atlas_import_drafts_expires" in import_draft_indexes
+        assert "idx_atlas_import_batches_scope_applied" in import_batch_indexes
+        assert "idx_atlas_entity_import_links_batch" in entity_import_indexes
+        assert "idx_atlas_entity_import_links_entity_seen" in entity_import_indexes
+        assert "idx_atlas_finding_import_occurrences_batch" in finding_import_indexes
+        assert "idx_atlas_finding_import_occurrences_finding_seen" in finding_import_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
         assert "idx_entity_labels_personal_unique" in label_indexes
         assert "idx_entity_labels_team_unique" in label_indexes

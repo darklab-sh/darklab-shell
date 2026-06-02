@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,485
+- behavior tests: 3,541
 - docs/inventory meta-tests: 34
-- `pytest`: 1965 (1931 behavior + 34 meta)
-- `vitest`: 1319
-- `playwright`: 258
-- total: 3,542
+- `pytest`: 1990 (1956 behavior + 34 meta)
+- `vitest`: 1326
+- `playwright`: 259
+- total: 3,575
 
 This document is organized in two parts:
 
@@ -619,6 +619,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
+| `TestSessionWorkspace.test_prepare_workspace_file_for_command_falls_back_for_scanner_owned_outputs` | Verifies that scanner-owned command output files are repaired through the scanner sudo path before another command writes them. |
 | `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
 | `TestSessionWorkspace.test_scanner_owned_workspace_entry_with_scanner_group_needs_repair` | Verifies that scanner-owned workspace entries are repaired when their mode bits look correct but their group drifted away from the shared app group. |
 | `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
@@ -936,6 +937,21 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
 | `TestDatabaseInit.test_json_bearing_schema_columns_use_sqlite_json_type` | Verifies JSON-bearing schema columns keep SQLite's `TEXT` storage type through the backend dialect helper. |
+| `TestDatabaseInit.test_atlas_import_source_helpers_are_idempotent` | Verifies Atlas import draft, batch, entity-link, and finding-occurrence helpers remain idempotent on repeated inserts. |
+| `TestDatabaseInit.test_import_only_sources_recalculate_and_remain_visible` | Verifies import-only Atlas entities and findings keep aggregate counts, seen-at timestamps, and list visibility without fake runs. |
+| `TestDatabaseInit.test_run_source_cleanup_preserves_import_backed_atlas_records` | Verifies run-source cleanup keeps Atlas rows that still have import provenance and recomputes them from import links. |
+| `TestDatabaseInit.test_delete_atlas_entities_removes_import_links` | Verifies direct Atlas entity deletion removes entity import-source links instead of leaving orphan provenance rows. |
+| `TestDatabaseInit.test_atlas_import_parser_normalizes_generic_csv` | Verifies the Atlas import parser normalizes generic CSV entity and finding rows into canonical Atlas rows. |
+| `TestDatabaseInit.test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows` | Verifies generic JSONL imports keep valid rows while returning bounded row warnings for malformed JSON and invalid entity kinds. |
+| `TestDatabaseInit.test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity` | Verifies generic JSONL imports normalize URL, host/IP, CVE, hash, and unlinked finding rows while dropping invalid severities. |
+| `TestDatabaseInit.test_atlas_import_parser_keeps_duplicate_generic_rows_stable_for_later_dedupe` | Verifies duplicate generic finding rows keep stable canonical subjects and signatures for later idempotent apply. |
+| `TestDatabaseInit.test_atlas_import_parser_normalizes_nuclei_jsonl` | Verifies Nuclei JSONL imports map template metadata, matched targets, severities, and references into canonical findings. |
+| `TestDatabaseInit.test_atlas_import_parser_streams_nessus_xml_and_extracts_cves` | Verifies Nessus XML imports use the parent report host, detect domain/IP host types, stream report items, and extract CVE entities. |
+| `TestDatabaseInit.test_atlas_import_parser_normalizes_zap_json_and_xml_reports` | Verifies OWASP ZAP JSON and XML reports map alerts, worded risks, numeric risk codes, URLs, and references into canonical findings. |
+| `TestDatabaseInit.test_atlas_import_parser_normalizes_burp_xml_report` | Verifies Burp Suite XML issues map host/path, severity, confidence, and issue ids into canonical findings. |
+| `TestDatabaseInit.test_atlas_import_parser_rejects_unsafe_xml_dtds` | Verifies XML imports reject DTD and external-entity declarations before row normalization. |
+| `TestDatabaseInit.test_atlas_import_parser_enforces_row_and_element_limits` | Verifies import parsing enforces row limits and streaming XML element limits. |
+| `TestDatabaseInit.test_atlas_import_parser_enforces_upload_and_warning_limits` | Verifies import parsing enforces upload byte limits and caps returned row warnings. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
 | `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
 | `TestDatabaseInit.test_materializer_deduplicates_team_entities_across_members` | Verifies team-owned Atlas entity materialization deduplicates the same canonical entity across team members. |
@@ -1449,6 +1465,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
 | `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
 | `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
+| `TestAtlasImportRoutes.test_preview_and_apply_import_without_creating_history_run` | Verifies Atlas import preview/apply creates imported Atlas records and import provenance without creating a History run, while over-quota Project linking is rejected. |
+| `TestAtlasImportRoutes.test_create_project_targets_only_reports_target_entity_side_effects` | Verifies target-only Atlas import apply creates the backing Atlas entity and import source while reporting Project target counts separately from generic Project link counts. |
+| `TestAtlasImportRoutes.test_create_project_targets_quota_rejects_without_partial_import_rows` | Verifies target-creation quota failures return a structured import error without leaving partial Atlas import batches, source links, findings, entities, or project targets. |
+| `TestAtlasImportRoutes.test_apply_updates_existing_scan_records_and_preserves_import_provenance` | Verifies duplicate import rows update existing scan-discovered Atlas rows, preserve import source provenance, and recompute aggregate occurrence counts. |
+| `TestAtlasImportRoutes.test_import_routes_keep_uploaded_filename_and_text_fields_as_safe_json_data` | Verifies Atlas import routes clean path-like upload filenames while preserving imported HTML-like finding text as JSON data. |
+| `TestAtlasImportRoutes.test_apply_rejects_digest_mismatch_and_stale_or_invalid_previews` | Verifies Atlas import preview/apply rejects unsupported formats, expired drafts, digest mismatches, and configured finding limits. |
+| `TestTeamRoutes.test_team_atlas_import_apply_requires_option_specific_capabilities` | Verifies team-scoped Atlas import apply requires the project-mutation capability when finding import would create linked entities. |
 | `TestTeamRoutes.test_team_create_list_and_detail` | Verifies team creation, list, detail, capability lists, one-time recovery-code response shapes, and recovery-code failure rollback for durable session tokens. |
 | `TestTeamRoutes.test_team_browser_read_routes_have_dedicated_token_limit` | Verifies browser team-management read routes use the dedicated per-token team read limit. |
 | `TestTeamRoutes.test_active_team_scope_uses_explicit_team_secrets_for_providers_and_commands` | Verifies active team scope uses explicit team secrets for provider readiness and command env injection while keeping personal secrets separate and role-gating writes. |
@@ -2432,6 +2455,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `saves and applies named Atlas views` | Verifies that Atlas saves the current tab/filter state as a named view and applies it back to the surface. |
 | `syncs populated filter selects and enhances dynamic detail selects` | Verifies that Atlas syncs populated Findings filters and enhances the finding review-state picker after it renders. |
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
+| `previews and applies an Atlas import from a project-scoped Atlas surface` | Verifies that the Atlas import modal previews a file, applies selected options, and refreshes project-scoped Atlas state. |
+| `requires a file before previewing an Atlas import` | Verifies that the Atlas import modal rejects preview without a selected file before calling the backend. |
+| `disables unavailable Atlas import apply options after preview` | Verifies that unavailable Atlas import apply options render disabled and keep apply unavailable. |
+| `can retry an Atlas import preview after a handled preview rejection` | Verifies that a handled preview error leaves the modal ready for a successful retry. |
+| `does not log expected Atlas import preview rejections as client errors` | Verifies that handled preview rejections show the backend message without sending a generic browser error log. |
+| `logs Atlas import preview runtime failures as client errors` | Verifies that browser/runtime preview failures still send a client error log. |
+| `does not log expected Atlas import apply rejections as client errors` | Verifies that handled apply rejections show the backend message without sending a generic browser error log. |
 | `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
 | `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
@@ -4103,6 +4133,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `creates, previews, applies, and shows an Atlas auto-promote rule` | Verifies that the Projects modal can preview, create, refresh, apply, and display an Atlas auto-promote rule and its promoted entity in a live browser. |
 | `refreshes an open project when a run stream auto-promotes an Atlas entity` | Verifies that a live command stream can auto-promote a matching Atlas entity and refresh an already-open Projects modal without a page reload. |
 | `opens a prefilled Project auto-promote rule from Atlas` | Verifies that Atlas can hand the current filtered view to Projects and open a prefilled auto-promote rule editor in a live browser. |
+| `imports a small Nuclei JSONL file into Atlas from the browser` | Verifies that the Atlas import modal can preview and apply a small Nuclei JSONL file in a live browser. |
 | `creates, edits, downloads, and deletes a project evidence package` | Verifies that the Projects modal package wizard creates a linked-run evidence package with labels/notes, and that package edit, manifest, download, and delete actions work in a live browser. |
 | `edits finding and artifact metadata and previews project artifacts` | Verifies that seeded project findings and run artifacts can be edited, previewed, downloaded, filtered by source run, and unlinked through the Projects modal in a live browser. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |

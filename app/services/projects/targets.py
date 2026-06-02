@@ -306,6 +306,33 @@ def _ensure_project_entity_link(
     return entity_id
 
 
+def ensure_project_target_on_conn(
+    conn,
+    session_id,
+    project_id,
+    entity_type,
+    canonical_value,
+    *,
+    source="auto_input_file",
+    confidence=1.0,
+    review_state="confirmed",
+    source_detail=None,
+    team_id="",
+):
+    return _ensure_project_entity_link(
+        conn,
+        session_id,
+        project_id,
+        entity_type,
+        canonical_value,
+        source,
+        confidence=confidence,
+        review_state=review_state,
+        source_detail=source_detail,
+        team_id=team_id,
+    )
+
+
 def _target_payloads_from_target_list_file(session_id, raw_item):
     if not isinstance(raw_item, dict) or str(raw_item.get("source_kind") or "") != "flag":
         return []

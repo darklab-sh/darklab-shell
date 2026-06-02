@@ -29,6 +29,18 @@
   const exportMenu = document.getElementById('atlas-export-menu');
   const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
   const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
+  const importBtn = document.getElementById('atlas-import-btn');
+  const importOverlay = document.getElementById('atlas-import-overlay');
+  const importModal = document.getElementById('atlas-import-modal');
+  const importCloseBtn = document.getElementById('atlas-import-close');
+  const importCancelBtn = document.getElementById('atlas-import-cancel');
+  const importFormatSelect = document.getElementById('atlas-import-format');
+  const importNameInput = document.getElementById('atlas-import-name');
+  const importFileInput = document.getElementById('atlas-import-file');
+  const importPreviewBtn = document.getElementById('atlas-import-preview-btn');
+  const importStatus = document.getElementById('atlas-import-status');
+  const importPreviewHost = document.getElementById('atlas-import-preview');
+  const importApplyBtn = document.getElementById('atlas-import-apply');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
   const findingsBoardBtn = document.getElementById('atlas-findings-board-btn');
   const clearFiltersBtn = document.getElementById('atlas-clear-filters-btn');
@@ -47,6 +59,15 @@
   const paginationSummary = document.getElementById('atlas-pagination-summary');
   const prevBtn = document.getElementById('atlas-prev-btn');
   const nextBtn = document.getElementById('atlas-next-btn');
+  const importAcceptByFormat = {
+    burp_xml: '.xml,application/xml,text/xml',
+    generic_csv: '.csv,text/csv',
+    generic_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
+    nessus_xml: '.nessus,.xml,application/xml,text/xml',
+    nuclei_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
+    zap_json: '.json,application/json',
+    zap_xml: '.xml,application/xml,text/xml',
+  };
 
   function ensureBulkActionLayout() {
     const row = findingBulkRow?.querySelector?.('.atlas-bulk-action-row');
@@ -129,6 +150,15 @@
     intelRefreshingEntityId: '',
     intelRefreshingLabel: '',
     detailOffsets: { runs: 0, findings: 0 },
+    importFlow: {
+      open: false,
+      previewLoading: false,
+      applyLoading: false,
+      draftId: '',
+      rowSetDigest: '',
+      preview: null,
+      result: null,
+    },
     searchTimer: null,
     refreshSeq: 0,
   };
@@ -207,7 +237,14 @@
       else if (data && typeof data.message === 'string' && data.message.trim()) message = data.message.trim();
       else if (data && typeof data.error === 'string' && data.error.trim()) message = data.error.trim();
     } catch (_) {}
-    return new Error(message || fallback);
+    const err = new Error(message || fallback);
+    err.atlasHandledClientHttpError = Number(resp?.status || 0) >= 400 && Number(resp?.status || 0) < 500;
+    return err;
+  }
+
+  function logImportClientError(message, err) {
+    if (err && err.atlasHandledClientHttpError) return;
+    if (typeof global.logClientError === 'function') global.logClientError(message, err);
   }
 
   let intelRefreshOverlay = null;
@@ -302,6 +339,13 @@
     return `${numeric.toLocaleString()} ${numeric === 1 ? singular : plural}`;
   }
 
+  function node(tag, className = '', content = '') {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (content !== '') el.textContent = String(content);
+    return el;
+  }
+
   const findingStates = [
     ['new', 'New'],
     ['reviewed', 'Reviewed'],
@@ -326,6 +370,7 @@
     if (!overlay) return;
     abortReadRequests();
     setExportMenuOpen(false);
+    if (state.importFlow.open) setImportModalOpen(false);
     resetSelection({ selectMode: false, render: false });
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
@@ -988,6 +1033,321 @@
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to create auto-promote rule from atlas view', err);
       showToastSafe(err && err.message ? err.message : 'Failed to create rule from Atlas view', 'error');
+    }
+  }
+
+  function selectedImportFormatLabel() {
+    const option = importFormatSelect?.selectedOptions?.[0] || null;
+    return String(option?.textContent || importFormatSelect?.value || 'Atlas import').trim();
+  }
+
+  function syncImportFileAcceptHint() {
+    if (!importFileInput || !importFormatSelect) return;
+    importFileInput.setAttribute('accept', importAcceptByFormat[importFormatSelect.value] || '');
+  }
+
+  function resetImportFlow() {
+    state.importFlow.previewLoading = false;
+    state.importFlow.applyLoading = false;
+    state.importFlow.draftId = '';
+    state.importFlow.rowSetDigest = '';
+    state.importFlow.preview = null;
+    state.importFlow.result = null;
+    if (importStatus) importStatus.textContent = '';
+    if (importPreviewHost) {
+      importPreviewHost.replaceChildren();
+      importPreviewHost.classList.add('u-hidden');
+    }
+    if (importApplyBtn) importApplyBtn.disabled = true;
+  }
+
+  function setImportModalOpen(open) {
+    if (!importOverlay) return;
+    state.importFlow.open = !!open;
+    importOverlay.classList.toggle('u-hidden', !open);
+    importOverlay.classList.toggle('open', !!open);
+    importOverlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (!open) {
+      resetImportFlow();
+      if (importFileInput) importFileInput.value = '';
+      if (importNameInput) importNameInput.value = '';
+      if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+      return;
+    }
+    if (importNameInput && !importNameInput.value) importNameInput.value = selectedImportFormatLabel();
+    syncImportFileAcceptHint();
+    renderImportPreview();
+    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    window.setTimeout(() => {
+      const focusTarget = importFormatSelect || importModal;
+      focusTarget?.focus?.({ preventScroll: true });
+    }, 0);
+  }
+
+  function openImportModal() {
+    setExportMenuOpen(false);
+    setImportModalOpen(true);
+  }
+
+  function closeImportModal() {
+    setImportModalOpen(false);
+  }
+
+  function importCountGrid(counts = {}) {
+    const grid = document.createElement('div');
+    grid.className = 'atlas-import-count-grid';
+    [
+      ['Rows', counts.rows],
+      ['Entities', counts.entity_valid],
+      ['Findings', counts.finding_valid],
+      ['New', counts.new],
+      ['Updated', counts.updated],
+      ['Warnings', counts.warnings],
+    ].forEach(([label, value]) => {
+      const item = document.createElement('div');
+      item.className = 'atlas-import-count';
+      item.append(
+        node('span', 'atlas-import-count-value', Number(value || 0).toLocaleString()),
+        node('span', 'atlas-import-count-label', label),
+      );
+      grid.appendChild(item);
+    });
+    return grid;
+  }
+
+  function importSampleRows(title, rows, formatter) {
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'atlas-import-sample';
+    sectionEl.appendChild(node('div', 'atlas-import-sample-title', title));
+    const list = document.createElement('div');
+    list.className = 'atlas-import-sample-list nice-scroll';
+    const values = Array.isArray(rows) ? rows : [];
+    if (!values.length) {
+      list.appendChild(node('div', 'atlas-empty-inline', 'No rows'));
+    } else {
+      values.slice(0, 6).forEach((row) => list.appendChild(node('div', 'panel-row atlas-import-sample-row', formatter(row))));
+    }
+    sectionEl.appendChild(list);
+    return sectionEl;
+  }
+
+  function importWarningRows(warnings) {
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'atlas-import-sample';
+    sectionEl.appendChild(node('div', 'atlas-import-sample-title', 'Warnings'));
+    const list = document.createElement('div');
+    list.className = 'atlas-import-warning-list nice-scroll';
+    const values = Array.isArray(warnings) ? warnings : [];
+    if (!values.length) {
+      list.appendChild(node('div', 'atlas-empty-inline', 'No warnings'));
+    } else {
+      values.slice(0, 8).forEach((warning) => {
+        const label = warning && typeof warning === 'object'
+          ? `Row ${warning.row_number || '?'} · ${text(warning.message, warning.code || 'warning')}`
+          : text(warning, 'warning');
+        list.appendChild(node('div', 'panel-row atlas-import-warning-row', label));
+      });
+    }
+    sectionEl.appendChild(list);
+    return sectionEl;
+  }
+
+  function importOptionAvailable(options, key) {
+    const option = options && typeof options === 'object' ? options[key] : null;
+    return !!(option && option.available);
+  }
+
+  function importOptionControl(key, label, note, options, { checked = true, disabled = false } = {}) {
+    const wrap = document.createElement('label');
+    wrap.className = 'form-check atlas-import-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.atlasImportOption = key;
+    checkbox.checked = checked && !disabled;
+    checkbox.disabled = !!disabled;
+    const copy = document.createElement('span');
+    copy.append(node('span', 'atlas-import-option-label', label));
+    if (note) copy.append(node('span', 'atlas-muted atlas-import-option-note', note));
+    wrap.append(checkbox, copy);
+    return wrap;
+  }
+
+  function renderImportPreview() {
+    if (!importPreviewHost) return;
+    importPreviewHost.replaceChildren();
+    const flow = state.importFlow;
+    const preview = flow.preview;
+    const result = flow.result;
+    if (!preview && !result) {
+      importPreviewHost.classList.add('u-hidden');
+      if (importApplyBtn) importApplyBtn.disabled = true;
+      return;
+    }
+    importPreviewHost.classList.remove('u-hidden');
+    if (preview) {
+      const counts = preview.counts || {};
+      importPreviewHost.append(
+        node('div', 'atlas-detail-section-title', 'Preview'),
+        importCountGrid(counts),
+      );
+      const options = preview.apply_options || {};
+      const optionWrap = document.createElement('div');
+      optionWrap.className = 'atlas-import-options';
+      const hasProject = !!String(state.projectId || '').trim();
+      optionWrap.append(
+        importOptionControl('import_entities', 'Import entities', 'Add or update normalized Atlas entities.', options, {
+          checked: importOptionAvailable(options, 'import_entities'),
+          disabled: !importOptionAvailable(options, 'import_entities'),
+        }),
+        importOptionControl('import_findings', 'Import findings', 'Add findings and their import occurrence sources.', options, {
+          checked: importOptionAvailable(options, 'import_findings'),
+          disabled: !importOptionAvailable(options, 'import_findings'),
+        }),
+        importOptionControl('link_to_project', 'Link imported entities to this project', hasProject ? state.projectName || 'Project context' : 'Open Atlas from a project to link rows.', options, {
+          checked: false,
+          disabled: !hasProject || !importOptionAvailable(options, 'link_to_project'),
+        }),
+        importOptionControl('create_project_targets', 'Create project targets', `${Number(counts.project_target_candidates || 0).toLocaleString()} target candidates; creates or reuses Atlas entities`, options, {
+          checked: false,
+          disabled: !hasProject || !importOptionAvailable(options, 'create_project_targets'),
+        }),
+      );
+      importPreviewHost.append(optionWrap);
+      const samples = preview.samples || {};
+      const sampleGrid = document.createElement('div');
+      sampleGrid.className = 'atlas-import-samples';
+      sampleGrid.append(
+        importSampleRows('Entity sample', samples.entities, row => [
+          text(row.kind, 'entity'),
+          text(row.canonical_value, row.value || ''),
+        ].filter(Boolean).join(' · ')),
+        importSampleRows('Finding sample', samples.findings, row => [
+          text(row.severity),
+          text(row.title, row.signature_hash || 'finding'),
+        ].filter(Boolean).join(' · ')),
+        importWarningRows(preview.warnings),
+      );
+      importPreviewHost.append(sampleGrid);
+    }
+    if (result) {
+      const counts = result.counts || {};
+      const resultBox = document.createElement('div');
+      resultBox.className = 'atlas-import-result';
+      resultBox.append(
+        node('div', 'atlas-detail-section-title', 'Applied'),
+        node('div', 'atlas-muted', [
+          countLabel(counts.entities_created, 'entity created', 'entities created'),
+          countLabel(counts.entities_updated, 'entity updated', 'entities updated'),
+          countLabel(counts.findings_created, 'finding created', 'findings created'),
+          countLabel(counts.findings_updated, 'finding updated', 'findings updated'),
+          countLabel(counts.project_links_added, 'project link added', 'project links added'),
+          countLabel(counts.project_links_existing, 'project link already existed', 'project links already existed'),
+          countLabel(counts.project_targets_created, 'project target created', 'project targets created'),
+          countLabel(counts.project_targets_existing, 'project target already existed', 'project targets already existed'),
+        ].join(' · ')),
+      );
+      importPreviewHost.append(resultBox);
+    }
+    syncImportApplyState();
+  }
+
+  function selectedImportOptions() {
+    const options = {};
+    importPreviewHost?.querySelectorAll?.('[data-atlas-import-option]').forEach((checkbox) => {
+      options[checkbox.dataset.atlasImportOption] = !!checkbox.checked && !checkbox.disabled;
+    });
+    return options;
+  }
+
+  function syncImportApplyState() {
+    const options = selectedImportOptions();
+    const hasOption = Object.values(options).some(Boolean);
+    if (importApplyBtn) {
+      importApplyBtn.disabled = !state.importFlow.preview || !state.importFlow.draftId || !hasOption
+        || state.importFlow.previewLoading || state.importFlow.applyLoading;
+      importApplyBtn.textContent = state.importFlow.applyLoading ? 'Applying...' : 'Apply import';
+    }
+    if (importPreviewBtn) {
+      importPreviewBtn.disabled = state.importFlow.previewLoading || state.importFlow.applyLoading;
+      importPreviewBtn.textContent = state.importFlow.previewLoading ? 'Previewing...' : 'Preview';
+    }
+  }
+
+  async function previewImportFile() {
+    if (!importFileInput || !importFormatSelect) return;
+    const file = importFileInput.files && importFileInput.files[0] ? importFileInput.files[0] : null;
+    if (!file) {
+      showToastSafe('Choose a file to import', 'error');
+      return;
+    }
+    state.importFlow.previewLoading = true;
+    state.importFlow.result = null;
+    state.importFlow.preview = null;
+    if (importStatus) importStatus.textContent = 'Parsing file...';
+    renderImportPreview();
+    syncImportApplyState();
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      body.append('format_id', String(importFormatSelect.value || ''));
+      body.append('source_tool', selectedImportFormatLabel());
+      body.append('import_name', String(importNameInput?.value || '').trim() || selectedImportFormatLabel());
+      const resp = await api()('/atlas/imports/preview', { method: 'POST', body });
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to preview import');
+      const data = await resp.json();
+      state.importFlow.draftId = String(data.draft_id || '');
+      state.importFlow.rowSetDigest = String(data.row_set_digest || '');
+      state.importFlow.preview = data;
+      if (importStatus) importStatus.textContent = 'Preview ready';
+      renderImportPreview();
+    } catch (err) {
+      logImportClientError('failed to preview atlas import', err);
+      if (importStatus) importStatus.textContent = '';
+      showToastSafe(err && err.message ? err.message : 'Failed to preview import', 'error');
+    } finally {
+      state.importFlow.previewLoading = false;
+      syncImportApplyState();
+    }
+  }
+
+  async function applyImportPreview() {
+    if (!state.importFlow.preview || !state.importFlow.draftId || !state.importFlow.rowSetDigest) return;
+    const options = selectedImportOptions();
+    if (!Object.values(options).some(Boolean)) {
+      showToastSafe('Choose what to import first', 'error');
+      return;
+    }
+    state.importFlow.applyLoading = true;
+    if (importStatus) importStatus.textContent = 'Applying import...';
+    syncImportApplyState();
+    try {
+      const body = {
+        draft_id: state.importFlow.draftId,
+        row_set_digest: state.importFlow.rowSetDigest,
+        options,
+      };
+      if (state.projectId) body.project_id = state.projectId;
+      const resp = await api()('/atlas/imports/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to apply import');
+      const data = await resp.json();
+      state.importFlow.result = data;
+      state.importFlow.draftId = '';
+      state.importFlow.rowSetDigest = '';
+      if (importStatus) importStatus.textContent = 'Import applied';
+      showToastSafe('Atlas import applied', 'success');
+      if (state.projectId) broadcastProjectWorkspaceChange('atlas_import_applied', state.projectId);
+      await refreshAtlas({ resetOffset: true });
+      renderImportPreview();
+    } catch (err) {
+      logImportClientError('failed to apply atlas import', err);
+      showToastSafe(err && err.message ? err.message : 'Failed to apply import', 'error');
+    } finally {
+      state.importFlow.applyLoading = false;
+      syncImportApplyState();
     }
   }
 
@@ -2245,6 +2605,7 @@
       }
     });
     refreshBtn?.addEventListener('click', () => refreshAtlas());
+    importBtn?.addEventListener('click', () => openImportModal());
     findingsBoardBtn?.addEventListener('click', openFindingsBoardFromAtlas);
     clearFiltersBtn?.addEventListener('click', () => clearAtlasFilters());
     prevBtn?.addEventListener('click', () => {
@@ -2356,6 +2717,33 @@
       setExportMenuOpen(false);
       exportEntities('jsonl');
     });
+    importModal?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      previewImportFile();
+    });
+    importApplyBtn?.addEventListener('click', () => {
+      applyImportPreview();
+    });
+    importCloseBtn?.addEventListener('click', () => closeImportModal());
+    importCancelBtn?.addEventListener('click', () => closeImportModal());
+    importFormatSelect?.addEventListener('change', () => {
+      syncImportFileAcceptHint();
+      if (importNameInput && (!importNameInput.value || state.importFlow.preview)) {
+        importNameInput.value = selectedImportFormatLabel();
+      }
+      resetImportFlow();
+      syncSelectDisplay(importFormatSelect);
+    });
+    importFileInput?.addEventListener('change', () => {
+      resetImportFlow();
+    });
+    importPreviewHost?.addEventListener('change', (event) => {
+      if (event.target?.matches?.('[data-atlas-import-option]')) syncImportApplyState();
+    });
+    syncImportFileAcceptHint();
+    ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
+      importOverlay?.addEventListener(eventName, event => event.stopPropagation(), true);
+    });
     if (typeof global.bindOutsideClickClose === 'function' && exportWrap) {
       global.bindOutsideClickClose(exportWrap, {
         triggers: exportMenuBtn,
@@ -2374,8 +2762,20 @@
         closeOnBackdrop: true,
       });
     }
+    if (typeof global.bindDismissible === 'function' && importOverlay) {
+      global.bindDismissible(importOverlay, {
+        level: 'modal',
+        isOpen: () => state.importFlow.open,
+        onClose: () => closeImportModal(),
+        closeButtons: [importCloseBtn, importCancelBtn].filter(Boolean),
+        closeOnBackdrop: true,
+      });
+    }
     if (typeof global.bindMobileSheet === 'function' && surface) {
       global.bindMobileSheet(surface, { onClose: () => closeAtlas() });
+    }
+    if (typeof global.bindMobileSheet === 'function' && importModal) {
+      global.bindMobileSheet(importModal, { onClose: () => closeImportModal() });
     }
   }
 

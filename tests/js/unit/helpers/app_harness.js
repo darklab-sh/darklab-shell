@@ -214,6 +214,11 @@ export async function loadAppFns({
         <button class="project-workspace-close"></button>
       </div>
     </div>
+    <div id="atlas-import-overlay" class="u-hidden">
+      <form id="atlas-import-modal">
+        <button id="atlas-import-close" type="button"></button>
+      </form>
+    </div>
     <div id="project-target-editor-overlay" class="u-hidden">
       <div id="project-target-editor-modal">
         <button class="project-target-editor-close"></button>

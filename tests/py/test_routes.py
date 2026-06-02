@@ -35,6 +35,7 @@ import core.process as process
 import services.runs.comparison as run_comparison
 import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
+import services.atlas.import_workflow as atlas_import_workflow
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import quote_sqlite_identifier
@@ -353,6 +354,1023 @@ class TestSecretsRoutes:
                 patcher.stop()
 
 
+class TestAtlasImportRoutes:
+    def _client(self, tmp_path):
+        db_path = str(tmp_path / "atlas-import-routes.db")
+        lock_path = str(tmp_path / "atlas-import-routes.lock")
+        patchers = [
+            mock.patch("core.database.DB_PATH", db_path),
+            mock.patch("core.database.DB_INIT_LOCK_PATH", lock_path),
+        ]
+        for patcher in patchers:
+            patcher.start()
+        db_init()
+        return get_client(), patchers
+
+    def _register_session_token(self, session_id):
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (session_id, datetime.now(timezone.utc).isoformat(), ""),
+            )
+            conn.commit()
+
+    def test_preview_and_apply_import_without_creating_history_run(self, tmp_path):
+        from services.intel.canonical import entity_signature
+        from services.projects.findings import _finding_signature, _normalize_finding_signal_key
+
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_routes"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_import_routes"
+            archived_project_id = "proj_atlas_import_archived"
+            quota_project_id = "proj_atlas_import_quota"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Imported Scope', 'imported-scope', ?, ?)",
+                    (project_id, session_id, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
+                )
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, status, created, updated) "
+                    "VALUES (?, ?, 'Archived Import Scope', 'archived-import-scope', 'archived', ?, ?)",
+                    (
+                        archived_project_id,
+                        session_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Quota Import Scope', 'quota-import-scope', ?, ?)",
+                    (
+                        quota_project_id,
+                        session_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+                conn.commit()
+            csv_payload = (
+                "row_type,entity_kind,entity_value,title,severity,evidence,external_id\n"
+                "entity,domain,imported.example,,,,ent-1\n"
+                "entity,domain,IMPORTED.example,,,,ent-2\n"
+                "finding,domain,imported.example,Imported TLS finding,high,certificate mismatch,ext-1\n"
+            ).encode()
+            with mock.patch.object(atlas_import_workflow.log, "info") as mock_import_log:
+                preview = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "External CSV",
+                        "import_name": "Quarterly triage",
+                        "file": (io.BytesIO(csv_payload), "triage.csv"),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["entity_new"] == 1
+            assert preview_payload["counts"]["finding_new"] == 1
+            assert preview_payload["counts"]["project_target_candidates"] == 1
+            assert preview_payload["apply_options"]["import_findings"]["available"] is True
+            assert preview_payload["apply_options"]["create_project_targets"]["available"] is True
+            preview_success_extra = next(
+                call.kwargs["extra"]
+                for call in mock_import_log.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_PREVIEW_SUCCEEDED"
+            )
+            assert preview_success_extra["session"].startswith("tok_atla")
+            assert preview_success_extra["session"].endswith("********")
+            assert preview_success_extra["format_id"] == "generic_csv"
+            assert preview_success_extra["source_tool_key"] == "external_csv"
+            assert preview_success_extra["draft_id"] == preview_payload["draft_id"]
+            assert preview_success_extra["entity_new"] == 1
+            assert preview_success_extra["finding_new"] == 1
+            preview_created_extra = next(
+                call.kwargs["extra"]
+                for call in mock_import_log.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_PREVIEW_CREATED"
+            )
+            assert preview_created_extra["session"].startswith("tok_atla")
+            assert preview_created_extra["session"].endswith("********")
+            assert preview_created_extra["source_tool_key"] == "external_csv"
+            assert "source_tool" not in preview_created_extra
+            assert preview_created_extra["has_filename"] is True
+            assert preview_created_extra["upload_bytes"] == len(csv_payload)
+            assert preview_created_extra["entity_new"] == 1
+            assert preview_created_extra["finding_new"] == 1
+
+            with mock.patch.object(atlas_import_workflow.log, "info") as mock_apply_log:
+                archived_rejected = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview_payload["draft_id"],
+                        "row_set_digest": preview_payload["row_set_digest"],
+                        "project_id": archived_project_id,
+                        "options": {"import_findings": True, "create_project_targets": True},
+                    },
+                )
+                assert archived_rejected.status_code == 404
+                assert archived_rejected.get_json()["error"] == "project_not_found"
+
+                applied = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview_payload["draft_id"],
+                        "row_set_digest": preview_payload["row_set_digest"],
+                        "project_id": project_id,
+                        "options": {"import_findings": True, "link_to_project": True, "create_project_targets": True},
+                    },
+                )
+                assert applied.status_code == 200
+                applied_payload = applied.get_json()
+                assert applied_payload["counts"]["entities_created"] == 1
+                assert applied_payload["counts"]["findings_created"] == 1
+                assert applied_payload["counts"]["entity_links"] == 1
+                assert applied_payload["counts"]["finding_occurrences"] == 1
+                assert applied_payload["counts"]["project_links_added"] == 1
+                assert applied_payload["counts"]["project_links_existing"] == 0
+                assert applied_payload["counts"]["project_targets_created"] == 1
+                assert applied_payload["counts"]["project_targets_existing"] == 0
+
+                applied_again = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview_payload["draft_id"],
+                        "row_set_digest": preview_payload["row_set_digest"],
+                        "project_id": project_id,
+                        "options": {"import_findings": True, "create_project_targets": True},
+                    },
+                )
+                assert applied_again.status_code == 200
+                assert applied_again.get_json()["already_applied"] is True
+                assert applied_again.get_json()["batch_id"] == applied_payload["batch_id"]
+
+                applied_again_stale_digest = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview_payload["draft_id"],
+                        "row_set_digest": "stale-digest-after-apply",
+                        "project_id": project_id,
+                        "options": {"import_findings": True, "link_to_project": True, "create_project_targets": True},
+                    },
+                )
+                assert applied_again_stale_digest.status_code == 200
+                assert applied_again_stale_digest.get_json()["already_applied"] is True
+                assert applied_again_stale_digest.get_json()["batch_id"] == applied_payload["batch_id"]
+
+            quota_payload = (
+                "row_type,entity_kind,entity_value\n"
+                "entity,domain,quota-one.example\n"
+                "entity,domain,quota-two.example\n"
+            ).encode()
+            quota_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Quota check",
+                    "file": (io.BytesIO(quota_payload), "quota.csv"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert quota_preview.status_code == 200
+            quota_preview_payload = quota_preview.get_json()
+            with mock.patch.dict(config.CFG, {
+                "max_project_links_per_project": 20,
+                "max_project_entities_per_project": 1,
+            }, clear=False):
+                quota_rejected = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": quota_preview_payload["draft_id"],
+                        "row_set_digest": quota_preview_payload["row_set_digest"],
+                        "project_id": quota_project_id,
+                        "options": {"import_entities": True, "link_to_project": True},
+                    },
+                )
+            assert quota_rejected.status_code == 409
+            assert quota_rejected.get_json()["error"] == "project_quota_exceeded"
+            assert quota_rejected.get_json()["message"] == "project entity quota exceeded for this project"
+
+            with db_connect() as conn:
+                run_count = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+                entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+                finding_count = conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"]
+                batch_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_batches").fetchone()["count"]
+                batch_status = conn.execute("SELECT status FROM atlas_import_batches").fetchone()["status"]
+                entity_link_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
+                ).fetchone()["count"]
+                entity_link_occurrence_count = conn.execute(
+                    "SELECT occurrence_count FROM atlas_entity_import_links"
+                ).fetchone()["occurrence_count"]
+                finding_occurrence_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
+                ).fetchone()["count"]
+                finding_identity = conn.execute(
+                    "SELECT subject_key, signature_hash FROM findings"
+                ).fetchone()
+                project_target_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (project_id,),
+                ).fetchone()["count"]
+                quota_project_link_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (quota_project_id,),
+                ).fetchone()["count"]
+            assert run_count == 0
+            assert entity_count == 1
+            assert finding_count == 1
+            assert batch_count == 1
+            assert batch_status == "applied"
+            assert entity_link_count == 1
+            assert entity_link_occurrence_count == 3
+            assert finding_occurrence_count == 1
+            expected_finding_subject = entity_signature("domain", "imported.example")
+            expected_finding_signature = _finding_signature(
+                "generic",
+                "finding",
+                "high",
+                _normalize_finding_signal_key("Imported TLS finding\ncertificate mismatch"),
+                expected_finding_subject,
+            )
+            assert finding_identity["subject_key"] == expected_finding_subject
+            assert finding_identity["signature_hash"] == expected_finding_signature
+            assert project_target_count == 1
+            assert quota_project_link_count == 0
+            apply_success_extra = next(
+                call.kwargs["extra"]
+                for call in mock_apply_log.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_APPLY_SUCCEEDED"
+            )
+            assert apply_success_extra["session"].startswith("tok_atla")
+            assert apply_success_extra["session"].endswith("********")
+            assert apply_success_extra["draft_id"] == preview_payload["draft_id"]
+            assert apply_success_extra["batch_id"] == applied_payload["batch_id"]
+            assert apply_success_extra["project_id"] == project_id
+            assert apply_success_extra["option_import_findings"] is True
+            assert apply_success_extra["option_link_to_project"] is True
+            assert apply_success_extra["option_create_project_targets"] is True
+            assert apply_success_extra["entities_created"] == 1
+            assert apply_success_extra["project_targets_created"] == 1
+            apply_created_extra = next(
+                call.kwargs["extra"]
+                for call in mock_apply_log.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_APPLIED"
+            )
+            assert apply_created_extra["session"].startswith("tok_atla")
+            assert apply_created_extra["session"].endswith("********")
+            assert apply_created_extra["source_tool_key"] == "external_csv"
+            assert "source_tool" not in apply_created_extra
+            assert apply_created_extra["project_id"] == project_id
+            assert apply_created_extra["option_link_to_project"] is True
+            assert apply_created_extra["required_capabilities"] == ["mutate_projects", "triage_findings"]
+            replayed_events = [
+                call.kwargs["extra"]
+                for call in mock_apply_log.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_APPLY_REPLAYED"
+            ]
+            assert len(replayed_events) == 2
+            assert replayed_events[0]["draft_status"] == "applied"
+            assert replayed_events[0]["batch_id"] == applied_payload["batch_id"]
+            import_events = [
+                *(call.args[0] for call in mock_import_log.call_args_list),
+                *(call.args[0] for call in mock_apply_log.call_args_list),
+            ]
+            assert "ATLAS_IMPORT_PREVIEW_CREATED" in import_events
+            assert "ATLAS_IMPORT_APPLIED" in import_events
+            assert "ATLAS_IMPORT_APPLY_REPLAYED" in import_events
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_create_project_targets_only_reports_target_entity_side_effects(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_target_only"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_import_target_only"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Target Only Import', 'target-only-import', ?, ?)",
+                    (project_id, session_id, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            csv_payload = (
+                "row_type,entity_kind,entity_value\n"
+                "entity,domain,target-only.example\n"
+            ).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Target-only triage",
+                    "file": (io.BytesIO(csv_payload), "target-only.csv"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {"create_project_targets": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            counts = applied.get_json()["counts"]
+            assert counts["entities_created"] == 1
+            assert counts["entity_links"] == 1
+            assert counts["findings_created"] == 0
+            assert counts["project_links_added"] == 0
+            assert counts["project_links_existing"] == 0
+            assert counts["project_targets_created"] == 1
+            assert counts["project_targets_existing"] == 0
+            with db_connect() as conn:
+                entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+                import_link_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
+                ).fetchone()["count"]
+                project_link = conn.execute(
+                    "SELECT source FROM project_links WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()
+            assert entity_count == 1
+            assert import_link_count == 1
+            assert project_link["source"] == "auto_input_file"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_create_project_targets_quota_rejects_without_partial_import_rows(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_target_quota"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_import_target_quota"
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Target Quota Import', 'target-quota-import', ?, ?)",
+                    (project_id, session_id, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            csv_payload = (
+                "row_type,entity_kind,entity_value\n"
+                "entity,domain,target-quota-one.example\n"
+                "entity,domain,target-quota-two.example\n"
+            ).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Target quota triage",
+                    "file": (io.BytesIO(csv_payload), "target-quota.csv"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["project_target_candidates"] == 2
+
+            with mock.patch.dict(config.CFG, {
+                "max_project_links_per_project": 20,
+                "max_project_entities_per_project": 20,
+                "max_project_targets_per_project": 1,
+            }, clear=False):
+                rejected = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview_payload["draft_id"],
+                        "row_set_digest": preview_payload["row_set_digest"],
+                        "project_id": project_id,
+                        "options": {"create_project_targets": True},
+                    },
+                )
+
+            assert rejected.status_code == 409
+            assert rejected.get_json() == {
+                "error": "project_quota_exceeded",
+                "message": "project target quota exceeded for this project",
+            }
+            with db_connect() as conn:
+                draft_status = conn.execute(
+                    "SELECT status FROM atlas_import_drafts WHERE id = ?",
+                    (preview_payload["draft_id"],),
+                ).fetchone()["status"]
+                entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+                finding_count = conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"]
+                batch_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_batches").fetchone()["count"]
+                entity_link_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
+                ).fetchone()["count"]
+                finding_occurrence_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
+                ).fetchone()["count"]
+                project_target_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (project_id,),
+                ).fetchone()["count"]
+            assert draft_status == "previewed"
+            assert entity_count == 0
+            assert finding_count == 0
+            assert batch_count == 0
+            assert entity_link_count == 0
+            assert finding_occurrence_count == 0
+            assert project_target_count == 0
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_apply_updates_existing_scan_records_and_preserves_import_provenance(self, tmp_path):
+        from services.intel.canonical import entity_signature
+        from services.projects.findings import _finding_signature, _normalize_finding_signal_key
+
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_existing_mix"
+            self._register_session_token(session_id)
+            run_id = "run_existing_import_mix"
+            entity_id = "ent_existing_import_mix"
+            finding_id = "fnd_existing_import_mix"
+            canonical_value = "mixed-existing.example"
+            seen_at = "2026-06-01T00:00:00+00:00"
+            import_seen_at = "2026-06-02T00:00:00+00:00"
+            import_later_at = "2026-06-03T00:00:00+00:00"
+            subject_key = entity_signature("domain", canonical_value)
+            finding_signature = _finding_signature(
+                "generic",
+                "finding",
+                "high",
+                _normalize_finding_signal_key("Existing mixed finding\nsame evidence"),
+                subject_key,
+            )
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, output_preview, output_search_text) "
+                    "VALUES (?, ?, 'nmap mixed-existing.example', ?, '[]', 'same evidence')",
+                    (run_id, session_id, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                    "occurrence_count, created) "
+                    "VALUES (?, ?, 'domain', ?, ?, ?, ?, 1, ?)",
+                    (entity_id, session_id, canonical_value, subject_key, seen_at, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'generic', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                    (
+                        finding_id,
+                        session_id,
+                        run_id,
+                        entity_id,
+                        subject_key,
+                        finding_signature,
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        "Existing mixed finding",
+                        "same evidence",
+                        seen_at,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE findings_occurrences SET line_number = 7, snippet = 'same evidence', seen_at = ? "
+                    "WHERE finding_id = ? AND run_id = ?",
+                    (seen_at, finding_id, run_id),
+                )
+                conn.commit()
+
+            csv_payload = (
+                "row_type,entity_kind,entity_value,title,severity,evidence,external_id,observed_at\n"
+                f"entity,domain,MIXED-existing.example,,,,entity-1,{import_seen_at}\n"
+                f"finding,domain,{canonical_value},Existing mixed finding,high,same evidence,finding-1,{import_seen_at}\n"
+                f"finding,domain,MIXED-existing.example,Existing mixed finding,high,same evidence,finding-2,{import_later_at}\n"
+            ).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Existing scan mix",
+                    "file": (io.BytesIO(csv_payload), "existing-mix.csv"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["entity_duplicate"] == 1
+            assert preview_payload["counts"]["finding_duplicate"] == 2
+            assert preview_payload["counts"]["new"] == 0
+            assert preview_payload["counts"]["updated"] == 3
+
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "options": {"import_entities": True, "import_findings": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            counts = applied.get_json()["counts"]
+            assert counts["entities_created"] == 0
+            assert counts["entities_updated"] == 1
+            assert counts["findings_created"] == 0
+            assert counts["findings_updated"] == 2
+            assert counts["entity_links"] == 1
+            assert counts["finding_occurrences"] == 2
+            with db_connect() as conn:
+                entity_row = conn.execute(
+                    "SELECT occurrence_count, first_seen_at, last_seen_at FROM entities WHERE id = ?",
+                    (entity_id,),
+                ).fetchone()
+                finding_row = conn.execute(
+                    "SELECT occurrence_count, first_run_id, last_run_id, line_number FROM findings WHERE id = ?",
+                    (finding_id,),
+                ).fetchone()
+                entity_import_link = conn.execute(
+                    "SELECT occurrence_count, created_entity, first_observed_at, last_observed_at "
+                    "FROM atlas_entity_import_links WHERE entity_id = ?",
+                    (entity_id,),
+                ).fetchone()
+                finding_import_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences WHERE finding_id = ?",
+                    (finding_id,),
+                ).fetchone()["count"]
+            assert entity_row["occurrence_count"] == 4
+            assert entity_row["first_seen_at"] == seen_at
+            assert entity_row["last_seen_at"] == import_later_at
+            assert finding_row["occurrence_count"] == 3
+            assert finding_row["first_run_id"] == run_id
+            assert finding_row["last_run_id"] == ""
+            assert finding_row["line_number"] == 7
+            assert entity_import_link["occurrence_count"] == 3
+            assert entity_import_link["created_entity"] == 0
+            assert entity_import_link["first_observed_at"] == import_seen_at
+            assert entity_import_link["last_observed_at"] == import_later_at
+            assert finding_import_count == 2
+
+            listed = client.get("/atlas/findings?q=mixed", headers={"X-Session-ID": session_id})
+            detail = client.get(f"/atlas/entities/{entity_id}", headers={"X-Session-ID": session_id})
+
+            assert listed.status_code == 200
+            listed_finding = listed.get_json()["findings"][0]
+            assert listed_finding["id"] == finding_id
+            assert listed_finding["import_sources"][0]["import_name"] == "Existing scan mix"
+            assert listed_finding["import_sources"][0]["occurrence_count"] == 2
+            assert detail.status_code == 200
+            detail_payload = detail.get_json()
+            assert detail_payload["import_sources"][0]["created_record"] is False
+            assert detail_payload["import_sources"][0]["occurrence_count"] == 3
+            assert detail_payload["findings"][0]["import_sources"][0]["occurrence_count"] == 2
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_import_routes_keep_uploaded_filename_and_text_fields_as_safe_json_data(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_untrusted_text"
+            self._register_session_token(session_id)
+            title = '<script>alert("atlas")</script> TLS finding'
+            evidence = '<img src=x onerror=alert(1)> evidence & notes'
+            csv_body = io.StringIO()
+            writer = csv.DictWriter(
+                csv_body,
+                fieldnames=["row_type", "entity_kind", "entity_value", "title", "severity", "evidence", "external_id"],
+            )
+            writer.writeheader()
+            writer.writerow({
+                "row_type": "finding",
+                "entity_kind": "domain",
+                "entity_value": "unsafe-text.example",
+                "title": title,
+                "severity": "medium",
+                "evidence": evidence,
+                "external_id": "unsafe-text-1",
+            })
+
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Unsafe text import",
+                    "file": (io.BytesIO(csv_body.getvalue().encode()), "../../triage<script>.csv"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            assert "application/json" in preview.content_type
+            preview_payload = preview.get_json()
+            assert preview_payload["samples"]["findings"][0]["title"] == title
+
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "options": {"import_entities": True, "import_findings": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            with db_connect() as conn:
+                draft_row = conn.execute(
+                    "SELECT filename FROM atlas_import_drafts WHERE id = ?",
+                    (preview_payload["draft_id"],),
+                ).fetchone()
+                batch_row = conn.execute(
+                    "SELECT filename FROM atlas_import_batches WHERE draft_id = ?",
+                    (preview_payload["draft_id"],),
+                ).fetchone()
+            assert draft_row["filename"] == "triage_script_.csv"
+            assert batch_row["filename"] == "triage_script_.csv"
+            assert "/" not in draft_row["filename"]
+            assert "\\" not in draft_row["filename"]
+            assert "<" not in draft_row["filename"]
+            assert ">" not in draft_row["filename"]
+
+            listed = client.get("/atlas/findings?q=TLS", headers={"X-Session-ID": session_id})
+            assert listed.status_code == 200
+            assert "application/json" in listed.content_type
+            listed_finding = listed.get_json()["findings"][0]
+            assert listed_finding["title"] == title
+            assert listed_finding["raw_line"] == evidence
+            assert listed_finding["import_sources"][0]["filename"] == "triage_script_.csv"
+
+            detail = client.get(f"/atlas/entities/{listed_finding['entity_id']}", headers={"X-Session-ID": session_id})
+            assert detail.status_code == 200
+            assert "application/json" in detail.content_type
+            detail_payload = detail.get_json()
+            assert detail_payload["import_sources"][0]["filename"] == "triage_script_.csv"
+            assert detail_payload["findings"][0]["title"] == title
+            assert detail_payload["findings"][0]["raw_line"] == evidence
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_apply_rejects_digest_mismatch_and_stale_or_invalid_previews(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_digest"
+            self._register_session_token(session_id)
+            with mock.patch("blueprints.atlas.preview_atlas_import", return_value={"ok": True}) as mock_preview:
+                streamed_preview = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "External CSV",
+                        "import_name": "Stream check",
+                        "file": (
+                            io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,stream.example\n"),
+                            "stream.csv",
+                        ),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert streamed_preview.status_code == 200
+            streamed_content = mock_preview.call_args.kwargs["file_content"]
+            assert not isinstance(streamed_content, (bytes, str))
+            assert hasattr(streamed_content, "read")
+
+            with mock.patch.dict(config.CFG, {"atlas_import_max_upload_mb": 1}, clear=False), \
+                    mock.patch("blueprints.atlas.preview_atlas_import") as mock_preview, \
+                    mock.patch("blueprints.atlas.log.warning") as mock_preview_warning:
+                declared_oversized = client.post(
+                    "/atlas/imports/preview",
+                    data={},
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                    environ_overrides={"CONTENT_LENGTH": str(3 * 1024 * 1024)},
+                )
+            assert declared_oversized.status_code == 413
+            assert declared_oversized.get_json()["error"] == "invalid_import_file"
+            assert "byte limit" in declared_oversized.get_json()["message"]
+            mock_preview.assert_not_called()
+            oversized_warning = mock_preview_warning.call_args
+            assert oversized_warning.args[0] == "ATLAS_IMPORT_PREVIEW_REJECTED"
+            assert oversized_warning.kwargs["extra"]["reason"] == "request_too_large"
+            assert oversized_warning.kwargs["extra"]["session"].startswith("tok_atla")
+            assert oversized_warning.kwargs["extra"]["session"].endswith("********")
+            assert oversized_warning.kwargs["extra"]["status"] == 413
+
+            with mock.patch.object(atlas_import_workflow.log, "warning") as mock_import_warning:
+                unsupported = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "content_sniff_me",
+                        "source_tool": "External CSV",
+                        "import_name": "Unsupported format",
+                        "file": (
+                            io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,unsupported.example\n"),
+                            "triage.csv",
+                        ),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert unsupported.status_code == 400
+            assert unsupported.get_json()["error"] == "invalid_import_file"
+            warning_events = [call.args[0] for call in mock_import_warning.call_args_list]
+            assert "ATLAS_IMPORT_PREVIEW_REJECTED" in warning_events
+            preview_rejected_extra = next(
+                call.kwargs["extra"]
+                for call in mock_import_warning.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_PREVIEW_REJECTED"
+                and "session" in call.kwargs["extra"]
+            )
+            assert preview_rejected_extra["reason"] == "invalid_import_file"
+            assert preview_rejected_extra["session"].startswith("tok_atla")
+            assert preview_rejected_extra["session"].endswith("********")
+            assert preview_rejected_extra["format_id"] == "content_sniff_me"
+            assert preview_rejected_extra["source_tool_key"] == "external_csv"
+            assert preview_rejected_extra["status"] == 400
+
+            with mock.patch.dict(config.CFG, {"atlas_import_max_upload_mb": 1}, clear=False):
+                oversized = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "External CSV",
+                        "import_name": "Too large",
+                        "file": (
+                            io.BytesIO(b"x" * (1024 * 1024 + 1)),
+                            "too-large.csv",
+                        ),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert oversized.status_code == 400
+            assert oversized.get_json()["error"] == "invalid_import_file"
+            assert "byte limit" in oversized.get_json()["message"]
+
+            expired_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Expired draft",
+                    "file": (
+                        io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,expired.example\n"),
+                        "expired.csv",
+                    ),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert expired_preview.status_code == 200
+            expired_draft_id = expired_preview.get_json()["draft_id"]
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts SET expires_at = '2000-01-01 00:00:00' WHERE id = ?",
+                    (expired_draft_id,),
+                )
+                conn.commit()
+
+            with mock.patch("blueprints.atlas.log.warning") as mock_apply_warning:
+                stale_apply = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": expired_draft_id,
+                        "row_set_digest": expired_preview.get_json()["row_set_digest"],
+                        "options": {"import_entities": True},
+                    },
+                )
+            assert stale_apply.status_code == 400
+            assert stale_apply.get_json()["error"] == "draft_expired"
+            stale_warning = mock_apply_warning.call_args
+            assert stale_warning.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
+            assert stale_warning.kwargs["extra"]["reason"] == "draft_expired"
+            assert stale_warning.kwargs["extra"]["draft_id"] == expired_draft_id
+            assert stale_warning.kwargs["extra"]["import_entities"] is True
+            service_stale_warning = next(
+                call.kwargs["extra"]
+                for call in mock_apply_warning.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
+                and "draft_status" in call.kwargs["extra"]
+            )
+            assert service_stale_warning["draft_status"] == "previewed"
+            assert service_stale_warning["required_capabilities"] == []
+
+            stale_applying = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Stale applying draft",
+                    "file": (
+                        io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,applying.example\n"),
+                        "applying.csv",
+                    ),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert stale_applying.status_code == 200
+            stale_applying_draft_id = stale_applying.get_json()["draft_id"]
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts SET status = 'applying', expires_at = '2000-01-01 00:00:00' "
+                    "WHERE id = ?",
+                    (stale_applying_draft_id,),
+                )
+                conn.commit()
+            with db_connect() as conn, mock.patch.object(atlas_import_workflow.log, "warning") as mock_cleanup_warning:
+                assert atlas_import_workflow.cleanup_expired_import_drafts(conn=conn, now="2026-01-01 00:00:00") == 1
+                conn.commit()
+            stale_cleanup_warning = next(
+                call.kwargs["extra"]
+                for call in mock_cleanup_warning.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_APPLY_STALE_CLEANED"
+            )
+            assert stale_cleanup_warning["applying_count"] == 1
+
+            stale_preview_cleanup = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Stale preview cleanup",
+                    "file": (
+                        io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,preview-cleanup.example\n"),
+                        "preview-cleanup.csv",
+                    ),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert stale_preview_cleanup.status_code == 200
+            stale_preview_draft_id = stale_preview_cleanup.get_json()["draft_id"]
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts SET expires_at = '2000-01-01 00:00:00' WHERE id = ?",
+                    (stale_preview_draft_id,),
+                )
+                conn.commit()
+            with db_connect() as conn, mock.patch.object(atlas_import_workflow.log, "info") as mock_cleanup_info:
+                assert atlas_import_workflow.cleanup_expired_import_drafts(conn=conn, now="2026-01-01 00:00:00") == 1
+                conn.commit()
+            cleanup_info = next(
+                call.kwargs["extra"]
+                for call in mock_cleanup_info.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_DRAFTS_CLEANED"
+            )
+            assert cleanup_info["previewed_count"] == 1
+
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Digest check",
+                    "file": (
+                        io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,digest.example\n"),
+                        "triage.csv",
+                    ),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            with db_connect() as conn:
+                expired_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM atlas_import_drafts WHERE id = ?",
+                    (expired_draft_id,),
+                ).fetchone()["count"]
+            assert expired_count == 0
+            with mock.patch("blueprints.atlas.log.warning") as mock_apply_warning:
+                rejected = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview.get_json()["draft_id"],
+                        "row_set_digest": "bad-digest",
+                        "options": {"import_entities": True},
+                    },
+                )
+            assert rejected.status_code == 400
+            assert rejected.get_json()["error"] == "digest_mismatch"
+            digest_warning = mock_apply_warning.call_args
+            assert digest_warning.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
+            assert digest_warning.kwargs["extra"]["reason"] == "digest_mismatch"
+            assert digest_warning.kwargs["extra"]["status"] == 400
+            assert digest_warning.kwargs["extra"]["import_entities"] is True
+            service_digest_warning = next(
+                call.kwargs["extra"]
+                for call in mock_apply_warning.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
+                and "draft_status" in call.kwargs["extra"]
+            )
+            assert service_digest_warning["draft_status"] == "previewed"
+            assert service_digest_warning["option_import_entities"] is True
+
+            with mock.patch.dict(config.CFG, {"atlas_import_max_findings": 1}, clear=False), \
+                    mock.patch.object(atlas_import_workflow.log, "warning") as mock_limit_warning:
+                too_many_findings = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "External CSV",
+                        "import_name": "Too many findings",
+                        "file": (
+                            io.BytesIO(
+                                b"row_type,entity_kind,entity_value,title,severity\n"
+                                b"finding,domain,one.example,One,low\n"
+                                b"finding,domain,two.example,Two,low\n"
+                            ),
+                            "too-many.csv",
+                        ),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert too_many_findings.status_code == 400
+            assert too_many_findings.get_json()["error"] == "import_limit_exceeded"
+            limit_warning = next(
+                call.kwargs["extra"]
+                for call in mock_limit_warning.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_LIMIT_REJECTED"
+            )
+            assert limit_warning["limit_key"] == "atlas_import_max_findings"
+            assert limit_warning["configured_limit"] == 1
+            assert limit_warning["actual_count"] == 2
+            assert limit_warning["stage"] == "preview"
+
+            atlas_import_workflow._INVALID_CFG_LIMIT_WARNED.discard("atlas_import_preview_sample_limit")
+            with mock.patch.dict(config.CFG, {"atlas_import_preview_sample_limit": "nope"}, clear=False), \
+                    mock.patch.object(atlas_import_workflow.log, "warning") as mock_config_warning:
+                invalid_config_preview = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "External CSV",
+                        "import_name": "Invalid config warning",
+                        "file": (
+                            io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,config.example\n"),
+                            "config.csv",
+                        ),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert invalid_config_preview.status_code == 200
+            config_warning = next(
+                call.kwargs["extra"]
+                for call in mock_config_warning.call_args_list
+                if call.args[0] == "ATLAS_IMPORT_CONFIG_LIMIT_INVALID"
+            )
+            assert config_warning["key"] == "atlas_import_preview_sample_limit"
+            assert config_warning["default"] == atlas_import_workflow.PREVIEW_SAMPLE_LIMIT
+            assert config_warning["configured_type"] == "str"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+
 class TestTeamRoutes:
     def _team_client(self, tmp_path):
         db_path = str(tmp_path / "team-routes.db")
@@ -381,6 +1399,256 @@ class TestTeamRoutes:
             headers={"X-Session-ID": session_id},
             json={"name": name, "display_name": "Owner"},
         )
+
+    def test_team_atlas_import_apply_requires_option_specific_capabilities(self, monkeypatch, tmp_path):
+        from services.teams import capabilities
+        from services.teams.capabilities import Capability
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_atlas_import_owner"
+            operator_token = "tok_team_atlas_import_operator"
+            viewer_token = "tok_team_atlas_import_viewer"
+            self._register_session_token(operator_token)
+            self._register_session_token(viewer_token)
+            monkeypatch.setitem(
+                capabilities.ROLE_CAPABILITIES,
+                "operator",
+                frozenset({Capability.VIEW_TEAM, Capability.TRIAGE_FINDINGS}),
+            )
+            created = self._create_team(client, owner_token, name="Atlas Import Capability")
+            team_id = created.get_json()["team"]["id"]
+            operator_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Import triager"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Import triager"},
+            ).status_code == 201
+            viewer_invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "viewer", "label": "Import viewer"},
+            )
+            assert client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": viewer_token},
+                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Import viewer"},
+            ).status_code == 201
+
+            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            csv_payload = (
+                "row_type,entity_kind,entity_value,title,severity,evidence\n"
+                "finding,domain,team-import.example,Team import finding,high,evidence\n"
+            ).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Team capability import",
+                    "file": (io.BytesIO(csv_payload), "team-import.csv"),
+                },
+                headers=operator_headers,
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["apply_options"]["import_findings"]["available"] is False
+            assert preview_payload["apply_options"]["import_findings"]["requires"] == [
+                "triage_findings",
+                "mutate_projects",
+            ]
+
+            rejected = client.post(
+                "/atlas/imports/apply",
+                headers=operator_headers,
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "options": {"import_findings": True},
+                },
+            )
+            assert rejected.status_code == 403
+            assert rejected.get_json()["error"] == "team_forbidden"
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
+                assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
+
+            entity_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Team entity capability import",
+                    "file": (
+                        io.BytesIO(b"row_type,entity_kind,entity_value\nentity,domain,entity-only.example\n"),
+                        "team-entity-import.csv",
+                    ),
+                },
+                headers=operator_headers,
+                content_type="multipart/form-data",
+            )
+            assert entity_preview.status_code == 200
+            entity_payload = entity_preview.get_json()
+            assert entity_payload["apply_options"]["import_entities"]["available"] is False
+            entity_rejected = client.post(
+                "/atlas/imports/apply",
+                headers=operator_headers,
+                json={
+                    "draft_id": entity_payload["draft_id"],
+                    "row_set_digest": entity_payload["row_set_digest"],
+                    "options": {"import_entities": True},
+                },
+            )
+            assert entity_rejected.status_code == 403
+            assert entity_rejected.get_json()["error"] == "team_forbidden"
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
+                assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
+
+            subject_only_payload = (
+                b"row_type,subject,title,severity,evidence\n"
+                b"finding,external-subject-1,Subject-only finding,low,subject evidence\n"
+            )
+            viewer_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Viewer subject-only import",
+                    "file": (io.BytesIO(subject_only_payload), "viewer-subject.csv"),
+                },
+                headers=viewer_headers,
+                content_type="multipart/form-data",
+            )
+            assert viewer_preview.status_code == 200
+            viewer_payload = viewer_preview.get_json()
+            assert viewer_payload["apply_options"]["import_findings"]["available"] is False
+            viewer_rejected = client.post(
+                "/atlas/imports/apply",
+                headers=viewer_headers,
+                json={
+                    "draft_id": viewer_payload["draft_id"],
+                    "row_set_digest": viewer_payload["row_set_digest"],
+                    "options": {"import_findings": True},
+                },
+            )
+            assert viewer_rejected.status_code == 403
+            assert viewer_rejected.get_json()["error"] == "team_forbidden"
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
+                assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
+
+            subject_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Team subject-only import",
+                    "file": (io.BytesIO(subject_only_payload), "team-subject.csv"),
+                },
+                headers=operator_headers,
+                content_type="multipart/form-data",
+            )
+            assert subject_preview.status_code == 200
+            subject_payload = subject_preview.get_json()
+            assert subject_payload["counts"]["finding_subject_entities_to_create"] == 0
+            assert subject_payload["apply_options"]["import_findings"]["available"] is True
+            assert subject_payload["apply_options"]["import_findings"]["requires"] == ["triage_findings"]
+
+            with db_connect() as conn:
+                existing_entity_id = "ent_team_import_existing"
+                existing_value = "team-import-existing.example"
+                existing_signature = hashlib.sha256(
+                    f"domain\x1f{existing_value}".encode("utf-8", errors="replace")
+                ).hexdigest()
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "VALUES (?, ?, ?, 'domain', ?, ?, ?, ?, ?)",
+                    (
+                        existing_entity_id,
+                        owner_token,
+                        team_id,
+                        existing_value,
+                        existing_signature,
+                        "2026-06-01T00:00:00+00:00",
+                        "2026-06-01T00:00:00+00:00",
+                        "2026-06-01T00:00:00+00:00",
+                    ),
+                )
+                conn.commit()
+
+            stale_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "External CSV",
+                    "import_name": "Team stale capability import",
+                    "file": (
+                        io.BytesIO(
+                            b"row_type,entity_kind,entity_value,title,severity,evidence\n"
+                            b"finding,domain,team-import-existing.example,Existing entity finding,high,evidence\n"
+                        ),
+                        "team-stale-import.csv",
+                    ),
+                },
+                headers=operator_headers,
+                content_type="multipart/form-data",
+            )
+            assert stale_preview.status_code == 200
+            stale_payload = stale_preview.get_json()
+            assert stale_payload["apply_options"]["import_findings"]["available"] is True
+            assert stale_payload["apply_options"]["import_findings"]["requires"] == ["triage_findings"]
+
+            with db_connect() as conn:
+                conn.execute("DELETE FROM entities WHERE id = ?", (existing_entity_id,))
+                conn.commit()
+
+            stale_rejected = client.post(
+                "/atlas/imports/apply",
+                headers=operator_headers,
+                json={
+                    "draft_id": stale_payload["draft_id"],
+                    "row_set_digest": stale_payload["row_set_digest"],
+                    "options": {"import_findings": True},
+                },
+            )
+            assert stale_rejected.status_code == 403
+            assert stale_rejected.get_json()["error"] == "team_forbidden"
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
+                assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
+
+            subject_applied = client.post(
+                "/atlas/imports/apply",
+                headers=operator_headers,
+                json={
+                    "draft_id": subject_payload["draft_id"],
+                    "row_set_digest": subject_payload["row_set_digest"],
+                    "options": {"import_findings": True},
+                },
+            )
+            assert subject_applied.status_code == 200
+            assert subject_applied.get_json()["counts"]["findings_created"] == 1
+            assert subject_applied.get_json()["counts"]["entities_created"] == 0
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
+                assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 1
+                finding_row = conn.execute(
+                    "SELECT team_id, subject_key, title FROM findings"
+                ).fetchone()
+            assert finding_row["team_id"] == team_id
+            assert finding_row["subject_key"] == "external-subject-1"
+            assert finding_row["title"] == "Subject-only finding"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
 
     def test_team_create_list_and_detail(self, tmp_path):
         client, patchers = self._team_client(tmp_path)

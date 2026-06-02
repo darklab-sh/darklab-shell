@@ -421,13 +421,14 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
 - Atlas search matches entity values plus Atlas labels and notes, so curated metadata is as findable as values copied from command output.
 - Atlas can be scoped to one source run from Run Details or from the Atlas run filter. The filter applies across the Findings queue, entity tabs, tab counts, and entity exports until you clear the visible run chip.
+- The Atlas toolbar can import external triage files from Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL. Imports show a preview with counts, samples, and row warnings before anything is written. From a project-filtered Atlas view, you can also link imported entities to that project or create project targets from imported domains, IPs, and URLs.
 - When a team scope is active, Atlas views follow team-owned source runs. Team members can review deduplicated team-owned entities, source runs, and findings produced by shared runs, add shared labels and notes, refresh cached intel, update finding review/suppression state, and link Atlas entities into team projects without pulling in their personal Atlas rows.
 - Run Details shows the source run's Atlas entity count and includes paged entity tabs for the same entity types, so you can inspect generated hosts, domains, hashes, CVEs, and URLs without leaving the run modal.
 - Entity details page through source runs and findings when an entity appears across more rows than fit in one view, so older evidence stays reachable without loading the whole collection at once.
 - Saved views remember useful Atlas filter sets for the active session token, including search text, source run, orphan filter, suppression filter, Findings review state, and project scope. Applying a saved view keeps you on the current Atlas tab, and **Clear filters** returns the visible filter controls and saved-view picker to their defaults while keeping a project-scoped Atlas launch anchored to that project.
 - On mobile, Atlas uses a list/detail flow with Back navigation, compact filters, bottom-sheet actions, and select mode from the overflow menu so entity triage fits the same touch pattern as Projects and History.
 - The **Findings** tab works as the cross-run triage queue. It lists deduped findings, supports text, project, source-run, and review-state filters, opens finding detail with source-run and entity navigation, and can update or delete selected visible findings in bulk. On desktop, the larger Findings Board opens from the rail, Atlas toolbar, or Projects and groups findings into New, Reviewed, False positive, and Follow-up lanes for quicker review-state triage. Mobile keeps Findings in the list flow so the review tools fit the narrow screen.
-- Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, source runs, and related findings.
+- Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, import sources, source runs, and related findings.
 - Select mode adds checkboxes on the visible page for any Atlas tab. You can suppress or restore selected noisy rows without deleting source data, delete selected findings directly, or delete selected entities and their attached findings in one confirmed action.
 - Entity tokens in saved and live transcripts can open Atlas directly. Long-pressing or right-clicking a token opens quick actions for copying the value, refreshing intel, editing metadata in Atlas, or refocusing the transcript line.
 - **Refresh intel** fetches current app-native intel for that entity, shows a progress panel while slower providers run, and stores normalized provider snapshots back on the entity.
@@ -435,6 +436,47 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
 - Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
 - Entity tabs can export the current Atlas filter as CSV or JSONL. Exports include summary fields, suppression state, labels, notes, project names, and provider names that have cached intel, but they leave raw provider response bodies out.
+
+**Importing external reports:** Atlas imports are for bringing third-party triage results into the entity and finding view without pretending those results came from a shell command.
+
+- Supported formats are Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL.
+- Preview always runs before apply. It shows parsed row counts, new/duplicate/update counts, sample entities and findings, row warnings, and which apply options are available for the current personal or team scope.
+- Invalid rows stay out of the apply step and appear as preview warnings. Imported severity values are normalized into Atlas severities when possible; unsupported severity text is kept from becoming a misleading review signal.
+- Imports do not create History rows, terminal transcripts, command artifacts, or run-comparison inputs. They create Atlas records plus import-source provenance only.
+- Imported detail views show whether a source created the row or added another source to an existing row, using labels such as `Created by Nuclei JSONL import` or `Also seen in Nessus XML import`.
+- Apply is idempotent. Re-applying the same draft returns the existing batch instead of duplicating entities, findings, source links, or project links.
+- Team imports use the active team scope. Importing findings requires triage permission, and any path that creates entities, links entities to projects, or creates project targets requires project-mutation permission. If a finding references a new normalizable entity, applying that finding needs both permissions.
+- Project-scoped imports can optionally link imported entities to the current project and create project targets from imported domains, IPs, and URLs. Creating targets creates or reuses the matching Atlas entities so the target has the same canonical identity and import provenance. Those options are opt-in and use the normal Project target and quota checks.
+- Upload size, parsed rows, finding count, warning count, XML element count, preview sample size, warning sample size, and draft lifetime are all bounded by operator configuration. Drafts expire if they are previewed but not applied.
+
+**Generic CSV and JSONL import schema:** use these formats when a tool does not have a dedicated adapter yet, or when you want to shape a small triage handoff yourself. Each row/object can describe an entity, a finding tied to an entity, or a finding tied only to a `subject_key`.
+
+Supported fields:
+
+- `row_type` or `type`: use `entity` for entity-only rows. Rows with a finding title are treated as finding rows.
+- `entity_kind` or `kind`: one of `domain`, `ip`, `url`, `cve`, or `hash`. `host` is accepted as a domain alias.
+- `entity_value` or `value`: the value to normalize into Atlas.
+- `subject_key` or `subject`: a stable subject for a finding that does not have a normalizable entity.
+- `title` or `finding_title`: the finding title.
+- `severity`: `info`, `low`, `medium`, `high`, or `critical`. Numeric scores and common words such as `moderate` are normalized when possible.
+- `description`, `evidence`, `external_id`, `references`, and `observed_at`: optional provenance and finding detail fields. CSV references can be separated by commas or whitespace; JSONL references can be a string or an array.
+
+Runnable Generic CSV example:
+
+```csv
+row_type,entity_kind,entity_value,subject_key,title,severity,description,evidence,references,external_id,observed_at
+entity,domain,darklab.sh,,,,,,inventory-1,2026-06-01T12:00:00Z
+finding,url,https://darklab.sh/login,,Missing CSP,medium,Header missing,No CSP,https://owasp.org,ext-1,2026-06-01T12:05:00Z
+finding,,,third-party-app,Vendor finding,high,Manual review,Tool reported finding,,ext-2,2026-06-01T12:10:00Z
+```
+
+Runnable Generic JSONL example:
+
+```jsonl
+{"row_type":"entity","entity_kind":"domain","entity_value":"darklab.sh","external_id":"inventory-1","observed_at":"2026-06-01T12:00:00Z"}
+{"row_type":"finding","entity_kind":"url","entity_value":"https://darklab.sh/login","title":"Missing CSP","severity":"medium","description":"Header missing","evidence":"No CSP","references":["https://owasp.org"],"external_id":"ext-1","observed_at":"2026-06-01T12:05:00Z"}
+{"row_type":"finding","subject_key":"third-party-app","title":"Vendor finding","severity":"high","description":"Manual review","evidence":"Tool reported finding","external_id":"ext-2","observed_at":"2026-06-01T12:10:00Z"}
+```
 
 **Limits:** Atlas only includes entities materialized from saved external-run output after the entity store was added. Built-in commands do not create Atlas entities.
 

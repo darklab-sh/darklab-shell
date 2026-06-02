@@ -214,6 +214,36 @@
 # Per-session burst limit for auto-promote preview requests.
 # Server default if unset: 2
 # project_auto_promote_preview_rate_limit_per_second: 2
+
+# ── Atlas Import Guardrails ─────────────────────────────────────────────────
+#
+# Limits for Atlas imports from external triage tools. Invalid or zero values
+# fall back to the server defaults rather than making imports unlimited.
+# Server default if unset: 10
+# atlas_import_max_upload_mb: 10
+#
+# Server default if unset: 5000
+# atlas_import_max_rows: 5000
+#
+# Server default if unset: 5000
+# atlas_import_max_findings: 5000
+#
+# Server default if unset: 100
+# atlas_import_max_warnings: 100
+#
+# Server default if unset: 100000
+# atlas_import_max_xml_elements: 100000
+#
+# Server default if unset: 20
+# atlas_import_preview_sample_limit: 20
+#
+# Server default if unset: 50
+# atlas_import_warning_sample_limit: 50
+#
+# Server default if unset: 30
+# atlas_import_draft_ttl_minutes: 30
+
+# ── Project Targets and Metadata Guardrails ─────────────────────────────────
 #
 # Maximum manual or discovered project targets. Bulk-linked Atlas entities use
 # max_project_entities_per_project instead.

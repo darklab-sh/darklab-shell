@@ -290,6 +290,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0024",
         "0025",
         "0026",
+        "0027",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -316,6 +317,24 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'match_count',
                 'linked_count'
             ))
+            OR (table_name = 'atlas_import_drafts' AND column_name IN (
+                'normalized_rows_json',
+                'preview_counts_json',
+                'warning_summary_json'
+            ))
+            OR (table_name = 'atlas_import_batches' AND column_name IN (
+                'counts_json',
+                'warning_summary_json'
+            ))
+            OR (table_name = 'atlas_entity_import_links' AND column_name IN (
+                'occurrence_count',
+                'source_detail_json',
+                'created_entity'
+            ))
+            OR (table_name = 'atlas_finding_import_occurrences' AND column_name IN (
+                'row_number',
+                'source_detail_json'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -326,6 +345,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "entities",
         "entity_intel_snapshots",
         "project_auto_promote_rules",
+        "atlas_import_drafts",
+        "atlas_import_batches",
+        "atlas_entity_import_links",
+        "atlas_finding_import_occurrences",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -340,6 +363,16 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("project_auto_promote_rules", "apply_on_run", "boolean"),
         ("project_auto_promote_rules", "match_count", "bigint"),
         ("project_auto_promote_rules", "linked_count", "bigint"),
+        ("atlas_import_drafts", "normalized_rows_json", "jsonb"),
+        ("atlas_import_drafts", "preview_counts_json", "jsonb"),
+        ("atlas_import_drafts", "warning_summary_json", "jsonb"),
+        ("atlas_import_batches", "counts_json", "jsonb"),
+        ("atlas_import_batches", "warning_summary_json", "jsonb"),
+        ("atlas_entity_import_links", "occurrence_count", "bigint"),
+        ("atlas_entity_import_links", "source_detail_json", "jsonb"),
+        ("atlas_entity_import_links", "created_entity", "boolean"),
+        ("atlas_finding_import_occurrences", "row_number", "bigint"),
+        ("atlas_finding_import_occurrences", "source_detail_json", "jsonb"),
     }
     runs_index_rows = conn.execute(
         """
@@ -383,6 +416,29 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_auto_promote_rules_project_updated",
         "idx_project_auto_promote_rules_run_scan",
     }.issubset({row["indexname"] for row in auto_promote_index_rows})
+    import_index_rows = conn.execute(
+        """
+        SELECT tablename, indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN (
+            'atlas_import_drafts',
+            'atlas_import_batches',
+            'atlas_entity_import_links',
+            'atlas_finding_import_occurrences'
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_atlas_import_drafts_scope_created",
+        "idx_atlas_import_drafts_expires",
+        "idx_atlas_import_batches_scope_applied",
+        "idx_atlas_entity_import_links_batch",
+        "idx_atlas_entity_import_links_entity_seen",
+        "idx_atlas_finding_import_occurrences_batch",
+        "idx_atlas_finding_import_occurrences_finding_seen",
+    }.issubset({row["indexname"] for row in import_index_rows})
 
 
 @pytest.mark.postgres

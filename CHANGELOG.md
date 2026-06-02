@@ -10,6 +10,41 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Atlas import source foundation** — added the persistence layer for importing external triage results into Atlas without creating fake runs.
+  - Added SQLite and Postgres schema support for import drafts, applied import batches, entity import links, and finding import occurrences.
+  - Atlas aggregate recalculation and core scope/orphan lookup helpers now treat import-source rows as real Atlas sources, so import-only entities and findings can stay visible and keep first/last-seen counts without History rows or transcripts.
+  - Added idempotent persistence helpers for import drafts, batches, entity source links, and finding import occurrences.
+  - Added the Atlas import parser service for Generic CSV, Generic JSONL, Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, and Burp Suite XML, normalizing known tool fields into canonical entity and finding import rows.
+  - Added `defusedxml` as a direct app dependency and hardened XML import parsing with streaming limits, DTD rejection, external-entity rejection, and entity-expansion protections.
+  - Added Atlas import preview/apply routes with persisted drafts, normalized row-set digest checks, option-specific team capability enforcement, idempotent source anchors, optional Project links, and Project target creation for imported domains, IPs, and URLs.
+  - Added configurable Atlas import guardrails for upload size, row count, finding count, warning count, XML element count, preview samples, warning samples, and draft lifetime; preview/apply both enforce the limits, expired unapplied drafts are cleaned up, and repeated apply requests return the existing batch instead of duplicating source rows.
+  - Added an Atlas toolbar import modal that previews counts, samples, warnings, and allowed apply options before writing imported rows, then refreshes Atlas and project-scoped views after apply.
+  - The import file picker now hints the expected file extensions and MIME types for the selected format to reduce accidental wrong-file previews.
+  - Entity and finding details now show import provenance separately from source runs, including whether an import created the row or added another source to an existing row.
+  - Atlas run-source cleanup now preserves entities and findings that still have import provenance, and direct Atlas entity deletion cleans up its import-source links.
+  - Atlas import preview now rejects declared oversized request bodies before reading multipart files, while the parser still enforces the byte cap for streamed uploads.
+  - Atlas import parser, preview/apply routes, and workflows now emit structured parse, success, replay, rejection, warning-truncation, guardrail, cleanup, config fallback, and stage-aware failure events with request identity, selected options, draft or batch ids, and summary counts.
+  - Atlas import preview/apply now avoids duplicate generic browser warning logs for expected 4xx rejections while still logging network and runtime failures.
+  - Atlas import Project linking now follows the configured Project link and Atlas entity quotas and returns a structured quota error instead of partially linking over budget.
+  - OWASP ZAP imports now map numeric `riskcode` values through ZAP's 0-3 severity scale when a worded risk description is absent.
+  - Nessus imports and generic `host` fields now detect IP hosts as IP Atlas entities instead of forcing every host value into the domain type.
+  - Burp Suite XML imports now keep nested request/response evidence from issue records instead of dropping it during normalization.
+  - Imported findings now use the same entity-backed subject signature as run-discovered findings, keeping stored `subject_key` and dedupe signatures consistent.
+  - The Atlas import modal now keeps keyboard focus inside the dialog while it is open.
+  - Cleaned up the Atlas import apply path by removing an unused finding-created entity flag.
+  - Atlas import option checkboxes now use the shared checkbox form primitive.
+  - Atlas import batches now use an interim `applying` status before the final applied counts are written.
+  - Atlas import Project target counts now distinguish target creation from generic Project link counts and explain that target creation creates or reuses Atlas entities.
+  - Re-applying an already-applied Atlas import draft now returns the existing batch even if the client sends an outdated row-set digest.
+  - Expanded the user-facing Atlas Import docs with preview/apply behavior, warning handling, provenance labels, permission rules, idempotent apply behavior, Project options, and configured limits.
+  - Documented the Generic CSV and Generic JSONL import field contract with copyable examples in the feature reference.
+  - Documented the Atlas import preview/apply route contract, response shape, apply options, digest rule, and client-visible error codes in the architecture reference.
+  - Expanded the architecture logging inventory for Atlas import preview, apply, parser, rejection, cleanup, and failure events.
+  - Added an operator recipe for tuning Atlas import limits in `config.local.yaml`.
+  - Removed the completed Atlas Import implementation plan from `TODO.md` so open work only lists current tasks.
+  - Added the user-facing Atlas Import highlight to the v2.1 release notes.
+  - **Tests:** added backend coverage for schema shape, SQLite/Postgres migration parity, idempotent import-source writes, import-only Atlas aggregate/list visibility, known-tool parser mappings, malicious XML rejection, parser row/element/upload/warning limits, preview/apply success and rejection events, stale preview rejection, option-specific team capability enforcement across role branches, digest mismatch rejection, no-fake-run apply behavior, duplicate imports against existing scan records, untrusted import filenames/text, Project target creation, and target-quota rollback; added Atlas unit and Playwright coverage for import preview/apply, no-file and rejected-preview branches, retry behavior, disabled apply options, handled apply rejections, warnings, apply options, and imported provenance labels.
+
 - **Config-backed evidence package preset catalog** — added `app/conf/package_presets.yaml` and a hot-reloading server-side loader for evidence package preset metadata.
   - The shipped catalog keeps the existing `evidence`, `summary`, `full`, and `redacted` preset ids while validating operator catalogs for stable ids, bounded display text, default labels/notes, redaction mode, artifact/private-note defaults, and named selection policies.
   - Added `package_presets_file` so operators can point the server at a custom preset catalog; invalid overrides log `PACKAGE_PRESETS_OVERRIDE_INVALID` and fall back to the shipped presets.
@@ -153,6 +188,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Scheduled active-run auto-attach** — scheduled and watcher-fired commands that are still running when the UI opens now remain in Status Monitor instead of automatically taking over the terminal.
   - **Fix:** `/history/active` filters scheduled active runs by default for browser reload recovery, while Status Monitor requests the inclusive active-run list so **Attach** and **Kill** still work for automation-owned commands.
   - **Tests:** added schedule route coverage for default vs inclusive active-run responses, plus runner/status monitor unit coverage for scheduled restore skips and inclusive manual-attach recovery.
+
+- **Workspace command output files can be rewritten after permission repair** — scanner-owned output files no longer get stranded as zero-byte, read-only targets after a restart or failed write.
+  - **Root cause:** command output targets were prepared with a direct appuser `chmod`, which could not repair files already owned by the `scanner` user.
+  - **Fix:** write-target preparation now falls back through the validated scanner sudo path and restores `0660` permissions before launching the command.
+  - **Tests:** added backend coverage for scanner-owned output target repair.
 
 - **Fast-exiting interactive PTY stream replay** — Redis-backed PTY streams now try to replay any already-published output and exit events before stale-run cleanup can prune an open-looking run, so very short invalid interactive commands show their real terminal error and exit code instead of falling back to a missing-transcript notice.
   - **Tests:** added broker-service coverage for a fast-exiting PTY whose process metadata is already gone while completed Redis stream events are still available.

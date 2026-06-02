@@ -40,6 +40,14 @@ function jsonResponse(data) {
   }
 }
 
+function errorResponse(status, data) {
+  return {
+    ok: false,
+    status,
+    json: () => Promise.resolve(data),
+  }
+}
+
 function deferred() {
   let resolve
   let reject
@@ -85,7 +93,9 @@ function setupAtlasDom() {
             <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
           </div>
         </div>
+        <button id="atlas-import-btn" type="button">import</button>
         <button id="atlas-refresh-btn" type="button">refresh</button>
+        <button id="atlas-findings-board-btn" type="button">board</button>
         <button id="atlas-clear-filters-btn" type="button">clear filters</button>
         <div class="atlas-shell">
           <div id="atlas-finding-bulk-row" class="u-hidden">
@@ -112,6 +122,22 @@ function setupAtlasDom() {
           </div>
           <aside id="atlas-detail"></aside>
         </div>
+        <div id="atlas-import-overlay" class="modal-overlay mobile-sheet-overlay atlas-import-overlay u-hidden" aria-hidden="true">
+          <form id="atlas-import-modal" class="modal-card mobile-sheet-surface atlas-import-modal" tabindex="-1">
+            <button id="atlas-import-close" type="button">close import</button>
+            <select id="atlas-import-format">
+              <option value="nuclei_jsonl">Nuclei JSONL</option>
+              <option value="nessus_xml">Nessus XML</option>
+            </select>
+            <input id="atlas-import-name" />
+            <input id="atlas-import-file" type="file" />
+            <button id="atlas-import-preview-btn" type="submit">preview</button>
+            <span id="atlas-import-status"></span>
+            <section id="atlas-import-preview" class="u-hidden"></section>
+            <button id="atlas-import-cancel" type="button">cancel</button>
+            <button id="atlas-import-apply" type="button">apply</button>
+          </form>
+        </div>
       </section>
     </div>
   `
@@ -120,6 +146,7 @@ function setupAtlasDom() {
 function loadAtlas({
   activeProject = null,
   apiFetchImpl = null,
+  apiFetchInterceptor = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
   useRealSelectEnhancer = false,
@@ -127,6 +154,7 @@ function loadAtlas({
   teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
 } = {}) {
   const showToast = vi.fn()
+  const logClientError = vi.fn()
   const syncAppSelect = vi.fn()
   const enhanceAppSelects = vi.fn()
   const downloadBlobAsAttachment = vi.fn()
@@ -134,6 +162,10 @@ function loadAtlas({
   const projectEvents = []
   const apiFetch = apiFetchImpl || vi.fn((url, options = {}) => {
     const target = String(url)
+    if (typeof apiFetchInterceptor === 'function') {
+      const intercepted = apiFetchInterceptor(url, options)
+      if (intercepted) return intercepted
+    }
     if (target === '/atlas' || target.startsWith('/atlas?')) {
       return Promise.resolve(jsonResponse({
         total: 1,
@@ -196,9 +228,60 @@ function loadAtlas({
         blob: () => Promise.resolve(new Blob(['id,type\nent_ip,ip\n'], { type: 'text/csv' })),
       })
     }
+    if (target === '/atlas/imports/preview' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        draft_id: 'impd_1',
+        row_set_digest: 'digest_1',
+        counts: {
+          rows: 2,
+          entity_valid: 1,
+          finding_valid: 1,
+          new: 2,
+          updated: 0,
+          warnings: 1,
+          project_target_candidates: 1,
+        },
+        samples: {
+          entities: [{ kind: 'domain', canonical_value: 'example.com' }],
+          findings: [{ severity: 'high', title: 'Missing security header' }],
+        },
+        warnings: [{ row_number: 2, code: 'missing_field', message: 'Skipped empty value' }],
+        apply_options: {
+          import_entities: { available: true, requires: ['mutate_projects'] },
+          import_findings: { available: true, requires: ['triage_findings'] },
+          link_to_project: { available: true, requires: ['mutate_projects'] },
+          create_project_targets: { available: true, requires: ['mutate_projects'] },
+        },
+      }))
+    }
+    if (target === '/atlas/imports/apply' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        batch_id: 'impb_1',
+        counts: {
+          entities_created: 1,
+          entities_updated: 0,
+          findings_created: 1,
+          findings_updated: 0,
+          project_links_added: 1,
+          project_links_existing: 0,
+          project_targets_created: 1,
+          project_targets_existing: 0,
+        },
+      }))
+    }
     if (target === '/atlas/entities/ent_ip') {
       return Promise.resolve(jsonResponse({
         entity: ENTITY,
+        import_sources: [{
+          batch_id: 'impb_1',
+          source_tool: 'Nuclei JSONL',
+          import_name: 'Nuclei JSONL',
+          occurrence_count: 1,
+          created_record: true,
+          last_observed_at: '2026-05-15T00:03:00Z',
+        }],
         intel_snapshots: [{
           provider: 'Shodan',
           status: 'ok',
@@ -286,6 +369,7 @@ function loadAtlas({
         apiFetch,
         fetch: apiFetch,
         showToast,
+        logClientError,
         showConfirm: showConfirmImpl,
         syncAppSelect,
         enhanceAppSelects,
@@ -310,6 +394,7 @@ function loadAtlas({
       `{
         apiFetch,
         showToast,
+        logClientError,
         downloadBlobAsAttachment,
         openAtlas: window.openAtlas,
         closeAtlas: window.closeAtlas,
@@ -319,6 +404,7 @@ function loadAtlas({
       `
         window.apiFetch = apiFetch;
         window.showToast = showToast;
+        window.logClientError = logClientError;
         window.showConfirm = showConfirm;
         if (!useRealSelectEnhancer) {
           window.syncAppSelect = syncAppSelect;
@@ -337,6 +423,7 @@ function loadAtlas({
     apiFetch,
     showConfirm: showConfirmImpl,
     showToast,
+    logClientError,
     openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
     syncAppSelect,
     enhanceAppSelects,
@@ -344,6 +431,19 @@ function loadAtlas({
     projectEvents,
     storage,
   }
+}
+
+function setAtlasImportFile(contents = '{"template-id":"ssl/header"}\n', name = 'nuclei.jsonl', type = 'application/jsonl') {
+  const fileInput = document.getElementById('atlas-import-file')
+  Object.defineProperty(fileInput, 'files', {
+    value: [new File([contents], name, { type })],
+    configurable: true,
+  })
+  return fileInput
+}
+
+function submitAtlasImportPreview() {
+  document.getElementById('atlas-import-modal')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
 }
 
 describe('Atlas overlay', () => {
@@ -537,6 +637,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Intel summary')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Open ports')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('80, 443')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Created by Nuclei JSONL import')
     expect(document.querySelectorAll('.atlas-intel-highlight-provider')).toHaveLength(2)
     expect(document.querySelector('.atlas-intel-highlight-provider')?.textContent).toContain('CVE-2026-0001')
     const intelToggle = document.querySelector('.atlas-intel-card-toggle')
@@ -571,6 +672,229 @@ describe('Atlas overlay', () => {
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', expect.objectContaining({ cache: 'no-store' }))
+  })
+
+  it('previews and applies an Atlas import from a project-scoped Atlas surface', async () => {
+    const { openAtlas, apiFetch, showToast, projectEvents } = loadAtlas()
+
+    await openAtlas({ source: 'test', tab: 'findings', projectId: 'proj_1', projectName: 'Evidence' })
+    document.getElementById('atlas-import-btn')?.click()
+
+    const fileInput = document.getElementById('atlas-import-file')
+    const formatSelect = document.getElementById('atlas-import-format')
+    expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
+    formatSelect.value = 'nessus_xml'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('.nessus')
+    formatSelect.value = 'nuclei_jsonl'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
+    Object.defineProperty(fileInput, 'files', {
+      value: [new File(['{"template-id":"ssl/header"}\n'], 'nuclei.jsonl', { type: 'application/jsonl' })],
+      configurable: true,
+    })
+    document.getElementById('atlas-import-modal')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/imports/preview',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const previewCall = apiFetch.mock.calls.find(([url]) => url === '/atlas/imports/preview')
+    expect(previewCall?.[1].body.get('format_id')).toBe('nuclei_jsonl')
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+    })
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Skipped empty value')
+    expect(document.querySelector('.atlas-import-warning-row')?.textContent).toContain('Row 2')
+    expect(document.querySelector('[data-atlas-import-option="import_entities"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="import_findings"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="link_to_project"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.checked).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.closest('label')?.textContent)
+      .toContain('creates or reuses Atlas entities')
+    const importOptionLabel = document.querySelector('[data-atlas-import-option="import_entities"]')?.closest('label')
+    expect(importOptionLabel?.classList.contains('form-check')).toBe(true)
+    expect(importOptionLabel?.classList.contains('control-row')).toBe(false)
+
+    document.querySelector('[data-atlas-import-option="link_to_project"]').checked = true
+    document.getElementById('atlas-import-apply')?.click()
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/imports/apply',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const applyCall = apiFetch.mock.calls.find(([url]) => url === '/atlas/imports/apply')
+    const applyBody = JSON.parse(applyCall?.[1].body)
+    expect(applyBody).toMatchObject({
+      draft_id: 'impd_1',
+      row_set_digest: 'digest_1',
+      project_id: 'proj_1',
+      options: {
+        import_entities: true,
+        import_findings: true,
+        link_to_project: true,
+      },
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 entity created')
+    })
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project link added')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
+    expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
+    expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
+  })
+
+  it('requires a file before previewing an Atlas import', async () => {
+    const { openAtlas, apiFetch, showToast } = loadAtlas()
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    submitAtlasImportPreview()
+
+    expect(showToast).toHaveBeenCalledWith('Choose a file to import', 'error')
+    expect(apiFetch.mock.calls.some(([url]) => url === '/atlas/imports/preview')).toBe(false)
+    expect(document.getElementById('atlas-import-apply')?.disabled).toBe(true)
+  })
+
+  it('disables unavailable Atlas import apply options after preview', async () => {
+    const { openAtlas } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          return Promise.resolve(jsonResponse({
+            ok: true,
+            draft_id: 'impd_disabled',
+            row_set_digest: 'digest_disabled',
+            counts: { rows: 1, entity_valid: 0, finding_valid: 0, new: 0, updated: 0, warnings: 0 },
+            samples: { entities: [], findings: [] },
+            warnings: [],
+            apply_options: {
+              import_entities: { available: false, requires: ['mutate_projects'] },
+              import_findings: { available: false, requires: ['triage_findings'] },
+              link_to_project: { available: false, requires: ['mutate_projects'] },
+              create_project_targets: { available: false, requires: ['mutate_projects'] },
+            },
+          }))
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings', projectId: 'proj_1', projectName: 'Evidence' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile()
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-status')?.textContent).toContain('Preview ready')
+    })
+    ;['import_entities', 'import_findings', 'link_to_project', 'create_project_targets'].forEach((key) => {
+      const checkbox = document.querySelector(`[data-atlas-import-option="${key}"]`)
+      expect(checkbox?.disabled).toBe(true)
+      expect(checkbox?.checked).toBe(false)
+    })
+    expect(document.getElementById('atlas-import-apply')?.disabled).toBe(true)
+  })
+
+  it('can retry an Atlas import preview after a handled preview rejection', async () => {
+    let previewAttempts = 0
+    const { openAtlas, showToast } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          previewAttempts += 1
+          if (previewAttempts === 1) {
+            return Promise.resolve(errorResponse(400, { message: 'Unsupported import format' }))
+          }
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile('not jsonl', 'bad.txt', 'text/plain')
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Unsupported import format', 'error'))
+    expect(document.getElementById('atlas-import-status')?.textContent).toBe('')
+
+    setAtlasImportFile()
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+    })
+    expect(previewAttempts).toBe(2)
+    expect(document.getElementById('atlas-import-status')?.textContent).toContain('Preview ready')
+  })
+
+  it('does not log expected Atlas import preview rejections as client errors', async () => {
+    const { openAtlas, logClientError, showToast } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          return Promise.resolve(errorResponse(400, { message: 'Unsupported import format' }))
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile('not jsonl', 'bad.txt', 'text/plain')
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Unsupported import format', 'error'))
+    expect(logClientError).not.toHaveBeenCalled()
+  })
+
+  it('logs Atlas import preview runtime failures as client errors', async () => {
+    const networkError = new Error('network down')
+    const { openAtlas, logClientError, showToast } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          return Promise.reject(networkError)
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile()
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('network down', 'error'))
+    expect(logClientError).toHaveBeenCalledWith('failed to preview atlas import', networkError)
+  })
+
+  it('does not log expected Atlas import apply rejections as client errors', async () => {
+    for (const [status, message] of [
+      [403, 'You need permission to import Atlas findings'],
+      [409, 'Import preview expired'],
+    ]) {
+      setupAtlasDom()
+      const { openAtlas, logClientError, showToast } = loadAtlas({
+        apiFetchInterceptor: (url, options = {}) => {
+          if (String(url) === '/atlas/imports/apply' && options.method === 'POST') {
+            return Promise.resolve(errorResponse(status, { message }))
+          }
+          return undefined
+        },
+      })
+
+      await openAtlas({ source: 'test', tab: 'findings' })
+      document.getElementById('atlas-import-btn')?.click()
+      setAtlasImportFile()
+      submitAtlasImportPreview()
+      await vi.waitFor(() => {
+        expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+      })
+
+      document.getElementById('atlas-import-apply')?.click()
+
+      await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith(message, 'error'))
+      expect(logClientError).not.toHaveBeenCalled()
+    }
   })
 
   it('cycles Atlas tabs forward and backward for modal keyboard shortcuts', async () => {

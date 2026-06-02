@@ -251,6 +251,14 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `max_project_auto_promote_rules_per_project` | `100` | Server-side only. Maximum auto-promote rules stored for one project. `0` means unlimited |
 | `project_auto_promote_preview_rate_limit_per_minute` | `30` | Server-side only. Per-session rate limit for auto-promote preview requests |
 | `project_auto_promote_preview_rate_limit_per_second` | `2` | Server-side only. Per-session burst limit for auto-promote preview requests |
+| `atlas_import_max_upload_mb` | `10 MB` | Server-side only. Maximum uploaded file size for one Atlas import preview |
+| `atlas_import_max_rows` | `5000` | Server-side only. Maximum parsed rows accepted for one Atlas import preview or apply |
+| `atlas_import_max_findings` | `5000` | Server-side only. Maximum normalized findings accepted for one Atlas import |
+| `atlas_import_max_warnings` | `100` | Server-side only. Maximum row warnings retained while parsing one Atlas import |
+| `atlas_import_max_xml_elements` | `100000` | Server-side only. Maximum XML elements streamed by one XML Atlas import parser before rejection |
+| `atlas_import_preview_sample_limit` | `20` | Server-side only. Maximum entity and finding sample rows returned in one Atlas import preview response |
+| `atlas_import_warning_sample_limit` | `50` | Server-side only. Maximum warning samples returned in one Atlas import preview and stored on draft/batch metadata |
+| `atlas_import_draft_ttl_minutes` | `30` | Server-side only. Time window in minutes before an unapplied Atlas import draft is treated as abandoned and cleaned up |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
@@ -1082,6 +1090,22 @@ scrape_configs:
 Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `examples/grafana/darklab-overview.json`.
 
 Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
+
+### Tune Atlas Import Limits
+
+```yaml
+# app/conf/config.local.yaml
+atlas_import_max_upload_mb: 10
+atlas_import_max_rows: 5000
+atlas_import_max_findings: 5000
+atlas_import_max_warnings: 100
+atlas_import_max_xml_elements: 100000
+atlas_import_preview_sample_limit: 20
+atlas_import_warning_sample_limit: 50
+atlas_import_draft_ttl_minutes: 30
+```
+
+These caps apply to Atlas imports before and during apply, so lowering them can make large Nessus, ZAP, Burp, Nuclei, CSV, or JSONL files fail preview with a clear limit error. Invalid values and `0` fall back to the server defaults above.
 
 ### Set The Default Theme
 

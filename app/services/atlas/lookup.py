@@ -104,6 +104,7 @@ def _entity_scope_sql(alias: str, team_id: str = "") -> str:
     normalized_team_id = _normalize_team_id(team_id)
     if normalized_team_id:
         run_scope_sql = _run_scope_sql("scope_run", normalized_team_id)
+        import_scope_sql = _project_scope_sql("scope_import_batch", normalized_team_id)
         return _sql_join((
             "(",
             f"{prefix}team_id = ? OR EXISTS (",
@@ -111,6 +112,11 @@ def _entity_scope_sql(alias: str, team_id: str = "") -> str:
             "JOIN runs scope_run ON scope_run.id = scope_erl.run_id ",
             f"WHERE scope_erl.entity_id = {prefix}id AND ",
             run_scope_sql,
+            ") OR EXISTS (",
+            "SELECT 1 FROM atlas_entity_import_links scope_eil ",
+            "JOIN atlas_import_batches scope_import_batch ON scope_import_batch.id = scope_eil.batch_id ",
+            f"WHERE scope_eil.entity_id = {prefix}id AND ",
+            import_scope_sql,
             "))",
         ))
     return f"{prefix}session_id = ?"
@@ -118,7 +124,7 @@ def _entity_scope_sql(alias: str, team_id: str = "") -> str:
 
 def _entity_scope_params(session_id: str, team_id: str = "") -> list[str]:
     normalized_team_id = _normalize_team_id(team_id)
-    return [normalized_team_id, normalized_team_id] if normalized_team_id else [session_id]
+    return [normalized_team_id, normalized_team_id, normalized_team_id] if normalized_team_id else [session_id]
 
 
 def entity_exists_in_scope(conn, session_id: str, entity_id: str, *, team_id: str = "") -> bool:
@@ -143,6 +149,19 @@ def _entity_run_exists_sql(entity_alias: str, run_alias: str, team_id: str = "")
     ))
 
 
+def _entity_import_exists_sql(entity_alias: str, batch_alias: str, team_id: str = "") -> str:
+    entity_prefix = f"{entity_alias}." if entity_alias else ""
+    import_scope_sql = _project_scope_sql(batch_alias, team_id)
+    return _sql_join((
+        "EXISTS (",
+        "SELECT 1 FROM atlas_entity_import_links source_eil ",
+        f"JOIN atlas_import_batches {batch_alias} ON {batch_alias}.id = source_eil.batch_id ",
+        f"WHERE source_eil.entity_id = {entity_prefix}id AND ",
+        import_scope_sql,
+        ")",
+    ))
+
+
 def _finding_run_exists_sql(finding_alias: str, run_alias: str, team_id: str = "") -> str:
     finding_prefix = f"{finding_alias}." if finding_alias else ""
     run_scope_sql = _run_scope_sql(run_alias, team_id)
@@ -152,6 +171,19 @@ def _finding_run_exists_sql(finding_alias: str, run_alias: str, team_id: str = "
         f"JOIN runs {run_alias} ON {run_alias}.id = source_fo.run_id ",
         f"WHERE source_fo.finding_id = {finding_prefix}id AND ",
         run_scope_sql,
+        ")",
+    ))
+
+
+def _finding_import_exists_sql(finding_alias: str, batch_alias: str, team_id: str = "") -> str:
+    finding_prefix = f"{finding_alias}." if finding_alias else ""
+    import_scope_sql = _project_scope_sql(batch_alias, team_id)
+    return _sql_join((
+        "EXISTS (",
+        "SELECT 1 FROM atlas_finding_import_occurrences source_fio ",
+        f"JOIN atlas_import_batches {batch_alias} ON {batch_alias}.id = source_fio.batch_id ",
+        f"WHERE source_fio.finding_id = {finding_prefix}id AND ",
+        import_scope_sql,
         ")",
     ))
 
@@ -174,7 +206,9 @@ def _finding_source_scope_sql(alias: str, team_id: str = "") -> str:
         ") OR EXISTS (SELECT 1 FROM runs source_run WHERE source_run.id = ",
         f"{prefix}last_run_id AND ",
         run_scope_sql,
-        "))",
+        ") OR ",
+        _finding_import_exists_sql(alias, "source_import_batch", team_id),
+        ")",
     ))
 
 
@@ -182,7 +216,8 @@ def _finding_source_scope_params(session_id: str, team_id: str = "") -> list[str
     if not _normalize_team_id(team_id):
         return [session_id]
     run_params = _run_scope_params(session_id, team_id)
-    return [team_id, *run_params, *run_params, *run_params, *run_params]
+    import_params = _project_scope_params(session_id, team_id)
+    return [team_id, *run_params, *run_params, *run_params, *run_params, *import_params]
 
 
 def finding_exists_in_scope(conn, session_id: str, finding_id: str, *, team_id: str = "") -> bool:
@@ -241,14 +276,20 @@ def _finding_run_filter_params(session_id: str, run_filter: str, team_id: str = 
 def _orphan_entity_clause(alias: str, team_id: str = "") -> str:
     if _normalize_team_id(team_id):
         return "AND ? != 'only' "
-    run_exists = _entity_run_exists_sql(alias, "orphan_run", team_id)
+    source_exists = _sql_join((
+        "(",
+        _entity_run_exists_sql(alias, "orphan_run", team_id),
+        " OR ",
+        _entity_import_exists_sql(alias, "orphan_import_batch", team_id),
+        ")",
+    ))
     return _sql_join((
         "AND (? = 'all' ",
         "OR (? = 'hide' AND ",
-        run_exists,
+        source_exists,
         ") ",
         "OR (? = 'only' AND NOT ",
-        run_exists,
+        source_exists,
         ")) ",
     ))
 
@@ -258,20 +299,35 @@ def _orphan_entity_params(session_id: str, orphan_filter: str, team_id: str = ""
     if _normalize_team_id(team_id):
         return [normalized]
     run_params = _run_scope_params(session_id, team_id)
-    return [normalized, normalized, *run_params, normalized, *run_params]
+    import_params = _project_scope_params(session_id, team_id)
+    return [
+        normalized,
+        normalized,
+        *run_params,
+        *import_params,
+        normalized,
+        *run_params,
+        *import_params,
+    ]
 
 
 def _orphan_finding_clause(alias: str, team_id: str = "") -> str:
     if _normalize_team_id(team_id):
         return "AND ? != 'only' "
-    run_exists = _finding_run_exists_sql(alias, "orphan_run", team_id)
+    source_exists = _sql_join((
+        "(",
+        _finding_run_exists_sql(alias, "orphan_run", team_id),
+        " OR ",
+        _finding_import_exists_sql(alias, "orphan_import_batch", team_id),
+        ")",
+    ))
     return _sql_join((
         "AND (? = 'all' ",
         "OR (? = 'hide' AND ",
-        run_exists,
+        source_exists,
         ") ",
         "OR (? = 'only' AND NOT ",
-        run_exists,
+        source_exists,
         ")) ",
     ))
 
@@ -281,7 +337,16 @@ def _orphan_finding_params(session_id: str, orphan_filter: str, team_id: str = "
     if _normalize_team_id(team_id):
         return [normalized]
     run_params = _run_scope_params(session_id, team_id)
-    return [normalized, normalized, *run_params, normalized, *run_params]
+    import_params = _project_scope_params(session_id, team_id)
+    return [
+        normalized,
+        normalized,
+        *run_params,
+        *import_params,
+        normalized,
+        *run_params,
+        *import_params,
+    ]
 
 
 def _row_to_entity(row) -> dict[str, Any]:
@@ -557,6 +622,74 @@ def _row_to_run_link(row) -> dict[str, Any]:
         "last_seen_at": row["last_seen_at"],
         "occurrence_count": int(row["occurrence_count"] or 0),
     }
+
+
+def _row_to_import_source(row) -> dict[str, Any]:
+    return {
+        "batch_id": row["batch_id"],
+        "source_tool": row["source_tool"] or "",
+        "format_id": row["format_id"] or "",
+        "import_name": row["import_name"] or "",
+        "filename": row["filename"] or "",
+        "applied_at": row["applied_at"] or "",
+        "first_observed_at": row["first_observed_at"] or "",
+        "last_observed_at": row["last_observed_at"] or "",
+        "occurrence_count": int(row["occurrence_count"] or 0),
+        "created_record": bool(row["created_record"]) if "created_record" in row.keys() else False,
+    }
+
+
+def _entity_import_sources(conn, session_id: str, entity_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
+    batch_scope_sql = _project_scope_sql("batch", team_id)
+    batch_scope_params = _project_scope_params(session_id, team_id)
+    rows = conn.execute(
+        "SELECT link.batch_id, batch.source_tool, batch.format_id, batch.import_name, batch.filename, "
+        "batch.applied_at, link.first_observed_at, link.last_observed_at, link.occurrence_count, "
+        "link.created_entity AS created_record "
+        "FROM atlas_entity_import_links link "
+        "JOIN atlas_import_batches batch ON batch.id = link.batch_id "
+        "WHERE link.entity_id = ? AND " + batch_scope_sql + " "  # nosec
+        "ORDER BY link.last_observed_at DESC, batch.applied_at DESC, batch.id DESC",
+        [entity_id, *batch_scope_params],
+    ).fetchall()
+    return [_row_to_import_source(row) for row in rows]
+
+
+def _finding_import_sources_by_id(
+    conn,
+    session_id: str,
+    finding_ids: list[str],
+    *,
+    team_id: str = "",
+) -> dict[str, list[dict[str, Any]]]:
+    ids = list(dict.fromkeys(str(finding_id or "").strip() for finding_id in finding_ids if str(finding_id or "").strip()))
+    if not ids:
+        return {}
+    dialect = dialect_for_backend(DB_BACKEND)
+    id_filter_sql, id_filter_params = dialect.in_clause("occ.finding_id", ids)
+    batch_scope_sql = _project_scope_sql("batch", team_id)
+    batch_scope_params = _project_scope_params(session_id, team_id)
+    rows = conn.execute(
+        "SELECT occ.finding_id, occ.batch_id, batch.source_tool, batch.format_id, batch.import_name, "
+        "batch.filename, batch.applied_at, MIN(occ.observed_at) AS first_observed_at, "
+        "MAX(occ.observed_at) AS last_observed_at, COUNT(*) AS occurrence_count, "
+        "FALSE AS created_record "
+        "FROM atlas_finding_import_occurrences occ "
+        "JOIN atlas_import_batches batch ON batch.id = occ.batch_id "
+        "WHERE " + id_filter_sql + " AND " + batch_scope_sql + " "  # nosec
+        "GROUP BY occ.finding_id, occ.batch_id, batch.source_tool, batch.format_id, "
+        "batch.import_name, batch.filename, batch.applied_at, batch.id "
+        "ORDER BY MAX(occ.observed_at) DESC, batch.applied_at DESC, batch.id DESC",
+        [*id_filter_params, *batch_scope_params],
+    ).fetchall()
+    sources_by_id: dict[str, list[dict[str, Any]]] = {finding_id: [] for finding_id in ids}
+    for row in rows:
+        sources_by_id.setdefault(str(row["finding_id"] or ""), []).append(_row_to_import_source(row))
+    return sources_by_id
+
+
+def _finding_import_sources(conn, session_id: str, finding_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
+    return _finding_import_sources_by_id(conn, session_id, [finding_id], team_id=team_id).get(finding_id, [])
 
 
 def _label_order_sql(prefix: str = "") -> str:
@@ -1345,11 +1478,20 @@ def list_findings(
             *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
         ],
     ).fetchall()
+    findings = [_row_to_finding(row) for row in rows]
+    sources_by_finding = _finding_import_sources_by_id(
+        conn,
+        session_id,
+        [finding["id"] for finding in findings],
+        team_id=team_id,
+    )
+    for finding in findings:
+        finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)
     return {
-        "findings": [_row_to_finding(row) for row in rows],
+        "findings": findings,
         "total": total,
         "limit": page_limit,
         "offset": page_offset,
@@ -1390,7 +1532,10 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
         [finding_id, *occurrence_scope_params, ENTITY_DETAIL_RUN_LIMIT],
     ).fetchall()
     return {
-        "finding": _row_to_finding(row),
+        "finding": {
+            **_row_to_finding(row),
+            "import_sources": _finding_import_sources(conn, session_id, finding_id, team_id=team_id),
+        },
         "occurrences": [
             {
                 "run_id": occurrence["run_id"],
@@ -1831,12 +1976,22 @@ def entity_detail(
         [*finding_scope_params, entity_id, ENTITY_DETAIL_FINDING_LIMIT, safe_findings_offset],
     ).fetchall()
     intel_snapshots = [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows]
+    findings = [_row_to_finding(finding) for finding in finding_rows]
+    sources_by_finding = _finding_import_sources_by_id(
+        conn,
+        session_id,
+        [finding["id"] for finding in findings],
+        team_id=team_id,
+    )
+    for finding in findings:
+        finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     return {
         "entity": entity,
         "runs": [_row_to_run_link(run) for run in run_rows],
+        "import_sources": _entity_import_sources(conn, session_id, entity_id, team_id=team_id),
         "intel_snapshots": intel_snapshots,
         "intel_summary": summarize_intel_snapshots(entity["type"], intel_snapshots),
-        "findings": [_row_to_finding(finding) for finding in finding_rows],
+        "findings": findings,
         "detail_limits": {
             "runs": {
                 "limit": ENTITY_DETAIL_RUN_LIMIT,

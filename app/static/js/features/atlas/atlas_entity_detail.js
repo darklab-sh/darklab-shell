@@ -335,6 +335,41 @@
     return wrap;
   }
 
+  function importSourceTitle(source) {
+    return text(source.import_name, text(source.source_tool, 'Import'));
+  }
+
+  function importSourceLabel(source) {
+    const tool = text(source.source_tool, text(source.format_id, 'external tool'));
+    return source.created_record ? `Created by ${tool} import` : `Also seen in ${tool} import`;
+  }
+
+  function renderImportSources(sources) {
+    const wrap = node('div', 'atlas-source-list atlas-import-source-list');
+    const rows = Array.isArray(sources) ? sources : [];
+    if (!rows.length) {
+      wrap.appendChild(node('div', 'atlas-empty-inline', 'No import sources'));
+      return wrap;
+    }
+    rows.forEach(source => {
+      const row = node('div', 'panel-row atlas-source-row atlas-import-source-row');
+      row.append(
+        node('div', 'atlas-source-command', importSourceTitle(source)),
+        node(
+          'div',
+          'atlas-muted',
+          [
+            importSourceLabel(source),
+            formatCount(source.occurrence_count, 'row'),
+            formatDate(source.last_observed_at || source.applied_at),
+          ].filter(Boolean).join(' · '),
+        ),
+      );
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
   function renderFindings(findings, meta = null, onPage = null) {
     const wrap = node('div', 'atlas-finding-list');
     const rows = Array.isArray(findings) ? findings : [];
@@ -494,7 +529,9 @@
         global.enhanceAppSelects(actions);
       }
     }
-    container.append(meta, section('Evidence', raw));
+    container.append(meta);
+    container.append(section('Import sources', renderImportSources(finding.import_sources)));
+    container.append(section('Evidence', raw));
   }
 
   function renderMetadataEditor(entity, handlers = {}) {
@@ -596,6 +633,7 @@
     container.append(section('Labels', renderLabels(entity.labels)));
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
     container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
+    container.append(section('Import sources', renderImportSources(detail.import_sources)));
     container.append(section('Source runs', renderRuns(
       detail.runs,
       handlers.onSeeRun,

@@ -261,6 +261,49 @@ def _insert_project_link(
     raise ProjectWorkspaceError("could not allocate a project link id")
 
 
+def insert_project_link_with_quota(
+    conn,
+    project_id,
+    entity_type,
+    entity_id,
+    source,
+    *,
+    confidence=1.0,
+    review_state="confirmed",
+    source_detail=None,
+):
+    entity_type = validate_project_entity_type(entity_type)
+    row = conn.execute(
+        "SELECT id, project_id, entity_type, entity_id, source, created "
+        "FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
+        (project_id, entity_type, entity_id),
+    ).fetchone()
+    if row:
+        return _row_to_link(row)
+    if _quota_exceeded(
+        _project_link_count(conn, project_id),
+        "max_project_links_per_project",
+        5000,
+    ):
+        _raise_quota("project link quota exceeded for this project")
+    if entity_type == "atlas_entity" and _quota_exceeded(
+        _project_link_count(conn, project_id, entity_type="atlas_entity"),
+        "max_project_entities_per_project",
+        5000,
+    ):
+        _raise_quota("project entity quota exceeded for this project")
+    return _insert_project_link(
+        conn,
+        project_id,
+        entity_type,
+        entity_id,
+        source,
+        confidence=confidence,
+        review_state=review_state,
+        source_detail=source_detail,
+    )
+
+
 def _run_entity_ids_for_project_link(conn, session_id, run_ids, *, team_id=""):
     normalized_run_ids = [str(run_id or "").strip() for run_id in run_ids]
     normalized_run_ids = [run_id for run_id in normalized_run_ids if run_id]
