@@ -3123,7 +3123,7 @@ button.project-explorer-item:focus-visible,
 
 .project-finding-review {
   flex: 0 0 auto;
-  width: 156px;
+  width: 188px;
   max-width: 100%;
 }
 
@@ -3132,18 +3132,32 @@ button.project-explorer-item:focus-visible,
 .project-finding-row-actions {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-end;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 6px;
-  width: 156px;
+  width: 188px;
   max-width: 100%;
+}
+
+
+
+.project-finding-row-button-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+
+
+.project-finding-row-button-group .btn {
+  width: 100%;
 }
 
 
 
 .project-finding-review + .app-select {
   flex: 0 0 auto;
-  width: 156px;
+  width: 188px;
   max-width: 100%;
 }
 
@@ -4218,6 +4232,13 @@ body.mobile-terminal-mode .project-target-editor-form .form-select {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.project-finding-row-actions {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 .project-entity-selection-count,

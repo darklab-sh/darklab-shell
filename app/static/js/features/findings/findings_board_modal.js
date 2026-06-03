@@ -159,6 +159,20 @@
     ));
   }
 
+  function updateFindingTriage(findingId, triage) {
+    const normalized = String(findingId || '');
+    const compact = triage && typeof triage === 'object' ? triage : {};
+    state.findings = state.findings.map(finding => (
+      String(finding && finding.id || '') === normalized
+        ? {
+            ...finding,
+            triage: compact,
+            verification_status: String(compact.verification_status || finding.verification_status || 'not_started'),
+          }
+        : finding
+    ));
+  }
+
   function reviewSelect(finding) {
     const select = document.createElement('select');
     const allowed = canTriageFindings();
@@ -250,6 +264,15 @@
       open.dataset.lineIndex = Number.isInteger(card.line_number) ? String(card.line_number) : '';
       open.textContent = 'Open';
       actions.appendChild(open);
+    }
+    if (card.id) {
+      const triage = document.createElement('button');
+      triage.type = 'button';
+      triage.className = 'btn btn-secondary btn-compact';
+      triage.dataset.findingsBoardAction = 'edit-triage';
+      triage.dataset.findingId = String(card.id || '');
+      triage.textContent = 'Triage';
+      actions.appendChild(triage);
     }
     actions.appendChild(reviewSelect(finding));
     article.appendChild(actions);
@@ -395,6 +418,37 @@
     }
   }
 
+  async function openFindingTriage(findingId) {
+    const finding = findingById(findingId);
+    if (!finding) {
+      showMessage('Finding is missing its details.', 'error');
+      return;
+    }
+    if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+      showMessage('Finding triage editor is not available.', 'error');
+      return;
+    }
+    showMessage('');
+    await global.DarklabFindingTriageEditor.open(finding, {
+      canEdit: canTriageFindings(),
+      onSaved: async (triage) => {
+        const compact = typeof global.DarklabFindingTriageEditor.compactTriage === 'function'
+          ? global.DarklabFindingTriageEditor.compactTriage(triage)
+          : triage;
+        updateFindingTriage(findingId, compact);
+        render();
+        showMessage('Finding triage saved.');
+        if (typeof global.emitUiEvent === 'function') {
+          global.emitUiEvent('app:project-workspace-mutated', {
+            reason: 'finding-triage-updated',
+            project_id: state.projectId,
+            finding_id: findingId,
+          });
+        }
+      },
+    });
+  }
+
   async function openFindingsBoard(options = {}) {
     if (!overlay || !bodyEl) return false;
     if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
@@ -457,6 +511,11 @@
         opened = true;
       }
       if (opened) closeFindingsBoard({ refocus: false });
+      return;
+    }
+    if (action.dataset.findingsBoardAction === 'edit-triage') {
+      event.preventDefault();
+      void openFindingTriage(String(action.dataset.findingId || ''));
     }
   });
   bodyEl?.addEventListener('dragstart', event => {

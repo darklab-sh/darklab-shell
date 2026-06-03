@@ -1695,6 +1695,26 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
+      if (url === '/findings/finding-high/triage') {
+        if (options.method === 'PUT') {
+          const payload = JSON.parse(options.body || '{}')
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ triage: payload }),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            triage: {
+              remediation: '',
+              verification_steps: '',
+              verification_status: 'not_started',
+              verification_notes: '',
+            },
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
@@ -3855,8 +3875,10 @@ describe('shell chrome project workspace', () => {
     const findingTriageButton = document.querySelector(
       '#project-explorer-body [data-project-action="edit-finding-triage"][data-finding-id="finding-1"]',
     )
+    const findingActionGroup = findingTriageButton?.closest('.project-finding-row-button-group')
     expect(window.DarklabFindingTriageEditor?.open).toEqual(expect.any(Function))
     expect(findingTriageButton).not.toBeNull()
+    expect(findingActionGroup?.querySelector('[data-project-action="edit-finding-metadata"]')).not.toBeNull()
     expect(findingTriageButton.disabled).toBe(false)
     expect(findingTriageButton.dataset.projectId).toBe('project-1')
     const triageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
@@ -4893,6 +4915,37 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('findings-board-subtitle').textContent).toContain('Project: Sort Project')
     expect(document.getElementById('findings-board-body').textContent).toContain('Critical issue')
+    const boardTriageButton = document.querySelector(
+      '#findings-board-body [data-findings-board-action="edit-triage"][data-finding-id="finding-high"]',
+    )
+    expect(boardTriageButton).not.toBeNull()
+    expect(boardTriageButton.textContent).toBe('Triage')
+    const boardTriageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
+    boardTriageButton.click()
+    await tick()
+    await tick()
+    expect(boardTriageOpenSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'finding-high' }), expect.objectContaining({
+      canEdit: true,
+      onSaved: expect.any(Function),
+    }))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+    document.getElementById('finding-triage-remediation').value = 'Patch the exposed service.'
+    document.getElementById('finding-triage-status').value = 'ready_to_verify'
+    document.getElementById('finding-triage-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-high/triage', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        remediation: 'Patch the exposed service.',
+        verification_steps: '',
+        verification_status: 'ready_to_verify',
+        verification_notes: '',
+      }),
+    }))
+    expect(document.getElementById('findings-board-message').textContent).toBe('Finding triage saved.')
     const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
     boardReview.value = 'false_positive'
     boardReview.dispatchEvent(new Event('change', { bubbles: true }))
@@ -5106,8 +5159,10 @@ describe('shell chrome project workspace', () => {
 
     const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
     const boardCard = document.querySelector('#findings-board-body [data-finding-id]')
+    const boardTriage = document.querySelector('#findings-board-body [data-findings-board-action="edit-triage"]')
     expect(boardReview?.disabled).toBe(true)
     expect(boardCard?.draggable).toBe(false)
+    expect(boardTriage?.disabled).toBe(false)
 
     boardReview.value = 'false_positive'
     boardReview.dispatchEvent(new Event('change', { bubbles: true }))

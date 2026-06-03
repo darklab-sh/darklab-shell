@@ -74,12 +74,14 @@
       const wrap = document.createElement('div');
       wrap.className = 'project-finding-row-actions';
       if (finding && finding.id) {
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'project-finding-row-button-group';
         const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
         triage.dataset.findingId = String(finding.id || '');
-        wrap.appendChild(triage);
         const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
         edit.dataset.findingId = String(finding.id || '');
-        wrap.appendChild(edit);
+        buttonGroup.append(triage, edit);
+        wrap.appendChild(buttonGroup);
         wrap.appendChild(reviewControl(finding, projectId));
       }
       return wrap;

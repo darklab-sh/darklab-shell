@@ -13,6 +13,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Finding remediation and verification storage foundation** — added owner-scoped storage and service helpers for per-finding remediation text, verification steps, verification status, and verification notes, with SQLite/Postgres schema support and cleanup when findings are deleted.
   - Added internal finding triage read/update routes, team capability enforcement for writes, compact Atlas/Project list enrichment, and `verification_status` filtering.
   - Added a shared finding triage editor in Atlas and Projects so operators can save remediation guidance, verification steps, verification status, and verification notes, with compact badges in finding lists and boards.
+  - Added the shared Triage action to cards in the top-level Findings Board modal, matching the Atlas and Project finding list flows.
+  - Project finding list rows now group the Triage and Edit actions into a compact button pair above the review selector, making the row controls easier to scan.
   - Kept the finding triage editor's app-native verification selector in sync when reopening the editor for another finding or switching into view-only mode.
   - Unified verification-status badge colors across Atlas desktop, Atlas mobile, and Projects so `verified` is green, `needs_retest` is amber, and other verification states stay muted.
   - Kept the Atlas mobile finding Triage button available to read-only team members so they can open remediation and verification details without being able to save changes.
