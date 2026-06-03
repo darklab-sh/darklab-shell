@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -374,6 +375,20 @@ def _workspace_ticket_error_response(exc: DownloadTicketError) -> tuple[Response
     return jsonify({"error": str(exc)}), 403
 
 
+def _workspace_download_response(handle, path: str) -> Response:
+    response = send_file(
+        handle,
+        as_attachment=True,
+        download_name=Path(path).name,
+        mimetype="text/plain; charset=utf-8",
+    )
+    try:
+        response.content_length = os.fstat(handle.fileno()).st_size
+    except (AttributeError, OSError, ValueError):
+        pass
+    return response
+
+
 def _path_from_request() -> str:
     return str(request.args.get("path") or "").strip()
 
@@ -557,12 +572,7 @@ def workspace_files_download():
             path = str(payload.get("path") or "").strip()
             owner_context = owner_context_from_ticket(payload)
             handle = open_owner_workspace_file_for_download(owner_context, path)
-            return send_file(
-                handle,
-                as_attachment=True,
-                download_name=Path(path).name,
-                mimetype="text/plain; charset=utf-8",
-            )
+            return _workspace_download_response(handle, path)
         except DownloadTicketError as exc:
             return _workspace_ticket_error_response(exc)
         except Exception as exc:
@@ -575,12 +585,7 @@ def workspace_files_download():
     path = _path_from_request()
     try:
         handle = open_owner_workspace_file_for_download(scope.context, path)
-        return send_file(
-            handle,
-            as_attachment=True,
-            download_name=Path(path).name,
-            mimetype="text/plain; charset=utf-8",
-        )
+        return _workspace_download_response(handle, path)
     except Exception as exc:
         return _workspace_error_response(exc)
 

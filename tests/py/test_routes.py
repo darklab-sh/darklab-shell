@@ -6250,6 +6250,7 @@ class TestProjectRoutes:
             )
             assert download_resp.status_code == 200
             assert download_resp.data == b"0123456789"
+            assert download_resp.headers["Content-Length"] == "10"
             assert "attachment" in download_resp.headers["Content-Disposition"]
             ticket_resp = client.post(
                 f"/projects/{project['id']}/artifacts/rfa_{run_id}/download-ticket",
@@ -6259,6 +6260,7 @@ class TestProjectRoutes:
             ticket_download = client.get(ticket_resp.get_json()["url"])
             assert ticket_download.status_code == 200
             assert ticket_download.data == b"0123456789"
+            assert ticket_download.headers["Content-Length"] == "10"
             missing_preview = client.get(
                 f"/projects/{project['id']}/artifacts/rfa_{baseline_run_id}/preview",
                 headers={"X-Session-ID": session_id},
@@ -8158,6 +8160,7 @@ class TestProjectRoutes:
         assert ticket_resp.status_code == 200
         download_resp = client.get(ticket_resp.get_json()["url"])
         assert download_resp.status_code == 200
+        assert int(download_resp.headers["Content-Length"]) > 0
         assert "attachment" in download_resp.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(download_resp.data)) as archive:
             assert "manifest.json" in archive.namelist()
@@ -12548,11 +12551,13 @@ class TestWorkspaceRoutes:
             ticket_download = client.get(ticket_resp.get_json()["url"])
         assert resp.status_code == 200
         assert resp.get_data(as_text=True) == "darklab.sh\n"
+        assert resp.headers["Content-Length"] == "11"
         assert "attachment" in resp.headers["Content-Disposition"]
         assert "targets.txt" in resp.headers["Content-Disposition"]
         assert ticket_resp.status_code == 200
         assert ticket_download.status_code == 200
         assert ticket_download.get_data(as_text=True) == "darklab.sh\n"
+        assert ticket_download.headers["Content-Length"] == "11"
 
     def test_file_list_includes_project_artifact_metadata(self):
         client = get_client()

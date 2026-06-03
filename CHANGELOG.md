@@ -155,7 +155,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Browser downloads start immediately for large files** — workspace files, project artifacts, and evidence package archives now use short-lived direct download URLs so the browser can show native download progress instead of waiting for JavaScript to buffer the whole file first.
+- **Browser downloads start immediately for large files** — workspace files, project artifacts, and evidence package archives now use short-lived direct download URLs with known content lengths, so the browser can show native download progress instead of waiting for JavaScript to buffer the whole file first.
   - **Tests:** updated route and browser-unit coverage for ticketed workspace, artifact, and evidence-package downloads.
 
 - **Bundled Postgres 18 service** — moved the optional Compose, CI, and disposable test Postgres images from 17 to 18.

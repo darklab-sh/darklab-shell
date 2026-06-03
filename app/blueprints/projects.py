@@ -234,6 +234,23 @@ def _project_download_ticket_owner(payload, *, project_id, expected_ids):
     return session_id, str(payload.get("team_id") or "").strip()
 
 
+def _set_download_content_length(response, size):
+    try:
+        known_size = int(size)
+    except (TypeError, ValueError):
+        return response
+    if known_size >= 0:
+        response.content_length = known_size
+    return response
+
+
+def _download_handle_size(handle):
+    try:
+        return os.fstat(handle.fileno()).st_size
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
 def _entity_metadata_write_capability(entity_type):
     if str(entity_type or "").strip() == "workspace_file":
         return Capability.MANAGE_WORKSPACE_FILES
@@ -1164,7 +1181,7 @@ def projects_packages_download(project_id, package_id):
         except OSError:
             pass
 
-    return response
+    return _set_download_content_length(response, archive.get("byte_size") or metrics.get("archive_bytes"))
 
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs", methods=["POST"])
@@ -1275,7 +1292,7 @@ def projects_packages_download_job_file(project_id, package_id, job_id):
     def _cleanup_evidence_package_archive_job():
         discard_evidence_package_archive_job(job_id)
 
-    return response
+    return _set_download_content_length(response, archive.get("archive_bytes"))
 
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download-ticket", methods=["POST"])
@@ -1403,12 +1420,13 @@ def projects_artifacts_download(project_id, artifact_id):
     except WorkspaceError as exc:
         return _workspace_project_artifact_error_response(exc)
     download_name = artifact.get("display_name") or artifact["workspace_path"].split("/")[-1] or "artifact"
-    return send_file(
+    response = send_file(
         handle,
         as_attachment=True,
         download_name=download_name,
         mimetype=artifact.get("content_type") or "application/octet-stream",
     )
+    return _set_download_content_length(response, _download_handle_size(handle))
 
 
 @projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/download-ticket", methods=["POST"])
