@@ -12,6 +12,12 @@ from werkzeug.exceptions import BadRequest
 from config import CFG
 from extensions import limiter
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.download_tickets import (
+    DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+    DownloadTicketError,
+    create_download_ticket,
+    read_download_ticket,
+)
 from services import metrics as app_metrics
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
@@ -210,6 +216,22 @@ def _project_owner(required_capability=None):
         except TeamPermissionDenied as exc:
             return session_id, "", _team_permission_error_response(exc)
     return session_id, scope.team_id, None
+
+
+def _project_ticket_error_response(exc):
+    return jsonify({"error": str(exc)}), 403
+
+
+def _project_download_ticket_owner(payload, *, project_id, expected_ids):
+    if str(payload.get("project_id") or "") != str(project_id or ""):
+        raise DownloadTicketError("download ticket project is invalid")
+    for key, expected in expected_ids.items():
+        if str(payload.get(key) or "") != str(expected or ""):
+            raise DownloadTicketError("download ticket target is invalid")
+    session_id = str(payload.get("session_id") or "").strip()
+    if not session_id:
+        raise DownloadTicketError("download ticket session is invalid")
+    return session_id, str(payload.get("team_id") or "").strip()
 
 
 def _entity_metadata_write_capability(entity_type):
@@ -1194,9 +1216,21 @@ def projects_packages_download_job_get(project_id, package_id, job_id):
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download")
 @limiter.limit(_evidence_package_download_limit)
 def projects_packages_download_job_file(project_id, package_id, job_id):
-    session_id, team_id, error_response = _project_owner()
-    if error_response:
-        return error_response
+    ticket = str(request.args.get("ticket") or "").strip()
+    if ticket:
+        try:
+            payload = read_download_ticket(ticket, expected_kind="project_package_job")
+            session_id, team_id = _project_download_ticket_owner(
+                payload,
+                project_id=project_id,
+                expected_ids={"package_id": package_id, "job_id": job_id},
+            )
+        except DownloadTicketError as exc:
+            return _project_ticket_error_response(exc)
+    else:
+        session_id, team_id, error_response = _project_owner()
+        if error_response:
+            return error_response
     archive = evidence_package_archive_for_job(session_id, project_id, package_id, job_id, team_id=team_id)
     if archive is None:
         return _project_not_found("package build job not found")
@@ -1242,6 +1276,37 @@ def projects_packages_download_job_file(project_id, package_id, job_id):
         discard_evidence_package_archive_job(job_id)
 
     return response
+
+
+@projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download-ticket", methods=["POST"])
+@limiter.limit(_evidence_package_download_limit)
+def projects_packages_download_job_ticket(project_id, package_id, job_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    archive = evidence_package_archive_for_job(session_id, project_id, package_id, job_id, team_id=team_id)
+    if archive is None:
+        return _project_not_found("package build job not found")
+    status = archive.get("status")
+    if status != "complete":
+        status_code = 409 if status not in {"failed"} else 400
+        return jsonify({"error": archive.get("error") or "package archive is not ready", "status": status}), status_code
+    ticket = create_download_ticket({
+        "kind": "project_package_job",
+        "session_id": session_id,
+        "team_id": team_id,
+        "project_id": project_id,
+        "package_id": package_id,
+        "job_id": job_id,
+    })
+    return jsonify({
+        "ok": True,
+        "url": (
+            f"/projects/{project_id}/packages/{package_id}/download-jobs/"
+            f"{job_id}/download?ticket={ticket}"
+        ),
+        "expires_in_seconds": DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+    })
 
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>", methods=["DELETE"])
@@ -1307,9 +1372,21 @@ def projects_artifacts_preview(project_id, artifact_id):
 
 @projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/download")
 def projects_artifacts_download(project_id, artifact_id):
-    session_id, team_id, error_response = _project_owner()
-    if error_response:
-        return error_response
+    ticket = str(request.args.get("ticket") or "").strip()
+    if ticket:
+        try:
+            payload = read_download_ticket(ticket, expected_kind="project_artifact")
+            session_id, team_id = _project_download_ticket_owner(
+                payload,
+                project_id=project_id,
+                expected_ids={"artifact_id": artifact_id},
+            )
+        except DownloadTicketError as exc:
+            return _project_ticket_error_response(exc)
+    else:
+        session_id, team_id, error_response = _project_owner()
+        if error_response:
+            return error_response
     artifact = get_project_run_file_artifact(session_id, project_id, artifact_id, team_id=team_id)
     if artifact is None:
         return _project_not_found("artifact not found")
@@ -1332,6 +1409,41 @@ def projects_artifacts_download(project_id, artifact_id):
         download_name=download_name,
         mimetype=artifact.get("content_type") or "application/octet-stream",
     )
+
+
+@projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/download-ticket", methods=["POST"])
+def projects_artifacts_download_ticket(project_id, artifact_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id, team_id=team_id)
+    if artifact is None:
+        return _project_not_found("artifact not found")
+    if not artifact.get("file_available"):
+        status = 403 if artifact.get("file_status") == "disabled" else 404
+        return jsonify({
+            "error": artifact.get("file_status_detail") or "artifact file is not available",
+            "artifact": artifact,
+        }), status
+    try:
+        artifact_session_id = str(artifact.get("session_id") or session_id)
+        owner_context = artifact_owner_context(artifact_session_id, artifact)
+        with open_owner_workspace_file_for_download(owner_context, artifact["workspace_path"], CFG):
+            pass
+    except WorkspaceError as exc:
+        return _workspace_project_artifact_error_response(exc)
+    ticket = create_download_ticket({
+        "kind": "project_artifact",
+        "session_id": session_id,
+        "team_id": team_id,
+        "project_id": project_id,
+        "artifact_id": artifact_id,
+    })
+    return jsonify({
+        "ok": True,
+        "url": f"/projects/{project_id}/artifacts/{artifact_id}/download?ticket={ticket}",
+        "expires_in_seconds": DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+    })
 
 
 @projects_bp.route("/projects/<project_id>/findings")

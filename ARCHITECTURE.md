@@ -524,10 +524,12 @@ Client-visible error codes include `session_required`, `file_required`,
 | `POST` | `/projects/<project_id>/packages/<package_id>/download-jobs` | Starts a polled evidence package archive build job. |
 | `GET` | `/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>` | Returns the current archive build job status. |
 | `GET` | `/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download` | Downloads a completed archive build job and cleans up the temporary archive. |
+| `POST` | `/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download-ticket` | Issues a short-lived browser download URL for a completed evidence package archive job. |
 | `DELETE` | `/projects/<project_id>/packages/<package_id>` | Deletes one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/artifacts` | Lists project-linked run artifacts in bounded pages with optional run and target filters. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
+| `POST` | `/projects/<project_id>/artifacts/<artifact_id>/download-ticket` | Issues a short-lived browser download URL for one available project-linked run artifact. |
 | `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs or linked Atlas entities, with run, target, review-state, verification-status, command-root, severity, scope, label, and note-state filters. |
 | `POST` | `/projects/<project_id>/findings/review` | Updates the review state for selected active-scope findings that are visible through the project. |
 | `GET` | `/entities/run/<run_id>/findings` | Lists persisted findings captured for an active-scope run. |
@@ -563,6 +565,7 @@ Saving the default empty payload deletes the stored triage row instead of keepin
 | `GET` | `/workspace/files/read` | Reads a workspace text file for the UI viewer/editor; binary files return an explicit unsupported-media response. Archived team scopes stay readable. |
 | `GET` | `/workspace/files/info` | Returns metadata for an active-scope workspace path, including directory file counts used by delete confirmations. |
 | `GET` | `/workspace/files/download` | Streams one active-scope workspace file as an attachment. |
+| `POST` | `/workspace/files/download-ticket` | Issues a short-lived browser download URL for one active-scope workspace file. |
 
 ### Asset And Operator Routes
 

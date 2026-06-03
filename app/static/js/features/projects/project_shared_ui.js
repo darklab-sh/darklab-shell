@@ -325,12 +325,18 @@
       if (successMessage) ctx.setProjectWorkspaceMessage?.(successMessage);
     }
 
+    function downloadUrlAsAttachment(url, filename = '', successMessage = '') {
+      ctx.downloadUrlAsAttachment?.(url, filename ? { filename } : {});
+      if (successMessage) ctx.setProjectWorkspaceMessage?.(successMessage);
+    }
+
     return {
       comparableRuns,
       countEntries,
       counts,
       displayName,
       downloadBlobAsAttachment,
+      downloadUrlAsAttachment,
       emptyPanel,
       entityEditorLabelForType,
       entityLabelValues,

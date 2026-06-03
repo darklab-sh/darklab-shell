@@ -1217,6 +1217,7 @@
     projectSharedUiController = factory({
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       downloadBlobAsAttachment,
+      downloadUrlAsAttachment,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
     });
     return projectSharedUiController;
@@ -1422,6 +1423,7 @@
         if (typeof logClientError === 'function') logClientError(message, err);
       },
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
       closeProjectWorkspace,
       openAtlas: global.openAtlas,
       projectDisplayName: _projectDisplayName,
@@ -1475,6 +1477,7 @@
       renderProjectExplorer: _renderProjectExplorer,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
       setWorkspaceTab: projectWorkspaceState.setTab,
       syncProjectWorkspaceNestedSuppression: _syncProjectWorkspaceNestedSuppression,
       focusProjectNestedSheet: _focusProjectNestedSheet,
@@ -1644,6 +1647,7 @@
       },
       groupBy: _groupBy,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
       metaSeparator: ' · ',
       groupCaret: '▾',
     });
@@ -2556,6 +2560,10 @@
 
   function _downloadBlobAsAttachment(blob, filename, successMessage = '') {
     _projectSharedUiController().downloadBlobAsAttachment(blob, filename, successMessage);
+  }
+
+  function _downloadUrlAsAttachment(url, filename = '', successMessage = '') {
+    _projectSharedUiController().downloadUrlAsAttachment(url, filename, successMessage);
   }
 
   function _syncProjectWorkspaceNestedSuppression() {

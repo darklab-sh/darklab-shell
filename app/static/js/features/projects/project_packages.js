@@ -1523,15 +1523,15 @@
       const startData = await readJsonResponse(startResp, 'Unable to start package archive build.');
       const job = await waitForPackageJob(projectId, packageId, startData.job || {});
       const downloadResp = await ctx.apiFetch(
-        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs/${encodeURIComponent(job.id || '')}/download`,
-        { cache: 'no-store' },
+        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs/${encodeURIComponent(job.id || '')}/download-ticket`,
+        { method: 'POST', cache: 'no-store' },
       );
       if (!downloadResp.ok) {
         const data = await downloadResp.json().catch(() => ({}));
         throw new Error(data.error || 'Unable to download package.');
       }
-      const blob = await downloadResp.blob();
-      ctx.downloadBlobAsAttachment(blob, packageDownloadName(pkg), 'Package download started.');
+      const data = await downloadResp.json().catch(() => ({}));
+      ctx.downloadUrlAsAttachment(data.url, packageDownloadName(pkg), 'Package download started.');
     }
 
     function packageBuildStatusText(elapsedSeconds) {

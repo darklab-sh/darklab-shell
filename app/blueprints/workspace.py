@@ -11,6 +11,14 @@ from flask import Blueprint, Response, jsonify, request, send_file
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.download_tickets import (
+    DownloadTicketError,
+    DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+    create_download_ticket,
+    owner_context_from_ticket,
+    owner_context_ticket_payload,
+    read_download_ticket,
+)
 from services.teams.capabilities import Capability, require_capability, role_can
 from services.teams.contracts import TeamPermissionDenied
 from services.teams.request_scope import RequestScope, RequestScopeError, current_request_scope, scope_error_payload
@@ -362,6 +370,10 @@ def _workspace_error_response(exc: Exception) -> tuple[Response, int]:
     raise exc
 
 
+def _workspace_ticket_error_response(exc: DownloadTicketError) -> tuple[Response, int]:
+    return jsonify({"error": str(exc)}), 403
+
+
 def _path_from_request() -> str:
     return str(request.args.get("path") or "").strip()
 
@@ -538,6 +550,24 @@ def workspace_files_move():
 
 @workspace_bp.route("/workspace/files/download", methods=["GET"])
 def workspace_files_download():
+    ticket = str(request.args.get("ticket") or "").strip()
+    if ticket:
+        try:
+            payload = read_download_ticket(ticket, expected_kind="workspace_file")
+            path = str(payload.get("path") or "").strip()
+            owner_context = owner_context_from_ticket(payload)
+            handle = open_owner_workspace_file_for_download(owner_context, path)
+            return send_file(
+                handle,
+                as_attachment=True,
+                download_name=Path(path).name,
+                mimetype="text/plain; charset=utf-8",
+            )
+        except DownloadTicketError as exc:
+            return _workspace_ticket_error_response(exc)
+        except Exception as exc:
+            return _workspace_error_response(exc)
+
     _session_id, scope, error = _workspace_scope_or_error(allow_archived=True)
     if error:
         return error
@@ -551,5 +581,32 @@ def workspace_files_download():
             download_name=Path(path).name,
             mimetype="text/plain; charset=utf-8",
         )
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
+@workspace_bp.route("/workspace/files/download-ticket", methods=["POST"])
+def workspace_files_download_ticket():
+    _session_id, scope, error = _workspace_scope_or_error(allow_archived=True)
+    if error:
+        return error
+    assert scope is not None
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    path = str(data.get("path") or "").strip()
+    try:
+        with open_owner_workspace_file_for_download(scope.context, path):
+            pass
+        ticket = create_download_ticket({
+            "kind": "workspace_file",
+            "path": path,
+            **owner_context_ticket_payload(scope.context),
+        })
+        return jsonify({
+            "ok": True,
+            "url": f"/workspace/files/download?ticket={ticket}",
+            "expires_in_seconds": DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+        })
     except Exception as exc:
         return _workspace_error_response(exc)

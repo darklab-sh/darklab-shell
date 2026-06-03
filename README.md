@@ -602,6 +602,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
 │   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
 │   │   │   └── models.py       # Shared diff result dataclass and diff-kind constants
+│   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>

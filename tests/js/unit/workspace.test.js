@@ -857,8 +857,11 @@ describe('workspace UI helpers', () => {
       if (String(url).startsWith('/workspace/files/read')) {
         return Promise.resolve(responseJson({ path: 'amass-viz/amass.html', text: '<html></html>' }))
       }
-      if (String(url).startsWith('/workspace/files/download')) {
-        return Promise.resolve(new Response(new Blob(['html']), { status: 200 }))
+      if (url === '/workspace/files/download-ticket' && opts?.method === 'POST') {
+        return Promise.resolve(responseJson({
+          ok: true,
+          url: '/workspace/files/download?ticket=workspace-ticket',
+        }))
       }
       if (String(url).startsWith('/workspace/files?path=amass-viz%2Famass.html') && opts?.method === 'DELETE') {
         return Promise.resolve(responseJson({
@@ -899,7 +902,11 @@ describe('workspace UI helpers', () => {
     document.querySelector('[data-workspace-viewer-action="download"]').click()
     await flushWorkspacePromises()
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/download?path=amass-viz%2Famass.html')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/download-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'amass-viz/amass.html' }),
+    })
     expect(clicked).toHaveBeenCalled()
 
     showWorkspaceViewer('amass-viz/amass.html', '<html></html>')

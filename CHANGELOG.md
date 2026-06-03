@@ -155,6 +155,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Browser downloads start immediately for large files** — workspace files, project artifacts, and evidence package archives now use short-lived direct download URLs so the browser can show native download progress instead of waiting for JavaScript to buffer the whole file first.
+  - **Tests:** updated route and browser-unit coverage for ticketed workspace, artifact, and evidence-package downloads.
+
 - **Bundled Postgres 18 service** — moved the optional Compose, CI, and disposable test Postgres images from 17 to 18.
   - **Before:** the bundled Compose profile mounted `postgres-data` at the old `/var/lib/postgresql/data` image path used by Postgres 17 and earlier.
   - **After:** the bundled service uses Postgres 18's `/var/lib/postgresql` volume mount so the official image stores data in its versioned layout. The operator docs now describe the export/import path for existing Compose-managed Postgres 17 volumes instead of recommending a Docker `pg_upgrade` wrapper.

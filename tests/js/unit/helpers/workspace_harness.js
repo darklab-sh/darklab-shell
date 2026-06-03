@@ -162,6 +162,15 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     anchor.remove()
     globals.window.setTimeout(() => globals.URL.revokeObjectURL(url), 2000)
   }
+  globals.downloadUrlAsAttachment = (url, options = {}) => {
+    const anchor = document.createElement('a')
+    anchor.href = String(url || '')
+    if (options?.filename) anchor.download = String(options.filename)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  }
   Object.assign(globals, overrides)
   const names = Object.keys(globals)
   const values = Object.values(globals)

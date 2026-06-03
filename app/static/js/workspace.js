@@ -1407,13 +1407,20 @@ async function deleteWorkspaceFile(path) {
 }
 
 async function downloadWorkspaceFile(path) {
-  const resp = await apiFetch(`/workspace/files/download?path=${encodeURIComponent(path)}`);
+  const resp = await apiFetch('/workspace/files/download-ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
   if (!resp.ok) {
     await _workspaceJson(resp);
     return false;
   }
-  const blob = await resp.blob();
-  downloadBlobAsAttachment(blob, path.split('/').filter(Boolean).pop() || 'workspace-file.txt');
+  const data = await _workspaceJson(resp);
+  downloadUrlAsAttachment(
+    data.url,
+    { filename: path.split('/').filter(Boolean).pop() || 'workspace-file.txt' },
+  );
   return true;
 }
 

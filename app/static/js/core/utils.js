@@ -178,6 +178,22 @@ function downloadBlobAsAttachment(blob, filename, options = {}) {
   }
 }
 
+function downloadUrlAsAttachment(url, options = {}) {
+  const href = String(url || '').trim();
+  if (!href) throw new Error('Download URL is required');
+  const opts = options && typeof options === 'object' ? options : {};
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  if (opts.filename) anchor.download = String(opts.filename);
+  anchor.rel = 'noopener';
+  const parent = opts.container && typeof opts.container.appendChild === 'function'
+    ? opts.container
+    : document.body;
+  parent.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 async function shareUrl(url) {
   // navigator.share requires a user gesture and a secure context (HTTPS).
   // Because shareUrl is always called from inside a fetch .then() callback

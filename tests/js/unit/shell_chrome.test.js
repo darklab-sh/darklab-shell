@@ -191,6 +191,7 @@ function loadShellChrome({
   applyProjectAutoLinkRunEntitiesPreference = (mode) => { preferences.pref_project_auto_link_run_entities = mode },
   activeTeamScopeCan = () => true,
   teamScopeDeniedMessage = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
+  downloadUrlAsAttachmentImpl = null,
 } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
@@ -391,6 +392,15 @@ function loadShellChrome({
     window.setTimeout(revoke, 2000)
     window.addEventListener('pagehide', revoke, { once: true })
   }
+  const downloadUrlAsAttachment = downloadUrlAsAttachmentImpl || vi.fn((url, options = {}) => {
+    const anchor = document.createElement('a')
+    anchor.href = String(url || '')
+    if (options?.filename) anchor.download = String(options.filename)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  })
   global.APP_CONFIG = appConfig
 
   new Function(
@@ -433,6 +443,7 @@ function loadShellChrome({
     'getProjectAutoLinkRunEntitiesPreference',
     'applyProjectAutoLinkRunEntitiesPreference',
     'downloadBlobAsAttachment',
+    'downloadUrlAsAttachment',
     `
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
@@ -550,6 +561,7 @@ function loadShellChrome({
     getProjectAutoLinkRunEntitiesPreference,
     applyProjectAutoLinkRunEntitiesPreference,
     downloadBlobAsAttachment,
+    downloadUrlAsAttachment,
   )
 
   return {
@@ -3508,10 +3520,13 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/artifacts/artifact-1/download') {
+      if (url === '/projects/project-1/artifacts/artifact-1/download-ticket' && options.method === 'POST') {
         return Promise.resolve({
           ok: true,
-          blob: () => Promise.resolve(new Blob(['{"template":"ok"}\n'], { type: 'application/json' })),
+          json: () => Promise.resolve({
+            ok: true,
+            url: '/projects/project-1/artifacts/artifact-1/download?ticket=artifact-ticket',
+          }),
         })
       }
       if (url === '/projects/project-1/packages/pkg-1') {
@@ -3546,10 +3561,16 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download') {
+      if (
+        url === '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download-ticket'
+        && options.method === 'POST'
+      ) {
         return Promise.resolve({
           ok: true,
-          blob: () => packageDownloadBlob,
+          json: () => packageDownloadBlob.then(() => ({
+            ok: true,
+            url: '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download?ticket=package-ticket',
+          })),
         })
       }
       if (url === '/projects/project-1/packages' && options.method === 'POST') {
@@ -3612,6 +3633,7 @@ describe('shell chrome project workspace', () => {
       return originalSetTimeout(callback, delay, ...args)
     })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const downloadUrlAsAttachment = vi.fn()
     const shell = loadShellChrome({
       apiFetch,
       restoreHistoryRunIntoTab,
@@ -3620,6 +3642,7 @@ describe('shell chrome project workspace', () => {
       fetchAndRenderHistoryComparison,
       bindDismissible,
       bindMobileSheet,
+      downloadUrlAsAttachmentImpl: downloadUrlAsAttachment,
     })
 
     document.dispatchEvent(new CustomEvent('app:project-target-discovered', { detail: { project_id: 'project-1', count: 2 } }))
@@ -4154,14 +4177,14 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith(
-      '/projects/project-1/artifacts/artifact-1/download',
-      { cache: 'no-store' },
+      '/projects/project-1/artifacts/artifact-1/download-ticket',
+      { method: 'POST', cache: 'no-store' },
     )
-    expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
-    expect(delayedRevokes).toHaveLength(1)
-    delayedRevokes[0]()
-    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-1')
-    globalThis.URL.revokeObjectURL.mockClear()
+    expect(downloadUrlAsAttachment).toHaveBeenCalledWith(
+      '/projects/project-1/artifacts/artifact-1/download?ticket=artifact-ticket',
+      { filename: 'nuclei.json' },
+    )
+    expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
     expect(document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-2"]').disabled)
       .toBe(true)
     globalThis.URL.createObjectURL.mockClear()
@@ -4226,8 +4249,8 @@ describe('shell chrome project workspace', () => {
       { method: 'POST', cache: 'no-store' },
     )
     expect(apiFetch).toHaveBeenCalledWith(
-      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download',
-      { cache: 'no-store' },
+      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download-ticket',
+      { method: 'POST', cache: 'no-store' },
     )
     expect(packageDownloadButton.disabled).toBe(true)
     expect(packageDownloadButton.classList.contains('is-preparing')).toBe(true)
@@ -4240,15 +4263,17 @@ describe('shell chrome project workspace', () => {
     resolvePackageDownloadBlob(new Blob(['package zip'], { type: 'application/zip' }))
     await tick()
     await tick()
-    expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+    expect(downloadUrlAsAttachment).toHaveBeenCalledWith(
+      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download?ticket=package-ticket',
+      { filename: 'darklab-evidence.zip' },
+    )
+    expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
     expect(packageDownloadButton.disabled).toBe(false)
     expect(packageDownloadButton.classList.contains('is-preparing')).toBe(false)
     expect(packageDownloadButton.getAttribute('aria-busy')).toBeNull()
     expect(packageDownloadButton.textContent).toBe('Download')
     expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()
-    expect(delayedRevokes).toHaveLength(2)
-    delayedRevokes[1]()
-    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-2')
+    expect(delayedRevokes).toHaveLength(0)
     globalThis.URL.revokeObjectURL.mockClear()
     window.dispatchEvent(new Event('pagehide'))
     expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()

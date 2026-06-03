@@ -6251,6 +6251,14 @@ class TestProjectRoutes:
             assert download_resp.status_code == 200
             assert download_resp.data == b"0123456789"
             assert "attachment" in download_resp.headers["Content-Disposition"]
+            ticket_resp = client.post(
+                f"/projects/{project['id']}/artifacts/rfa_{run_id}/download-ticket",
+                headers={"X-Session-ID": session_id},
+            )
+            assert ticket_resp.status_code == 200
+            ticket_download = client.get(ticket_resp.get_json()["url"])
+            assert ticket_download.status_code == 200
+            assert ticket_download.data == b"0123456789"
             missing_preview = client.get(
                 f"/projects/{project['id']}/artifacts/rfa_{baseline_run_id}/preview",
                 headers={"X-Session-ID": session_id},
@@ -8143,10 +8151,12 @@ class TestProjectRoutes:
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
 
-        download_resp = client.get(
-            f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}/download",
+        ticket_resp = client.post(
+            f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}/download-ticket",
             headers={"X-Session-ID": session_id},
         )
+        assert ticket_resp.status_code == 200
+        download_resp = client.get(ticket_resp.get_json()["url"])
         assert download_resp.status_code == 200
         assert "attachment" in download_resp.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(download_resp.data)) as archive:
@@ -12530,10 +12540,19 @@ class TestWorkspaceRoutes:
                 "/workspace/files/download?path=notes/targets.txt",
                 headers={"X-Session-ID": session},
             )
+            ticket_resp = client.post(
+                "/workspace/files/download-ticket",
+                headers={"X-Session-ID": session},
+                json={"path": "notes/targets.txt"},
+            )
+            ticket_download = client.get(ticket_resp.get_json()["url"])
         assert resp.status_code == 200
         assert resp.get_data(as_text=True) == "darklab.sh\n"
         assert "attachment" in resp.headers["Content-Disposition"]
         assert "targets.txt" in resp.headers["Content-Disposition"]
+        assert ticket_resp.status_code == 200
+        assert ticket_download.status_code == 200
+        assert ticket_download.get_data(as_text=True) == "darklab.sh\n"
 
     def test_file_list_includes_project_artifact_metadata(self):
         client = get_client()
