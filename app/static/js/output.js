@@ -1379,7 +1379,15 @@ function _normalizeCommandOutcomeSummary(outcome) {
 
 function _buildCommandOutcomeSummary(tab) {
   if (!tab || !_outputCore || typeof _outputCore.buildCommandOutcomeSummary !== 'function') return null;
-  return _outputCore.buildCommandOutcomeSummary(tab.command || '', tab.rawLines || []);
+  return _outputCore.buildCommandOutcomeSummary(tab.command || '', _commandOutcomeRawLinesForTab(tab));
+}
+
+function _commandOutcomeRawLinesForTab(tab) {
+  const rawLines = Array.isArray(tab && tab.rawLines) ? tab.rawLines : [];
+  const start = Number.isFinite(Number(tab && tab.currentRunStartIndex))
+    ? Math.max(0, Math.min(rawLines.length, Number(tab.currentRunStartIndex)))
+    : 0;
+  return rawLines.slice(start);
 }
 
 function _removeCommandOutcomeSummary(out) {
@@ -1423,8 +1431,9 @@ function renderCommandOutcomeSummary(tabId, outcome = null) {
   const explicitSummary = outcome !== null && outcome !== undefined
     ? _normalizeCommandOutcomeSummary(outcome)
     : null;
+  const currentRawLines = _commandOutcomeRawLinesForTab(tab);
   const builtSummary = _buildCommandOutcomeSummary(tab);
-  const hasCurrentOutput = Array.isArray(tab.rawLines) && tab.rawLines.length > 0;
+  const hasCurrentOutput = currentRawLines.length > 0;
   const cachedSummary = !explicitSummary && !builtSummary && !hasCurrentOutput
     ? _normalizeCommandOutcomeSummary(tab.commandOutcomeSummary)
     : null;

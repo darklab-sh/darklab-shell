@@ -902,6 +902,24 @@ describe('appendLine', () => {
     expect(failedNmap._getTabs()[0].commandOutcomeSummary).toBeNull()
 
     resetOutputFixture()
+    const bracketFailedNmap = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    bracketFailedNmap._getTabs()[0].command = 'nmap -sT -p 10-10000 [192.168.1.5]'
+    bracketFailedNmap.appendLine('22/tcp open ssh', '', 'tab-1')
+    bracketFailedNmap.appendLine('80/tcp open http', '', 'tab-1')
+    bracketFailedNmap.appendLine('Nmap done: 1 IP address (1 host up) scanned in 0.28 seconds', '', 'tab-1')
+    bracketFailedNmap._getTabs()[0].currentRunStartIndex = bracketFailedNmap._getTabs()[0].rawLines.length
+    bracketFailedNmap.appendLine('Failed to resolve "[192.168.1.5]".', 'error', 'tab-1')
+    bracketFailedNmap.appendLine('WARNING: No targets were specified, so 0 hosts scanned.', 'warning', 'tab-1')
+    bracketFailedNmap.appendLine('Nmap done: 0 IP addresses (0 hosts up) scanned in 0.03 seconds', '', 'tab-1')
+    expect(bracketFailedNmap.renderCommandOutcomeSummary('tab-1')).toBe(true)
+    const bracketOutcomeText = Array.from(document.querySelectorAll('.command-outcome-summary-row'))
+      .map(line => line.textContent)
+      .join('\n')
+    expect(bracketOutcomeText).toContain('Hosts: 0 up')
+    expect(bracketOutcomeText).not.toContain('Open ports:')
+    expect(bracketOutcomeText).not.toContain('22/tcp')
+
+    resetOutputFixture()
     const explicitOutcome = loadOutputFns({ appConfig: { max_output_lines: 30 } })
     explicitOutcome._getTabs()[0].command = 'nmap --script bad 192.168.1.5'
     explicitOutcome.appendLine('NSE: failed to initialize the script engine:', 'error', 'tab-1')
