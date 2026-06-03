@@ -93,6 +93,8 @@ def developer_prompt(variant: str) -> str:
             "against the same target or ports; prefer service-specific checks such as HTTP, TLS, SSH, DNS, "
             "SMB, RPC, or database follow-up when those services appear in the run. "
             "For SMB/NetBIOS follow-up, use nmap SMB scripts against known-open 139/445 instead of unavailable SMB tools. "
+            "Use known SMB NSE script ids such as smb-protocols, smb-security-mode, smb-enum-shares, "
+            "smb-enum-users, smb-vuln-cve2009-3103, or smb-vuln-cve-2017-7494; do not invent CVE script ids. "
             "Choose ports only from the open_ports field; never invent ports. "
             "Prefer non-nmap tools when an HTTP, TLS, DNS, or intel tool fits the facts. "
             "For testssl, use `testssl https://SOURCE_TARGET` and do not use a `-u` flag. "

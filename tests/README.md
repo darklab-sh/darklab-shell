@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,545
+- behavior tests: 3,546
 - docs/inventory meta-tests: 34
-- `pytest`: 1994 (1960 behavior + 34 meta)
+- `pytest`: 1995 (1961 behavior + 34 meta)
 - `vitest`: 1326
 - `playwright`: 259
-- total: 3,579
+- total: 3,580
 
 This document is organized in two parts:
 
@@ -473,6 +473,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAIAssistContextAndStorage.test_ai_worker_fails_assist_when_context_hash_changes` | Checks that the AI worker fails a queued assist when rebuilt context no longer matches the cached hash. |
 | `TestAIAssistContextAndStorage.test_ai_worker_validates_next_command_suggestions` | Checks that the AI worker validates next-command suggestions and persists accepted and rejected audit rows. |
 | `TestAIAssistContextAndStorage.test_ai_suggestion_validation_tolerates_redacted_context_targets` | Checks that AI suggestion validation tolerates redacted source-run targets while still validating against the saved source target. |
+| `TestAIAssistContextAndStorage.test_ai_suggestion_validation_normalizes_bracketed_targets_and_rejects_invalid_nmap_scripts` | Checks that AI suggestion validation removes unnecessary brackets from concrete targets and rejects invented Nmap SMB CVE script ids. |
 | `TestSplitChainedCommands.test_plain_command_returns_one_element` | Checks that plain command returns one element. |
 | `TestSplitChainedCommands.test_pipe` | Checks pipe handling. |
 | `TestSplitChainedCommands.test_double_ampersand` | Checks double ampersand handling. |

@@ -876,6 +876,40 @@ describe('appendLine', () => {
     unsupported.appendLine('nona', '', 'tab-1')
     expect(unsupported.renderCommandOutcomeSummary('tab-1')).toBe(false)
     expect(document.querySelector('.command-outcome-summary')).toBeNull()
+
+    resetOutputFixture()
+    const failedNmap = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    failedNmap._getTabs()[0].command = [
+      'nmap -sC -p 139,445',
+      '--script=smb-vuln-cve2009-1231,smb-vuln-cve-2017-7494',
+      '192.168.1.5',
+    ].join(' ')
+    failedNmap._getTabs()[0].commandOutcomeSummary = {
+      title: 'Command outcome',
+      items: [
+        { label: 'Hosts', value: '1 up' },
+        { label: 'Open ports', value: '25 (22/tcp ssh OpenSSH 10.0)' },
+      ],
+    }
+    failedNmap.appendLine('Starting Nmap 7.95 ( https://nmap.org ) at 2026-06-03 01:15 UTC', '', 'tab-1')
+    failedNmap.appendLine('NSE: failed to initialize the script engine:', 'error', 'tab-1')
+    failedNmap.appendLine("'smb-vuln-cve2009-1231' did not match a category, filename, or directory", 'error', 'tab-1')
+    failedNmap.appendLine('QUITTING!', 'error', 'tab-1')
+    failedNmap.appendLine('[process exited with code 1 in 0.2s]', 'exit-fail', 'tab-1')
+    expect(failedNmap.renderCommandOutcomeSummary('tab-1')).toBe(false)
+    expect(document.querySelector('.command-outcome-summary')).toBeNull()
+    expect(document.getElementById('out').textContent).not.toContain('Open ports: 25')
+    expect(failedNmap._getTabs()[0].commandOutcomeSummary).toBeNull()
+
+    resetOutputFixture()
+    const explicitOutcome = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    explicitOutcome._getTabs()[0].command = 'nmap --script bad 192.168.1.5'
+    explicitOutcome.appendLine('NSE: failed to initialize the script engine:', 'error', 'tab-1')
+    explicitOutcome.setTabCommandOutcomeSummary('tab-1', {
+      title: 'Command outcome',
+      items: [{ label: 'Status', value: 'saved summary' }],
+    })
+    expect(document.getElementById('out').textContent).toContain('Status: saved summary')
   })
 
   it('combines line numbers and timestamps into a compact shared prefix', () => {

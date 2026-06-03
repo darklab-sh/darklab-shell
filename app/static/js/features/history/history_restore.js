@@ -140,7 +140,9 @@ function restoreHistoryRunIntoTab(run, {
         _historyExitClass(fullRun.exit_code),
         tabId
       );
-      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
+      if (typeof renderCommandOutcomeSummary === 'function') {
+        renderCommandOutcomeSummary(tabId, t && t.commandOutcomeSummary);
+      }
       _suppressHistoryRestoreStatusPeek(tabId);
       if (typeof setTabStatus === 'function') {
         setTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');

@@ -1420,9 +1420,17 @@ function renderCommandOutcomeSummary(tabId, outcome = null) {
     _syncOutputPrefixesForAppend(out);
     return false;
   }
-  const summary = _normalizeCommandOutcomeSummary(outcome || tab.commandOutcomeSummary)
-    || _buildCommandOutcomeSummary(tab);
+  const explicitSummary = outcome !== null && outcome !== undefined
+    ? _normalizeCommandOutcomeSummary(outcome)
+    : null;
+  const builtSummary = _buildCommandOutcomeSummary(tab);
+  const hasCurrentOutput = Array.isArray(tab.rawLines) && tab.rawLines.length > 0;
+  const cachedSummary = !explicitSummary && !builtSummary && !hasCurrentOutput
+    ? _normalizeCommandOutcomeSummary(tab.commandOutcomeSummary)
+    : null;
+  const summary = explicitSummary || builtSummary || cachedSummary;
   if (!summary) {
+    tab.commandOutcomeSummary = null;
     _syncOutputPrefixesForAppend(out);
     return false;
   }
@@ -1442,7 +1450,7 @@ function setTabCommandOutcomeSummary(tabId, outcome, { render = true } = {}) {
   const tab = getTab(tabId || activeTabId);
   if (!tab) return null;
   tab.commandOutcomeSummary = _normalizeCommandOutcomeSummary(outcome);
-  if (render) renderCommandOutcomeSummary(tab.id);
+  if (render) renderCommandOutcomeSummary(tab.id, tab.commandOutcomeSummary);
   return tab.commandOutcomeSummary;
 }
 
@@ -1590,6 +1598,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
   const out = getOutput(tabId);
   const tab = getTab(tabId);
   if (!out || !tab) return;
+  const restoredSummary = tab.commandOutcomeSummary;
   const lines = Array.isArray(rawLines) ? rawLines.map(line => ({
     text: String(line && line.text || ''),
     cls: String(line && line.cls || ''),
@@ -1609,7 +1618,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
   tab.rawLines = lines;
   _resetTabOutputSignalCounts(tab, lines);
   lines.forEach(line => _appendRestoredOutputSpan(out, line, tabId));
-  renderCommandOutcomeSummary(tabId);
+  renderCommandOutcomeSummary(tabId, restoredSummary);
   syncOutputPrefixes(out);
   if (lines.length) {
     tab.followOutput = true;

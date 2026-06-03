@@ -181,6 +181,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Command outcome summaries ignore stale tab cache** — failed or unsupported commands no longer reuse the previous command's summary when the current transcript has no parsable outcome.
+
+- **AI next-command suggestions now avoid bracketed concrete targets and hallucinated SMB NSE script ids** — suggestion validation strips unnecessary brackets from concrete target tokens like `[192.168.1.5]` before display, rejects invented SMB CVE script names such as `smb-vuln-cve2009-1231`, and the next-command prompt now names known-good SMB NSE examples instead of asking for generic SMB scripts.
+
 - **Bundled llama.cpp sidecar starts without memory locking by default** — the optional `llama` Compose profile no longer passes `--mlock` or requests Docker memory-lock privileges in the base stack.
   - **Fix:** removed the `IPC_LOCK`, `memlock`, and `--mlock` defaults so local Docker hosts that do not support memory locking avoid llama.cpp startup crashes; operators can still opt into memory locking with a local Compose override.
 

@@ -2156,6 +2156,59 @@ class TestAIAssistContextAndStorage:
         assert nmap_duplicate_payload["suggestions"][0]["rejection_reason"] == "duplicate_source"
         assert nmap_duplicate_audit_rows[0]["target_allowed"] is True
 
+    def test_ai_suggestion_validation_normalizes_bracketed_targets_and_rejects_invalid_nmap_scripts(self, monkeypatch):
+        from services.ai import suggestions as ai_suggestions
+
+        suggestion_rejections = []
+        monkeypatch.setattr(
+            ai_suggestions.app_metrics,
+            "record_ai_suggestion_rejection",
+            lambda reason: suggestion_rejections.append(reason),
+        )
+
+        payload, audit_rows = ai_suggestions.validate_suggestions(
+            {"suggestions": [
+                {
+                    "command": "nmap -sC -p 139,445 --script=smb-protocols [192.168.1.5]",
+                    "reason": "Check SMB protocol support.",
+                    "risk_label": "medium",
+                    "target": "[192.168.1.5]",
+                },
+                {
+                    "command": (
+                        "nmap -sC -p 139,445 "
+                        "--script=smb-vuln-cve2009-1231,smb-vuln-cve-2017-7494 [192.168.1.5]"
+                    ),
+                    "reason": "Reject invented SMB NSE script ids.",
+                    "risk_label": "medium",
+                    "target": "[192.168.1.5]",
+                },
+            ]},
+            context={
+                "run": {
+                    "command": "nmap -sV -p 139,445 192.168.1.5",
+                    "target": "192.168.1.5",
+                },
+                "findings": [
+                    {"line": "139/tcp open netbios-ssn Samba smbd", "line_number": 6},
+                    {"line": "445/tcp open microsoft-ds Samba smbd", "line_number": 7},
+                ],
+            },
+            session_id="tok_ai",
+            project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.5"}],
+            cfg={**app_config.CFG, "share_redaction_enabled": False},
+        )
+
+        assert payload["suggestions"][0]["validation_result"] == "accepted"
+        assert payload["suggestions"][0]["command"] == "nmap -sC -p 139,445 --script=smb-protocols 192.168.1.5"
+        assert payload["suggestions"][0]["target"] == "192.168.1.5"
+        assert audit_rows[0]["target_allowed"] is True
+        assert payload["suggestions"][1]["validation_result"] == "rejected"
+        assert payload["suggestions"][1]["rejection_reason"] == "invalid_script"
+        assert payload["suggestions"][1]["command"].endswith(" 192.168.1.5")
+        assert "[192.168.1.5]" not in payload["suggestions"][1]["command"]
+        assert suggestion_rejections == ["invalid_script"]
+
 
 # ── split_chained_commands ────────────────────────────────────────────────────
 
