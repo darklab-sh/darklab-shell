@@ -61,9 +61,12 @@
 
 
 
-.project-target-editor-overlay,
-.project-entity-editor-overlay {
+.project-target-editor-overlay {
   z-index: 360;
+}
+
+.project-entity-editor-overlay {
+  z-index: 380;
 }
 
 

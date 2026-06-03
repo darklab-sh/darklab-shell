@@ -49,12 +49,6 @@ services:
     restart: unless-stopped
     profiles:
       - llama
-    cap_add:
-      - IPC_LOCK
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
     volumes:
       - llama-cache:/root/.cache
     command:
@@ -74,7 +68,6 @@ services:
       - "${LLAMA_N_PREDICT:-180}"
       - -np
       - "${LLAMA_PARALLEL:-1}"
-      - --mlock
       - --cont-batching
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]

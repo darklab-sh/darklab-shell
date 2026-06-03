@@ -181,6 +181,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Bundled llama.cpp sidecar starts without memory locking by default** — the optional `llama` Compose profile no longer passes `--mlock` or requests Docker memory-lock privileges in the base stack.
+  - **Fix:** removed the `IPC_LOCK`, `memlock`, and `--mlock` defaults so local Docker hosts that do not support memory locking avoid llama.cpp startup crashes; operators can still opt into memory locking with a local Compose override.
+
+- **Run Details metadata editor layering** — the **Edit** action in the Run Details metadata section now opens the metadata editor above the Run Details modal instead of behind it.
+  - **Fix:** raised the shared metadata editor overlay above the Run Details overlay while leaving the other project nested editor layers unchanged.
+
 - **Tour sample tab output routing** — commands launched from a `tour` sample chip now keep their prompt echo and live output in the sample tab while the tour waits in its original tab.
   - **Fix:** the local-command capture wrapper now only captures output, command echoes, status updates, and client-run persistence for the tab that started the local command, forwarding other tabs normally.
   - **Tests:** added runner unit coverage for a pending tour with a second tab streaming command output.
