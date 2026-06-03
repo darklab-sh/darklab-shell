@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
-from services.atlas.lookup import metadata_owner_id
+from services.atlas.scope import metadata_owner_id
 from services.projects.active import (
     active_project_id_from_preferences as _active_project_id_from_preferences,
     active_project_recent_ids_from_preferences as _active_project_recent_ids_from_preferences,

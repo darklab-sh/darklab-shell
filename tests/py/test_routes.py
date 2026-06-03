@@ -949,12 +949,19 @@ class TestAtlasImportRoutes:
 
             listed = client.get("/atlas/findings?q=mixed", headers={"X-Session-ID": session_id})
             detail = client.get(f"/atlas/entities/{entity_id}", headers={"X-Session-ID": session_id})
+            imported_triage = client.put(
+                f"/findings/{finding_id}/triage",
+                headers={"X-Session-ID": session_id},
+                json={"verification_status": "needs_retest", "verification_steps": "Re-run imported proof."},
+            )
 
             assert listed.status_code == 200
             listed_finding = listed.get_json()["findings"][0]
             assert listed_finding["id"] == finding_id
             assert listed_finding["import_sources"][0]["import_name"] == "Existing scan mix"
             assert listed_finding["import_sources"][0]["occurrence_count"] == 2
+            assert imported_triage.status_code == 200
+            assert imported_triage.get_json()["triage"]["verification_status"] == "needs_retest"
             assert detail.status_code == 200
             detail_payload = detail.get_json()
             assert detail_payload["import_sources"][0]["created_record"] is False
@@ -1046,6 +1053,143 @@ class TestAtlasImportRoutes:
             assert detail_payload["import_sources"][0]["filename"] == "triage_script_.csv"
             assert detail_payload["findings"][0]["title"] == title
             assert detail_payload["findings"][0]["raw_line"] == evidence
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_reimport_preserves_operator_edited_remediation(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_remediation"
+            self._register_session_token(session_id)
+
+            def burp_payload(remediation):
+                return f"""
+                <issues burpVersion="2026.1">
+                  <issue>
+                    <serialNumber>42</serialNumber>
+                    <type>5242880</type>
+                    <name>SQL injection</name>
+                    <host>https://darklab.sh</host>
+                    <path>/search?q=test</path>
+                    <severity>High</severity>
+                    <confidence>Firm</confidence>
+                    <issueDetail>Parameter q appears injectable.</issueDetail>
+                    <remediationDetail>{remediation}</remediationDetail>
+                    <requestresponse>
+                      <request method="GET" base64="false">GET /search?q=test HTTP/1.1
+Host: darklab.sh</request>
+                      <response base64="false">HTTP/1.1 500 Internal Server Error
+SQL syntax error near q</response>
+                    </requestresponse>
+                  </issue>
+                </issues>
+                """.encode()
+
+            def preview_and_apply(payload, name):
+                preview = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "burp_xml",
+                        "source_tool": "Burp Suite",
+                        "import_name": name,
+                        "file": (io.BytesIO(payload), f"{name}.xml"),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+                assert preview.status_code == 200
+                preview_payload = preview.get_json()
+                applied = client.post(
+                    "/atlas/imports/apply",
+                    headers={"X-Session-ID": session_id},
+                    json={
+                        "draft_id": preview_payload["draft_id"],
+                        "row_set_digest": preview_payload["row_set_digest"],
+                        "options": {"import_entities": True, "import_findings": True},
+                    },
+                )
+                assert applied.status_code == 200
+                return applied.get_json()
+
+            with mock.patch.object(atlas_import_workflow.log, "debug") as remediation_debug, \
+                 mock.patch.object(atlas_import_workflow.log, "info") as remediation_info:
+                first_apply = preview_and_apply(
+                    burp_payload("Use parameterized queries."),
+                    "burp-remediation-first",
+                )
+            listed = client.get("/atlas/findings?q=SQL", headers={"X-Session-ID": session_id})
+            assert listed.status_code == 200
+            finding_id = listed.get_json()["findings"][0]["id"]
+            imported_triage = client.get(
+                f"/findings/{finding_id}/triage",
+                headers={"X-Session-ID": session_id},
+            )
+            assert imported_triage.status_code == 200
+            assert imported_triage.get_json()["triage"]["remediation"] == "Use parameterized queries."
+
+            operator_triage = client.put(
+                f"/findings/{finding_id}/triage",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "remediation": "Use the platform query builder and add regression coverage.",
+                    "verification_steps": "Re-run Burp active scan.",
+                    "verification_status": "ready_to_verify",
+                },
+            )
+            assert operator_triage.status_code == 200
+
+            with mock.patch.object(atlas_import_workflow.log, "warning") as remediation_warning:
+                second_apply = preview_and_apply(
+                    burp_payload("Upgrade the scanner-recommended parameterization wording."),
+                    "burp-remediation-second",
+                )
+            preserved_triage = client.get(
+                f"/findings/{finding_id}/triage",
+                headers={"X-Session-ID": session_id},
+            )
+
+            assert first_apply["counts"]["findings_created"] == 1
+            assert first_apply["counts"]["finding_remediations_imported"] == 1
+            remediation_debug.assert_any_call("ATLAS_IMPORT_REMEDIATION_TRIAGE_UPSERT", extra=mock.ANY)
+            remediation_debug_extra = next(
+                call.kwargs["extra"]
+                for call in remediation_debug.call_args_list
+                if call.args and call.args[0] == "ATLAS_IMPORT_REMEDIATION_TRIAGE_UPSERT"
+            )
+            assert remediation_debug_extra["finding_id"] == finding_id
+            assert remediation_debug_extra["created_finding"] is True
+            assert remediation_debug_extra["existing_triage"] is False
+            assert remediation_debug_extra["remediation_chars"] == len("Use parameterized queries.")
+            remediation_info_extra = next(
+                call.kwargs["extra"]
+                for call in remediation_info.call_args_list
+                if call.args and call.args[0] == "ATLAS_IMPORT_APPLIED"
+            )
+            assert remediation_info_extra["finding_remediations_imported"] == 1
+            assert second_apply["counts"]["findings_updated"] == 1
+            assert second_apply["counts"]["finding_remediations_imported"] == 0
+            remediation_warning.assert_any_call(
+                "ATLAS_IMPORT_REMEDIATION_PRESERVED_EXISTING_TRIAGE",
+                extra=mock.ANY,
+            )
+            remediation_warning_extra = next(
+                call.kwargs["extra"]
+                for call in remediation_warning.call_args_list
+                if call.args and call.args[0] == "ATLAS_IMPORT_REMEDIATION_PRESERVED_EXISTING_TRIAGE"
+            )
+            assert remediation_warning_extra["finding_id"] == finding_id
+            assert remediation_warning_extra["previous_remediation_chars"] == len(
+                "Use the platform query builder and add regression coverage."
+            )
+            assert remediation_warning_extra["imported_remediation_chars"] == len(
+                "Upgrade the scanner-recommended parameterization wording."
+            )
+            assert preserved_triage.status_code == 200
+            triage = preserved_triage.get_json()["triage"]
+            assert triage["remediation"] == "Use the platform query builder and add regression coverage."
+            assert triage["verification_steps"] == "Re-run Burp active scan."
+            assert triage["verification_status"] == "ready_to_verify"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -2540,6 +2684,20 @@ class TestTeamRoutes:
                 headers=viewer_headers,
                 json={"review_state": "reviewed"},
             )
+            viewer_finding_triage_read = client.get(
+                f"/findings/{finding_id}/triage",
+                headers=viewer_headers,
+            )
+            operator_finding_triage_update = client.put(
+                f"/findings/{finding_id}/triage",
+                headers=operator_headers,
+                json={"verification_status": "ready_to_verify", "remediation": "Patch capability finding."},
+            )
+            viewer_finding_triage_update = client.put(
+                f"/findings/{finding_id}/triage",
+                headers=viewer_headers,
+                json={"verification_status": "verified"},
+            )
             viewer_atlas_review = client.post(
                 "/atlas/findings/review",
                 headers=viewer_headers,
@@ -2580,6 +2738,9 @@ class TestTeamRoutes:
             assert operator_label_create.status_code == 201
             assert viewer_label_create.status_code == 403
             assert viewer_finding_review.status_code == 403
+            assert viewer_finding_triage_read.status_code == 200
+            assert operator_finding_triage_update.status_code == 200
+            assert viewer_finding_triage_update.status_code == 403
             assert viewer_atlas_review.status_code == 403
             assert viewer_intel_refresh.status_code == 403
             assert viewer_brokered_run.get_json()["error"] == "team_forbidden"
@@ -6245,6 +6406,19 @@ class TestProjectRoutes:
                 (evidence_target["id"], f"fnd_{run_id}"),
             )
             conn.commit()
+        triage_resp = client.put(
+            f"/findings/fnd_{run_id}/triage",
+            json={
+                "remediation": "Patch TLS config for darklab.sh.",
+                "verification_steps": "Re-run nmap -sV darklab.sh.",
+                "verification_status": "ready_to_verify",
+                "verification_notes": "Internal ticket APP-123.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert triage_resp.status_code == 200
+        triage_payload = triage_resp.get_json()
+        assert isinstance(triage_payload, dict)
 
         package_resp = client.post(
             f"/projects/{project['id']}/packages",
@@ -6408,8 +6582,26 @@ class TestProjectRoutes:
         assert findings_json["count"] == 1
         assert findings_json["findings"][0]["raw_line"] == "443/tcp open https"
         assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
+        assert findings_json["findings"][0]["triage"] == {
+            "id": triage_payload["triage"]["id"],
+            "session_id": session_id,
+            "team_id": "",
+            "finding_id": f"fnd_{run_id}",
+            "remediation": "Patch TLS config for darklab.sh.",
+            "verification_steps": "Re-run nmap -sV darklab.sh.",
+            "verification_status": "ready_to_verify",
+            "verification_notes": "Internal ticket APP-123.",
+            "created": triage_payload["triage"]["created"],
+            "updated": triage_payload["triage"]["updated"],
+        }
+        assert downloaded_manifest["manifest"]["findings"][0]["triage"]["remediation"] == (
+            "Patch TLS config for darklab.sh."
+        )
         assert "# Findings" in findings_md
         assert "443/tcp open https" in findings_md
+        assert "Remediation: Patch TLS config for darklab.sh." in findings_md
+        assert "Verification steps: Re-run nmap -sV darklab.sh." in findings_md
+        assert "Verification notes: Internal ticket APP-123." in findings_md
         assert "[click](javascript:alert(1))" not in findings_md
         assert r"\[click\]\(javascript:alert\(1\)\)" in findings_md
         assert "[retest](javascript:alert(2))" not in findings_md
@@ -6473,6 +6665,9 @@ class TestProjectRoutes:
         assert "## Project Notes" in readme
         assert "Package notes for the external handoff." in readme
         assert "Labels: `important`" in readme
+        assert "Remediation: Patch TLS config for darklab.sh." in readme
+        assert "Verification steps: Re-run nmap -sV darklab.sh." in readme
+        assert "Verification notes: Internal ticket APP-123." in readme
         assert "[click](javascript:alert(1))" not in readme
         assert r"\[click\]\(javascript:alert\(1\)\)" in readme
         assert "[retest](javascript:alert(2))" not in readme
@@ -7631,6 +7826,18 @@ class TestProjectRoutes:
                 )
             conn.commit()
 
+        triage_resp = client.put(
+            f"/findings/fnd_{run_id}/triage",
+            json={
+                "remediation": "Patch https://secret.darklab.sh before 192.168.1.5 leaks tokens.",
+                "verification_steps": "Run curl https://secret.darklab.sh from 192.168.1.5.",
+                "verification_status": "ready_to_verify",
+                "verification_notes": "Internal verification note should stay out for secret.darklab.sh.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert triage_resp.status_code == 200
+
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "secret.darklab.sh", "source_run_id": run_id},
@@ -7679,6 +7886,7 @@ class TestProjectRoutes:
         assert "Bearer abc123" not in json.dumps(package)
         assert "secret.darklab.sh" not in json.dumps(package)
         assert "192.168.1.5" not in json.dumps(package)
+        assert "Internal verification note" not in json.dumps(package)
 
         with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
             package_download = client.get(
@@ -7708,6 +7916,13 @@ class TestProjectRoutes:
             notes_json = json.loads(archive.read("notes/entity-notes.json"))
             assert notes_json["include_private_notes"] is False
             assert notes_json["count"] == 0
+            downloaded_manifest = json.loads(archive.read("manifest.json"))
+            findings_json = json.loads(archive.read("findings/findings.json"))
+            assert "verification_notes" not in json.dumps(downloaded_manifest["manifest"]["findings"])
+            assert "verification_notes" not in json.dumps(findings_json["findings"])
+            assert findings_json["findings"][0]["triage"]["verification_status"] == "ready_to_verify"
+            assert "[host-redacted]" in findings_json["findings"][0]["triage"]["remediation"]
+            assert "[ip-redacted]" in findings_json["findings"][0]["triage"]["verification_steps"]
             package_text = "\n".join(
                 archive.read(name).decode("utf-8")
                 for name in (
@@ -7739,6 +7954,7 @@ class TestProjectRoutes:
         assert "Finding private note" not in package_text
         assert "Target private note" not in package_text
         assert "Artifact private note" not in package_text
+        assert "Internal verification note" not in package_text
         assert "notes/project.md" not in package_text
 
     def test_project_workspace_write_quotas_return_conflict(self):
@@ -11094,9 +11310,119 @@ class TestAtlasRoutes:
         list_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
         data = json.loads(list_resp.data)
         finding_id = data["findings"][0]["id"]
+        wrong_session_id = self._session_id()
         bulk_resp = client.post(
             "/atlas/findings/review",
             json={"finding_ids": [finding_id, "missing-finding"], "review_state": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+        missing_triage_get_resp = client.get(
+            "/findings/missing-finding/triage",
+            headers={"X-Session-ID": session_id},
+        )
+        missing_triage_put_resp = client.put(
+            "/findings/missing-finding/triage",
+            json={"verification_status": "ready_to_verify"},
+            headers={"X-Session-ID": session_id},
+        )
+        cross_scope_triage_get_resp = client.get(
+            f"/findings/{finding_id}/triage",
+            headers={"X-Session-ID": wrong_session_id},
+        )
+        cross_scope_triage_put_resp = client.put(
+            f"/findings/{finding_id}/triage",
+            json={"verification_status": "ready_to_verify"},
+            headers={"X-Session-ID": wrong_session_id},
+        )
+        triage_get_empty_resp = client.get(
+            f"/findings/{finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        )
+        with mock.patch("blueprints.projects.log.debug") as triage_debug, \
+             mock.patch("blueprints.projects.log.info") as triage_info:
+            triage_update_resp = client.put(
+                f"/findings/{finding_id}/triage",
+                json={
+                    "remediation": "Patch the exposed service.",
+                    "verification_steps": "Re-run the original check.",
+                    "verification_status": "ready_to_verify",
+                    "verification_notes": "Coordinate with the service owner.",
+                },
+                headers={"X-Session-ID": session_id},
+            )
+        with mock.patch("blueprints.projects.upsert_finding_triage_details", return_value=None), \
+             mock.patch("blueprints.projects.log.warning") as triage_miss_warning:
+            triage_update_miss_resp = client.put(
+                f"/findings/{finding_id}/triage",
+                json={"verification_status": "verified"},
+                headers={"X-Session-ID": session_id},
+            )
+        triage_invalid_resp = client.put(
+            f"/findings/{finding_id}/triage",
+            json={"verification_status": "done"},
+            headers={"X-Session-ID": session_id},
+        )
+        triage_oversized_resp = client.put(
+            f"/findings/{finding_id}/triage",
+            json={"remediation": "x" * 20001},
+            headers={"X-Session-ID": session_id},
+        )
+        triage_null_resp = client.put(
+            f"/findings/{finding_id}/triage",
+            data="null",
+            content_type="application/json",
+            headers={"X-Session-ID": session_id},
+        )
+        with mock.patch("blueprints.projects.log.warning") as malformed_warning:
+            triage_malformed_resp = client.put(
+                f"/findings/{finding_id}/triage",
+                data="{",
+                content_type="application/json",
+                headers={"X-Session-ID": session_id},
+            )
+        triage_empty_body_resp = client.put(
+            f"/findings/{finding_id}/triage",
+            data="",
+            content_type="application/json",
+            headers={"X-Session-ID": session_id},
+        )
+        triage_after_bad_payloads_resp = client.get(
+            f"/findings/{finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        )
+        self._seed_domain_finding_run(session_id, "no-triage.darklab.test")
+        self._seed_domain_finding_run(session_id, "explicit-not-started.darklab.test")
+        with db_connect() as conn:
+            no_triage_finding_id = conn.execute(
+                "SELECT id FROM findings WHERE session_id = ? AND raw_line LIKE ?",
+                (session_id, "%no-triage.darklab.test%"),
+            ).fetchone()["id"]
+            explicit_not_started_finding_id = conn.execute(
+                "SELECT id FROM findings WHERE session_id = ? AND raw_line LIKE ?",
+                (session_id, "%explicit-not-started.darklab.test%"),
+            ).fetchone()["id"]
+        explicit_not_started_resp = client.put(
+            f"/findings/{explicit_not_started_finding_id}/triage",
+            json={
+                "remediation": "Keep this queued for later verification.",
+                "verification_status": "not_started",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        filtered_resp = client.get(
+            "/atlas/findings?verification_status=ready_to_verify",
+            headers={"X-Session-ID": session_id},
+        )
+        filtered_not_started_resp = client.get(
+            "/atlas/findings?verification_status=not_started",
+            headers={"X-Session-ID": session_id},
+        )
+        filtered_empty_resp = client.get(
+            "/atlas/findings?verification_status=verified",
+            headers={"X-Session-ID": session_id},
+        )
+        filtered_invalid_resp = client.get(
+            "/atlas/findings?verification_status=done",
             headers={"X-Session-ID": session_id},
         )
 
@@ -11106,6 +11432,73 @@ class TestAtlasRoutes:
         assert bulk_resp.status_code == 200
         bulk_data = json.loads(bulk_resp.data)
         assert bulk_data["counts"] == {"updated": 1, "not_found": 1}
+        assert missing_triage_get_resp.status_code == 404
+        assert json.loads(missing_triage_get_resp.data) == {"error": "finding not found"}
+        assert missing_triage_put_resp.status_code == 404
+        assert json.loads(missing_triage_put_resp.data) == {"error": "finding not found"}
+        assert cross_scope_triage_get_resp.status_code == 404
+        assert json.loads(cross_scope_triage_get_resp.data) == {"error": "finding not found"}
+        assert cross_scope_triage_put_resp.status_code == 404
+        assert json.loads(cross_scope_triage_put_resp.data) == {"error": "finding not found"}
+        assert triage_get_empty_resp.status_code == 200
+        assert json.loads(triage_get_empty_resp.data)["triage"]["verification_status"] == "not_started"
+        assert triage_update_resp.status_code == 200
+        triage_debug.assert_called_with("FINDING_TRIAGE_UPDATE_REQUESTED", extra=mock.ANY)
+        triage_debug_extra = triage_debug.call_args.kwargs["extra"]
+        assert triage_debug_extra["finding_id"] == finding_id
+        assert triage_debug_extra["previous_verification_status"] == "not_started"
+        assert triage_debug_extra["next_verification_status"] == "ready_to_verify"
+        assert triage_debug_extra["will_clear"] is False
+        triage_info.assert_any_call("FINDING_TRIAGE_UPDATED", extra=mock.ANY)
+        triage_info_call = next(
+            call for call in triage_info.call_args_list
+            if call.args and call.args[0] == "FINDING_TRIAGE_UPDATED"
+        )
+        triage_info_extra = triage_info_call.kwargs["extra"]
+        assert triage_info_extra["finding_id"] == finding_id
+        assert triage_info_extra["action"] == "created"
+        assert triage_info_extra["triage_id"]
+        assert triage_update_miss_resp.status_code == 404
+        triage_miss_warning.assert_called_with("FINDING_TRIAGE_UPDATE_MISS", extra=mock.ANY)
+        assert triage_miss_warning.call_args.kwargs["extra"]["finding_id"] == finding_id
+        triage = json.loads(triage_update_resp.data)["triage"]
+        assert triage["remediation"] == "Patch the exposed service."
+        assert triage["verification_status"] == "ready_to_verify"
+        assert triage_invalid_resp.status_code == 400
+        assert triage_oversized_resp.status_code == 400
+        assert triage_null_resp.status_code == 400
+        assert triage_malformed_resp.status_code == 400
+        assert json.loads(triage_malformed_resp.data) == {"error": "finding triage payload must be JSON"}
+        malformed_warning.assert_called_with("FINDING_TRIAGE_PAYLOAD_DECODE_FAILED", extra=mock.ANY)
+        assert malformed_warning.call_args.kwargs["extra"]["finding_id"] == finding_id
+        assert triage_empty_body_resp.status_code == 400
+        triage_after_bad_payloads = json.loads(triage_after_bad_payloads_resp.data)["triage"]
+        assert triage_after_bad_payloads["remediation"] == "Patch the exposed service."
+        assert triage_after_bad_payloads["verification_status"] == "ready_to_verify"
+        assert explicit_not_started_resp.status_code == 200
+        assert filtered_resp.status_code == 200
+        filtered = json.loads(filtered_resp.data)
+        assert filtered["total"] == 1
+        assert filtered["findings"][0]["verification_status"] == "ready_to_verify"
+        assert filtered["findings"][0]["triage"]["has_remediation"] is True
+        assert filtered["findings"][0]["triage"]["remediation_preview"] == "Patch the exposed service."
+        assert filtered_not_started_resp.status_code == 200
+        filtered_not_started = json.loads(filtered_not_started_resp.data)
+        assert filtered_not_started["total"] == 2
+        filtered_not_started_by_id = {
+            item["id"]: item for item in filtered_not_started["findings"]
+        }
+        assert set(filtered_not_started_by_id) == {no_triage_finding_id, explicit_not_started_finding_id}
+        assert filtered_not_started_by_id[no_triage_finding_id]["verification_status"] == "not_started"
+        assert filtered_not_started_by_id[no_triage_finding_id]["triage"]["has_remediation"] is False
+        assert filtered_not_started_by_id[explicit_not_started_finding_id]["verification_status"] == "not_started"
+        assert filtered_not_started_by_id[explicit_not_started_finding_id]["triage"]["has_remediation"] is True
+        assert (
+            filtered_not_started_by_id[explicit_not_started_finding_id]["triage"]["remediation_preview"]
+            == "Keep this queued for later verification."
+        )
+        assert json.loads(filtered_empty_resp.data)["total"] == 0
+        assert filtered_invalid_resp.status_code == 400
         with db_connect() as conn:
             row = conn.execute(
                 "SELECT status FROM findings WHERE session_id = ? AND id = ?",
@@ -11302,8 +11695,24 @@ class TestAtlasRoutes:
             json={"review_state": "needs_followup"},
             headers={"X-Session-ID": session_id},
         )
+        triage_resp = client.put(
+            f"/findings/{finding['id']}/triage",
+            json={
+                "verification_status": "verified",
+                "verification_steps": "Confirm TLSv1.0 is disabled.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
         updated_project_findings_resp = client.get(
             f"/projects/{project['id']}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        verified_project_findings_resp = client.get(
+            f"/projects/{project['id']}/findings?verification_status=verified",
+            headers={"X-Session-ID": session_id},
+        )
+        wrong_verification_project_findings_resp = client.get(
+            f"/projects/{project['id']}/findings?verification_status=needs_retest",
             headers={"X-Session-ID": session_id},
         )
 
@@ -11349,7 +11758,13 @@ class TestAtlasRoutes:
         assert reviewed_finding["review_state"] == "needs_followup"
         assert reviewed_finding["status"] == "needs_followup"
         assert expected_finding_keys.issubset(reviewed_finding)
-        assert json.loads(updated_project_findings_resp.data)["findings"][0]["review_state"] == "needs_followup"
+        assert triage_resp.status_code == 200
+        updated_project_finding = json.loads(updated_project_findings_resp.data)["findings"][0]
+        assert updated_project_finding["review_state"] == "needs_followup"
+        assert updated_project_finding["verification_status"] == "verified"
+        assert updated_project_finding["triage"]["has_verification_steps"] is True
+        assert json.loads(verified_project_findings_resp.data)["findings"][0]["id"] == finding["id"]
+        assert json.loads(wrong_verification_project_findings_resp.data)["findings"] == []
 
     def test_run_findings_route_returns_deduped_findings_with_occurrence_count(self):
         client = get_client()

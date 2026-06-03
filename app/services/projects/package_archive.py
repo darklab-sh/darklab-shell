@@ -32,6 +32,7 @@ from services.projects.contracts import (
 )
 from services.projects.findings import list_project_findings
 from services.projects.metadata import (
+    _finding_triage_by_id,
     _metadata_owner_where,
     _metadata_row_owner_values,
 )
@@ -134,6 +135,23 @@ def _raw_artifact_row_for_archive(session_id, project_id, artifact_id, *, team_i
             (*project_owner_params, project_id, artifact_id, *run_owner_params),
         ).fetchone()
     return _row_to_run_file_artifact(row)
+
+
+def _attach_package_finding_triage(session_id, findings, *, team_id=""):
+    items = [finding for finding in findings if isinstance(finding, dict)]
+    if not items:
+        return findings
+    finding_ids = [str(finding.get("id") or "") for finding in items if finding.get("id")]
+    if not finding_ids:
+        return findings
+    with db_connect() as conn:
+        triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
+    for finding in items:
+        triage = triage_by_id.get(str(finding.get("id") or ""))
+        if triage:
+            finding["triage"] = triage
+            finding["verification_status"] = triage.get("verification_status") or finding.get("verification_status")
+    return findings
 
 
 def _package_selected_id_count(manifest, key):
@@ -817,6 +835,7 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         return None
     summary["artifacts"] = _list_all_project_artifacts(session_id, project_id, team_id=team_id) or []
     findings = list_project_findings(session_id, project_id, team_id=team_id) or []
+    _attach_package_finding_triage(session_id, findings, team_id=team_id)
     manifest = _evidence_manifest_from_summary(summary, payload, findings)
     redaction_rules = _package_redaction_rules(payload["redaction_mode"])
     if redaction_rules:

@@ -12,6 +12,9 @@ MAX_PROJECT_NOTES_LEN = 20000
 MAX_ENTITY_ID_LEN = 512
 MAX_LABEL_LEN = 80
 MAX_ENTITY_NOTE_BODY_LEN = 20000
+MAX_FINDING_REMEDIATION_LEN = 20000
+MAX_FINDING_VERIFICATION_STEPS_LEN = 20000
+MAX_FINDING_VERIFICATION_NOTES_LEN = 20000
 MAX_TARGET_VALUE_LEN = 512
 MAX_FINDING_TITLE_LEN = 240
 MAX_PACKAGE_NAME_LEN = 120
@@ -46,6 +49,13 @@ PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip"})
 PROJECT_TARGET_REVIEW_STATES = frozenset({"confirmed", "pending", "dismissed"})
 PROJECT_TARGET_SOURCES = frozenset({"user", "auto_command", "auto_input_file"})
 FINDING_REVIEW_STATES = frozenset({"new", "reviewed", "important", "false_positive", "needs_followup"})
+FINDING_VERIFICATION_STATES = frozenset({
+    "not_started",
+    "ready_to_verify",
+    "verified",
+    "needs_retest",
+    "not_applicable",
+})
 EVIDENCE_PACKAGE_STATUSES = frozenset({"draft"})
 PROJECT_TARGET_SELECT_COLUMNS = (
     "id, project_id, type, value, source_run_id, confidence, "

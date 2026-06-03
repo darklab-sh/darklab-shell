@@ -12,7 +12,7 @@ from config import CFG
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from services.atlas.lookup import entity_exists_in_scope, metadata_owner_id
+from services.atlas.scope import entity_exists_in_scope, metadata_owner_id
 from services.intel.lookup import lookup_entity
 from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
 

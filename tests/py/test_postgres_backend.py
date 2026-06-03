@@ -291,6 +291,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0025",
         "0026",
         "0027",
+        "0028",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -1811,6 +1812,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     from services.atlas import cleanup as atlas_cleanup
     from services.atlas import lookup as atlas_lookup
+    from services.projects import metadata as project_metadata
     from services.projects import preferences as project_preferences
 
     conn = postgres_schema.conn
@@ -1901,6 +1903,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     monkeypatch.setattr(atlas_blueprint, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(atlas_lookup, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(atlas_cleanup, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(project_metadata, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     client = app.test_client()
@@ -1920,6 +1923,22 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         },
     )
     saved_views_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+    triage_resp = client.put(
+        f"/findings/{finding_id}/triage",
+        headers={"X-Session-ID": session_id},
+        json={
+            "remediation": "Patch the Postgres service.",
+            "verification_status": "ready_to_verify",
+        },
+    )
+    triage_update_resp = client.put(
+        f"/findings/{finding_id}/triage",
+        headers={"X-Session-ID": session_id},
+        json={
+            "remediation": "Patch and restart the Postgres service.",
+            "verification_status": "verified",
+        },
+    )
     review_resp = client.post(
         "/atlas/findings/review",
         headers={"X-Session-ID": session_id},
@@ -1954,6 +1973,12 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     saved_view = json.loads(saved_views_resp.data)["views"][0]
     assert saved_view["name"] == "Postgres Atlas"
     assert saved_view["filters"]["run_id"] == run_id
+    assert triage_resp.status_code == 200
+    assert json.loads(triage_resp.data)["triage"]["verification_status"] == "ready_to_verify"
+    assert triage_update_resp.status_code == 200
+    updated_triage = json.loads(triage_update_resp.data)["triage"]
+    assert updated_triage["verification_status"] == "verified"
+    assert updated_triage["remediation"] == "Patch and restart the Postgres service."
     assert review_resp.status_code == 200
     assert json.loads(review_resp.data)["counts"] == {"updated": 1, "not_found": 0}
     assert suppression_resp.status_code == 200

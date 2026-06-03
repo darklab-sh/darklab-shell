@@ -1097,6 +1097,54 @@
   </div>
 </div>
 
+<div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
+  <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal" role="dialog" aria-modal="true" aria-labelledby="finding-triage-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close finding triage editor"></div>
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="finding-triage-title">FINDING TRIAGE</span>
+        <div class="project-entity-editor-subtitle" id="finding-triage-subtitle"></div>
+      </div>
+      <button type="button" id="finding-triage-close" class="close-btn finding-triage-close" aria-label="Close finding triage editor">✕</button>
+    </div>
+    <div id="finding-triage-message" class="project-workspace-message finding-triage-message u-hidden" role="status" aria-live="polite"></div>
+    <form id="finding-triage-form" class="project-target-editor-form finding-triage-form">
+      <section class="finding-triage-section" aria-labelledby="finding-triage-remediation-label">
+        <span class="project-workspace-section-label" id="finding-triage-remediation-label">Remediation</span>
+        <label class="project-target-edit-field">
+          <span>What should be fixed</span>
+          <textarea id="finding-triage-remediation" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="5" placeholder="Remediation guidance" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding remediation"></textarea>
+        </label>
+      </section>
+      <section class="finding-triage-section" aria-labelledby="finding-triage-verification-label">
+        <span class="project-workspace-section-label" id="finding-triage-verification-label">Verification</span>
+        <label class="project-target-edit-field">
+          <span>Status</span>
+          <select id="finding-triage-status" class="form-select form-control-compact" aria-label="Finding verification status">
+            <option value="not_started">Not started</option>
+            <option value="ready_to_verify">Ready to verify</option>
+            <option value="verified">Verified</option>
+            <option value="needs_retest">Needs retest</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Steps</span>
+          <textarea id="finding-triage-verification-steps" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="4" placeholder="How to prove the fix worked" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding verification steps"></textarea>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Notes</span>
+          <textarea id="finding-triage-verification-notes" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="3" placeholder="Optional verification notes" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding verification notes"></textarea>
+        </label>
+      </section>
+      <div class="modal-actions">
+        <button type="button" id="finding-triage-cancel" class="btn btn-secondary btn-compact finding-triage-cancel">Cancel</button>
+        <button type="submit" id="finding-triage-save" class="btn btn-primary btn-compact">Save triage</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="command-catalog-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
   <div id="command-catalog-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="command-catalog-title">
     <div class="faq-header">
@@ -1507,6 +1555,7 @@
 <script src="/static/js/features/projects/project_entities.js"></script>
 <script src="/static/js/features/projects/project_findings.js"></script>
 <script src="/static/js/features/projects/project_findings_board.js"></script>
+<script src="/static/js/features/findings/finding_triage_editor.js"></script>
 <script src="/static/js/features/findings/findings_board_modal.js"></script>
 <script src="/static/js/features/projects/project_artifacts.js"></script>
 <script src="/static/js/features/projects/project_packages.js"></script>

@@ -19,6 +19,7 @@ from services.ai import ai_cfg
 from services.ai.prompts import scrub_prompt_boundaries
 from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal
 from services.runs.output_store import load_run_output_events_for_run
+from services.projects.metadata import _finding_triage_by_id
 from services.secrets.storage import list_secret_metadata
 from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 
@@ -125,7 +126,7 @@ def build_run_context(
         variant=variant,
     )
     drop_order = (
-        ("transcript_tail", "warnings_errors", "findings", "exploit_backed_findings")
+        ("transcript_tail", "warnings_errors", "findings", "triage_findings", "exploit_backed_findings")
         if variant == "summary"
         else (
             "project_context",
@@ -134,6 +135,7 @@ def build_run_context(
             "transcript_tail",
             "entities",
             "findings",
+            "triage_findings",
             "exploit_backed_findings",
         )
         if variant == "next_commands"
@@ -145,6 +147,7 @@ def build_run_context(
             "entities",
             "warnings_errors",
             "findings",
+            "triage_findings",
         )
     )
     result = _finalize_context(raw_context, max_input_chars=max_input_chars, drop_order=drop_order)
@@ -211,6 +214,12 @@ def _assemble_context(
                 "output_truncated": run_context["output_truncated"],
             }, redaction_rules, secret_names, active_cfg),
             "findings": _redact_value(_summary_findings(findings), redaction_rules, secret_names, active_cfg),
+            "triage_findings": _redact_value(
+                _triage_findings(findings),
+                redaction_rules,
+                secret_names,
+                active_cfg,
+            ),
             "exploit_backed_findings": _redact_value(
                 _exploit_backed_findings(findings),
                 redaction_rules,
@@ -237,6 +246,12 @@ def _assemble_context(
                 "output_truncated": run_context["output_truncated"],
             }, redaction_rules, secret_names, active_cfg),
             "findings": _redact_value(_summary_findings(findings), redaction_rules, secret_names, active_cfg),
+            "triage_findings": _redact_value(
+                _triage_findings(findings),
+                redaction_rules,
+                secret_names,
+                active_cfg,
+            ),
             "exploit_backed_findings": _redact_value(
                 _exploit_backed_findings(findings),
                 redaction_rules,
@@ -438,7 +453,7 @@ def _strip_redaction_markers(value: Any) -> tuple[Any, int, int]:
 def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
     if team_id:
         rows = conn.execute(
-            "SELECT f.severity, f.kind, f.title, f.raw_line, f.line_number, f.status "
+            "SELECT f.id, f.severity, f.kind, f.title, f.raw_line, f.line_number, f.status "
             "FROM findings f "
             "WHERE (f.run_id = ? OR EXISTS ("
             "  SELECT 1 FROM findings_occurrences fo WHERE fo.finding_id = f.id AND fo.run_id = ?"
@@ -448,12 +463,13 @@ def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT severity, kind, title, raw_line, line_number, status "
+            "SELECT id, severity, kind, title, raw_line, line_number, status "
             "FROM findings WHERE session_id = ? AND run_id = ? AND COALESCE(suppressed, FALSE) = FALSE "
             "ORDER BY line_number, created LIMIT 200",
             (session_id, run_id),
         ).fetchall()
-    return [{
+    findings = [{
+        "id": row["id"],
         "severity": row["severity"],
         "kind": row["kind"],
         "title": row["title"],
@@ -461,6 +477,12 @@ def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
         "line_number": row["line_number"],
         "status": row["status"],
     } for row in rows]
+    triage_by_id = _finding_triage_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
+    for finding in findings:
+        triage = triage_by_id.get(str(finding.get("id") or ""))
+        if triage:
+            finding["triage"] = triage
+    return findings
 
 
 def _load_entities(conn, session_id: str, run_id: str, *, team_id: str = "") -> dict[str, list[str]]:
@@ -546,6 +568,44 @@ def _summary_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "line_number": finding.get("line_number"),
         })
     return rows
+
+
+def _context_text_preview(value: Any, *, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 14)].rstrip() + "...[truncated]"
+
+
+def _triage_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for finding in findings:
+        triage = finding.get("triage") if isinstance(finding.get("triage"), dict) else None
+        if not triage:
+            continue
+        remediation = str(triage.get("remediation") or "").strip()
+        verification_steps = str(triage.get("verification_steps") or "").strip()
+        verification_status = str(triage.get("verification_status") or "not_started").strip()
+        if not remediation and not verification_steps and verification_status == "not_started":
+            continue
+        row = {
+            "severity": finding.get("severity"),
+            "title": finding.get("title"),
+            "line_number": finding.get("line_number"),
+            "verification_status": verification_status,
+        }
+        if remediation:
+            row["remediation"] = _context_text_preview(remediation, limit=180)
+        if verification_steps:
+            row["verification_steps"] = _context_text_preview(verification_steps, limit=180)
+        rows.append(row)
+    rows.sort(
+        key=lambda row: (
+            -_SEVERITY_RANK.get(str(row.get("severity") or "").lower(), 0),
+            int(row.get("line_number") or 0),
+        )
+    )
+    return rows[:25]
 
 
 def _exploit_backed_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -762,6 +822,7 @@ def _useful_context_chars(context: dict[str, Any]) -> int:
     text = json.dumps({
         "run": context.get("run", {}),
         "findings": context.get("findings", []),
+        "triage_findings": context.get("triage_findings", []),
         "exploit_backed_findings": context.get("exploit_backed_findings", []),
         "entities": context.get("entities", {}),
         "transcript_tail": context.get("transcript_tail", []),

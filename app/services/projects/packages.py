@@ -378,11 +378,18 @@ def package_manifest_without_private_notes(manifest):
         items = clean.get(key)
         if not isinstance(items, list):
             continue
-        clean[key] = [
-            {item_key: item_value for item_key, item_value in item.items() if item_key != "note"}
-            if isinstance(item, dict) else item
-            for item in items
-        ]
+        cleaned_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                cleaned_items.append(item)
+                continue
+            next_item = {item_key: item_value for item_key, item_value in item.items() if item_key != "note"}
+            if key == "findings" and isinstance(next_item.get("triage"), dict):
+                triage = dict(next_item["triage"])
+                triage.pop("verification_notes", None)
+                next_item["triage"] = triage
+            cleaned_items.append(next_item)
+        clean[key] = cleaned_items
     return clean
 
 

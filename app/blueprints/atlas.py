@@ -730,20 +730,24 @@ def atlas_findings_list():
     assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
-    with db_connect() as conn:
-        return jsonify(list_findings(
-            conn,
-            session_id,
-            team_id=owner_scope.team_id,
-            query=request.args.get("q") or "",
-            project_id=request.args.get("project_id") or "",
-            run_id=request.args.get("run_id") or "",
-            review_states=request.args.getlist("review_state"),
-            orphan_filter=request.args.get("orphan_filter") or "hide",
-            suppression_filter=request.args.get("suppression_filter") or "hide",
-            limit=limit,
-            offset=offset,
-        ))
+    try:
+        with db_connect() as conn:
+            return jsonify(list_findings(
+                conn,
+                session_id,
+                team_id=owner_scope.team_id,
+                query=request.args.get("q") or "",
+                project_id=request.args.get("project_id") or "",
+                run_id=request.args.get("run_id") or "",
+                review_states=request.args.getlist("review_state"),
+                verification_statuses=request.args.getlist("verification_status"),
+                orphan_filter=request.args.get("orphan_filter") or "hide",
+                suppression_filter=request.args.get("suppression_filter") or "hide",
+                limit=limit,
+                offset=offset,
+            ))
+    except ProjectWorkspaceError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @atlas_bp.route("/atlas/runs/<run_id>/cleanup-preview")

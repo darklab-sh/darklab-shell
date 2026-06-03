@@ -30,8 +30,9 @@ from services.atlas.materializer import upsert_entity
 from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.intel.canonical import entity_signature
 from services.projects.findings import _finding_signature, _normalize_finding_signal_key
-from services.projects.contracts import ProjectWorkspaceQuotaExceeded
+from services.projects.contracts import MAX_FINDING_REMEDIATION_LEN, ProjectWorkspaceQuotaExceeded
 from services.projects.links import insert_project_link_with_quota
+from services.projects.metadata import _finding_triage_by_id, upsert_finding_triage_details_on_conn
 from services.projects.scope import normalize_team_id, shared_owner_where
 from services.projects.targets import ensure_project_target_on_conn
 from services.projects.utils import now as project_now
@@ -118,6 +119,10 @@ def _safe_label(value: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
+def _safe_text(value: Any, limit: int) -> str:
+    return str(value or "").strip()[:limit]
+
+
 def _safe_filename(value: Any) -> str:
     filename = str(value or "").replace("\\", "/").split("/")[-1]
     filename = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" .")
@@ -193,6 +198,7 @@ def _safe_count_fields(counts: dict[str, Any]) -> dict[str, int]:
         "entities_updated",
         "findings_created",
         "findings_updated",
+        "finding_remediations_imported",
         "entity_links",
         "finding_occurrences",
         "project_links_added",
@@ -1101,6 +1107,7 @@ def _apply_atlas_import_impl(
             "entities_updated": 0,
             "findings_created": 0,
             "findings_updated": 0,
+            "finding_remediations_imported": 0,
             "entity_links": 0,
             "finding_occurrences": 0,
             "project_links_added": 0,
@@ -1198,6 +1205,57 @@ def _apply_atlas_import_impl(
                     external_id=str(finding.get("external_id") or ""),
                     source_detail=finding.get("source_detail") if isinstance(finding.get("source_detail"), dict) else {},
                 )
+                remediation = _safe_text(finding.get("remediation"), MAX_FINDING_REMEDIATION_LEN)
+                if remediation:
+                    existing_triage_row = _finding_triage_by_id(
+                        conn,
+                        session_id,
+                        [finding_id],
+                        team_id=team_id,
+                    ).get(finding_id)
+                    existing_triage = existing_triage_row if isinstance(existing_triage_row, dict) else {}
+                    previous_remediation = _safe_text(
+                        existing_triage.get("remediation"),
+                        MAX_FINDING_REMEDIATION_LEN,
+                    )
+                    if previous_remediation:
+                        if previous_remediation != remediation:
+                            log.warning("ATLAS_IMPORT_REMEDIATION_PRESERVED_EXISTING_TRIAGE", extra={
+                                "session": get_log_session_id(session_id),
+                                "team_id": team_id,
+                                "draft_id": draft_id,
+                                "batch_id": batch_id,
+                                "project_id": project_id,
+                                "finding_id": finding_id,
+                                "source_tool_key": _source_tool_key(draft["source_tool"]),
+                                "previous_remediation_chars": len(previous_remediation),
+                                "imported_remediation_chars": len(remediation),
+                            })
+                    else:
+                        log.debug("ATLAS_IMPORT_REMEDIATION_TRIAGE_UPSERT", extra={
+                            "session": get_log_session_id(session_id),
+                            "team_id": team_id,
+                            "draft_id": draft_id,
+                            "batch_id": batch_id,
+                            "finding_id": finding_id,
+                            "created_finding": created,
+                            "existing_triage": bool(existing_triage),
+                            "remediation_chars": len(remediation),
+                        })
+                        upsert_finding_triage_details_on_conn(
+                            conn,
+                            session_id,
+                            finding_id,
+                            {
+                                "remediation": remediation,
+                                "verification_steps": existing_triage.get("verification_steps", ""),
+                                "verification_status": existing_triage.get("verification_status", "not_started"),
+                                "verification_notes": existing_triage.get("verification_notes", ""),
+                            },
+                            team_id=team_id,
+                            now=now,
+                        )
+                        counts["finding_remediations_imported"] += 1
                 counts["finding_occurrences"] += 1
                 counts["findings_created" if created else "findings_updated"] += 1
                 finding_ids.add(finding_id)

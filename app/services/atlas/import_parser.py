@@ -77,6 +77,7 @@ class ImportFinding:
     subject_key: str
     signature_hash: str
     description: str = ""
+    remediation: str = ""
     evidence: str = ""
     affected_entity: ImportEntity | None = None
     external_id: str = ""
@@ -317,6 +318,7 @@ def _make_finding(
     affected_entity: ImportEntity | None = None,
     subject: Any = "",
     description: Any = "",
+    remediation: Any = "",
     evidence: Any = "",
     external_id: Any = "",
     references: list[str] | None = None,
@@ -339,6 +341,7 @@ def _make_finding(
         subject_key=normalized_subject,
         signature_hash=signature_hash,
         description=_safe_multiline(description),
+        remediation=_safe_multiline(remediation),
         evidence=_safe_multiline(evidence),
         affected_entity=affected_entity,
         external_id=_safe_text(external_id),
@@ -683,7 +686,8 @@ def _append_nessus_report_item(
         severity=severity,
         affected_entity=entity,
         subject=host or plugin_id,
-        description=_child_text(elem, "description", "synopsis", "solution"),
+        description=_child_text(elem, "description", "synopsis"),
+        remediation=_child_text(elem, "solution"),
         evidence=_child_text(elem, "plugin_output"),
         external_id=plugin_id,
         references=_split_references(_child_text(elem, "see_also", "xref")),
@@ -800,6 +804,7 @@ def _append_zap_alert(
         affected_entity=entity,
         subject=url or alert.get("pluginid"),
         description=alert.get("desc") or alert.get("description"),
+        remediation=alert.get("solution"),
         evidence=evidence or param,
         external_id=alert.get("pluginid"),
         references=_split_references(alert.get("reference")),
@@ -837,6 +842,7 @@ def _parse_burp_xml(
             affected_entity=entity,
             subject=target or issue.get("serialnumber") or issue.get("type"),
             description=issue.get("issuedetail") or issue.get("background"),
+            remediation=issue.get("remediationdetail"),
             evidence=issue.get("requestresponse") or issue.get("issuedetail"),
             external_id=issue.get("serialnumber") or issue.get("type"),
             references=_split_references(issue.get("references")),

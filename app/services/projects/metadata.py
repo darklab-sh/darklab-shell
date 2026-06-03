@@ -10,18 +10,22 @@ from datetime import datetime, timezone
 import config as _config
 from core.database import DB_BACKEND, db_connect, validate_project_entity_type
 from core.database_backend import dialect_for_backend
-from services.atlas.lookup import entity_exists_in_scope, finding_exists_in_scope, metadata_owner_id
+from services.atlas.scope import entity_exists_in_scope, finding_exists_in_scope, metadata_owner_id
 from services.projects.contracts import (
     ENTITY_METADATA_TYPES,
     MAX_ENTITY_ID_LEN,
     MAX_ENTITY_NOTE_BODY_LEN,
+    MAX_FINDING_REMEDIATION_LEN,
+    MAX_FINDING_VERIFICATION_NOTES_LEN,
+    MAX_FINDING_VERIFICATION_STEPS_LEN,
     MAX_LABEL_LEN,
     MAX_PROJECT_NOTES_LEN,
+    FINDING_VERIFICATION_STATES,
     ProjectWorkspaceError,
     ProjectWorkspaceQuotaExceeded,
 )
 from services.projects.scope import normalize_team_id, shared_owner_where
-from services.projects.utils import trim_text as _trim_text
+from services.projects.utils import text_exceeds_limit as _text_exceeds_limit, trim_text as _trim_text
 from services.teams.scope import team_owner_context
 from services.workspace.files import WorkspaceError, resolve_owner_workspace_path, resolve_workspace_path
 
@@ -62,6 +66,10 @@ def _new_entity_note_id() -> str:
     return "note_" + secrets.token_hex(8)
 
 
+def _new_finding_triage_id() -> str:
+    return "ftri_" + secrets.token_hex(8)
+
+
 def _row_to_label(row):
     if not row:
         return None
@@ -96,6 +104,25 @@ def _row_to_entity_note(row):
     return item
 
 
+def _row_to_finding_triage(row):
+    if not row:
+        return None
+    item = {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "finding_id": row["finding_id"],
+        "remediation": row["remediation"],
+        "verification_steps": row["verification_steps"],
+        "verification_status": row["verification_status"],
+        "verification_notes": row["verification_notes"],
+        "created": row["created"],
+        "updated": row["updated"],
+    }
+    if hasattr(row, "keys") and "team_id" in row.keys():
+        item["team_id"] = row["team_id"] or ""
+    return item
+
+
 def _metadata_row_owner_values(session_id, team_id=""):
     normalized_team_id = normalize_team_id(team_id)
     if normalized_team_id:
@@ -116,6 +143,46 @@ def _metadata_owner_where(session_id, team_id="", *, table_alias=""):
     return (
         f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?",
         (str(session_id or "").strip(),),
+    )
+
+
+def finding_triage_verification_status_filter_sql_and_params(
+    session_id: str,
+    statuses: list[str],
+    *,
+    team_id: str = "",
+    table_alias: str = "filter_triage",
+    finding_alias: str = "f",
+) -> tuple[str, list[str]]:
+    if not statuses:
+        return "", []
+    owner_sql, owner_params = _metadata_owner_where(session_id, team_id, table_alias=table_alias)
+    placeholders = ",".join("?" for _ in statuses)
+    triage_prefix = f"{table_alias}." if table_alias else ""
+    finding_prefix = f"{finding_alias}." if finding_alias else ""
+    finding_match_sql = f"{triage_prefix}finding_id = {finding_prefix}id"
+    if "not_started" in statuses:
+        return (
+            "("
+            "NOT EXISTS ("
+            f"  SELECT 1 FROM finding_triage_details {table_alias} "
+            f"  WHERE {owner_sql} AND {finding_match_sql}"
+            ") "
+            "OR EXISTS ("
+            f"  SELECT 1 FROM finding_triage_details {table_alias} "
+            f"  WHERE {owner_sql} AND {finding_match_sql} "
+            f"  AND {triage_prefix}verification_status IN ({placeholders})"  # nosec
+            ")"
+            ")",
+            [*owner_params, *owner_params, *statuses],
+        )
+    return (
+        "EXISTS ("
+        f"  SELECT 1 FROM finding_triage_details {table_alias} "
+        f"  WHERE {owner_sql} AND {finding_match_sql} "
+        f"  AND {triage_prefix}verification_status IN ({placeholders})"  # nosec
+        ")",
+        [*owner_params, *statuses],
     )
 
 
@@ -179,6 +246,77 @@ def _entity_notes_by_id(conn, session_id, entity_type, entity_ids, *, team_id=""
         [*owner_params, entity_type, *values],
     ).fetchall()
     return {str(row["entity_id"]): _row_to_entity_note(row) for row in rows}
+
+
+def _finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
+    values = [str(value) for value in finding_ids if value]
+    if not values:
+        return {}
+    owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
+    placeholders = ",".join("?" for _ in values)
+    rows = conn.execute(
+        "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "verification_status, verification_notes, created, updated "
+        "FROM finding_triage_details WHERE " + owner_sql + f" AND finding_id IN ({placeholders})",  # nosec
+        [*owner_params, *values],
+    ).fetchall()
+    return {str(row["finding_id"]): _row_to_finding_triage(row) for row in rows}
+
+
+def default_finding_triage_details(session_id, finding_id, *, team_id=""):
+    item = {
+        "id": "",
+        "session_id": str(session_id or "").strip(),
+        "finding_id": str(finding_id or "").strip(),
+        "remediation": "",
+        "verification_steps": "",
+        "verification_status": "not_started",
+        "verification_notes": "",
+        "created": "",
+        "updated": "",
+    }
+    normalized_team_id = normalize_team_id(team_id)
+    if normalized_team_id:
+        item["session_id"] = _metadata_session_id(session_id, normalized_team_id)
+        item["team_id"] = normalized_team_id
+    else:
+        item["team_id"] = ""
+    return item
+
+
+def _text_preview(value, limit=160):
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "..."
+
+
+def compact_finding_triage_details(triage):
+    item = triage if isinstance(triage, dict) else {}
+    remediation = str(item.get("remediation") or "")
+    verification_steps = str(item.get("verification_steps") or "")
+    verification_notes = str(item.get("verification_notes") or "")
+    return {
+        "verification_status": str(item.get("verification_status") or "not_started"),
+        "has_remediation": bool(remediation.strip()),
+        "has_verification_steps": bool(verification_steps.strip()),
+        "has_verification_notes": bool(verification_notes.strip()),
+        "remediation_preview": _text_preview(remediation),
+        "verification_steps_preview": _text_preview(verification_steps),
+    }
+
+
+def attach_finding_triage_details(conn, session_id, findings, *, team_id=""):
+    items = [finding for finding in findings if finding]
+    if not items:
+        return items
+    finding_ids = [str(finding.get("id") or "") for finding in items if finding.get("id")]
+    triage_map = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
+    for finding in items:
+        triage = triage_map.get(str(finding.get("id") or ""))
+        finding["triage"] = compact_finding_triage_details(triage)
+        finding["verification_status"] = finding["triage"]["verification_status"]
+    return items
 
 
 def _attach_project_notes(conn, session_id, projects, *, team_id=""):
@@ -311,6 +449,40 @@ def _normalize_entity_note_payload(data, *, partial=False):
             raise ProjectWorkspaceError("note body is required")
         clean["body"] = body
     return clean
+
+
+def _normalize_finding_triage_payload(data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("finding triage payload must be an object")
+    verification_status = _trim_text(data.get("verification_status") or "not_started", 64)
+    if verification_status not in FINDING_VERIFICATION_STATES:
+        raise ProjectWorkspaceError("invalid verification_status")
+    for field, limit in (
+        ("remediation", MAX_FINDING_REMEDIATION_LEN),
+        ("verification_steps", MAX_FINDING_VERIFICATION_STEPS_LEN),
+        ("verification_notes", MAX_FINDING_VERIFICATION_NOTES_LEN),
+    ):
+        if _text_exceeds_limit(data.get(field), limit):
+            raise ProjectWorkspaceError(f"{field} exceeds maximum length")
+    return {
+        "remediation": _trim_text(data.get("remediation"), MAX_FINDING_REMEDIATION_LEN),
+        "verification_steps": _trim_text(data.get("verification_steps"), MAX_FINDING_VERIFICATION_STEPS_LEN),
+        "verification_status": verification_status,
+        "verification_notes": _trim_text(data.get("verification_notes"), MAX_FINDING_VERIFICATION_NOTES_LEN),
+    }
+
+
+def _finding_triage_payload_is_empty(payload):
+    return (
+        not payload["remediation"]
+        and not payload["verification_steps"]
+        and payload["verification_status"] == "not_started"
+        and not payload["verification_notes"]
+    )
+
+
+def _finding_belongs_to_scope(conn, session_id, finding_id, *, team_id=""):
+    return finding_exists_in_scope(conn, session_id, finding_id, team_id=team_id)
 
 
 def _workspace_file_belongs_to_session(session_id, entity_id, *, team_id=""):
@@ -585,6 +757,147 @@ def delete_entity_note(session_id, entity_type, entity_id, *, team_id=""):
         result = conn.execute(
             "DELETE FROM entity_notes WHERE " + owner_sql + " AND entity_type = ? AND entity_id = ?",  # nosec
             (*owner_params, entity_type, entity_id),
+        )
+        conn.commit()
+    return result.rowcount > 0
+
+
+def get_finding_triage_details(session_id, finding_id, *, team_id=""):
+    finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
+    if not finding_id:
+        raise ProjectWorkspaceError("finding_id is required")
+    with db_connect() as conn:
+        if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
+            return None
+        triage_map = _finding_triage_by_id(conn, session_id, [finding_id], team_id=team_id)
+    return triage_map.get(finding_id)
+
+
+def finding_triage_target_exists(session_id, finding_id, *, team_id=""):
+    finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
+    if not finding_id:
+        raise ProjectWorkspaceError("finding_id is required")
+    with db_connect() as conn:
+        return _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id)
+
+
+def upsert_finding_triage_details(session_id, finding_id, data, *, team_id=""):
+    finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
+    if not finding_id:
+        raise ProjectWorkspaceError("finding_id is required")
+    with db_connect() as conn:
+        if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
+            return None
+        result = upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, team_id=team_id)
+        conn.commit()
+        return result
+
+
+def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *, team_id="", now=""):
+    finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
+    if not finding_id:
+        raise ProjectWorkspaceError("finding_id is required")
+    payload = _normalize_finding_triage_payload(data)
+    metadata_session, metadata_team_id = _metadata_row_owner_values(session_id, team_id)
+    owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
+    timestamp = _trim_text(now, 64) or _now()
+    existing = conn.execute(
+        "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "verification_status, verification_notes, created, updated "
+        "FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
+        [*owner_params, finding_id],
+    ).fetchone()
+    if _finding_triage_payload_is_empty(payload):
+        if existing:
+            conn.execute("DELETE FROM finding_triage_details WHERE id = ?", [existing["id"]])
+        return None
+    if existing:
+        conn.execute(
+            "UPDATE finding_triage_details SET session_id = ?, team_id = ?, remediation = ?, "
+            "verification_steps = ?, verification_status = ?, verification_notes = ?, updated = ? WHERE id = ?",
+            (
+                metadata_session,
+                metadata_team_id,
+                payload["remediation"],
+                payload["verification_steps"],
+                payload["verification_status"],
+                payload["verification_notes"],
+                timestamp,
+                existing["id"],
+            ),
+        )
+        row = conn.execute(
+            "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
+            "verification_status, verification_notes, created, updated "
+            "FROM finding_triage_details WHERE id = ?",
+            [existing["id"]],
+        ).fetchone()
+        return _row_to_finding_triage(row)
+    count_sql, count_params = _metadata_owner_where(session_id, team_id)
+    owner_count = conn.execute(
+        "SELECT COUNT(*) AS count FROM finding_triage_details WHERE " + count_sql,  # nosec
+        count_params,
+    ).fetchone()
+    if _quota_exceeded(
+        int(owner_count["count"] or 0) if owner_count else 0,
+        "max_finding_triage_details_per_owner",
+        5000,
+    ):
+        _raise_quota("finding triage quota exceeded for this owner")
+    triage_id = _new_finding_triage_id()
+    conflict_target = (
+        "ON CONFLICT(team_id, finding_id) WHERE team_id != '' DO UPDATE SET "
+        if metadata_team_id
+        else "ON CONFLICT(session_id, finding_id) WHERE team_id IS NULL OR team_id = '' DO UPDATE SET "
+    )
+    conn.execute(
+        "INSERT INTO finding_triage_details "
+        "(id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "verification_status, verification_notes, created, updated) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        f"{conflict_target}"  # nosec
+        "session_id = excluded.session_id, "
+        "team_id = excluded.team_id, "
+        "remediation = excluded.remediation, "
+        "verification_steps = excluded.verification_steps, "
+        "verification_status = excluded.verification_status, "
+        "verification_notes = excluded.verification_notes, "
+        "updated = excluded.updated",
+        (
+            triage_id,
+            metadata_session,
+            metadata_team_id,
+            finding_id,
+            payload["remediation"],
+            payload["verification_steps"],
+            payload["verification_status"],
+            payload["verification_notes"],
+            timestamp,
+            timestamp,
+        ),
+    )
+    row = conn.execute(
+        "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "verification_status, verification_notes, created, updated "
+        "FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
+        [*owner_params, finding_id],
+    ).fetchone()
+    if row:
+        return _row_to_finding_triage(row)
+    raise ProjectWorkspaceError("could not upsert finding triage details")
+
+
+def delete_finding_triage_details(session_id, finding_id, *, team_id=""):
+    finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
+    if not finding_id:
+        raise ProjectWorkspaceError("finding_id is required")
+    owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
+    with db_connect() as conn:
+        if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
+            return None
+        result = conn.execute(
+            "DELETE FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
+            [*owner_params, finding_id],
         )
         conn.commit()
     return result.rowcount > 0

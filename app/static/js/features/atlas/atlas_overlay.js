@@ -1477,6 +1477,7 @@
     badges.className = 'atlas-entity-badges';
     if (finding.suppressed) badges.appendChild(badge('suppressed', 'muted'));
     badges.appendChild(badge(findingStatusLabel(finding.review_state || finding.status), 'green'));
+    triageBadges(finding).forEach(item => badges.appendChild(item));
     if (finding.occurrence_count) badges.appendChild(badge(countLabel(finding.occurrence_count, 'hit', 'hits'), 'muted'));
     if (state.selectMode) {
       appendSelectionCheckbox(
@@ -1578,6 +1579,21 @@
     return el;
   }
 
+  function triageBadges(finding) {
+    const result = [];
+    const triage = finding && finding.triage && typeof finding.triage === 'object' ? finding.triage : null;
+    if (!triage) return result;
+    const status = String(triage.verification_status || finding.verification_status || 'not_started');
+    if (status && status !== 'not_started') {
+      const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+      const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+      result.push(badge(label, tone));
+    }
+    if (triage.has_remediation) result.push(badge('remediation', 'muted'));
+    if (triage.has_verification_steps) result.push(badge('verification steps', 'muted'));
+    return result;
+  }
+
   function rowMessage(message) {
     const row = document.createElement('div');
     row.className = 'atlas-empty';
@@ -1624,6 +1640,7 @@
         }),
         onOpenEntity: (item) => openEntityFromFinding(item),
         onDeleteFinding: (item) => confirmDeleteFinding(item),
+        onEditTriage: (item) => openFindingTriageEditor(item),
         onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
       });
       return;
@@ -1956,6 +1973,28 @@
     state.selectedFindingId = String(findingId || '');
     renderList();
     renderDetail();
+  }
+
+  async function openFindingTriageEditor(finding) {
+    const findingId = String(finding && finding.id || state.selectedFindingId || '');
+    const current = state.findings.find(item => String(item.id || '') === findingId) || finding;
+    if (!current || !findingId) return;
+    if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+      throw new Error('Finding triage editor is not available.');
+    }
+    await global.DarklabFindingTriageEditor.open(current, {
+      canEdit: canTriageAtlasRows(),
+      onSaved: async (triage) => {
+        const compact = global.DarklabFindingTriageEditor.compactTriage(triage);
+        state.findings = state.findings.map(item => (
+          String(item && item.id || '') === findingId
+            ? { ...item, triage: compact, verification_status: compact.verification_status }
+            : item
+        ));
+        renderList();
+        renderDetail();
+      },
+    });
   }
 
   async function updateFindingReviewState(finding, reviewState) {
@@ -2807,6 +2846,7 @@
     confirmDeleteEntity,
     confirmDeleteFinding,
     confirmCleanRunAtlas,
+    openFindingTriageEditor,
     updateFindingReviewState,
     updateSuppression,
     canTriageAtlasRows,

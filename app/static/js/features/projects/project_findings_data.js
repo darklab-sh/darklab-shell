@@ -326,6 +326,24 @@
       });
     }
 
+    function updateCachedFinding(projectId, findingId, updates) {
+      const normalized = String(projectId || '');
+      const normalizedFindingId = String(findingId || '');
+      const updatePayload = updates && typeof updates === 'object' ? updates : {};
+      const current = findings.get(normalized);
+      if (!normalized || !normalizedFindingId || !Array.isArray(current)) return;
+      const updateRow = finding => (
+        String(finding && finding.id || '') === normalizedFindingId
+          ? { ...finding, ...updatePayload }
+          : finding
+      );
+      findings.set(normalized, current.map(updateRow));
+      filteredFindings.forEach((items, key) => {
+        if (!String(key).startsWith(`${normalized}::`)) return;
+        filteredFindings.set(key, items.map(updateRow));
+      });
+    }
+
     async function load(projectId, options = {}) {
       const normalized = String(projectId || '');
       if (!normalized) return;
@@ -528,6 +546,7 @@
       page,
       setPageOffset,
       setCachedReviewState,
+      updateCachedFinding,
       loadFiltered,
     };
   }

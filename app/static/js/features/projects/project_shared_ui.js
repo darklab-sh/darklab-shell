@@ -76,6 +76,18 @@
     function entityMetadataChips(entity) {
       const chips = entityLabelValues(entity).map(label => ({ label, kind: 'label' }));
       if (entityNoteBody(entity)) chips.push({ label: 'note', kind: 'note' });
+      const triage = entity && entity.triage && typeof entity.triage === 'object' ? entity.triage : null;
+      if (triage) {
+        const status = String(triage.verification_status || entity.verification_status || 'not_started');
+        if (status && status !== 'not_started') {
+          const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+          const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+          const kind = tone === 'green' ? 'success' : (tone === 'amber' ? 'warning' : 'label');
+          chips.push({ label, kind });
+        }
+        if (triage.has_remediation) chips.push({ label: 'remediation', kind: 'note' });
+        if (triage.has_verification_steps) chips.push({ label: 'verification steps', kind: 'label' });
+      }
       return chips;
     }
 
@@ -83,7 +95,11 @@
       const normalized = String(kind || '');
       const tone = normalized === 'note'
         ? 'badge-tone-cyan'
-        : (normalized === 'success' ? 'badge-tone-green' : 'badge-tone-muted');
+        : (
+            normalized === 'success'
+              ? 'badge-tone-green'
+              : (normalized === 'warning' ? 'badge-tone-amber' : 'badge-tone-muted')
+          );
       return `project-explorer-metadata-chip badge ${tone}`;
     }
 

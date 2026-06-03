@@ -290,6 +290,10 @@ def delete_atlas_findings(conn, session_id: str, finding_ids: list[str] | tuple[
         owned,
     )
     conn.execute(
+        f"DELETE FROM finding_triage_details WHERE finding_id IN ({owned_placeholders})",  # nosec
+        owned,
+    )
+    conn.execute(
         f"DELETE FROM findings_occurrences WHERE finding_id IN ({owned_placeholders})",  # nosec
         owned,
     )

@@ -112,6 +112,10 @@ const PROJECT_FINDINGS_BOARD_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_board.js'),
   'utf8',
 )
+const FINDING_TRIAGE_EDITOR_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/findings/finding_triage_editor.js'),
+  'utf8',
+)
 const FINDINGS_BOARD_MODAL_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/findings/findings_board_modal.js'),
   'utf8',
@@ -321,6 +325,27 @@ function loadShellChrome({
         <div id="findings-board-body"></div>
       </div>
     </div>
+    <div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
+      <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal">
+        <button type="button" id="finding-triage-close"></button>
+        <div id="finding-triage-subtitle"></div>
+        <div id="finding-triage-message" class="u-hidden"></div>
+        <form id="finding-triage-form">
+          <textarea id="finding-triage-remediation"></textarea>
+          <textarea id="finding-triage-verification-steps"></textarea>
+          <select id="finding-triage-status" class="form-select form-control-compact">
+            <option value="not_started">Not started</option>
+            <option value="ready_to_verify">Ready to verify</option>
+            <option value="verified">Verified</option>
+            <option value="needs_retest">Needs retest</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+          <textarea id="finding-triage-verification-notes"></textarea>
+          <button type="button" id="finding-triage-cancel"></button>
+          <button type="submit" id="finding-triage-save"></button>
+        </form>
+      </div>
+    </div>
   `
 
   const intervalCallbacks = []
@@ -439,6 +464,8 @@ function loadShellChrome({
       ${PROJECT_WORKSPACE_RENDERER_SRC}
       ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
       ${PROJECT_NESTED_SHEETS_SRC}
+      ${FINDING_TRIAGE_EDITOR_SRC}
+      global.DarklabFindingTriageEditor = window.DarklabFindingTriageEditor;
       ${PROJECT_WORKSPACE_EVENTS_SRC}
       ${PROJECT_TARGETS_SRC}
       ${PROJECT_RUNS_SRC}
@@ -3802,6 +3829,44 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('retest')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('old-label')
 
+    const findingTriageButton = document.querySelector(
+      '#project-explorer-body [data-project-action="edit-finding-triage"][data-finding-id="finding-1"]',
+    )
+    expect(window.DarklabFindingTriageEditor?.open).toEqual(expect.any(Function))
+    expect(findingTriageButton).not.toBeNull()
+    expect(findingTriageButton.disabled).toBe(false)
+    expect(findingTriageButton.dataset.projectId).toBe('project-1')
+    const triageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
+    findingTriageButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    expect(document.getElementById('project-workspace-message').textContent).not.toContain('Finding is missing')
+    expect(triageOpenSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'finding-1' }), expect.objectContaining({
+      canEdit: true,
+      onSaved: expect.any(Function),
+    }))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+    document.getElementById('finding-triage-remediation').value = 'Patch the affected service.'
+    document.getElementById('finding-triage-status').value = 'ready_to_verify'
+    document.getElementById('finding-triage-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/triage', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        remediation: 'Patch the affected service.',
+        verification_steps: '',
+        verification_status: 'ready_to_verify',
+        verification_notes: '',
+      }),
+    }))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Ready to verify')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('remediation')
+
     const sharedFilterMenu = document.querySelector('.project-shared-filter-menu')
     expect(sharedFilterMenu?.tagName).toBe('DIV')
     expect(sharedFilterMenu.querySelector('summary')).toBeNull()
@@ -4403,6 +4468,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1'])
     expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
     expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('note')
 
     document.querySelector('[data-project-tab="runs"]').click()
     await tick()

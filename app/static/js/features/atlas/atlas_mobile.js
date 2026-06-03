@@ -897,6 +897,18 @@
     if (finding.suppressed) badges.appendChild(controller.badge('suppressed', 'muted'));
     const severityTone = severity === 'high' || severity === 'critical' ? 'red' : 'muted';
     if (severity) badges.appendChild(controller.badge(severity, severityTone));
+    const triage = finding && finding.triage && typeof finding.triage === 'object' ? finding.triage : null;
+    if (triage) {
+      const verificationStatus = String(triage.verification_status || finding.verification_status || 'not_started');
+      if (verificationStatus && verificationStatus !== 'not_started') {
+        const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(verificationStatus)
+          || verificationStatus.replace(/_/g, ' ');
+        const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(verificationStatus) || 'muted';
+        badges.appendChild(controller.badge(label, tone));
+      }
+      if (triage.has_remediation) badges.appendChild(controller.badge('remediation', 'muted'));
+      if (triage.has_verification_steps) badges.appendChild(controller.badge('verification steps', 'muted'));
+    }
 
     const chev = document.createElement('span');
     chev.className = 'atlas-mobile-row-chev drill-chev';
@@ -1281,6 +1293,13 @@
         }
       }
     }
+
+    const triage = document.createElement('button');
+    triage.type = 'button';
+    triage.className = 'btn btn-secondary btn-compact';
+    triage.textContent = 'Triage';
+    triage.addEventListener('click', () => controller.openFindingTriageEditor?.(finding));
+    findingFooter.appendChild(triage);
 
     const seeRun = document.createElement('button');
     seeRun.type = 'button';

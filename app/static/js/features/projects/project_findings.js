@@ -74,6 +74,9 @@
       const wrap = document.createElement('div');
       wrap.className = 'project-finding-row-actions';
       if (finding && finding.id) {
+        const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
+        triage.dataset.findingId = String(finding.id || '');
+        wrap.appendChild(triage);
         const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
         edit.dataset.findingId = String(finding.id || '');
         wrap.appendChild(edit);

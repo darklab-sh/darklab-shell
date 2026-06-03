@@ -30,6 +30,9 @@
         wrap.appendChild(open);
       }
       if (card.id) {
+        const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
+        triage.dataset.findingId = card.id;
+        wrap.appendChild(triage);
         const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
         edit.dataset.findingId = card.id;
         wrap.appendChild(edit);

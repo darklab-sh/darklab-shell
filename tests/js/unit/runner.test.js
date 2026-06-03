@@ -2461,10 +2461,11 @@ describe('runner helpers', () => {
 
     loaded.runCommand()
 
-    await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1'))
-    expect(appendLine).toHaveBeenCalledWith('', 'builtin-faq-spacer', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    await vi.waitFor(() => {
+      expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
+      expect(appendLine).toHaveBeenCalledWith('', 'builtin-faq-spacer', 'tab-1')
+      expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    })
     await vi.waitFor(() =>
       expect(appendLines).toHaveBeenCalledWith(
         expect.arrayContaining([

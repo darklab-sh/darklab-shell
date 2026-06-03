@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,546
+- behavior tests: 3,551
 - docs/inventory meta-tests: 34
-- `pytest`: 1995 (1961 behavior + 34 meta)
-- `vitest`: 1326
+- `pytest`: 1996 (1962 behavior + 34 meta)
+- `vitest`: 1330
 - `playwright`: 259
-- total: 3,580
+- total: 3,585
 
 This document is organized in two parts:
 
@@ -1475,6 +1475,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasImportRoutes.test_create_project_targets_quota_rejects_without_partial_import_rows` | Verifies target-creation quota failures return a structured import error without leaving partial Atlas import batches, source links, findings, entities, or project targets. |
 | `TestAtlasImportRoutes.test_apply_updates_existing_scan_records_and_preserves_import_provenance` | Verifies duplicate import rows update existing scan-discovered Atlas rows, preserve import source provenance, and recompute aggregate occurrence counts. |
 | `TestAtlasImportRoutes.test_import_routes_keep_uploaded_filename_and_text_fields_as_safe_json_data` | Verifies Atlas import routes clean path-like upload filenames while preserving imported HTML-like finding text as JSON data. |
+| `TestAtlasImportRoutes.test_reimport_preserves_operator_edited_remediation` | Verifies re-importing scanner remediation fills empty triage details without overwriting operator-edited remediation on the same finding. |
 | `TestAtlasImportRoutes.test_apply_rejects_digest_mismatch_and_stale_or_invalid_previews` | Verifies Atlas import preview/apply rejects unsupported formats, expired drafts, digest mismatches, and configured finding limits. |
 | `TestTeamRoutes.test_team_atlas_import_apply_requires_option_specific_capabilities` | Verifies team-scoped Atlas import apply requires the project-mutation capability when finding import would create linked entities. |
 | `TestTeamRoutes.test_team_create_list_and_detail` | Verifies team creation, list, detail, capability lists, one-time recovery-code response shapes, and recovery-code failure rollback for durable session tokens. |
@@ -2471,7 +2472,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
 | `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations only show optional same-run cleanup when non-curated sibling rows can be removed. |
-| `disables Atlas delete actions when active team scope cannot triage findings` | Verifies that view-only team scope disables Atlas delete and suppression affordances before a confirmation can open. |
+| `disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings` | Verifies that view-only team scope disables Atlas delete and suppression affordances before a confirmation can open while still allowing read-only triage details. |
 | `applies the project filter when opened from a project` | Verifies that project-launched Atlas requests entities filtered to that project. |
 | `opens Findings scoped to a run and clears the run filter chip` | Verifies that run-launched Atlas requests summary, Findings, and entity rows for one source run and exposes a clearable run filter chip. |
 | `applies a source-run filter from the Atlas run selector` | Verifies that the Atlas run selector applies the selected source run to summary and Findings requests. |
@@ -2495,6 +2496,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `enters select mode from the action sheet and uses row taps for bulk selection` | Verifies that the Mobile Atlas overflow action sheet enters select mode, shows the sticky bulk bar, and turns row taps into selection toggles. |
 | `locks select mode and delete actions when team scope cannot triage` | Verifies that Mobile Atlas disables select mode plus destructive detail footer and action-sheet controls for view-only team scope before bulk or single-row deletes can run. |
 | `opens finding detail and keeps review updates in the sticky footer` | Verifies that Mobile Atlas opens finding detail and routes the footer review-state picker through the shared finding update handler. |
+| `keeps finding triage readable for view-only team members` | Verifies that Mobile Atlas keeps the finding Triage button enabled for read-only team members while leaving mutation-only review controls disabled. |
 | `uses danger tone for high and critical finding badges` | Verifies that Mobile Atlas renders high and critical finding severity badges with the danger tone instead of success green. |
 | `honors forceView detail requests once the selected entity is resolved` | Verifies that Mobile Atlas opens directly to entity detail when a caller requests detail view and the selected entity is already resolved. |
 
@@ -2665,6 +2667,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `embeds JetBrains Mono into the PDF when font VFS hooks are available` | Verifies PDF export embeds the committed JetBrains Mono fonts when jsPDF font VFS hooks are available. |
 | `uses the dim green border color for success badges` | Verifies the success badge border uses the dim green export token rather than the brighter text green. |
 | `skips fully empty raw lines without prefixes so PDF output matches browser rendering` | Verifies PDF export skips raw lines that have neither a prefix nor renderable content so blank rows do not drift from browser rendering. |
+
+#### `finding_triage_editor.test.js`
+
+| Test | Description |
+| --- | --- |
+| `loads, saves, and compacts remediation and verification details` | Verifies the shared finding triage editor loads existing details, saves remediation and verification fields, updates the compact finding payload, and closes after save. |
+| `keeps view-only triage read-only and rejects oversized text before saving` | Verifies the shared finding triage editor disables edits for view-only team members and rejects oversized free-text fields before sending a save request. |
+| `syncs the enhanced verification select across reopened findings and view-only mode` | Verifies the shared finding triage editor keeps the app-native verification select label and disabled state in sync when reopening for another finding. |
 
 #### `grep_output_suggestions.test.js`
 

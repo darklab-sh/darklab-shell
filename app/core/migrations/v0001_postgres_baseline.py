@@ -611,6 +611,20 @@ MIGRATION = Migration(
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS finding_triage_details (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
+            finding_id TEXT NOT NULL,
+            remediation TEXT NOT NULL DEFAULT '',
+            verification_steps TEXT NOT NULL DEFAULT '',
+            verification_status TEXT NOT NULL DEFAULT 'not_started',
+            verification_notes TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL,
+            updated TEXT NOT NULL
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS evidence_packages (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -920,6 +934,20 @@ MIGRATION = Migration(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_team_unique
         ON entity_notes (team_id, entity_type, entity_id)
+        WHERE team_id != ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_finding_triage_details_finding_updated
+        ON finding_triage_details (finding_id, updated)
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_finding_triage_details_personal_unique
+        ON finding_triage_details (session_id, finding_id)
+        WHERE team_id IS NULL OR team_id = ''
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_finding_triage_details_team_unique
+        ON finding_triage_details (team_id, finding_id)
         WHERE team_id != ''
         """,
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated ON evidence_packages (project_id, updated DESC)",

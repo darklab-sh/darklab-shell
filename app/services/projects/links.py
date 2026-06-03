@@ -12,7 +12,7 @@ from core.database import (
     validate_project_link_source,
 )
 from core.database_backend import dialect_for_backend
-from services.atlas.lookup import entity_exists_in_scope
+from services.atlas.scope import entity_exists_in_scope
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     MAX_BULK_RUN_ACTION_ITEMS,

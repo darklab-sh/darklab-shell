@@ -10,6 +10,18 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Finding remediation and verification storage foundation** — added owner-scoped storage and service helpers for per-finding remediation text, verification steps, verification status, and verification notes, with SQLite/Postgres schema support and cleanup when findings are deleted.
+  - Added internal finding triage read/update routes, team capability enforcement for writes, compact Atlas/Project list enrichment, and `verification_status` filtering.
+  - Added a shared finding triage editor in Atlas and Projects so operators can save remediation guidance, verification steps, verification status, and verification notes, with compact badges in finding lists and boards.
+  - Kept the finding triage editor's app-native verification selector in sync when reopening the editor for another finding or switching into view-only mode.
+  - Unified verification-status badge colors across Atlas desktop, Atlas mobile, and Projects so `verified` is green, `needs_retest` is amber, and other verification states stay muted.
+  - Kept the Atlas mobile finding Triage button available to read-only team members so they can open remediation and verification details without being able to save changes.
+  - Evidence packages now include report-ready remediation and verification fields for selected findings, keep verification notes behind the private-notes option, and redact those fields in redacted packages before writing JSON or Markdown.
+  - Nessus, OWASP ZAP, and Burp Suite imports now map explicit remediation fields into finding remediation, and AI summary/next-command context includes compact remediation and verification state without exposing long private notes.
+  - Nessus imports now keep `solution` text in finding remediation instead of folding it into the finding description, so re-imported Nessus findings can have shorter descriptions and clearer remediation fields.
+  - Re-importing scanner data now leaves operator-edited remediation intact and only fills imported remediation when the finding does not already have remediation text.
+  - **Tests:** regression coverage spans storage/service cleanup, route validation, compact list enrichment and filtering, shared editor behavior, package export/private-note/redaction behavior, import remediation mapping, AI context inclusion, and the existing Playwright evidence-package browser flow.
+
 - **Atlas import source foundation** — added the persistence layer for importing external triage results into Atlas without creating fake runs.
   - Added SQLite and Postgres schema support for import drafts, applied import batches, entity import links, and finding import occurrences.
   - Atlas aggregate recalculation and core scope/orphan lookup helpers now treat import-source rows as real Atlas sources, so import-only entities and findings can stay visible and keep first/last-seen counts without History rows or transcripts.

@@ -150,7 +150,13 @@ def _should_include_web_wordlists(context: dict, run: dict) -> bool:
         port_text = label.split("/", 1)[0]
         if port_text.isdigit() and int(port_text) in _WEB_SERVICE_PORTS:
             return True
-    if any(_WEB_SERVICE_RE.search(line) for line in _context_lines(context)):
+    if any(
+        _WEB_SERVICE_RE.search(line)
+        for line in _context_lines(
+            context,
+            sections=("exploit_backed_findings", "triage_findings", "findings", "warnings_errors"),
+        )
+    ):
         return True
     entities_value = context.get("entities")
     entities: dict[str, Any] = entities_value if isinstance(entities_value, dict) else {}
@@ -169,7 +175,7 @@ def _open_port_facts(context: dict) -> str:
 
 def _open_port_details(context: dict) -> dict[str, str]:
     details: dict[str, str] = {}
-    for line in _context_lines(context):
+    for line in _context_lines(context, sections=("findings",)):
         match = _OPEN_PORT_LINE_RE.search(line)
         if not match:
             continue
@@ -212,7 +218,9 @@ def _summary_facts(output_summary: dict[str, Any]) -> str:
 def _signal_lines(context: dict) -> list[str]:
     lines: list[str] = []
     seen: set[str] = set()
-    for line in [*_open_port_details(context).values(), *_context_lines(context)]:
+    priority = _context_lines(context, sections=("exploit_backed_findings", "triage_findings"))
+    details = _context_lines(context, sections=("findings", "warnings_errors"))
+    for line in [*priority, *_open_port_details(context).values(), *details]:
         cleaned = _clean_line(line)
         key = cleaned.casefold()
         if not cleaned or key in seen:
@@ -224,9 +232,9 @@ def _signal_lines(context: dict) -> list[str]:
     return lines
 
 
-def _context_lines(context: dict) -> list[str]:
+def _context_lines(context: dict, *, sections: tuple[str, ...]) -> list[str]:
     rows: list[str] = []
-    for section in ("exploit_backed_findings", "findings", "warnings_errors"):
+    for section in sections:
         values = context.get(section)
         if not isinstance(values, list):
             continue
@@ -238,12 +246,33 @@ def _context_lines(context: dict) -> list[str]:
                 if value:
                     rows.append(value)
                     continue
+            if section == "triage_findings":
+                value = _triage_context_line(item)
+                if value:
+                    rows.append(value)
+                    continue
             for key in ("line", "text", "title"):
                 value = _clean_line(item.get(key))
                 if value:
                     rows.append(value)
                     break
     return rows
+
+
+def _triage_context_line(item: dict) -> str:
+    return _clean_line(
+        " ".join(
+            str(part)
+            for part in (
+                item.get("severity") or "info",
+                item.get("title") or "",
+                item.get("verification_status") or "not_started",
+                item.get("remediation") or "",
+                item.get("verification_steps") or "",
+            )
+            if part
+        )
+    )
 
 
 def _exploit_backed_context_line(item: dict) -> str:

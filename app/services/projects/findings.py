@@ -11,7 +11,7 @@ from typing import Any
 
 from core.database import db_connect
 from core.output_signals import strip_ansi_codes
-from services.atlas.lookup import finding_exists_in_scope
+from services.atlas.scope import finding_exists_in_scope
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.atlas.materializer import (
     canonicalize_entity_record,
@@ -20,13 +20,20 @@ from services.atlas.materializer import (
 from services.intel.canonical import entity_signature
 from services.projects.contracts import (
     FINDING_REVIEW_STATES,
+    FINDING_VERIFICATION_STATES,
     MAX_BULK_RUN_ACTION_ITEMS,
     MAX_ENTITY_ID_LEN,
     MAX_FINDING_TITLE_LEN,
     MAX_LABEL_LEN,
     ProjectWorkspaceError,
 )
-from services.projects.metadata import _entity_labels_by_id, _entity_notes_by_id, _metadata_owner_where
+from services.projects.metadata import (
+    _entity_labels_by_id,
+    _entity_notes_by_id,
+    _metadata_owner_where,
+    attach_finding_triage_details,
+    finding_triage_verification_status_filter_sql_and_params,
+)
 from services.projects.scope import shared_owner_where
 from services.projects.targets import _canonical_target_payload, _target_payload_from_candidate
 from services.projects.utils import (
@@ -418,6 +425,12 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         scopes = _metadata_filter_values(filters, "scope", 64, lower=True)
         severities = _metadata_filter_values(filters, "severity", 64, lower=True)
         labels = _metadata_filter_values(filters, "label", MAX_LABEL_LEN)
+        verification_statuses = _metadata_filter_values(filters, "verification_status", 64, lower=True)
+        if verification_statuses:
+            if any(status not in FINDING_VERIFICATION_STATES for status in verification_statuses):
+                raise ProjectWorkspaceError(
+                    "verification_status must be not_started, ready_to_verify, verified, needs_retest, or not_applicable"
+                )
         note_state = _trim_text(filters.get("note_state"), 32).lower()
         if note_state:
             if note_state not in {"noted", "unnoted"}:
@@ -531,6 +544,16 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                 ")"
             )
             params.extend([*metadata_owner_params, *labels])
+        if verification_statuses:
+            verification_status_clause, verification_status_params = (
+                finding_triage_verification_status_filter_sql_and_params(
+                    session_id,
+                    verification_statuses,
+                    team_id=team_id,
+                )
+            )
+            where_clauses.append(verification_status_clause)
+            params.extend(verification_status_params)
         if note_state == "noted":
             where_clauses.append(
                 "EXISTS ("  # nosec
@@ -697,22 +720,23 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         finding_ids = [str(row["id"] or "") for row in rows if row["id"]]
         finding_labels = _entity_labels_by_id(conn, session_id, "finding", finding_ids, team_id=team_id)
         finding_notes = _entity_notes_by_id(conn, session_id, "finding", finding_ids, team_id=team_id)
-
-    findings = [
-        item for item in (
-            _row_to_project_finding(
-                row,
-                [row["entity_id"]] if row["entity_id"] else [],
-                project_target_ids,
+        findings = [
+            item for item in (
+                _row_to_project_finding(
+                    row,
+                    [row["entity_id"]] if row["entity_id"] else [],
+                    project_target_ids,
+                )
+                for row in rows
             )
-            for row in rows
-        )
-        if item
-    ]
-    for item in findings:
-        finding_id = str(item["id"] or "")
-        item["labels"] = finding_labels.get(finding_id, [])
-        item["note"] = finding_notes.get(finding_id)
+            if item
+        ]
+        for item in findings:
+            finding_id = str(item["id"] or "")
+            item["labels"] = finding_labels.get(finding_id, [])
+            item["note"] = finding_notes.get(finding_id)
+        attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
+
     if paginated:
         return _project_finding_page_payload(
             findings,

@@ -471,9 +471,28 @@ class TestAIAssistContextAndStorage:
 
     def test_summary_run_context_uses_compact_sections(self, monkeypatch, tmp_path):
         from services.ai import context as ai_context
+        from services.ai import summarize
 
         with self._ai_db(monkeypatch, tmp_path) as conn:
             self._insert_run_context_rows(conn)
+            conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, finding_id, remediation, verification_steps, verification_status, "
+                "verification_notes, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "triage_ai",
+                    "tok_ai",
+                    "fnd_ai",
+                    "Patch darklab.sh HTTPS hardening.",
+                    "Re-run nmap -sV darklab.sh.",
+                    "ready_to_verify",
+                    "Internal AI context note",
+                    "2026-05-23T10:00:03+00:00",
+                    "2026-05-23T10:00:03+00:00",
+                ),
+            )
+            conn.commit()
 
         cfg = {
             **app_config.CFG,
@@ -488,6 +507,7 @@ class TestAIAssistContextAndStorage:
         assert set(context.context) == {
             "run",
             "findings",
+            "triage_findings",
             "exploit_backed_findings",
             "warnings_errors",
             "transcript_tail",
@@ -496,6 +516,20 @@ class TestAIAssistContextAndStorage:
         assert "entities" not in context.context
         assert "output_summary" not in context.context
         assert "full_transcript" not in context.context
+        assert context.context["triage_findings"] == [{
+            "severity": "info",
+            "title": "Open HTTPS port",
+            "line_number": 3,
+            "verification_status": "ready_to_verify",
+            "remediation": "Patch darklab.sh HTTPS hardening.",
+            "verification_steps": "Re-run nmap -sV darklab.sh.",
+        }]
+        assert "Internal AI context note" not in json.dumps(context.context)
+        message_content = summarize.messages(context.context)[-1]["content"]
+        assert "triage_findings:" in message_content
+        assert "verification=ready_to_verify" in message_content
+        assert "Patch darklab.sh HTTPS hardening." in message_content
+        assert "Internal AI context note" not in message_content
         assert context.context["exploit_backed_findings"] == []
         assert context.context["transcript_tail"][0] == {"line_index": 0, "text": "Starting scan for darklab.sh"}
         debug.assert_called_once()
@@ -515,7 +549,7 @@ class TestAIAssistContextAndStorage:
             "pre_redaction_bytes": context.pre_redaction_bytes,
             "useful": True,
             "omitted_sections": [],
-            "section_count": 5,
+            "section_count": 6,
             "context_hash": context.context_hash,
         }
 
@@ -646,6 +680,7 @@ class TestAIAssistContextAndStorage:
         assert set(context.context) == {
             "run",
             "findings",
+            "triage_findings",
             "exploit_backed_findings",
             "warnings_errors",
             "entities",
@@ -655,6 +690,7 @@ class TestAIAssistContextAndStorage:
         }
         assert "id" not in context.context["run"]
         assert "full_transcript" not in context.context
+        assert context.context["triage_findings"] == []
         assert context.context["entities"]["domain"] == ["darklab.sh"]
 
         noisy_context = {
@@ -663,11 +699,19 @@ class TestAIAssistContextAndStorage:
                 {"line": f"{port}/tcp open svc{port}", "line_number": port}
                 for port in range(1, 13)
             ],
+            "triage_findings": [{
+                "severity": "info",
+                "title": "Open service port",
+                "verification_status": "ready_to_verify",
+                "remediation": "Patch service config.",
+                "verification_steps": "Re-run nmap -sV noisy.example.",
+            }],
             "entities": {"domain": ["noisy.example", *[f"host{index}.example" for index in range(8)]]},
             "output_summary": {"signal": {"findings": 12}},
         }
         message_content = next_commands.messages(noisy_context)[-1]["content"]
 
+        assert "Patch service config." in message_content
         assert "10/tcp open svc10; 2 more" in message_content
         assert "11/tcp open svc11" not in message_content
         assert "domains=9 (noisy.example, host0.example, host1.example, host2.example)" in message_content
@@ -3130,6 +3174,7 @@ class TestPostgresMigrations:
         "atlas_finding_import_occurrences",
         "entity_labels",
         "entity_notes",
+        "finding_triage_details",
         "evidence_packages",
     )
 
@@ -3207,6 +3252,7 @@ class TestPostgresMigrations:
             "0025",
             "0026",
             "0027",
+            "0028",
         ]
         for table_name in (
             "runs",
@@ -3247,6 +3293,7 @@ class TestPostgresMigrations:
             "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
+            "finding_triage_details",
             "evidence_packages",
         ):
             assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
@@ -14488,6 +14535,9 @@ class TestDatabaseInit:
             note_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('entity_notes')").fetchall()
             }
+            finding_triage_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('finding_triage_details')").fetchall()
+            }
             conn.close()
 
         assert {
@@ -14506,6 +14556,7 @@ class TestDatabaseInit:
             "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
+            "finding_triage_details",
             "evidence_packages",
         }.issubset(tables)
         assert "project_targets" not in tables
@@ -14529,6 +14580,163 @@ class TestDatabaseInit:
         assert {"finding_id", "batch_id", "row_number", "source_detail_json"}.issubset(finding_import_columns)
         assert "team_id" in label_columns
         assert "team_id" in note_columns
+        assert {
+            "team_id",
+            "finding_id",
+            "remediation",
+            "verification_steps",
+            "verification_status",
+            "verification_notes",
+        }.issubset(finding_triage_columns)
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
+                "VALUES ('finding-triage-1', 'session-triage', 'host:example', 'sig-triage', "
+                "'Finding', '2026-01-01')"
+            )
+            conn.commit()
+            conn.close()
+
+            from services.atlas.cleanup import delete_atlas_findings
+            from services.atlas.recalculation import recalculate_atlas_findings
+            from services.projects import metadata as project_metadata
+
+            with mock.patch("core.database.DB_PATH", db_path), \
+                    mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 5}, clear=False):
+                saved = project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {
+                        "remediation": "Patch Samba.",
+                        "verification_steps": "Re-run the SMB checks.",
+                        "verification_status": "ready_to_verify",
+                        "verification_notes": "Waiting on maintenance window.",
+                    },
+                )
+                assert saved is not None
+                assert saved["verification_status"] == "ready_to_verify"
+                assert saved["remediation"] == "Patch Samba."
+                loaded = project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                )
+                assert loaded is not None
+                assert loaded["verification_steps"] == "Re-run the SMB checks."
+                with database.db_connect() as quota_conn:
+                    quota_conn.execute(
+                        "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
+                        "VALUES ('finding-triage-2', 'session-triage', 'host:other', 'sig-triage-2', "
+                        "'Finding 2', '2026-01-01')"
+                    )
+                    quota_conn.commit()
+                with mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 1}, clear=False):
+                    with pytest.raises(ProjectWorkspaceQuotaExceeded, match="finding triage quota exceeded"):
+                        project_metadata.upsert_finding_triage_details(
+                            "session-triage",
+                            "finding-triage-2",
+                            {"verification_status": "ready_to_verify"},
+                        )
+                updated = project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {
+                        "remediation": "Patch Samba and restart smbd.",
+                        "verification_steps": "Re-run nmap smb-vuln scripts.",
+                        "verification_status": "verified",
+                        "verification_notes": "",
+                    },
+                )
+                assert updated is not None
+                assert updated["id"] == saved["id"]
+                assert updated["verification_status"] == "verified"
+
+                class _MissingFirstTriageSelect:
+                    def __init__(self):
+                        self._used = False
+
+                    def fetchone(self):
+                        self._used = True
+                        return None
+
+                class _RaceConnection:
+                    def __init__(self, conn):
+                        self._conn = conn
+                        self._hid_initial_lookup = False
+
+                    def execute(self, sql, params=()):
+                        if (
+                            not self._hid_initial_lookup
+                            and str(sql).startswith("SELECT id, session_id, team_id, finding_id")
+                            and "FROM finding_triage_details WHERE" in str(sql)
+                            and "AND finding_id = ?" in str(sql)
+                        ):
+                            self._hid_initial_lookup = True
+                            return _MissingFirstTriageSelect()
+                        return self._conn.execute(sql, params)
+
+                with database.db_connect() as race_conn:
+                    raced = project_metadata.upsert_finding_triage_details_on_conn(
+                        _RaceConnection(race_conn),
+                        "session-triage",
+                        "finding-triage-1",
+                        {
+                            "remediation": "Patch Samba after concurrent save.",
+                            "verification_steps": "Re-run the exact SMB proof.",
+                            "verification_status": "needs_retest",
+                            "verification_notes": "Race handled.",
+                        },
+                    )
+                    race_conn.commit()
+                assert raced is not None
+                assert raced["id"] == saved["id"]
+                assert raced["verification_status"] == "needs_retest"
+                assert raced["remediation"] == "Patch Samba after concurrent save."
+
+                with database.db_connect() as triage_conn:
+                    batch = project_metadata._finding_triage_by_id(
+                        triage_conn,
+                        "session-triage",
+                        ["finding-triage-1", "missing"],
+                    )
+                    assert set(batch) == {"finding-triage-1"}
+                    recalculate_atlas_findings(triage_conn, ["finding-triage-1"])
+                    triage_conn.commit()
+                recalculated = project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                )
+                assert recalculated is not None
+                assert recalculated["verification_status"] == "needs_retest"
+                with pytest.raises(ProjectWorkspaceError, match="invalid verification_status"):
+                    project_metadata.upsert_finding_triage_details(
+                        "session-triage",
+                        "finding-triage-1",
+                        {"verification_status": "done"},
+                    )
+                assert project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {"verification_status": "not_started"},
+                ) is None
+                assert project_metadata.get_finding_triage_details("session-triage", "finding-triage-1") is None
+                project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {"verification_status": "needs_retest"},
+                )
+                with database.db_connect() as cleanup_conn:
+                    assert delete_atlas_findings(cleanup_conn, "session-triage", ["finding-triage-1"]) == 1
+                    cleanup_conn.commit()
+                with database.db_connect() as cleanup_conn:
+                    row = cleanup_conn.execute(
+                        "SELECT COUNT(*) AS count FROM finding_triage_details WHERE finding_id = ?",
+                        ["finding-triage-1"],
+                    ).fetchone()
+                assert int(row["count"] or 0) == 0
 
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -15045,6 +15253,7 @@ class TestDatabaseInit:
               <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
                           pluginName="Example vulnerable service" severity="3">
                 <description>Service is vulnerable.</description>
+                <solution>Upgrade the affected HTTPS service.</solution>
                 <plugin_output>Banner evidence</plugin_output>
                 <cve>CVE-2026-12345</cve>
                 <see_also>https://example.com/advisory</see_also>
@@ -15071,6 +15280,7 @@ class TestDatabaseInit:
         assert result.findings[0].severity == "high"
         assert result.findings[0].affected_entity is not None
         assert result.findings[0].affected_entity.canonical_value == "graph.darklab.sh"
+        assert result.findings[0].remediation == "Upgrade the affected HTTPS service."
         assert result.findings[0].source_detail["plugin_id"] == "1234"
 
     def test_atlas_import_parser_normalizes_zap_json_and_xml_reports(self):
@@ -15081,6 +15291,7 @@ class TestDatabaseInit:
                     "alert": "Content Security Policy Header Not Set",
                     "riskdesc": "Medium (High)",
                     "desc": "CSP header is missing",
+                    "solution": "Configure a Content-Security-Policy header.",
                     "reference": "https://www.zaproxy.org/docs/alerts/10038/",
                     "instances": [{"uri": "https://darklab.sh/login", "param": "q"}],
                 }],
@@ -15105,6 +15316,7 @@ class TestDatabaseInit:
                 <alert>X-Frame-Options Header Not Set</alert>
                 <riskdesc>Low (Medium)</riskdesc>
                 <desc>Header is missing</desc>
+                <solution>Set X-Frame-Options or frame-ancestors.</solution>
                 <instances>
                   <instance>
                     <uri>https://darklab.sh/admin</uri>
@@ -15145,10 +15357,12 @@ class TestDatabaseInit:
         assert json_riskcode_result.findings[0].severity == "high"
         assert json_result.findings[0].affected_entity is not None
         assert json_result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
+        assert json_result.findings[0].remediation == "Configure a Content-Security-Policy header."
         assert xml_result.findings[0].severity == "low"
         assert xml_riskcode_result.findings[0].severity == "high"
         assert xml_result.findings[0].affected_entity is not None
         assert xml_result.findings[0].affected_entity.canonical_value == "https://darklab.sh/admin"
+        assert xml_result.findings[0].remediation == "Set X-Frame-Options or frame-ancestors."
         assert xml_result.findings[0].evidence == "Missing header"
         assert xml_result.findings[0].source_detail["param"] == "X-Frame-Options"
 
@@ -15182,6 +15396,7 @@ SQL syntax error near q</response>
         assert result.findings[0].external_id == "42"
         assert result.findings[0].affected_entity is not None
         assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/search?q=test"
+        assert result.findings[0].remediation == "Use parameterized queries."
         assert "GET /search?q=test" in result.findings[0].evidence
         assert "SQL syntax error near q" in result.findings[0].evidence
 
@@ -16445,6 +16660,9 @@ SQL syntax error near q</response>
             }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
+            finding_triage_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('finding_triage_details')").fetchall()
+            }
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
             conn.close()
 
@@ -16486,6 +16704,9 @@ SQL syntax error near q</response>
         assert "idx_entity_notes_entity_updated" in note_indexes
         assert "idx_entity_notes_personal_unique" in note_indexes
         assert "idx_entity_notes_team_unique" in note_indexes
+        assert "idx_finding_triage_details_finding_updated" in finding_triage_indexes
+        assert "idx_finding_triage_details_personal_unique" in finding_triage_indexes
+        assert "idx_finding_triage_details_team_unique" in finding_triage_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
 

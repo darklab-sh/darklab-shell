@@ -10,8 +10,32 @@ from typing import Any
 from core.database import DB_BACKEND
 from core.database_backend import dialect_for_backend
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
+from services.atlas.scope import (
+    entity_exists_in_scope as entity_exists_in_scope,
+    entity_import_exists_sql as _entity_import_exists_sql,
+    entity_run_exists_sql as _entity_run_exists_sql,
+    entity_scope_params as _entity_scope_params,
+    entity_scope_sql as _entity_scope_sql,
+    finding_exists_in_scope as finding_exists_in_scope,
+    finding_import_exists_sql as _finding_import_exists_sql,
+    finding_run_exists_sql as _finding_run_exists_sql,
+    finding_source_scope_params as _finding_source_scope_params,
+    finding_source_scope_sql as _finding_source_scope_sql,
+    metadata_owner_id,
+    metadata_owner_params as _metadata_owner_params,
+    metadata_owner_sql as _metadata_owner_sql,
+    normalize_team_id as _normalize_team_id,
+    project_scope_params as _project_scope_params,
+    project_scope_sql as _project_scope_sql,
+    run_scope_params as _run_scope_params,
+    run_scope_sql as _run_scope_sql,
+)
 from services.intel.registry import provider_label
-from services.projects.contracts import FINDING_REVIEW_STATES
+from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES, ProjectWorkspaceError
+from services.projects.metadata import (
+    attach_finding_triage_details,
+    finding_triage_verification_status_filter_sql_and_params,
+)
 from services.storage.body_store import load_text_body, stored_body_pointer
 
 
@@ -49,184 +73,6 @@ ATLAS_RUN_FILTER_LIMIT = 50
 
 def _sql_join(parts: tuple[str, ...]) -> str:
     return "".join(parts)
-
-
-def _normalize_team_id(team_id: str | None) -> str:
-    return str(team_id or "").strip()
-
-
-def metadata_owner_id(session_id: str, team_id: str = "") -> str:
-    return _normalize_team_id(team_id) or str(session_id or "").strip()
-
-
-def _metadata_owner_sql(alias: str, team_id: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    if _normalize_team_id(team_id):
-        return (
-            f"({prefix}team_id = ? OR "
-            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))"
-        )
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?"
-
-
-def _metadata_owner_params(session_id: str, team_id: str = "") -> list[str]:
-    normalized_team_id = _normalize_team_id(team_id)
-    if normalized_team_id:
-        return [normalized_team_id, metadata_owner_id(session_id, normalized_team_id)]
-    return [str(session_id or "").strip()]
-
-
-def _run_scope_sql(alias: str, team_id: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    if _normalize_team_id(team_id):
-        return f"{prefix}team_id = ?"
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')"
-
-
-def _run_scope_params(session_id: str, team_id: str = "") -> list[str]:
-    normalized_team_id = _normalize_team_id(team_id)
-    return [normalized_team_id] if normalized_team_id else [session_id]
-
-
-def _project_scope_sql(alias: str, team_id: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    if _normalize_team_id(team_id):
-        return f"{prefix}team_id = ?"
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')"
-
-
-def _project_scope_params(session_id: str, team_id: str = "") -> list[str]:
-    return _run_scope_params(session_id, team_id)
-
-
-def _entity_scope_sql(alias: str, team_id: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    normalized_team_id = _normalize_team_id(team_id)
-    if normalized_team_id:
-        run_scope_sql = _run_scope_sql("scope_run", normalized_team_id)
-        import_scope_sql = _project_scope_sql("scope_import_batch", normalized_team_id)
-        return _sql_join((
-            "(",
-            f"{prefix}team_id = ? OR EXISTS (",
-            "SELECT 1 FROM entity_run_links scope_erl ",
-            "JOIN runs scope_run ON scope_run.id = scope_erl.run_id ",
-            f"WHERE scope_erl.entity_id = {prefix}id AND ",
-            run_scope_sql,
-            ") OR EXISTS (",
-            "SELECT 1 FROM atlas_entity_import_links scope_eil ",
-            "JOIN atlas_import_batches scope_import_batch ON scope_import_batch.id = scope_eil.batch_id ",
-            f"WHERE scope_eil.entity_id = {prefix}id AND ",
-            import_scope_sql,
-            "))",
-        ))
-    return f"{prefix}session_id = ?"
-
-
-def _entity_scope_params(session_id: str, team_id: str = "") -> list[str]:
-    normalized_team_id = _normalize_team_id(team_id)
-    return [normalized_team_id, normalized_team_id, normalized_team_id] if normalized_team_id else [session_id]
-
-
-def entity_exists_in_scope(conn, session_id: str, entity_id: str, *, team_id: str = "") -> bool:
-    entity_scope_sql = _entity_scope_sql("e", team_id)
-    row = conn.execute(
-        "SELECT 1 FROM entities e WHERE " + entity_scope_sql + " AND e.id = ?",  # nosec
-        [*_entity_scope_params(session_id, team_id), entity_id],
-    ).fetchone()
-    return row is not None
-
-
-def _entity_run_exists_sql(entity_alias: str, run_alias: str, team_id: str = "") -> str:
-    entity_prefix = f"{entity_alias}." if entity_alias else ""
-    run_scope_sql = _run_scope_sql(run_alias, team_id)
-    return _sql_join((
-        "EXISTS (",
-        "SELECT 1 FROM entity_run_links source_erl ",
-        f"JOIN runs {run_alias} ON {run_alias}.id = source_erl.run_id ",
-        f"WHERE source_erl.entity_id = {entity_prefix}id AND ",
-        run_scope_sql,
-        ")",
-    ))
-
-
-def _entity_import_exists_sql(entity_alias: str, batch_alias: str, team_id: str = "") -> str:
-    entity_prefix = f"{entity_alias}." if entity_alias else ""
-    import_scope_sql = _project_scope_sql(batch_alias, team_id)
-    return _sql_join((
-        "EXISTS (",
-        "SELECT 1 FROM atlas_entity_import_links source_eil ",
-        f"JOIN atlas_import_batches {batch_alias} ON {batch_alias}.id = source_eil.batch_id ",
-        f"WHERE source_eil.entity_id = {entity_prefix}id AND ",
-        import_scope_sql,
-        ")",
-    ))
-
-
-def _finding_run_exists_sql(finding_alias: str, run_alias: str, team_id: str = "") -> str:
-    finding_prefix = f"{finding_alias}." if finding_alias else ""
-    run_scope_sql = _run_scope_sql(run_alias, team_id)
-    return _sql_join((
-        "EXISTS (",
-        "SELECT 1 FROM findings_occurrences source_fo ",
-        f"JOIN runs {run_alias} ON {run_alias}.id = source_fo.run_id ",
-        f"WHERE source_fo.finding_id = {finding_prefix}id AND ",
-        run_scope_sql,
-        ")",
-    ))
-
-
-def _finding_import_exists_sql(finding_alias: str, batch_alias: str, team_id: str = "") -> str:
-    finding_prefix = f"{finding_alias}." if finding_alias else ""
-    import_scope_sql = _project_scope_sql(batch_alias, team_id)
-    return _sql_join((
-        "EXISTS (",
-        "SELECT 1 FROM atlas_finding_import_occurrences source_fio ",
-        f"JOIN atlas_import_batches {batch_alias} ON {batch_alias}.id = source_fio.batch_id ",
-        f"WHERE source_fio.finding_id = {finding_prefix}id AND ",
-        import_scope_sql,
-        ")",
-    ))
-
-
-def _finding_source_scope_sql(alias: str, team_id: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    if not _normalize_team_id(team_id):
-        return f"{prefix}session_id = ?"
-    run_scope_sql = _run_scope_sql("source_run", team_id)
-    return _sql_join((
-        "(",
-        f"{prefix}team_id = ? OR ",
-        _finding_run_exists_sql(alias, "source_occurrence_run", team_id),
-        " OR EXISTS (SELECT 1 FROM runs source_run WHERE source_run.id = ",
-        f"{prefix}run_id AND ",
-        run_scope_sql,
-        ") OR EXISTS (SELECT 1 FROM runs source_run WHERE source_run.id = ",
-        f"{prefix}first_run_id AND ",
-        run_scope_sql,
-        ") OR EXISTS (SELECT 1 FROM runs source_run WHERE source_run.id = ",
-        f"{prefix}last_run_id AND ",
-        run_scope_sql,
-        ") OR ",
-        _finding_import_exists_sql(alias, "source_import_batch", team_id),
-        ")",
-    ))
-
-
-def _finding_source_scope_params(session_id: str, team_id: str = "") -> list[str]:
-    if not _normalize_team_id(team_id):
-        return [session_id]
-    run_params = _run_scope_params(session_id, team_id)
-    import_params = _project_scope_params(session_id, team_id)
-    return [team_id, *run_params, *run_params, *run_params, *run_params, *import_params]
-
-
-def finding_exists_in_scope(conn, session_id: str, finding_id: str, *, team_id: str = "") -> bool:
-    finding_scope_sql = _finding_source_scope_sql("f", team_id)
-    row = conn.execute(
-        "SELECT 1 FROM findings f WHERE " + finding_scope_sql + " AND f.id = ?",  # nosec
-        [*_finding_source_scope_params(session_id, team_id), finding_id],
-    ).fetchone()
-    return row is not None
 
 
 def _finding_run_filter_sql(team_id: str = "") -> str:
@@ -1341,6 +1187,21 @@ def _normalize_finding_statuses(values: list[str] | None) -> list[str]:
     return statuses
 
 
+def _normalize_verification_statuses(values: list[str] | None) -> list[str]:
+    statuses = []
+    for value in values or []:
+        status = str(value or "").strip().lower()
+        if not status:
+            continue
+        if status not in FINDING_VERIFICATION_STATES:
+            raise ProjectWorkspaceError(
+                "verification_status must be not_started, ready_to_verify, verified, needs_retest, or not_applicable"
+            )
+        if status not in statuses:
+            statuses.append(status)
+    return statuses
+
+
 def list_findings(
     conn,
     session_id: str,
@@ -1350,6 +1211,7 @@ def list_findings(
     project_id: str = "",
     run_id: str = "",
     review_states: list[str] | None = None,
+    verification_statuses: list[str] | None = None,
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
     limit: int = 50,
@@ -1371,7 +1233,14 @@ def list_findings(
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     statuses = _normalize_finding_statuses(review_states)
+    verified_statuses = _normalize_verification_statuses(verification_statuses)
     status_params = [*statuses, "", "", "", "", ""][:5]
+    verification_status_sql, verification_status_params = finding_triage_verification_status_filter_sql_and_params(
+        session_id,
+        verified_statuses,
+        team_id=team_id,
+    )
+    verification_status_clause = _sql_join(("AND ", verification_status_sql, " ")) if verification_status_sql else ""
     finding_scope_sql = _finding_source_scope_sql("f", team_id)
     finding_scope_params = _finding_source_scope_params(session_id, team_id)
     project_scope_sql = _project_scope_sql("filter_project", team_id)
@@ -1393,6 +1262,7 @@ def list_findings(
         *run_filter_params,
         len(statuses),
         *status_params,
+        *verification_status_params,
         *_suppression_params(normalized_suppression_filter),
         *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
     ]
@@ -1414,6 +1284,7 @@ def list_findings(
         ")) ",
         run_filter_sql,
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
+        verification_status_clause,
         _suppression_clause("f"),
         _orphan_finding_clause("f", team_id),
     ))
@@ -1450,6 +1321,7 @@ def list_findings(
         ")) ",
         run_filter_sql,
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
+        verification_status_clause,
         _suppression_clause("f"),
         _orphan_finding_clause("f", team_id),
         "ORDER BY CASE f.status ",
@@ -1487,6 +1359,7 @@ def list_findings(
     )
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
+    attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)

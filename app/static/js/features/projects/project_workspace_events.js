@@ -1004,6 +1004,30 @@
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectEntityEditor(projectId, 'finding', finding);
           return;
+        } else if (action === 'edit-finding-triage') {
+          const findingId = String(btn.dataset.findingId || '');
+          const finding = ctx.projectFindingItems(projectId).find(item => String(item.id || '') === findingId);
+          if (!finding) throw new Error('Finding is missing its details.');
+          ctx.setProjectWorkspaceMessage('');
+          if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+            throw new Error('Finding triage editor is not available.');
+          }
+          await global.DarklabFindingTriageEditor.open(finding, {
+            canEdit: activeTeamScopeCan('triage_findings'),
+            onSaved: async (triage) => {
+              const compact = global.DarklabFindingTriageEditor.compactTriage(triage);
+              ctx.updateCachedProjectFinding?.(projectId, findingId, {
+                triage: compact,
+                verification_status: compact.verification_status,
+              });
+              ctx.renderProjectExplorer?.();
+              if (mobileView() === 'detail' && workspaceTab() === 'findings' && selectedProjectId() === projectId) {
+                ctx.renderProjectMobileDetail?.();
+              }
+              ctx.setProjectWorkspaceMessage('Finding triage saved.');
+            },
+          });
+          return;
         } else if (action === 'edit-run-metadata') {
           const runId = String(btn.dataset.runId || '');
           const run = ctx.projectRunItems(ctx.projectSummary?.(projectId)).find(item => String(item.id || '') === runId);

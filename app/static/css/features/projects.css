@@ -3147,6 +3147,41 @@ button.project-explorer-item:focus-visible,
   max-width: 100%;
 }
 
+.finding-triage-modal {
+  width: min(760px, calc(100vw - 36px));
+  max-height: min(820px, calc(100vh - 36px));
+  overflow: hidden;
+}
+
+.finding-triage-form {
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.finding-triage-section {
+  display: grid;
+  gap: 10px;
+}
+
+.finding-triage-section + .finding-triage-section {
+  margin-top: 16px;
+}
+
+.finding-triage-form textarea.form-control {
+  width: 100%;
+  min-height: 94px;
+  resize: vertical;
+}
+
+.finding-triage-message {
+  margin: 0 0 10px;
+}
+
+.finding-triage-message.is-error {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--border));
+  color: var(--red);
+}
+
 
 
 .project-finding-review.review-reviewed {

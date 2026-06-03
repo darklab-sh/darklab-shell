@@ -2278,6 +2278,7 @@
       setProjectRunPageOffset: _setProjectRunPageOffset,
       setProjectPaginationOffset: _setProjectPaginationOffset,
       setCachedFindingReviewState: _setCachedFindingReviewState,
+      updateCachedProjectFinding: _updateCachedProjectFinding,
       setFindingSelectMode: projectWorkspaceState.setFindingSelectMode,
       setProjectMobileCreateOpen: _setProjectMobileCreateOpen,
       setProjectMobileView: _setProjectMobileView,
@@ -3184,6 +3185,10 @@
 
   function _setCachedFindingReviewState(projectId, findingId, reviewState) {
     _projectFindingsDataController().setCachedReviewState(projectId, findingId, reviewState);
+  }
+
+  function _updateCachedProjectFinding(projectId, findingId, updates) {
+    _projectFindingsDataController().updateCachedFinding(projectId, findingId, updates);
   }
 
   _projectWorkspaceBootstrapController().bindAll();

@@ -138,6 +138,27 @@ function setupAtlasDom() {
             <button id="atlas-import-apply" type="button">apply</button>
           </form>
         </div>
+        <div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
+          <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal">
+            <button type="button" id="finding-triage-close"></button>
+            <div id="finding-triage-subtitle"></div>
+            <div id="finding-triage-message" class="u-hidden"></div>
+            <form id="finding-triage-form">
+              <textarea id="finding-triage-remediation"></textarea>
+              <textarea id="finding-triage-verification-steps"></textarea>
+              <select id="finding-triage-status" class="form-select form-control-compact">
+                <option value="not_started">Not started</option>
+                <option value="ready_to_verify">Ready to verify</option>
+                <option value="verified">Verified</option>
+                <option value="needs_retest">Needs retest</option>
+                <option value="not_applicable">Not applicable</option>
+              </select>
+              <textarea id="finding-triage-verification-notes"></textarea>
+              <button type="button" id="finding-triage-cancel"></button>
+              <button type="submit" id="finding-triage-save"></button>
+            </form>
+          </div>
+        </div>
       </section>
     </div>
   `
@@ -199,6 +220,20 @@ function loadAtlas({
     }
     if (target === '/findings/fnd_1/review' && options.method === 'PUT') {
       return Promise.resolve(jsonResponse({ ok: true, finding: { ...FINDING, review_state: 'reviewed', status: 'reviewed' } }))
+    }
+    if (target === '/findings/fnd_1/triage' && !options.method) {
+      return Promise.resolve(jsonResponse({
+        triage: {
+          remediation: 'Retest the exposed service.',
+          verification_steps: '',
+          verification_status: 'not_started',
+          verification_notes: '',
+        },
+      }))
+    }
+    if (target === '/findings/fnd_1/triage' && options.method === 'PUT') {
+      const payload = JSON.parse(options.body)
+      return Promise.resolve(jsonResponse({ ok: true, triage: payload }))
     }
     if (target === '/atlas/findings/review' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true, counts: { updated: 1, not_found: 0 }, results: [] }))
@@ -358,6 +393,7 @@ function loadAtlas({
     ...fromDomScripts(
       [
         'app/static/js/ui/ui_entity_metadata.js',
+        'app/static/js/features/findings/finding_triage_editor.js',
         'app/static/js/features/atlas/atlas_tabs.js',
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
@@ -1061,9 +1097,9 @@ describe('Atlas overlay', () => {
     expect(curatedContent.textContent).toContain('1 curated entity and 1 curated finding will be kept unless this is checked.')
   })
 
-  it('disables Atlas delete actions when active team scope cannot triage findings', async () => {
+  it('disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('delete'))
-    const { openAtlas, showToast } = loadAtlas({
+    const { openAtlas, apiFetch, showToast } = loadAtlas({
       showConfirmImpl: showConfirm,
       activeTeamScopeCanImpl: capability => capability !== 'triage_findings',
     })
@@ -1091,6 +1127,30 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-bulk-delete')?.disabled).toBe(true)
     document.getElementById('atlas-bulk-delete')?.click()
     expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), expect.anything())
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    await flushPromises()
+    const triageButton = [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
+      .find(button => button.textContent === 'Triage')
+    expect(triageButton?.disabled).toBe(false)
+    triageButton?.click()
+    await flushPromises()
+
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('finding-triage-remediation').value).toBe('Retest the exposed service.')
+    expect(document.getElementById('finding-triage-remediation').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-status').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-save').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-message').textContent).toContain('read these details')
+
+    const putCallsBefore = apiFetch.mock.calls
+      .filter(([url, options]) => url === '/findings/fnd_1/triage' && options?.method === 'PUT').length
+    document.getElementById('finding-triage-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    const putCallsAfter = apiFetch.mock.calls
+      .filter(([url, options]) => url === '/findings/fnd_1/triage' && options?.method === 'PUT').length
+    expect(putCallsAfter).toBe(putCallsBefore)
   })
 
   it('applies the project filter when opened from a project', async () => {

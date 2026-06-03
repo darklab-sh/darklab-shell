@@ -7,6 +7,7 @@ import os
 import time
 
 from flask import Blueprint, jsonify, request, send_file
+from werkzeug.exceptions import BadRequest
 
 from config import CFG
 from extensions import limiter
@@ -54,8 +55,12 @@ from services.projects.metadata import (
     delete_entity_label,
     delete_entity_note,
     entity_metadata_target_exists,
+    default_finding_triage_details,
+    finding_triage_target_exists,
+    get_finding_triage_details,
     get_entity_note,
     list_entity_labels,
+    upsert_finding_triage_details,
     upsert_entity_note,
 )
 from services.projects.package_archive import (
@@ -1344,6 +1349,7 @@ def projects_findings_list(project_id):
         "command_root": request.args.getlist("command_root"),
         "label": request.args.getlist("label"),
         "note_state": request.args.get("note_state"),
+        "verification_status": request.args.getlist("verification_status"),
         "orphan_filter": request.args.get("orphan_filter"),
         "collapsed_group": request.args.getlist("collapsed_group"),
         "include_collapsed_group_counts": request.args.get("include_collapsed_group_counts"),
@@ -1445,6 +1451,102 @@ def findings_review_update(finding_id):
         "review_state": finding["review_state"],
     })
     return jsonify({"ok": True, "finding": finding})
+
+
+@projects_bp.route("/findings/<finding_id>/triage")
+def finding_triage_detail(finding_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    try:
+        if not finding_triage_target_exists(session_id, finding_id, team_id=team_id):
+            return _project_not_found("finding not found")
+        triage = get_finding_triage_details(session_id, finding_id, team_id=team_id)
+    except ProjectWorkspaceError as exc:
+        return _project_error_response(exc)
+    return jsonify({
+        "triage": triage or default_finding_triage_details(session_id, finding_id, team_id=team_id),
+    })
+
+
+@projects_bp.route("/findings/<finding_id>/triage", methods=["PUT"])
+@limiter.limit(_project_write_limit)
+def finding_triage_update(finding_id):
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
+    try:
+        if not finding_triage_target_exists(session_id, finding_id, team_id=team_id):
+            return _project_not_found("finding not found")
+        if request.is_json:
+            body_bytes = len(request.get_data(cache=True) or b"")
+            try:
+                data = request.get_json(silent=False)
+            except BadRequest:
+                log.warning("FINDING_TRIAGE_PAYLOAD_DECODE_FAILED", extra={
+                    "ip": get_client_ip(),
+                    "session": get_log_session_id(session_id),
+                    "team_id": team_id,
+                    "finding_id": finding_id,
+                    "content_type": request.content_type or "",
+                    "body_bytes": body_bytes,
+                })
+                return _project_json_error("finding triage payload must be JSON", 400)
+        else:
+            data = None
+        if not isinstance(data, dict):
+            raise ProjectWorkspaceError("finding triage payload must be a JSON object")
+        previous = get_finding_triage_details(session_id, finding_id, team_id=team_id)
+        next_verification_status = str(data.get("verification_status") or "not_started").strip() or "not_started"
+        will_clear = (
+            not str(data.get("remediation") or "").strip()
+            and not str(data.get("verification_steps") or "").strip()
+            and next_verification_status == "not_started"
+            and not str(data.get("verification_notes") or "").strip()
+        )
+        log.debug("FINDING_TRIAGE_UPDATE_REQUESTED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "finding_id": finding_id,
+            "previous_verification_status": (
+                previous.get("verification_status") if previous else "not_started"
+            ),
+            "next_verification_status": next_verification_status,
+            "will_clear": will_clear,
+        })
+        triage = upsert_finding_triage_details(
+            session_id,
+            finding_id,
+            data,
+            team_id=team_id,
+        )
+    except ProjectWorkspaceError as exc:
+        return _project_error_response(exc)
+    if triage is None and not will_clear:
+        log.warning("FINDING_TRIAGE_UPDATE_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "finding_id": finding_id,
+            "reason": "target_missing_after_precheck",
+        })
+        return _project_not_found("finding not found")
+    response = triage or default_finding_triage_details(session_id, finding_id, team_id=team_id)
+    action = "cleared" if will_clear else ("updated" if previous else "created")
+    log.info("FINDING_TRIAGE_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "finding_id": finding_id,
+        "action": action,
+        "triage_id": response.get("id") or "",
+        "verification_status": response.get("verification_status") or "not_started",
+        "has_remediation": bool(str(response.get("remediation") or "").strip()),
+        "has_verification_steps": bool(str(response.get("verification_steps") or "").strip()),
+        "has_verification_notes": bool(str(response.get("verification_notes") or "").strip()),
+    })
+    return jsonify({"ok": True, "triage": response})
 
 
 @projects_bp.route("/entities/<entity_type>/<path:entity_id>/labels")

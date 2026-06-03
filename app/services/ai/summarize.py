@@ -103,6 +103,11 @@ def _message_content(context: dict, *, source_targets: set[str] | None = None) -
     run_value = context.get("run")
     run: dict = run_value if isinstance(run_value, dict) else {}
     findings = context.get("findings") if isinstance(context.get("findings"), list) else []
+    triage_findings = (
+        context.get("triage_findings")
+        if isinstance(context.get("triage_findings"), list)
+        else []
+    )
     exploit_backed = (
         context.get("exploit_backed_findings")
         if isinstance(context.get("exploit_backed_findings"), list)
@@ -140,6 +145,12 @@ def _message_content(context: dict, *, source_targets: set[str] | None = None) -
             lines.append(f"- {finding.get('line_number')}: {finding_text}")
     else:
         lines.append("- none")
+    if triage_findings:
+        lines.append("triage_findings:")
+        for finding in triage_findings:
+            if not isinstance(finding, dict):
+                continue
+            lines.append(f"- {_triage_finding_line(finding)}")
     if exploit_backed:
         lines.append("exploit_backed_findings:")
         for finding in exploit_backed:
@@ -162,6 +173,24 @@ def _message_content(context: dict, *, source_targets: set[str] | None = None) -
         lines.append("- none")
     lines.append(f"{UNTRUSTED_OUTPUT_CLOSE}")
     return "\n".join(lines)
+
+
+def _triage_finding_line(finding: dict) -> str:
+    details = []
+    for key, label in (
+        ("remediation", "remediation"),
+        ("verification_steps", "verify"),
+    ):
+        value = str(finding.get(key) or "").strip()
+        if value:
+            details.append(f"{label}={value}")
+    parts = [
+        str(finding.get("severity") or "info"),
+        str(finding.get("title") or "").strip(),
+        f"verification={finding.get('verification_status') or 'not_started'}",
+        *details,
+    ]
+    return " ".join(part for part in parts if part)
 
 
 def _exploit_backed_line(finding: dict) -> str:

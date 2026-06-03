@@ -107,6 +107,17 @@
       return summary && Array.isArray(summary.packages) ? summary.packages : [];
     }
 
+    function mergePackageIntoSummary(projectId, pkg) {
+      const packageId = String(pkg && pkg.id || '');
+      const summary = summaryFor(projectId);
+      if (!packageId || !summary || !Array.isArray(summary.packages)) return;
+      summary.packages = summary.packages.map(item => (
+        String(item && item.id || '') === packageId
+          ? { ...item, ...pkg }
+          : item
+      ));
+    }
+
     function selectableArtifactItems(summary) {
       return ctx.projectArtifactItems(summary).filter(artifact => ctx.projectArtifactStatus(artifact) === 'available');
     }
@@ -1426,13 +1437,15 @@
         renderWizardModal();
         return;
       }
-      await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages`, {
+      const createResp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
+      const created = await readJsonResponse(createResp, 'Unable to create package.');
       wizard = null;
       hideWizardOverlay();
       await ctx.refreshProjectWorkspace();
+      mergePackageIntoSummary(projectId, created.package);
       ctx.setWorkspaceTab?.('packages');
       ctx.setProjectWorkspaceMessage?.('Package created.');
     }

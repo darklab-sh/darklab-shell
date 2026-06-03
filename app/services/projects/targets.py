@@ -13,7 +13,7 @@ import config as _config
 from core.database import DB_BACKEND, db_connect, validate_project_link_source
 from core.database_backend import dialect_for_backend
 from services.atlas.materializer import upsert_entity
-from services.atlas.lookup import metadata_owner_id
+from services.atlas.scope import metadata_owner_id
 from services.intel.canonical import CanonicalizationError, canonical_entity, entity_signature
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,

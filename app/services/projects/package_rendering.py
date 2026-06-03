@@ -595,6 +595,7 @@ def _finding_run_anchor(finding):
 def _package_finding_metadata_markdown(finding):
     labels = finding.get("labels") if isinstance(finding.get("labels"), list) else []
     note = finding.get("note") if isinstance(finding.get("note"), dict) else None
+    triage = finding.get("triage") if isinstance(finding.get("triage"), dict) else None
     parts = []
     label_values = [
         _package_markdown_code(label.get("label") or "")
@@ -603,6 +604,19 @@ def _package_finding_metadata_markdown(finding):
     ]
     if label_values:
         parts.append("Labels: " + ", ".join(label_values))
+    if triage:
+        verification_status = str(triage.get("verification_status") or "not_started").strip()
+        remediation = str(triage.get("remediation") or "").strip()
+        verification_steps = str(triage.get("verification_steps") or "").strip()
+        verification_notes = str(triage.get("verification_notes") or "").strip()
+        if verification_status and verification_status != "not_started":
+            parts.append("Verification: " + _package_markdown_code(verification_status))
+        if remediation:
+            parts.append("Remediation: " + _package_markdown_text(remediation))
+        if verification_steps:
+            parts.append("Verification steps: " + _package_markdown_text(verification_steps))
+        if verification_notes:
+            parts.append("Verification notes: " + _package_markdown_text(verification_notes))
     if note and note.get("body"):
         parts.append("Note: " + _package_markdown_text(note.get("body") or ""))
     return "<br>" + "<br>".join(parts) if parts else ""

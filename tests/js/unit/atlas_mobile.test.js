@@ -123,7 +123,7 @@ function createController(overrides = {}) {
         el.textContent = `finding detail ${finding.title || ''}`
         host.appendChild(el)
       },
-      reviewStateSelect: (value, onChange) => {
+      reviewStateSelect: (value, onChange, options = {}) => {
         const select = document.createElement('select')
         select.className = 'form-select form-control-compact'
         ;['new', 'reviewed', 'important'].forEach((stateValue) => {
@@ -133,6 +133,7 @@ function createController(overrides = {}) {
           select.appendChild(option)
         })
         select.value = value
+        select.disabled = !!options.disabled
         select.addEventListener('change', () => onChange(select.value))
         return select
       },
@@ -214,6 +215,7 @@ function createController(overrides = {}) {
     deleteCurrentSavedView: vi.fn(),
     openSourceRun: vi.fn(),
     updateFindingReviewState: vi.fn(),
+    openFindingTriageEditor: vi.fn(),
     openEntityFromFinding: vi.fn((finding) => {
       state.activeTab = finding.entity_type || 'ip'
       state.selectedId = finding.entity_id || ''
@@ -418,6 +420,28 @@ describe('Mobile Atlas controller', () => {
       expect.objectContaining({ id: 'fnd_1' }),
       'reviewed',
     )
+  })
+
+  it('keeps finding triage readable for view-only team members', () => {
+    const { controller, render } = createController({
+      state: { activeTab: 'findings' },
+      controller: {
+        canTriageAtlasRows: vi.fn(() => false),
+      },
+    })
+    loadMobileAtlas(controller)
+
+    render()
+    document.querySelector('.atlas-mobile-row')?.click()
+    const footer = document.getElementById('atlas-mobile-finding-footer')
+    const review = footer?.querySelector('select')
+    const triage = [...footer?.querySelectorAll('button') || []]
+      .find(button => button.textContent === 'Triage')
+
+    expect(review?.disabled).toBe(true)
+    expect(triage?.disabled).toBe(false)
+    triage?.click()
+    expect(controller.openFindingTriageEditor).toHaveBeenCalledWith(expect.objectContaining({ id: 'fnd_1' }))
   })
 
   it('uses danger tone for high and critical finding badges', () => {

@@ -370,6 +370,32 @@
     return wrap;
   }
 
+  function verificationStatusLabel(value) {
+    const normalized = text(value, 'not_started');
+    if (global.DarklabFindingTriageEditor && typeof global.DarklabFindingTriageEditor.verificationStatusLabel === 'function') {
+      return global.DarklabFindingTriageEditor.verificationStatusLabel(normalized);
+    }
+    return normalized.replace(/_/g, ' ');
+  }
+
+  function renderTriageSummary(finding) {
+    const triage = finding && finding.triage && typeof finding.triage === 'object' ? finding.triage : null;
+    const wrap = node('div', 'atlas-triage-summary');
+    if (!triage) {
+      wrap.appendChild(node('div', 'atlas-muted', 'No remediation or verification details yet.'));
+      return wrap;
+    }
+    wrap.appendChild(metaRow('Verification', verificationStatusLabel(triage.verification_status || finding.verification_status)));
+    const remediation = text(triage.remediation_preview || triage.remediation);
+    const steps = text(triage.verification_steps_preview || triage.verification_steps);
+    if (remediation) wrap.appendChild(metaRow('Remediation', remediation));
+    if (steps) wrap.appendChild(metaRow('Steps', steps));
+    if (!remediation && !steps && !triage.has_verification_notes) {
+      wrap.appendChild(node('div', 'atlas-muted', 'No remediation or verification text yet.'));
+    }
+    return wrap;
+  }
+
   function renderFindings(findings, meta = null, onPage = null) {
     const wrap = node('div', 'atlas-finding-list');
     const rows = Array.isArray(findings) ? findings : [];
@@ -492,6 +518,12 @@
           disabledReason: handlers.triageDisabledReason || '',
         },
       ));
+      const triage = document.createElement('button');
+      triage.type = 'button';
+      triage.className = 'btn btn-secondary btn-compact';
+      triage.textContent = 'Triage';
+      triage.addEventListener('click', () => handlers.onEditTriage?.(finding));
+      actions.appendChild(triage);
       if (finding.run_id) {
         const run = document.createElement('button');
         run.type = 'button';
@@ -530,6 +562,7 @@
       }
     }
     container.append(meta);
+    container.append(section('Remediation and verification', renderTriageSummary(finding)));
     container.append(section('Import sources', renderImportSources(finding.import_sources)));
     container.append(section('Evidence', raw));
   }
