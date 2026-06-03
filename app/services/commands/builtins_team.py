@@ -189,13 +189,22 @@ def _team_rows(teams: list[dict[str, Any]]) -> list[dict[str, object]]:
     if not teams:
         return [output_line("team: no teams joined yet.", "builtin-note")]
     lines = [output_line("Teams:", "builtin-section")]
-    lines.append(output_line(f"{'id':<36}  {'role':<8}  name", "builtin-kv"))
+    rows = []
     for team in teams:
         raw_member = team.get("member")
         member: dict[str, Any] = raw_member if isinstance(raw_member, dict) else {}
+        rows.append({
+            "id": str(team.get("id") or ""),
+            "role": str(member.get("role") or ""),
+            "name": str(team.get("name") or ""),
+        })
+    id_width = max([len("id"), *(len(row["id"]) for row in rows)])
+    role_width = max([len("role"), *(len(row["role"]) for row in rows)])
+    lines.append(output_line(f"{'id':<{id_width}}  {'role':<{role_width}}  name", "builtin-table-header"))
+    for row in rows:
         lines.append(output_line(
-            f"{team.get('id', ''):<36}  {str(member.get('role') or ''):<8}  {team.get('name', '')}",
-            "builtin-kv",
+            f"{row['id']:<{id_width}}  {row['role']:<{role_width}}  {row['name']}",
+            "builtin-table-row",
         ))
     return lines
 
@@ -262,13 +271,26 @@ def _members(parts: list[str], session_id: str, team_id: str) -> list[dict[str, 
         detail = storage.team_detail(conn, ref, current_session_token=session_id)
     members = (detail or {}).get("members") or []
     lines = [output_line("Team members:", "builtin-section")]
-    lines.append(output_line(f"{'id':<36}  {'role':<8}  {'status':<8}  name", "builtin-kv"))
+    rows = []
     for member in members:
         current = " *" if member.get("is_current") else ""
+        rows.append({
+            "id": str(member.get("id") or ""),
+            "role": str(member.get("role") or ""),
+            "status": str(member.get("status") or ""),
+            "name": f"{member.get('display_name', '')}{current}",
+        })
+    id_width = max([len("id"), *(len(row["id"]) for row in rows)])
+    role_width = max([len("role"), *(len(row["role"]) for row in rows)])
+    status_width = max([len("status"), *(len(row["status"]) for row in rows)])
+    lines.append(output_line(
+        f"{'id':<{id_width}}  {'role':<{role_width}}  {'status':<{status_width}}  name",
+        "builtin-table-header",
+    ))
+    for row in rows:
         lines.append(output_line(
-            f"{member.get('id', ''):<36}  {member.get('role', ''):<8}  "
-            f"{member.get('status', ''):<8}  {member.get('display_name', '')}{current}",
-            "builtin-kv",
+            f"{row['id']:<{id_width}}  {row['role']:<{role_width}}  {row['status']:<{status_width}}  {row['name']}",
+            "builtin-table-row",
         ))
     return lines
 

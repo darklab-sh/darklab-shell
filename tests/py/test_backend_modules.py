@@ -5624,7 +5624,12 @@ class TestNotificationsPhase0:
             assert create_recovery_match
 
             list_lines, _ = builtin_commands.execute_builtin_command("team list", "tok_team_builtin_owner")
-            assert team_id in "\n".join(str(line.get("text", "")) for line in list_lines)
+            list_text = "\n".join(str(line.get("text", "")) for line in list_lines)
+            assert team_id in list_text
+            list_header = next(line for line in list_lines if line.get("cls") == "builtin-table-header")
+            list_row = next(line for line in list_lines if line.get("cls") == "builtin-table-row")
+            assert str(list_header["text"]).index("role") == str(list_row["text"]).index("owner")
+            assert str(list_header["text"]).index("name") == str(list_row["text"]).index("Builtin Operators")
 
             invite_lines, _ = builtin_commands.execute_builtin_command(
                 "team invite create --role operator --label Shell",
@@ -5667,6 +5672,11 @@ class TestNotificationsPhase0:
             members_text = "\n".join(str(line.get("text", "")) for line in members_lines)
             assert "Operator" in members_text
             assert "owner" in members_text
+            members_header = next(line for line in members_lines if line.get("cls") == "builtin-table-header")
+            members_owner_row = next(line for line in members_lines if "Owner" in str(line.get("text", "")))
+            assert str(members_header["text"]).index("role") == str(members_owner_row["text"]).index("owner")
+            assert str(members_header["text"]).index("status") == str(members_owner_row["text"]).index("active")
+            assert str(members_header["text"]).index("name") == str(members_owner_row["text"]).index("Owner")
 
             recovery_lines, _ = builtin_commands.execute_builtin_command(
                 "team recovery rotate",
@@ -17372,6 +17382,7 @@ class TestBuiltinStats:
                     lines = builtin_commands._run_builtin_stats("tok_statsdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
+        class_by_text = {str(line["text"]): str(line.get("cls") or "") for line in lines}
         assert re.search(r"session\s+tok_stat••••", text)
         assert "tok_statsdemo" not in text
         assert re.search(r"runs\s+7", text)
@@ -17381,6 +17392,8 @@ class TestBuiltinStats:
         assert re.search(r"success rate\s+80% \(4 ok / 1 failed\)", text)
         assert re.search(r"average duration\s+21\.[78]s", text)
         assert "  command      runs         ok       avg" in text
+        assert class_by_text["  command      runs         ok       avg"] == "builtin-table-header"
+        assert class_by_text["  nmap       2 runs     50% ok     15.0s"] == "builtin-table-row"
         assert "  nmap       2 runs     50% ok     15.0s" in text
         assert "  dig         1 run    100% ok      2.0s" in text
         assert "  curl        1 run     n/a ok       n/a" in text

@@ -2130,9 +2130,10 @@ class TestRunStreaming:
         assert "httpx.txt" not in list_body
 
         long_body = list_long_resp.get_data(as_text=True)
-        assert "\\u001b[4mpath\\u001b[0m  " in long_body
-        assert "\\u001b[4msize\\u001b[0m    " in long_body
-        assert "\\u001b[4mmodified\\u001b[0m" in long_body
+        assert "  path" in long_body
+        assert "size" in long_body
+        assert "modified" in long_body
+        assert "\\u001b[4mpath\\u001b[0m" not in long_body
         assert "reports/" in long_body
         assert "targets.txt" in long_body
         assert "amass.txt" not in long_body
@@ -2393,8 +2394,9 @@ class TestRunStreaming:
         assert "success rate" in stats_body
         assert "\\u001b[32m" in stats_body
         assert "\\u001b[31m" in stats_body
-        assert "\\u001b[4mcommand\\u001b[0m" in stats_body
-        assert "\\u001b[4mruns\\u001b[0m" in stats_body
+        assert "  command" in stats_body
+        assert "runs" in stats_body
+        assert "\\u001b[4mcommand\\u001b[0m" not in stats_body
 
     def test_builtin_last_lists_recent_completed_runs(self):
         client = get_client()

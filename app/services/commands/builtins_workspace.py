@@ -8,7 +8,6 @@ from typing import Sequence, cast
 
 from config import CFG
 from services.commands.builtins_format import (
-    ansi_underline,
     format_bytes,
     format_native_record,
     output_line,
@@ -239,10 +238,6 @@ def _workspace_item_size(item: dict[str, object]) -> int:
     return 0
 
 
-def _underline_text(text: str) -> str:
-    return ansi_underline(text)
-
-
 def run_builtin_workspace(
     command: str,
     session_id: str,
@@ -328,19 +323,19 @@ def run_builtin_workspace(
             return lines
 
         width = max((len(str(item.get("display") or item["path"])) for item in rows), default=4)
-        path_header = f"{_underline_text('path')}{' ' * max(0, width - len('path'))}"
-        size_header = f"{_underline_text('size')}{' ' * (8 - len('size'))}"
-        modified_header = _underline_text("modified")
-        lines.append(output_line(f"  {path_header}  {size_header}  {modified_header}", "builtin-help-row"))
+        path_header = f"{'path':<{width}}"
+        size_header = f"{'size':<8}"
+        modified_header = "modified"
+        lines.append(output_line(f"  {path_header}  {size_header}  {modified_header}", "builtin-table-header"))
         for row in rows:
             path = str(row.get("display") or row["path"])
             if row["kind"] == "directory":
-                lines.append(output_line(f"  {path:<{width}}  folder", "builtin-help-row"))
+                lines.append(output_line(f"  {path:<{width}}  folder", "builtin-table-row"))
                 continue
             item = cast(dict[str, object], row["item"])
             size = format_bytes(_workspace_item_size(item))
             mtime = _format_clock(str(item.get("mtime") or ""))
-            lines.append(output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "builtin-help-row"))
+            lines.append(output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "builtin-table-row"))
         return lines
 
     if subcommand in {"show", "cat"}:

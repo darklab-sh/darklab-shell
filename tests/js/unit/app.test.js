@@ -1979,6 +1979,14 @@ describe('app helpers', () => {
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get command-outcome-summaries')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
+    const configHeader = document.querySelector('.line.builtin-table-header')
+    const configRows = Array.from(document.querySelectorAll('.line.builtin-table-row'))
+      .map(line => line.textContent)
+    expect(configHeader?.textContent).toMatch(/^option\s+value$/)
+    expect(configRows).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^project-auto-link-run-entities\s+off$/),
+      expect.stringMatching(/^command-outcome-summaries\s+off$/),
+    ]))
     expect(setStatus).toHaveBeenCalledWith('ok')
   })
 

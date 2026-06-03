@@ -158,12 +158,13 @@ def _project_target_lines(session_id: str, project: dict[str, object]) -> list[d
     if not targets:
         return [output_line("project: no targets yet", "builtin-note")]
     lines = [output_line("Project targets:", "builtin-section")]
+    lines.append(output_line(f"{'type':<8} value", "builtin-table-header"))
     for target in targets:
         label = str(target.get("label") or "")
         suffix = f"  {label}" if label else ""
         lines.append(output_line(
             f"{str(target.get('type') or ''):<8} {str(target.get('value') or '')}{suffix}",
-            "builtin-help-row",
+            "builtin-table-row",
         ))
     return lines
 
@@ -231,12 +232,13 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
             if not projects:
                 return [output_line("No projects yet. Run `project create <name>` to start one.", "builtin-note")]
             lines = [output_line("Projects:", "builtin-section")]
+            lines.append(output_line(f"  {'slug':<24}  {'status':<8}  name", "builtin-table-header"))
             for project in projects:
                 marker = "*" if str(project.get("id") or "") == active_id else " "
                 status = str(project.get("status") or "")
                 lines.append(output_line(
                     f"{marker} {str(project.get('slug') or ''):<24}  {status:<8}  {str(project.get('name') or '')}",
-                    "builtin-help-row",
+                    "builtin-table-row",
                 ))
             return lines
         if subcommand == "create":

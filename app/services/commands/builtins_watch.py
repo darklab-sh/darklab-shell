@@ -109,13 +109,13 @@ def _watch_lines(session_id: str) -> list[dict[str, object]]:
         for watcher in watchers:
             schedule_by_id[watcher.schedule_id] = get_schedule(watcher.schedule_id, conn=conn)
     lines = [output_line("Watchers:", "builtin-section")]
-    lines.append(output_line(f"{'id':<36} {'state':<12} {'cadence':<12} label", "builtin-help-row"))
+    lines.append(output_line(f"{'id':<36} {'state':<12} {'cadence':<12} label", "builtin-table-header"))
     for watcher in watchers:
         label = _watcher_label(watcher)
         cadence = _watcher_cadence(schedule_by_id.get(watcher.schedule_id))
         lines.append(output_line(
             f"{watcher.id:<36} {watcher.state:<12} {cadence:<12} {label}",
-            "builtin-help-row",
+            "builtin-table-row",
         ))
     return lines
 

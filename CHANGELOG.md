@@ -195,6 +195,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Command outcome summaries ignore stale tab state** — failed or unsupported commands no longer reuse the previous command's summary when the current transcript has no parsable outcome, and active-tab summaries now read only the current run's raw lines so stale nmap ports cannot carry into a later failed scan.
 
+- **Stats top-command table rendering** — the `stats` command now renders the **Top commands** header as a plain table header instead of leaking ANSI underline escape text, with command counts, success rates, and average durations kept in aligned columns.
+
+- **Config list table rendering** — `config list` now uses the shared terminal table styling for option/value rows, keeping long option names readable and aligned with other built-in command tables.
+
+- **Built-in list table rendering** — `schedule list`, `watch list`, `wordlist list`, long `file list`, Project lists, and Team lists now use the shared terminal table header/row classes instead of generic help or key/value rows.
+
 - **AI next-command suggestions now avoid bracketed concrete targets and hallucinated SMB NSE script ids** — suggestion validation strips unnecessary brackets from concrete target tokens like `[192.168.1.5]` before display, rejects invented SMB CVE script names such as `smb-vuln-cve2009-1231`, and the next-command prompt now names known-good SMB NSE examples instead of asking for generic SMB scripts.
 
 - **Bundled llama.cpp sidecar starts without memory locking by default** — the optional `llama` Compose profile no longer passes `--mlock` or requests Docker memory-lock privileges in the base stack.
