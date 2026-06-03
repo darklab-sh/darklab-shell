@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,541
+- behavior tests: 3,545
 - docs/inventory meta-tests: 34
-- `pytest`: 1990 (1956 behavior + 34 meta)
+- `pytest`: 1994 (1960 behavior + 34 meta)
 - `vitest`: 1326
 - `playwright`: 259
-- total: 3,575
+- total: 3,579
 
 This document is organized in two parts:
 
@@ -451,8 +451,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAIAssistProviderClient.test_private_base_url_guard_rejects_public_dns_results` | Checks that the AI provider private-base-URL guard rejects public DNS results. |
 | `TestAIAssistContextAndStorage.test_build_run_context_redacts_boundaries_and_hashes_deterministically` | Checks that AI run context assembly strips prompt boundaries and produces stable hashes. |
 | `TestAIAssistContextAndStorage.test_summary_run_context_uses_compact_sections` | Checks that summary AI context uses compact sections and omits richer context fields. |
+| `TestAIAssistContextAndStorage.test_summary_run_context_uses_grouped_nmap_vulners_findings` | Checks that summary AI context includes grouped Nmap Vulners exploit findings and repairs contradictory "no actionable findings" prose. |
 | `TestAIAssistContextAndStorage.test_next_commands_context_uses_compact_sections_with_entities` | Checks that next-command AI context uses compact sections while keeping trusted entities. |
 | `TestAIAssistContextAndStorage.test_summary_transcript_tail_keeps_findings_and_summaries_first` | Checks that summary transcript tails preserve findings and summaries before ordinary tail lines. |
+| `TestAIAssistContextAndStorage.test_summary_transcript_tail_omits_raw_nmap_vulners_rows` | Checks that summary transcript tails skip raw Nmap Vulners reference rows once persisted findings carry the exploit signal. |
 | `TestAIAssistContextAndStorage.test_ai_context_suppression_filters_use_boolean_literals` | Checks that AI context suppression filters use SQLite/Postgres-safe boolean literals. |
 | `TestAIAssistContextAndStorage.test_ai_context_redaction_counts_only_changed_source_bytes` | Checks that AI context redaction accounting counts only the original spans changed by redaction. |
 | `TestAIAssistContextAndStorage.test_ai_context_logs_secret_metadata_failures` | Checks that AI context assembly logs secret metadata lookup failures without exposing secret names or values. |
@@ -867,6 +869,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_live_output_batcher_flushes_sparse_output_by_age` | Verifies that sparse live output flushes promptly instead of waiting for a large batch. |
 | `TestOutputSignals.test_signal_matching_uses_ansi_normalized_text` | Verifies that backend signal matching strips ANSI formatting before classifying output while preserving the original line elsewhere. |
 | `TestOutputSignals.test_classifies_nuclei_findings_by_command` | Verifies that common Nuclei template result lines classify as command-scoped findings. |
+| `TestOutputSignals.test_classifies_nmap_vulners_exploit_and_cve_rows_as_findings` | Verifies that Nmap Vulners CVE and exploit reference rows classify as findings while keeping the affected service context. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
 | `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
@@ -956,6 +959,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
 | `TestDatabaseInit.test_materializer_deduplicates_team_entities_across_members` | Verifies team-owned Atlas entity materialization deduplicates the same canonical entity across team members. |
 | `TestDatabaseInit.test_record_run_findings_deduplicates_team_findings_across_members` | Verifies team-owned findings deduplicate the same signature across team members while retaining both source-run occurrences. |
+| `TestDatabaseInit.test_record_run_findings_maps_nmap_vulners_scores_to_severity` | Verifies Nmap Vulners finding persistence maps numeric scores to severity and groups exploit references by affected service. |
 | `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
 | `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |

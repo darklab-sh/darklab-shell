@@ -485,11 +485,18 @@ class TestAIAssistContextAndStorage:
             context = ai_context.build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
 
         assert context.input_chars <= 4000
-        assert set(context.context) == {"run", "findings", "warnings_errors", "transcript_tail"}
+        assert set(context.context) == {
+            "run",
+            "findings",
+            "exploit_backed_findings",
+            "warnings_errors",
+            "transcript_tail",
+        }
         assert "id" not in context.context["run"]
         assert "entities" not in context.context
         assert "output_summary" not in context.context
         assert "full_transcript" not in context.context
+        assert context.context["exploit_backed_findings"] == []
         assert context.context["transcript_tail"][0] == {"line_index": 0, "text": "Starting scan for darklab.sh"}
         debug.assert_called_once()
         assert debug.call_args.args == ("AI_CONTEXT_BUILT",)
@@ -508,9 +515,117 @@ class TestAIAssistContextAndStorage:
             "pre_redaction_bytes": context.pre_redaction_bytes,
             "useful": True,
             "omitted_sections": [],
-            "section_count": 4,
+            "section_count": 5,
             "context_hash": context.context_hash,
         }
+
+    def test_summary_run_context_uses_grouped_nmap_vulners_findings(self, monkeypatch, tmp_path):
+        from services.ai.context import build_run_context
+        from services.projects.findings import record_run_findings
+        from services.runs.output_model import line_event_from_legacy, to_wire
+
+        lines = [
+            "Nmap scan report for 192.168.1.5",
+            "139/tcp   open  netbios-ssn Samba smbd 4",
+            *[
+                f"|     EXPLOIT-{index:04d} 10.0 https://vulners.com/githubexploit/EXPLOIT-{index:04d} *EXPLOIT*"
+                for index in range(1, 31)
+            ],
+        ]
+        classifier = OutputSignalClassifier("nmap -sV --script vulners 192.168.1.5")
+        entries = []
+        events = []
+        for line in lines:
+            metadata = classifier.classify_line(line)
+            entry = {"text": line, **metadata}
+            entries.append(entry)
+            raw_signals = metadata.get("signals")
+            raw_entities = metadata.get("entities")
+            events.append(to_wire(line_event_from_legacy(
+                line,
+                signals=cast("list[object] | None", raw_signals if isinstance(raw_signals, list) else None),
+                line_index=metadata.get("line_index"),
+                command_root=metadata.get("command_root"),
+                target=metadata.get("target"),
+                entities=cast(
+                    "list[dict[str, object]] | None",
+                    raw_entities if isinstance(raw_entities, list) else None,
+                ),
+            )))
+
+        with self._ai_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run-ai-vulners",
+                    "tok_ai",
+                    "external",
+                    "nmap -sV --script vulners 192.168.1.5",
+                    "2026-05-23T10:00:00+00:00",
+                    "2026-05-23T10:00:02+00:00",
+                    0,
+                    json.dumps(events),
+                    len(events),
+                ),
+            )
+            record_run_findings(conn, "tok_ai", "run-ai-vulners", entries)
+            conn.commit()
+
+        cfg = {
+            **app_config.CFG,
+            "ai_max_input_chars": 8000,
+            "ai_allow_full_output": False,
+            "share_redaction_enabled": False,
+        }
+        context = build_run_context("run-ai-vulners", session_id="tok_ai", cfg=cfg, variant="summary")
+
+        assert len(context.context["findings"]) == 2
+        assert context.context["findings"][1]["line"].startswith(
+            "Nmap Vulners: Public exploit references available for samba on 192.168.1.5:139 "
+        )
+        assert "EXPLOIT-0001" in context.context["findings"][1]["line"]
+        exploit_backed = context.context["exploit_backed_findings"]
+        assert exploit_backed == [{
+            "severity": "critical",
+            "target": "192.168.1.5:139",
+            "service": "samba",
+            "cve": "",
+            "title": "Public exploit references available",
+            "cvss_score": 10.0,
+            "exploit_count": 30,
+            "references": [
+                "EXPLOIT-0001 https://vulners.com/githubexploit/EXPLOIT-0001",
+                "EXPLOIT-0002 https://vulners.com/githubexploit/EXPLOIT-0002",
+                "EXPLOIT-0003 https://vulners.com/githubexploit/EXPLOIT-0003",
+                "EXPLOIT-0004 https://vulners.com/githubexploit/EXPLOIT-0004",
+                "EXPLOIT-0005 https://vulners.com/githubexploit/EXPLOIT-0005",
+            ],
+            "line_number": 2,
+        }]
+        from services.ai import summarize
+
+        message_content = summarize.messages(context.context)[-1]["content"]
+        assert "exploit_backed_findings:" in message_content
+        assert "critical 192.168.1.5:139 samba Public exploit references available exploit_count=30" in message_content
+        repaired = summarize.merge_context_findings(
+            {
+                "summary": "No actionable findings.",
+                "key_findings": [],
+                "warnings": [],
+                "next_steps_hint": "No actionable findings need review.",
+            },
+            context.context,
+        )
+        assert repaired["summary"] == "The scan found exploit-backed findings."
+        assert repaired["next_steps_hint"] == "Review exploit-backed findings and prioritize affected services."
+        assert any(
+            finding.startswith("Nmap Vulners: Public exploit references available for samba on 192.168.1.5:139 ")
+            for finding in repaired["key_findings"]
+        )
+        assert any("exploit_count=30" in finding for finding in repaired["key_findings"])
+        assert "vulners.com" not in json.dumps(context.context["transcript_tail"])
 
     def test_next_commands_context_uses_compact_sections_with_entities(self, monkeypatch, tmp_path):
         from services.ai import next_commands
@@ -531,6 +646,7 @@ class TestAIAssistContextAndStorage:
         assert set(context.context) == {
             "run",
             "findings",
+            "exploit_backed_findings",
             "warnings_errors",
             "entities",
             "project_context",
@@ -592,6 +708,34 @@ class TestAIAssistContextAndStorage:
             "9929/tcp open nping-echo",
             "Not shown: 9986 closed tcp ports",
             "ordinary line 39",
+        ]
+
+    def test_summary_transcript_tail_omits_raw_nmap_vulners_rows(self):
+        from services.ai.context import _transcript_tail
+        from services.runs.output_model import LineEvent, LineSignal
+
+        events = [
+            LineEvent("22/tcp open ssh", line_index=1, command_root="nmap", signals=(LineSignal.findings,)),
+            LineEvent(
+                "|     CVE-2026-35414 8.1 https://vulners.com/cve/CVE-2026-35414",
+                line_index=2,
+                command_root="nmap",
+                signals=(LineSignal.findings,),
+            ),
+            LineEvent(
+                "|     SSV:93139 10.0 https://vulners.com/seebug/SSV:93139 *EXPLOIT*",
+                line_index=3,
+                command_root="nmap",
+                signals=(LineSignal.findings,),
+            ),
+            LineEvent("Nmap done: 1 IP address (1 host up)", line_index=4, command_root="nmap", signals=(LineSignal.summaries,)),
+        ]
+
+        selected = _transcript_tail(events, limit=10)
+
+        assert [event.text for event in selected] == [
+            "22/tcp open ssh",
+            "Nmap done: 1 IP address (1 host up)",
         ]
 
     def test_ai_context_suppression_filters_use_boolean_literals(self):
@@ -12846,6 +12990,35 @@ class TestOutputSignals:
         for line in nuclei_findings:
             assert classify_line(line, command="nuclei -u https://ip.darklab.sh") == ["findings"]
 
+    def test_classifies_nmap_vulners_exploit_and_cve_rows_as_findings(self):
+        classifier = OutputSignalClassifier("nmap -sV --script vulners 192.168.1.5")
+        classifier.classify_line("Nmap scan report for 192.168.1.5")
+        port = classifier.classify_line("139/tcp   open  netbios-ssn Samba smbd 4")
+
+        exploit = classifier.classify_line(
+            "|     SSV:93139 10.0 https://vulners.com/seebug/SSV:93139 *EXPLOIT*"
+        )
+        classifier.classify_line("22/tcp    open  ssh         OpenSSH 10.0 (protocol 2.0)")
+        cve = classifier.classify_line("|_    CVE-2026-35387 6.5 https://vulners.com/cve/CVE-2026-35387")
+        non_cve_reference = classifier.classify_line("|     CNVD-2025-27985 10.0 https://vulners.com/cnvd/CNVD-2025-27985")
+
+        assert port["target"] == "192.168.1.5"
+        assert exploit["signals"] == ["findings"]
+        assert exploit["target"] == "192.168.1.5:139 samba"
+        exploit_entities = cast("list[dict[str, object]]", exploit.get("entities") or [])
+        assert [
+            (entity["type"], entity["canonical_value"])
+            for entity in exploit_entities
+        ] == [("ip", "192.168.1.5")]
+        assert cve["signals"] == ["findings"]
+        assert cve["target"] == "192.168.1.5:22 ssh"
+        cve_entities = cast("list[dict[str, object]]", cve.get("entities") or [])
+        assert [
+            (entity["type"], entity["canonical_value"])
+            for entity in cve_entities
+        ] == [("ip", "192.168.1.5"), ("cve", "CVE-2026-35387")]
+        assert "signals" not in non_cve_reference
+
     def test_classifies_warning_error_and_summary_lines(self):
         assert classify_line("warning: retrying request", cls="notice", command="curl https://darklab.sh") == ["warnings"]
         assert classify_line("connection timed out", cls="exit-fail", command="nc -zv ip.darklab.sh 80") == ["errors"]
@@ -15221,6 +15394,67 @@ SQL syntax error near q</response>
             "run-finding-team-operator",
             "run-finding-team-owner",
         ]
+
+    def test_record_run_findings_maps_nmap_vulners_scores_to_severity(self):
+        from services.projects.findings import record_run_findings
+
+        vuln_lines = [
+            ("|     SSV:93139 10.0 https://vulners.com/seebug/SSV:93139 *EXPLOIT*", "critical"),
+            ("|     CVE-2022-32744 8.8 https://vulners.com/cve/CVE-2022-32744", "high"),
+            ("|     CVE-2023-5568 6.5 https://vulners.com/cve/CVE-2023-5568", "medium"),
+            ("|     B7EACB4F-A5CF-5C5A-809F-E03CCE2AB150 3.6 "
+             "https://vulners.com/githubexploit/B7EACB4F-A5CF-5C5A-809F-E03CCE2AB150 *EXPLOIT*", "low"),
+            ("|_    PACKETSTORM:180957 0.0 https://vulners.com/packetstorm/PACKETSTORM:180957 *EXPLOIT*", "info"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+                "VALUES ('run-nmap-vulners', 'sess-nmap-vulners', 'external', "
+                "'nmap -sV --script vulners 192.168.1.5', ?, ?, 0)",
+                ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
+            )
+            classifier = OutputSignalClassifier("nmap -sV --script vulners 192.168.1.5")
+            entries = []
+            for line in (
+                "Nmap scan report for 192.168.1.5",
+                "139/tcp   open  netbios-ssn Samba smbd 4",
+                *(text for text, _severity in vuln_lines),
+            ):
+                metadata = classifier.classify_line(line)
+                signals = metadata.get("signals")
+                if isinstance(signals, list) and "findings" in signals and "vulners.com/" in line:
+                    entries.append({"text": line, **metadata})
+            recorded = record_run_findings(conn, "sess-nmap-vulners", "run-nmap-vulners", entries)
+            conn.commit()
+            rows = conn.execute(
+                "SELECT entity_id, subject_key, raw_line, severity FROM findings ORDER BY line_number"
+            ).fetchall()
+            entity_rows = conn.execute("SELECT id, type, canonical_value FROM entities ORDER BY canonical_value").fetchall()
+            conn.close()
+
+        assert len(recorded) == 3
+        assert len(rows) == 3
+        public_exploit = rows[0]["raw_line"]
+        assert public_exploit.startswith(
+            "Nmap Vulners: Public exploit references available for samba on 192.168.1.5:139 "
+            "(max CVSS score 10, severity critical); references: "
+        )
+        assert "SSV:93139 https://vulners.com/seebug/SSV:93139" in public_exploit
+        assert "B7EACB4F-A5CF-5C5A-809F-E03CCE2AB150" in public_exploit
+        assert "PACKETSTORM:180957 https://vulners.com/packetstorm/PACKETSTORM:180957" in public_exploit
+        assert rows[0]["severity"] == "critical"
+        assert [(row["raw_line"], row["severity"]) for row in rows[1:]] == [
+            vuln_lines[1],
+            vuln_lines[2],
+        ]
+        assert {(row["type"], row["canonical_value"]) for row in entity_rows} == {("ip", "192.168.1.5")}
+        assert {row["entity_id"] for row in rows} == {entity_rows[0]["id"]}
+        assert {row["subject_key"] for row in rows} == {"nmap-service:192.168.1.5:139 samba"}
 
     def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -226,19 +226,44 @@ def _signal_lines(context: dict) -> list[str]:
 
 def _context_lines(context: dict) -> list[str]:
     rows: list[str] = []
-    for section in ("findings", "warnings_errors"):
+    for section in ("exploit_backed_findings", "findings", "warnings_errors"):
         values = context.get(section)
         if not isinstance(values, list):
             continue
         for item in values:
             if not isinstance(item, dict):
                 continue
+            if section == "exploit_backed_findings":
+                value = _exploit_backed_context_line(item)
+                if value:
+                    rows.append(value)
+                    continue
             for key in ("line", "text", "title"):
                 value = _clean_line(item.get(key))
                 if value:
                     rows.append(value)
                     break
     return rows
+
+
+def _exploit_backed_context_line(item: dict) -> str:
+    raw_references = item.get("references")
+    references = raw_references if isinstance(raw_references, list) else []
+    reference_text = " ".join(str(reference) for reference in references[:2] if reference)
+    return _clean_line(
+        " ".join(
+            str(part)
+            for part in (
+                item.get("severity") or "info",
+                item.get("target") or "",
+                item.get("service") or "",
+                item.get("cve") or item.get("title") or "",
+                f"exploit_count={int(item.get('exploit_count') or 0)}",
+                reference_text,
+            )
+            if part
+        )
+    )
 
 
 def _clean_line(value: object) -> str:

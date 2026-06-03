@@ -328,6 +328,15 @@ _PORT_RANGE_RE = re.compile(r"^\d+(?:-\d+)?$")
 _NMAP_DONE_RE = re.compile(r"^Nmap done:\b", re.I)
 _NMAP_RDNS_RE = re.compile(r"^rDNS record for\s+\S+:\s+\S+", re.I)
 _NMAP_HOST_UP_RE = re.compile(r"^Host is up\b", re.I)
+_NMAP_VULNERS_ROW_RE = re.compile(
+    r"^\|_?\s+(?P<id>\S+)\s+(?P<score>10(?:\.0)?|[0-9](?:\.\d)?)\s+"
+    r"https://vulners\.com/\S+(?P<exploit>\s+\*EXPLOIT\*)?\s*$",
+    re.I,
+)
+_NMAP_OPEN_PORT_ROW_RE = re.compile(
+    r"^(?P<port>\d+)/(?:tcp|udp)\s+open\S*\s+(?P<service>\S+)(?:\s+(?P<version>.*\S))?\s*$",
+    re.I,
+)
 _KILLED_BY_USER_RE = re.compile(r"^\[killed by user(?:\b|[^\w])", re.I)
 _DNS_MAIL_EXCHANGER_RE = re.compile(r"\bmail exchanger\s*=\s*\S+", re.I)
 _DNS_TEXT_RE = re.compile(r"\btext\s*=\s*.+", re.I)
@@ -696,6 +705,61 @@ def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[s
     return entities
 
 
+def _nmap_target_host(value: str) -> str:
+    token = str(value or "").strip().split(maxsplit=1)[0] if str(value or "").strip() else ""
+    if token.startswith("[") and "]" in token:
+        return token[1:token.index("]")]
+    if token.count(":") == 1:
+        host, port = token.rsplit(":", 1)
+        if port.isdigit():
+            return host
+    return token
+
+
+def _nmap_target_entities(value: str, source_line: int | None) -> list[dict[str, object]]:
+    host = _nmap_target_host(value)
+    if not host:
+        return []
+    try:
+        canonical = canonical_ip(host)
+    except CanonicalizationError:
+        try:
+            canonical = canonical_domain(host)
+        except CanonicalizationError:
+            return []
+        return [{
+            "type": "host",
+            "value": host,
+            "canonical_value": canonical,
+            "confidence": "medium",
+            **({"source_line": source_line} if source_line is not None else {}),
+        }]
+    return [{
+        "type": "ip",
+        "value": host,
+        "canonical_value": canonical,
+        "confidence": "high",
+        **({"source_line": source_line} if source_line is not None else {}),
+    }]
+
+
+def _nmap_service_context(scan_target: str | None, port_line: str) -> str:
+    target = str(scan_target or "").strip()
+    if not target:
+        return ""
+    match = _NMAP_OPEN_PORT_ROW_RE.match(str(port_line or "").strip())
+    if not match:
+        return ""
+    service = str(match.group("service") or "").strip()
+    version = str(match.group("version") or "").strip()
+    if service.lower() in {"netbios-ssn", "microsoft-ds"} and version.lower().startswith("samba"):
+        service = "samba"
+    if not service:
+        return ""
+    host = target if ":" not in target or target.startswith("[") else f"[{target}]"
+    return f"{host}:{match.group('port')} {service.lower()}"
+
+
 def _is_shodan_dns_text_row(stripped: str) -> bool:
     parsed = _parse_shodan_dns_row(stripped)
     return bool(parsed and parsed[1] == "TXT")
@@ -821,6 +885,13 @@ def _is_nslookup_address_finding(stripped: str) -> bool:
     return bool(match and _is_public_ip(match.group(1)))
 
 
+def _is_nmap_vulners_finding(stripped: str) -> bool:
+    match = _NMAP_VULNERS_ROW_RE.match(stripped)
+    if not match:
+        return False
+    return bool(match.group("exploit")) or match.group("id").upper().startswith("CVE-")
+
+
 def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root in {"dnsx", "subfinder"}:
         return bool(_HOSTNAME_RE.search(stripped))
@@ -835,7 +906,7 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root == "dnsrecon":
         return bool(_DNSRECON_FINDING_RE.match(stripped))
     if root == "nmap":
-        return bool(_NMAP_RDNS_RE.search(stripped))
+        return bool(_NMAP_RDNS_RE.search(stripped)) or _is_nmap_vulners_finding(stripped)
     if root == "whois":
         return bool(_WHOIS_FINDING_RE.search(stripped))
     if root == "wget":
@@ -978,6 +1049,7 @@ def _extract_entities_for_command(
     normalized_text: str | None = None,
     ansi_stripped_text: str | None = None,
     command_target: str | None = None,
+    line_target: str | None = None,
     command_url_template: str | None = None,
 ) -> list[dict[str, object]]:
     stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
@@ -994,6 +1066,18 @@ def _extract_entities_for_command(
         nmap_report_entities = _nmap_report_entities(stripped, source_line)
         if nmap_report_entities:
             return nmap_report_entities
+        if _is_nmap_vulners_finding(stripped):
+            entities = _nmap_target_entities(line_target or command_target or "", source_line)
+            seen = _seen_entities(entities)
+            for entity in extract_entities(text, source_line=source_line, normalized_text=stripped):
+                if str(entity.get("type") or "") == "domain" and str(entity.get("canonical_value") or "") == "vulners.com":
+                    continue
+                key = (str(entity.get("type") or ""), str(entity.get("canonical_value") or ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                entities.append(entity)
+            return entities
     if root == "openssl" and _is_openssl_noise(stripped):
         return []
     if root == "ffuf" and (_is_ffuf_noise(stripped) or bool(_FFUF_CONFIG_RE.search(stripped))):
@@ -1255,6 +1339,7 @@ class OutputSignalClassifier:
             self.url_template = _find_flag_value(tokenize_command(self.command), {"-u", "--url"})
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
+        self.current_nmap_service_target: str | None = None
         self.line_index = 0
         self.previous_text = ""
 
@@ -1263,8 +1348,15 @@ class OutputSignalClassifier:
             report_match = _NMAP_REPORT_TARGET_RE.match(normalized_text)
             if report_match:
                 self.current_target = report_match.group(1).strip()
+                self.current_nmap_service_target = None
             elif _NMAP_DONE_RE.match(normalized_text):
                 return self.target
+            else:
+                service_context = _nmap_service_context(self.current_target or self.target, normalized_text)
+                if service_context:
+                    self.current_nmap_service_target = service_context
+            if _is_nmap_vulners_finding(normalized_text) and self.current_nmap_service_target:
+                return self.current_nmap_service_target
             if self.current_target:
                 return self.current_target
         return self.target
@@ -1330,6 +1422,7 @@ class OutputSignalClassifier:
                 normalized_text=normalized_text,
                 ansi_stripped_text=ansi_stripped,
                 command_target=self.target,
+                line_target=target,
                 command_url_template=self.url_template,
             )
             if entities:

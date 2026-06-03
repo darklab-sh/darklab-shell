@@ -189,6 +189,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Fix:** `/history/active` filters scheduled active runs by default for browser reload recovery, while Status Monitor requests the inclusive active-run list so **Attach** and **Kill** still work for automation-owned commands.
   - **Tests:** added schedule route coverage for default vs inclusive active-run responses, plus runner/status monitor unit coverage for scheduled restore skips and inclusive manual-attach recovery.
 
+- **Nmap Vulners findings** — Nmap `vulners` script CVE rows and exploit rows are now recorded as findings instead of plain transcript text.
+  - **Fix:** the output classifier marks Vulners CVE rows and `*EXPLOIT*` rows as findings, keeps the affected Nmap host, port, and service as finding context, filters `vulners.com` reference links out of Atlas entities, groups exploit-only reference rows by affected service, and maps the numeric Vulners score to info, low, medium, high, or critical severity. AI summary context now relies on those persisted grouped findings, includes a compact exploit-backed findings section, corrects provider text that says there are no actionable findings when persisted findings exist, and skips raw Nmap Vulners reference rows in the transcript tail.
+  - **Tests:** added backend coverage for Nmap Vulners signal classification, affected-service context, persisted score-to-severity mapping, grouped findings in AI summary context, compact exploit-backed AI context, "No actionable findings" correction, and transcript-tail filtering for raw Vulners rows.
+
 - **Workspace command output files can be rewritten after permission repair** — scanner-owned output files no longer get stranded as zero-byte, read-only targets after a restart or failed write.
   - **Root cause:** command output targets were prepared with a direct appuser `chmod`, which could not repair files already owned by the `scanner` user.
   - **Fix:** write-target preparation now falls back through the validated scanner sudo path and restores `0660` permissions before launching the command.

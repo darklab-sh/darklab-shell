@@ -39,7 +39,7 @@ _OPEN_PORT_COUNT_RE = re.compile(
     r"\b(?P<count>\d{1,4})\s+open\s+(?:tcp\s+|udp\s+)?ports?\b(?:\s*\([^)]*\))?",
     re.IGNORECASE,
 )
-_NO_FINDINGS_RE = re.compile(r"\bno\s+findings?\b", re.IGNORECASE)
+_NO_FINDINGS_RE = re.compile(r"\bno\s+(?:actionable\s+)?findings?\b", re.IGNORECASE)
 
 
 def run(
@@ -103,6 +103,11 @@ def _message_content(context: dict, *, source_targets: set[str] | None = None) -
     run_value = context.get("run")
     run: dict = run_value if isinstance(run_value, dict) else {}
     findings = context.get("findings") if isinstance(context.get("findings"), list) else []
+    exploit_backed = (
+        context.get("exploit_backed_findings")
+        if isinstance(context.get("exploit_backed_findings"), list)
+        else []
+    )
     warnings_errors = context.get("warnings_errors") if isinstance(context.get("warnings_errors"), list) else []
     transcript_tail = context.get("transcript_tail") if isinstance(context.get("transcript_tail"), list) else []
     lines = [
@@ -135,6 +140,12 @@ def _message_content(context: dict, *, source_targets: set[str] | None = None) -
             lines.append(f"- {finding.get('line_number')}: {finding_text}")
     else:
         lines.append("- none")
+    if exploit_backed:
+        lines.append("exploit_backed_findings:")
+        for finding in exploit_backed:
+            if not isinstance(finding, dict):
+                continue
+            lines.append(f"- {_exploit_backed_line(finding)}")
     if warnings_errors:
         lines.append("warnings_errors:")
         for item in warnings_errors:
@@ -151,6 +162,30 @@ def _message_content(context: dict, *, source_targets: set[str] | None = None) -
         lines.append("- none")
     lines.append(f"{UNTRUSTED_OUTPUT_CLOSE}")
     return "\n".join(lines)
+
+
+def _exploit_backed_line(finding: dict) -> str:
+    subject = " ".join(
+        str(part)
+        for part in (
+            finding.get("target") or "",
+            finding.get("service") or "",
+        )
+        if part
+    )
+    title = str(finding.get("cve") or finding.get("title") or "").strip()
+    raw_references = finding.get("references")
+    references = raw_references if isinstance(raw_references, list) else []
+    reference_text = ", ".join(str(item) for item in references[:3] if item)
+    parts = [
+        str(finding.get("severity") or "info"),
+        subject,
+        title,
+        f"exploit_count={int(finding.get('exploit_count') or 0)}",
+    ]
+    if reference_text:
+        parts.append(f"refs={reference_text}")
+    return " ".join(part for part in parts if part)
 
 
 def _is_truncation(exc: AIClientError) -> bool:
@@ -190,6 +225,7 @@ def _fallback_result(context: dict) -> AIProviderResult:
 def merge_context_findings(payload: dict, context: dict, *, source_targets: set[str] | None = None) -> dict:
     context_findings = _context_key_findings(context)
     context_warnings = _context_warnings(context)
+    exploit_backed_count = _exploit_backed_count(context)
     aliases = source_targets or set()
     merged = []
     seen_keys: set[str] = set()
@@ -213,11 +249,23 @@ def merge_context_findings(payload: dict, context: dict, *, source_targets: set[
 
     port_count = len({key for key in seen_keys if key.startswith("port:")})
     summary = _display_summary_target_aliases(
-        _repair_text(payload.get("summary"), port_count=port_count, field="summary"),
+        _repair_text(
+            payload.get("summary"),
+            port_count=port_count,
+            finding_count=len(merged),
+            exploit_backed_count=exploit_backed_count,
+            field="summary",
+        ),
         aliases,
     )
     next_steps_hint = _display_summary_target_aliases(
-        _repair_text(payload.get("next_steps_hint"), port_count=port_count, field="next_steps_hint"),
+        _repair_text(
+            payload.get("next_steps_hint"),
+            port_count=port_count,
+            finding_count=len(merged),
+            exploit_backed_count=exploit_backed_count,
+            field="next_steps_hint",
+        ),
         aliases,
     )
     return {
@@ -254,6 +302,10 @@ def _context_key_findings(context: dict) -> list[str]:
         if not isinstance(finding, dict):
             continue
         maybe_add(finding.get("line") or finding.get("title"))
+    for finding in context.get("exploit_backed_findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        maybe_add(_exploit_backed_line(finding))
     for item in context.get("transcript_tail") or []:
         if not isinstance(item, dict):
             continue
@@ -261,6 +313,13 @@ def _context_key_findings(context: dict) -> list[str]:
         if _finding_key(str(text or "")):
             maybe_add(text)
     return findings
+
+
+def _exploit_backed_count(context: dict) -> int:
+    rows = context.get("exploit_backed_findings")
+    if not isinstance(rows, list):
+        return 0
+    return sum(1 for row in rows if isinstance(row, dict))
 
 
 def _context_warnings(context: dict) -> list[str]:
@@ -288,8 +347,17 @@ def _finding_key(text: str) -> str:
     return ""
 
 
-def _repair_text(text: object, *, port_count: int, field: str) -> str:
+def _repair_text(text: object, *, port_count: int, finding_count: int, exploit_backed_count: int, field: str) -> str:
     cleaned = " ".join(str(text or "").split())
+    has_no_findings_claim = bool(_NO_FINDINGS_RE.search(cleaned))
+    if has_no_findings_claim and finding_count > 0:
+        if field == "next_steps_hint":
+            if exploit_backed_count > 0:
+                return "Review exploit-backed findings and prioritize affected services."
+            return "Review the reported findings and prioritize follow-up."
+        if exploit_backed_count > 0:
+            return "The scan found exploit-backed findings."
+        return "The scan found actionable findings."
     cleaned = _NO_FINDINGS_RE.sub("no actionable issues", cleaned)
     if port_count <= 0:
         return cleaned

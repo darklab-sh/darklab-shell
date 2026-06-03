@@ -32,6 +32,8 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 No open TODOs are currently tracked.
 
+---
+
 ## Known Issues
 
 No known issues are currently tracked.

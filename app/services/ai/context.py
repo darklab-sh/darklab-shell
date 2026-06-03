@@ -23,6 +23,7 @@ from services.secrets.storage import list_secret_metadata
 from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 
 _SECRET_NAME_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9_]{0,63}\b")
+_NMAP_VULNERS_TRANSCRIPT_RE = re.compile(r"^\|_?\s+\S+\s+(?:10(?:\.0)?|[0-9](?:\.\d)?)\s+https://vulners\.com/\S+", re.I)
 _TRANSCRIPT_PRIORITY_ROLES = {
     LineRole.denied,
     LineRole.exit_fail,
@@ -38,7 +39,10 @@ _SUMMARY_MAX_INPUT_CHARS = 4000
 _NEXT_COMMANDS_TAIL_LINES = 25
 _NEXT_COMMANDS_MAX_INPUT_CHARS = 5000
 _SUMMARY_FINDING_LINE_CHARS = 200
+_EXPLOIT_BACKED_FINDING_LIMIT = 8
+_EXPLOIT_BACKED_REFERENCE_LIMIT = 5
 _MIN_USEFUL_CHARS = 200
+_SEVERITY_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
 
 log = logging.getLogger("shell")
 
@@ -121,7 +125,7 @@ def build_run_context(
         variant=variant,
     )
     drop_order = (
-        ("transcript_tail", "warnings_errors", "findings")
+        ("transcript_tail", "warnings_errors", "findings", "exploit_backed_findings")
         if variant == "summary"
         else (
             "project_context",
@@ -130,6 +134,7 @@ def build_run_context(
             "transcript_tail",
             "entities",
             "findings",
+            "exploit_backed_findings",
         )
         if variant == "next_commands"
         else (
@@ -206,6 +211,12 @@ def _assemble_context(
                 "output_truncated": run_context["output_truncated"],
             }, redaction_rules, secret_names, active_cfg),
             "findings": _redact_value(_summary_findings(findings), redaction_rules, secret_names, active_cfg),
+            "exploit_backed_findings": _redact_value(
+                _exploit_backed_findings(findings),
+                redaction_rules,
+                secret_names,
+                active_cfg,
+            ),
             "warnings_errors": _redact_value(_warning_error_lines(events), redaction_rules, secret_names, active_cfg),
             "transcript_tail": _redact_events(
                 _transcript_tail(events, limit=_SUMMARY_TAIL_LINES),
@@ -226,6 +237,12 @@ def _assemble_context(
                 "output_truncated": run_context["output_truncated"],
             }, redaction_rules, secret_names, active_cfg),
             "findings": _redact_value(_summary_findings(findings), redaction_rules, secret_names, active_cfg),
+            "exploit_backed_findings": _redact_value(
+                _exploit_backed_findings(findings),
+                redaction_rules,
+                secret_names,
+                active_cfg,
+            ),
             "warnings_errors": _redact_value(_warning_error_lines(events), redaction_rules, secret_names, active_cfg),
             "entities": _redact_value(_compact_entities(entities, limit_per_type=25), redaction_rules, secret_names, active_cfg),
             "project_context": _redact_value(project_context[:25], redaction_rules, secret_names, active_cfg),
@@ -531,21 +548,113 @@ def _summary_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _exploit_backed_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for finding in findings:
+        parsed = _parse_nmap_vulners_exploit_finding(finding)
+        if parsed:
+            rows.append(parsed)
+    rows.sort(
+        key=lambda row: (
+            -_SEVERITY_RANK.get(str(row.get("severity") or "").lower(), 0),
+            -int(row.get("exploit_count") or 0),
+            int(row.get("line_number") or 0),
+        )
+    )
+    return rows[:_EXPLOIT_BACKED_FINDING_LIMIT]
+
+
+def _parse_nmap_vulners_exploit_finding(finding: dict[str, Any]) -> dict[str, Any] | None:
+    line = " ".join(str(finding.get("line") or "").split())
+    if not line.startswith("Nmap Vulners: "):
+        return None
+
+    cve = ""
+    title = "Public exploit references available"
+    subject = ""
+    if line.startswith("Nmap Vulners: Public exploit references available for "):
+        subject = line.removeprefix("Nmap Vulners: Public exploit references available for ").split(" (", 1)[0]
+    else:
+        cve_match = re.match(r"^Nmap Vulners: (?P<cve>CVE-\d{4}-\d+) affects (?P<subject>.+?) \(", line, re.I)
+        if not cve_match:
+            return None
+        cve = str(cve_match.group("cve") or "").upper()
+        subject = str(cve_match.group("subject") or "")
+        title = f"{cve} exploit references"
+
+    service, target = _split_nmap_vulners_subject(subject)
+    references, hidden_count = _nmap_vulners_references(line)
+    if not references and hidden_count <= 0:
+        return None
+    severity = str(finding.get("severity") or _nmap_vulners_grouped_severity(line) or "info").lower()
+    score = _nmap_vulners_grouped_score(line)
+    return {
+        "severity": severity,
+        "target": target,
+        "service": service,
+        "cve": cve,
+        "title": title,
+        "cvss_score": score,
+        "exploit_count": len(references) + hidden_count,
+        "references": references[:_EXPLOIT_BACKED_REFERENCE_LIMIT],
+        "line_number": finding.get("line_number"),
+    }
+
+
+def _split_nmap_vulners_subject(subject: str) -> tuple[str, str]:
+    service, separator, target = str(subject or "").rpartition(" on ")
+    if not separator:
+        return "", str(subject or "").strip()
+    return service.strip(), target.strip()
+
+
+def _nmap_vulners_references(line: str) -> tuple[list[str], int]:
+    if "; public exploit references: " in line:
+        reference_text = line.split("; public exploit references: ", 1)[1]
+    elif "; references: " in line:
+        reference_text = line.split("; references: ", 1)[1]
+    else:
+        return [], 0
+    references: list[str] = []
+    hidden_count = 0
+    for raw_item in reference_text.split(";"):
+        item = raw_item.strip()
+        if not item:
+            continue
+        more_match = re.match(r"^\+(?P<count>\d+) more$", item)
+        if more_match:
+            hidden_count += int(more_match.group("count"))
+            continue
+        references.append(item)
+    return references, hidden_count
+
+
+def _nmap_vulners_grouped_severity(line: str) -> str:
+    match = re.search(r"\bseverity\s+(critical|high|medium|low|info)\b", line, re.I)
+    return str(match.group(1) or "").lower() if match else ""
+
+
+def _nmap_vulners_grouped_score(line: str) -> float | None:
+    match = re.search(r"\b(?:max\s+)?CVSS score (?P<score>10(?:\.0)?|[0-9](?:\.\d)?)\b", line, re.I)
+    return float(match.group("score")) if match else None
+
+
 def _transcript_tail(events: list[LineEvent], *, limit: int = _DEFAULT_TAIL_LINES) -> list[LineEvent]:
     if len(events) <= limit:
-        return events
+        return [event for event in events if not _is_noisy_nmap_vulners_event(event)]
+    eligible_events = [event for event in events if not _is_noisy_nmap_vulners_event(event)]
     primary = [
-        event for event in events
+        event for event in eligible_events
         if any(signal in {LineSignal.findings, LineSignal.summaries} for signal in event.signals)
     ]
     secondary = [
-        event for event in events
+        event for event in eligible_events
         if event.kind in {LineKind.warn, LineKind.error}
         or event.role in _TRANSCRIPT_PRIORITY_ROLES
         or any(signal in {LineSignal.warnings, LineSignal.errors} for signal in event.signals)
     ]
     low_value = {LineRole.progress, LineRole.status_line}
-    tail = [event for event in events[-limit:] if event.role not in low_value]
+    tail = [event for event in eligible_events[-limit:] if event.role not in low_value]
     selected: list[LineEvent] = []
     seen: set[int] = set()
 
@@ -564,6 +673,10 @@ def _transcript_tail(events: list[LineEvent], *, limit: int = _DEFAULT_TAIL_LINE
     append_group(secondary)
     append_group(tail)
     return sorted(selected, key=lambda event: event.line_index if event.line_index is not None else 0)
+
+
+def _is_noisy_nmap_vulners_event(event: LineEvent) -> bool:
+    return event.command_root == "nmap" and bool(_NMAP_VULNERS_TRANSCRIPT_RE.match(event.text.strip()))
 
 
 def _warning_error_lines(events: list[LineEvent]) -> list[dict[str, Any]]:
@@ -649,6 +762,7 @@ def _useful_context_chars(context: dict[str, Any]) -> int:
     text = json.dumps({
         "run": context.get("run", {}),
         "findings": context.get("findings", []),
+        "exploit_backed_findings": context.get("exploit_backed_findings", []),
         "entities": context.get("entities", {}),
         "transcript_tail": context.get("transcript_tail", []),
     }, ensure_ascii=False, sort_keys=True)

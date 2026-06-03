@@ -743,6 +743,22 @@ def _finding_severity_from_text(text):
     phrase_match = re.search(r"\b(info|low|medium|high|critical)\s+severity\b", raw_text, re.I)
     if phrase_match:
         return phrase_match.group(1).lower()
+    vulners_match = re.search(
+        r"^\|_?\s+\S+\s+(10(?:\.0)?|[0-9](?:\.\d)?)\s+https://vulners\.com/\S+",
+        raw_text.strip(),
+        re.I,
+    )
+    if vulners_match:
+        score = float(vulners_match.group(1))
+        if score >= 9.0:
+            return "critical"
+        if score >= 7.0:
+            return "high"
+        if score >= 4.0:
+            return "medium"
+        if score > 0:
+            return "low"
+        return "info"
     cvss_match = re.search(r"\bcvss\b[^\n\r]{0,32}\bscore\b\s*[:=]?\s*(10(?:\.0)?|[0-9](?:\.\d)?)\b", raw_text, re.I)
     if not cvss_match:
         return ""
@@ -756,6 +772,189 @@ def _finding_severity_from_text(text):
     if score > 0:
         return "low"
     return "info"
+
+
+_NMAP_VULNERS_ROW_RE = re.compile(
+    r"^\|_?\s+(?P<id>\S+)\s+(?P<score>10(?:\.0)?|[0-9](?:\.\d)?)\s+"
+    r"(?P<url>https://vulners\.com/\S+)(?P<exploit>\s+\*EXPLOIT\*)?\s*$",
+    re.I,
+)
+_NMAP_VULNERS_CVE_RE = re.compile(r"\bCVE[-_](\d{4})[-_](\d{4,})\b", re.I)
+_NMAP_VULNERS_REFERENCE_LIMIT = 20
+
+
+def _nmap_vulners_row(text: str) -> dict[str, Any] | None:
+    match = _NMAP_VULNERS_ROW_RE.match(strip_ansi_codes(str(text or "")).strip())
+    if not match:
+        return None
+    raw_id = str(match.group("id") or "")
+    cve_match = _NMAP_VULNERS_CVE_RE.search(raw_id) or _NMAP_VULNERS_CVE_RE.search(str(match.group("url") or ""))
+    return {
+        "id": raw_id,
+        "score": float(match.group("score")),
+        "url": str(match.group("url") or ""),
+        "exploit": bool(match.group("exploit")),
+        "cve": f"CVE-{cve_match.group(1)}-{cve_match.group(2)}".upper() if cve_match else "",
+    }
+
+
+def _nmap_vulners_score_severity(score: float) -> str:
+    if score >= 9.0:
+        return "critical"
+    if score >= 7.0:
+        return "high"
+    if score >= 4.0:
+        return "medium"
+    if score > 0:
+        return "low"
+    return "info"
+
+
+def _nmap_service_label(target: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(target or "")).strip()
+    match = re.match(r"^(?P<host>(?:\[[^\]]+\]|[^:\s]+)):(?P<port>\d+)\s+(?P<service>.+)$", normalized)
+    if not match:
+        return normalized
+    return f"{match.group('service')} on {match.group('host')}:{match.group('port')}"
+
+
+def _nmap_vulners_reference(row: dict[str, Any]) -> str:
+    return f"{row['id']} {row['url']}".strip()
+
+
+def _nmap_grouped_vulners_line(
+    *,
+    target: str,
+    cve: str = "",
+    score: float,
+    references: list[str],
+) -> str:
+    severity = _nmap_vulners_score_severity(score)
+    service = _nmap_service_label(target)
+    reference_items = references[:_NMAP_VULNERS_REFERENCE_LIMIT]
+    if len(references) > len(reference_items):
+        reference_items.append(f"+{len(references) - len(reference_items)} more")
+    reference_text = "; ".join(reference_items)
+    if cve:
+        return (
+            f"Nmap Vulners: {cve} affects {service} "
+            f"(CVSS score {score:g}, severity {severity}); public exploit references: {reference_text}"
+        )
+    return (
+        f"Nmap Vulners: Public exploit references available for {service} "
+        f"(max CVSS score {score:g}, severity {severity}); references: {reference_text}"
+    )
+
+
+def _group_nmap_vulners_entries(entries: list[Any]) -> list[Any]:
+    if not entries:
+        return entries
+
+    result: list[Any] = []
+    cve_groups: dict[tuple[str, str], dict[str, Any]] = {}
+    public_groups: dict[str, dict[str, Any]] = {}
+
+    def line_index_for(entry: dict[str, Any], fallback: int) -> int:
+        value = entry.get("line_index")
+        return value if isinstance(value, int) else fallback
+
+    for fallback_index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            result.append(entry)
+            continue
+        row = _nmap_vulners_row(str(entry.get("text") or ""))
+        if not row:
+            result.append(entry)
+            continue
+        signals = entry.get("signals")
+        signal_values = {str(signal) for signal in signals} if isinstance(signals, list) else set()
+        if "findings" not in signal_values:
+            result.append(entry)
+            continue
+
+        target = re.sub(r"\s+", " ", str(entry.get("target") or "")).strip()
+        index = line_index_for(entry, fallback_index)
+        if row["cve"]:
+            key = (target, row["cve"])
+            group = cve_groups.setdefault(
+                key,
+                {
+                    "entry": entry,
+                    "target": target,
+                    "cve": row["cve"],
+                    "score": row["score"],
+                    "references": [],
+                    "line_index": index,
+                    "entities": entry.get("entities"),
+                },
+            )
+            group["score"] = max(float(group["score"]), float(row["score"]))
+            group["line_index"] = min(int(group["line_index"]), index)
+            if row["exploit"]:
+                group["references"].append(_nmap_vulners_reference(row))
+            continue
+
+        if not row["exploit"]:
+            result.append(entry)
+            continue
+        group = public_groups.setdefault(
+            target,
+            {
+                "entry": entry,
+                "target": target,
+                "score": row["score"],
+                "references": [],
+                "line_index": index,
+                "entities": entry.get("entities"),
+            },
+        )
+        group["score"] = max(float(group["score"]), float(row["score"]))
+        group["line_index"] = min(int(group["line_index"]), index)
+        group["references"].append(_nmap_vulners_reference(row))
+
+    grouped_entries: list[tuple[int, dict[str, Any]]] = []
+    for group in cve_groups.values():
+        references = [str(item) for item in group["references"] if str(item)]
+        if not references:
+            grouped_entries.append((int(group["line_index"]), group["entry"]))
+            continue
+        entry = dict(group["entry"])
+        entry["line_index"] = int(group["line_index"])
+        entry["target"] = group["target"]
+        entry["text"] = _nmap_grouped_vulners_line(
+            target=str(group["target"]),
+            cve=str(group["cve"]),
+            score=float(group["score"]),
+            references=references,
+        )
+        if isinstance(group.get("entities"), list):
+            entry["entities"] = group["entities"]
+        grouped_entries.append((int(group["line_index"]), entry))
+
+    for group in public_groups.values():
+        references = [str(item) for item in group["references"] if str(item)]
+        if not references:
+            continue
+        entry = dict(group["entry"])
+        entry["line_index"] = int(group["line_index"])
+        entry["target"] = group["target"]
+        entry["text"] = _nmap_grouped_vulners_line(
+            target=str(group["target"]),
+            score=float(group["score"]),
+            references=references,
+        )
+        if isinstance(group.get("entities"), list):
+            entry["entities"] = group["entities"]
+        grouped_entries.append((int(group["line_index"]), entry))
+
+    if not grouped_entries:
+        return result
+    grouped_entries.sort(key=lambda item: item[0])
+    result.extend(entry for _index, entry in grouped_entries)
+    return sorted(
+        result,
+        key=lambda item: item.get("line_index", 0) if isinstance(item, dict) and isinstance(item.get("line_index"), int) else 0,
+    )
 
 
 def _finding_fingerprint(run_id, line_index, text):
@@ -776,6 +975,15 @@ def _finding_signature(tool_root, kind, severity, normalized_signal_key, subject
 
 def _normalize_finding_signal_key(text):
     return re.sub(r"\s+", " ", strip_ansi_codes(str(text or ""))).strip().lower()[:512]
+
+
+def _nmap_service_subject_from_entry(entry: dict[str, Any], tool_root: str) -> str:
+    if tool_root != "nmap":
+        return ""
+    target = re.sub(r"\s+", " ", str(entry.get("target") or "")).strip().lower()
+    if not target or not re.match(r"^(?:\[[^\]]+\]|[^:\s]+):\d+\s+\S+", target):
+        return ""
+    return f"nmap-service:{target}"[:512]
 
 
 def _entry_primary_entity(conn, session_id, entry, seen_at, *, team_id=""):
@@ -848,8 +1056,10 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
     conn.execute("DELETE FROM findings_occurrences WHERE run_id = ?", (run_id,))
     recorded = []
     seen_fingerprints = set()
-    entry_items = entries if isinstance(entries, list) else []
     tool_root = command_root(run["command"])
+    entry_items = entries if isinstance(entries, list) else []
+    if tool_root == "nmap":
+        entry_items = _group_nmap_vulners_entries(entry_items)
     for fallback_index, entry in enumerate(entry_items):
         if not isinstance(entry, dict):
             continue
@@ -877,7 +1087,9 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
             severity = "high"
         entity_id, entity_sig = _entry_primary_entity(conn, session_id, entry, created, team_id=team_id)
         signal_key = _normalize_finding_signal_key(raw_line)
-        subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{signal_key}"
+        subject_key = _nmap_service_subject_from_entry(entry, tool_root)
+        if not subject_key:
+            subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{signal_key}"
         signature_hash = _finding_signature(tool_root, "finding", severity, signal_key, subject_key)
         if team_id:
             row = conn.execute(
