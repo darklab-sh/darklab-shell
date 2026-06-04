@@ -797,3 +797,97 @@ async function loadSessionVariables() {
   }
   return sessionVariables;
 }
+
+// ── Output-context grep suggestions ──
+// When the prompt is inside a `| grep ` pipe stage we offer tokens that already
+// appear in the active tab's output (IPs, hostnames, CVE IDs, HTTP status codes,
+// and frequently repeated words) as grep patterns. These are drawn ONLY from the
+// active tab and never widen the allowed shell surface beyond the grep pipe helper.
+
+const GREP_OUTPUT_TOKEN_LIMIT = 12;
+
+function _isValidIpv4Octets(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((part) => {
+    if (!/^\d{1,3}$/.test(part)) return false;
+    const n = Number(part);
+    return n >= 0 && n <= 255;
+  });
+}
+
+// Ordered by tier: earlier kinds claim a token first, so a CVE id is never also
+// surfaced as a bare word, and IP octets never leak as HTTP status codes.
+const _GREP_TOKEN_KINDS = [
+  { kind: 'cve', tier: 0, minCount: 1, ci: true, re: /CVE-\d{4}-\d{4,7}/gi },
+  { kind: 'ipv4', tier: 1, minCount: 1, re: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, validate: _isValidIpv4Octets },
+  // Matches full 8-group and `::`-compressed IPv6; requires either form so it
+  // does not match clock timestamps such as 12:34:56.
+  { kind: 'ipv6', tier: 2, minCount: 1, ci: true, re: /\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?:[0-9a-f]{1,4}:)+:(?:[0-9a-f]{1,4}:?)*[0-9a-f]{1,4}|::(?:[0-9a-f]{1,4}:?)*[0-9a-f]{1,4}/gi },
+  { kind: 'host', tier: 3, minCount: 1, ci: true, re: /\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b/gi },
+  { kind: 'status', tier: 4, minCount: 2, re: /(?<![\d.])[1-5]\d{2}(?![\d.])/g },
+  { kind: 'word', tier: 5, minCount: 3, ci: true, re: /\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b/g },
+];
+
+// Extract ranked candidate tokens from arbitrary output text. Pure and
+// DOM-free so it is straightforward to unit test. Returns token strings in
+// tier order, each tier internally ordered by descending occurrence count.
+function extractGrepOutputTokens(text, maxItems = GREP_OUTPUT_TOKEN_LIMIT) {
+  const source = String(text || '');
+  if (!source.trim()) return [];
+  const claimed = new Set();
+  const ranked = [];
+  _GREP_TOKEN_KINDS.forEach((def) => {
+    const counts = new Map();
+    def.re.lastIndex = 0;
+    let match;
+    while ((match = def.re.exec(source)) !== null) {
+      const raw = match[0];
+      if (def.validate && !def.validate(raw)) continue;
+      const key = def.ci ? raw.toLowerCase() : raw;
+      if (claimed.has(key)) continue;
+      const entry = counts.get(key);
+      if (entry) entry.count += 1;
+      else counts.set(key, { text: raw, count: 1 });
+    }
+    const kindTokens = [...counts.values()]
+      .filter((entry) => entry.count >= def.minCount)
+      .sort((a, b) => b.count - a.count || a.text.localeCompare(b.text));
+    kindTokens.forEach((entry) => {
+      claimed.add(def.ci ? entry.text.toLowerCase() : entry.text);
+      ranked.push(entry.text);
+    });
+  });
+  return ranked.slice(0, Math.max(0, maxItems));
+}
+
+// Read the active tab's rendered output text, excluding the echoed command
+// lines so we suggest from results, not from the user's own typed commands.
+function _activeTabOutputText() {
+  if (typeof getOutput !== 'function') return '';
+  const id = typeof activeTabId !== 'undefined' ? activeTabId : null;
+  if (!id) return '';
+  const out = getOutput(id);
+  if (!out || typeof out.querySelectorAll !== 'function') return '';
+  return Array.from(out.querySelectorAll('.line'))
+    .filter((line) => line instanceof Element && !line.classList.contains('prompt-echo'))
+    .map((line) => line.textContent || '')
+    .join('\n');
+}
+
+// Build grep argument suggestions from the active tab's output. The caller is
+// responsible for confirming the completion is inside a grep pipe stage.
+function getGrepOutputSuggestions(ctx, buildItem, filterItems, maxItems = GREP_OUTPUT_TOKEN_LIMIT) {
+  if (!ctx || typeof buildItem !== 'function' || typeof filterItems !== 'function') return [];
+  const tokens = extractGrepOutputTokens(_activeTabOutputText(), maxItems);
+  if (!tokens.length) return [];
+  const items = tokens.map((token) => buildItem({
+    value: token,
+    label: token,
+    description: 'From active tab output',
+    replaceStart: ctx.tokenStart,
+    replaceEnd: ctx.tokenEnd,
+    insertValue: token,
+  }));
+  return filterItems(items, ctx.currentToken);
+}

@@ -38,6 +38,24 @@ function _stripTabExportAnsi(text) {
   return String(text ?? '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 }
 
+function _commandOutcomeSummariesEnabledForExport() {
+  if (typeof getCommandOutcomeSummariesPreference === 'function') {
+    return getCommandOutcomeSummariesPreference() !== 'off';
+  }
+  const cookie = typeof document !== 'undefined' ? String(document.cookie || '') : '';
+  return !/(?:^|;\s*)pref_command_outcome_summaries=off(?:;|$)/.test(cookie);
+}
+
+function _appendTabCommandOutcomeSummaryLines(tab, lines) {
+  if (!window.ExportHtmlUtils || typeof ExportHtmlUtils.appendCommandOutcomeSummaryLines !== 'function') {
+    return _normalizeTabTranscriptLines(lines);
+  }
+  return ExportHtmlUtils.appendCommandOutcomeSummaryLines(lines, {
+    command: tab && tab.command || '',
+    enabled: _commandOutcomeSummariesEnabledForExport(),
+  });
+}
+
 function copyTab(id) {
   const t = getTab(id);
   const lines = _getExportableRawLines(t);
@@ -46,7 +64,8 @@ function copyTab(id) {
     _refocusAfterTabAction();
     return;
   }
-  const text = lines.map(line => _stripTabExportAnsi(line.text)).join('\n');
+  const exportLines = _appendTabCommandOutcomeSummaryLines(t, lines);
+  const text = exportLines.map(line => _stripTabExportAnsi(line.text)).join('\n');
   copyTextToClipboard(text)
     .then(() => showToast('Copied to clipboard'))
     .catch(() => showToast('Failed to copy', 'error'))
@@ -63,7 +82,8 @@ function saveTab(id) {
     _refocusAfterTabAction();
     return;
   }
-  const text = lines.map(line => _stripTabExportAnsi(line.text)).join('\n');
+  const exportLines = _appendTabCommandOutcomeSummaryLines(t, lines);
+  const text = exportLines.map(line => _stripTabExportAnsi(line.text)).join('\n');
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const blob = new Blob([text], { type: 'text/plain' });
   downloadBlobAsAttachment(blob, `${APP_CONFIG.app_name || 'shell'}-${ts}.txt`);
@@ -73,6 +93,11 @@ function saveTab(id) {
 // Returns the gutter prefix for a raw line, respecting the current tsMode/lnMode
 // toggles so exports match what the user sees in the terminal.
 function _exportPrefix(line, zeroBasedIndex) {
+  if (window.ExportHtmlUtils
+      && typeof ExportHtmlUtils.isCommandOutcomeSummaryLine === 'function'
+      && ExportHtmlUtils.isCommandOutcomeSummaryLine(line)) {
+    return '';
+  }
   const parts = [];
   if (typeof lnMode !== 'undefined' && lnMode === 'on') {
     const absoluteLineNumber = Number(line && line.line_number || 0);
@@ -129,6 +154,7 @@ function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } =
   const normalizedCreatedText = String(createdText || new Date().toLocaleString());
   const rawLines = omitRawOnly ? _omitRawOnlyExportLines(tab && tab.rawLines) : (tab && tab.rawLines);
   if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
+    const normalizedRawLineCount = _normalizeTabTranscriptLines(rawLines).length;
     return ExportHtmlUtils.buildExportDocumentModel({
       appName: APP_CONFIG.app_name || 'darklab_shell',
       title: String(tab && tab.label || ''),
@@ -137,10 +163,12 @@ function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } =
       runMeta: {
         exitCode: tab ? tab.exitCode : null,
         duration: null,
-        lines: `${_normalizeTabTranscriptLines(rawLines).length} lines`,
+        lines: `${normalizedRawLineCount} lines`,
         version: APP_CONFIG.version || null,
       },
       rawLines,
+      command: tab && tab.command || '',
+      includeCommandOutcomeSummary: _commandOutcomeSummariesEnabledForExport(),
     });
   }
   const normalizedRawLines = _normalizeTabTranscriptLines(rawLines);
@@ -276,7 +304,22 @@ function _shareSnapshotLabel(tab) {
   return latestCommand || customLabel || 'snapshot';
 }
 
+function _canCreateShareSnapshot() {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
+function _shareSnapshotDeniedMessage() {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage('create team history snapshots')
+    : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+}
+
 async function permalinkTab(id) {
+  if (!_canCreateShareSnapshot()) {
+    showToast(_shareSnapshotDeniedMessage(), 'error');
+    refocusComposerAfterAction();
+    return;
+  }
   const t = getTab(id);
   if (!t || !t.rawLines.length) {
     showToast('No output to share yet');

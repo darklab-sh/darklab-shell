@@ -33,7 +33,7 @@ export async function setupWelcomePage(page) {
       body: JSON.stringify({ runs: [] }),
     })
   })
-  await page.route('**/history/active', (route) => {
+  await page.route('**/history/active**', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'application/json',

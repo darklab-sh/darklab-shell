@@ -70,8 +70,8 @@ The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side setti
 
 Resolution order is:
 
-1. command flags: `--api-url`, `--token`, and `--timeout`
-2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, and `DARKLAB_TIMEOUT`
+1. command flags: `--api-url`, `--token`, `--team`, and `--timeout`
+2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, and `DARKLAB_TIMEOUT`
 3. `~/.config/darklab/config.toml`
 4. built-in defaults
 
@@ -80,10 +80,11 @@ Example:
 ```toml
 api_url = "https://shell.example.com"
 token = "tok_your_session_token"
+team = "team_optional_scope"
 timeout = 30
 ```
 
-`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally.
+`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally. When the CLI writes this file, it keeps owner-only `0600` permissions because the file can store a session token and active team scope.
 
 Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
@@ -115,7 +116,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `ai_provider` | `openai_compatible` | Provider contract for AI assists. The current foundation uses OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints |
 | `ai_base_url` | _(empty)_ | Base URL for the AI provider, such as a llama.cpp, Ollama, vLLM, LiteLLM, or hosted OpenAI-compatible endpoint |
 | `ai_model` | _(empty)_ | Model name sent to the provider and checked by `/diag` against `/v1/models` |
-| `ai_api_key_secret_name` | _(empty)_ | Optional session vault secret name to use when an AI request has a session context |
+| `ai_api_key_secret_name` | _(empty)_ | Optional personal/team vault secret name to use when an AI request has a session context |
 | `ai_api_key` | _(empty)_ | Optional process/config fallback API key. Local unauthenticated providers usually leave this empty |
 | `ai_connect_timeout_seconds` | `5` | Provider TCP connect timeout |
 | `ai_timeout_seconds` | `120` | Provider read timeout. Local CPU models can need longer than normal HTTP calls, and AI assists run in the worker path rather than tying up a route worker |
@@ -133,7 +134,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `ai_feature_summary` | `false` | Feature flag for Run Details AI summaries |
 | `ai_feature_next_commands` | `false` | Feature flag for Run Details AI next-command drafts. Accepted suggestions can be copied after validation |
 | `ai_feature_run_suggestions` | `false` | Feature flag for Run buttons on accepted AI suggestions. The button submits through the normal composer path, so command policy still applies |
-| `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
+| `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved. In Compose deployments, `RESTRICTED_COMMAND_INPUT_CIDRS` overrides this value and also feeds the scanner-user egress block |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
@@ -149,6 +150,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `rate_limit_enabled` | `true` | Enables the shared `/runs` and `/api/v1` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
 | `rate_limit_per_minute` | `30` | Max `/runs` and `/api/v1` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/runs` and `/api/v1` requests per second per IP |
+| `team_read_rate_limit_per_minute` | `180` | Max team-management read requests per minute. The Options Teams tab, desktop HUD scope selector, mobile scope selector, and `/api/v1/teams` list/detail routes use this token-keyed limit |
+| `team_read_rate_limit_per_second` | `20` | Max team-management read requests per second for the same read surfaces |
+| `team_write_rate_limit_per_minute` | `30` | Max team-management write requests per minute for create, join, invite, membership, archive/reactivate, leave, and recovery-code changes |
 | `intel_cache_ttl_shodan_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Shodan IP responses |
 | `intel_cache_ttl_shodan_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Shodan search responses |
 | `intel_cache_ttl_censys_host_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Censys host responses |
@@ -220,6 +224,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_negative_cache_securitytrails_quota_seconds` | `21600` | Server-side only. Fallback cache window for SecurityTrails quota-exhausted responses when no reset time is available |
 | `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
 | `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
+| `interactive_pty_resize_rate_limit_per_minute` | `600` | Max interactive PTY resize requests per minute per IP. This is separate from `/runs` because normal browser layout changes can produce short resize bursts |
+| `interactive_pty_resize_rate_limit_per_second` | `30` | Max interactive PTY resize request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |
 | `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the saved run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` means unlimited |
 | `high_volume_output_line_threshold` | `50000` | Browser-facing. Pauses live rendering for brokered command output after this many received lines. Output keeps counting, kill controls stay available, and backend preview/full-output storage still follows the normal output settings. `0` disables the pause |
@@ -227,24 +233,42 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
-| `workspace_enabled` | `false` | Server-side only. Enables the app-managed per-session workspace foundation. This does not enable shell navigation or redirection by itself |
-| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. The label does not mount storage by itself |
-| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed per-session workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
-| `workspace_quota_mb` | `50 MB` | Server-side only. Per-session workspace quota |
+| `workspace_enabled` | `false` | Server-side only. Enables app-managed personal and team Files. This does not enable shell navigation or redirection by itself |
+| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. Team Files on `tmpfs` are single-container scratch space and disappear on restart; use `volume` for durable shared team Files |
+| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed personal `sess_*` and team `team_*` workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
+| `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace |
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
 | `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
 | `max_project_entities_per_project` | `5000` | Server-side only. Maximum Atlas entities linked into one project |
+| `max_project_auto_promote_preview_matches` | `200` | Server-side only. Maximum matches returned by one auto-promote rule preview. API callers can request fewer matches with `limit`, but not more than this configured cap |
+| `max_project_auto_promote_scan_candidates` | `5000` | Server-side only. Maximum Atlas entity candidates scanned for match modes that cannot be fully filtered in SQL, such as CIDR |
+| `max_project_auto_promote_apply_matches` | `1000` | Server-side only. Maximum links one manual auto-promote apply can create. API callers can request a smaller apply window with `limit`, but not more than this configured cap |
+| `max_project_auto_promote_run_matches` | `100` | Server-side only. Maximum Atlas entity matches one auto-promote rule can apply from a single completed run |
+| `max_project_auto_promote_rules_per_run` | `50` | Server-side only. Maximum enabled auto-promote rules evaluated for one completed run |
+| `max_project_auto_promote_rules_per_project` | `100` | Server-side only. Maximum auto-promote rules stored for one project. `0` means unlimited |
+| `project_auto_promote_preview_rate_limit_per_minute` | `30` | Server-side only. Per-session rate limit for auto-promote preview requests |
+| `project_auto_promote_preview_rate_limit_per_second` | `2` | Server-side only. Per-session burst limit for auto-promote preview requests |
+| `atlas_import_max_upload_mb` | `10 MB` | Server-side only. Maximum uploaded file size for one Atlas import preview |
+| `atlas_import_max_rows` | `5000` | Server-side only. Maximum parsed rows accepted for one Atlas import preview or apply |
+| `atlas_import_max_findings` | `5000` | Server-side only. Maximum normalized findings accepted for one Atlas import |
+| `atlas_import_max_warnings` | `100` | Server-side only. Maximum row warnings retained while parsing one Atlas import |
+| `atlas_import_max_xml_elements` | `100000` | Server-side only. Maximum XML elements streamed by one XML Atlas import parser before rejection |
+| `atlas_import_preview_sample_limit` | `20` | Server-side only. Maximum entity and finding sample rows returned in one Atlas import preview response |
+| `atlas_import_warning_sample_limit` | `50` | Server-side only. Maximum warning samples returned in one Atlas import preview and stored on draft/batch metadata |
+| `atlas_import_draft_ttl_minutes` | `30` | Server-side only. Time window in minutes before an unapplied Atlas import draft is treated as abandoned and cleaned up |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
 | `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
+| `max_finding_triage_details_per_owner` | `5000` | Server-side only. Maximum finding remediation/verification detail records one personal session or team owner can create |
 | `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
+| `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped presets |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior. See [docs/notifications.md](docs/notifications.md) for channel setup |
@@ -343,7 +367,7 @@ Each chapter supports:
 - `id` - stable chapter identifier used by both renderers
 - `title` - short display title
 - `summary` - end-user copy for the chapter
-- `sample` - optional command-chip value for the terminal `tour` command; terminal samples open in a new tab, while the visual tour may replace this with an app action such as opening History, Workflows, Projects, Files, Options, or FAQ
+- `sample` - optional command-chip value for the terminal `tour` command; terminal samples open in a new tab, while the visual tour may replace this with an app action such as opening History, Workflows, Projects, Teams, Files, Options, or FAQ
 - `illustration` - optional key for the visual tour renderer
 - `requires` - optional exact config key such as `workspace_enabled` or `interactive_pty_enabled`; chapters are hidden when that feature is disabled
 
@@ -353,7 +377,7 @@ The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry po
 
 ## Command Registry Autocomplete
 
-`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, descriptive knowledge guidance, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
 
 ```yaml
 commands:
@@ -393,9 +417,9 @@ commands:
 
 `help.flags` marks invocations whose output should stay visible but should not create findings or Atlas entities. Help invocations also bypass required-secret preflight for that command root, so users can run safe `--help` commands before configuring provider keys. An example can opt into the default container smoke corpus with `smoke.profile: unauthenticated` when it is safe to run without provider credentials or workspace setup.
 
-`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
+`requires_secrets` names encrypted secrets from the active personal or team scope that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 
-Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current session, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row.
+Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current personal or team scope, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row. Personal secrets are not inherited by team scope; team owners and admins create shared team secrets explicitly.
 
 Inside each command's `autocomplete` block, a root can define:
 
@@ -442,6 +466,38 @@ How the keys work:
 - `pipe_helpers`
   - top-level registry entries for helpers that appear after `command |`
   - each helper has its own `autocomplete.pipe.enabled`, flags, arguments, and optional insert/display metadata
+
+### Command Knowledge
+
+A command root can carry an optional `knowledge` block — operator guidance shown in `commands info <root>`, `commands search`, and the Command Registry modal. It is a sibling of `autocomplete`, not nested inside it:
+
+```yaml
+commands:
+  - root: nmap
+    category: Port & Service Scanning
+    knowledge:
+      notes:
+        - Runs unprivileged, so a TCP connect scan (-sT) is injected when no scan type is given.
+      gotchas:
+        - -sS, -O, and --privileged are denied because the container has no raw-socket access.
+      safe_defaults:
+        - Use -sT for connect scans and add -Pn to skip host discovery on filtered hosts.
+      common_flags:
+        - "-sT — TCP connect scan"
+        - "-sV — service/version detection"
+      artifact_behavior: With Files enabled, -oN/-oX/-oG write report files into the session workspace; raw output paths are otherwise denied.
+```
+
+How the fields work:
+
+- `notes`, `gotchas`, `safe_defaults`, `common_flags`
+  - list fields, each holding short free-text strings
+  - normalized on load: stripped, de-duplicated, empties dropped, capped at five items, each truncated to 200 characters
+- `artifact_behavior`
+  - a single short scalar string describing where the tool writes output, truncated to 200 characters
+- all `knowledge` fields are descriptive only and never affect allow/deny policy, validation, or execution
+- in a `commands.local.yaml` overlay, scalar fields replace the base value and list fields extend the base list with de-duplication
+- unknown keys inside `knowledge` are ignored on load and reported only by the registry lint helper, so an overlay typo never hard-fails the registry
 
 More examples:
 
@@ -649,6 +705,7 @@ cp .env.example .env
 ```env
 # APP_PORT=8888
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
+# RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -700,6 +757,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
+| `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -708,7 +766,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `llama`, `postgres`, or a comma-separated combination such as `llama,postgres` when you want profile-gated services included without passing `--profile` |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
-| `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted session vault when a request has session context; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
+| `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
 | `AI_CONNECT_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | Docker Compose, Flask app | Provider connect and read timeouts. Local CPU models often need a longer read timeout than normal app routes |
 | `AI_MAX_INPUT_CHARS` / `AI_MAX_OUTPUT_TOKENS` / `AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS` | Docker Compose, Flask app | Prompt input and provider output caps. Input is measured in characters. Summary and next-command assists use separate output caps because next-command JSON needs more room |
 | `AI_MAX_CONCURRENT` / `AI_MAX_QUEUE_DEPTH` | Docker Compose, Flask app | AI worker concurrency and queue/backlog limits. The bundled local profile defaults to one concurrent provider call |
@@ -724,7 +782,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
 | `DATABASE_POSTGRES_JIT` | Flask app | Optional override for `database_postgres_jit`. Leave unset or `false` for lower-latency interactive app queries |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
-| `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted per-session secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
+| `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
 | `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
 
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production overlay currently defaults `WEB_CONCURRENCY` to `8` when that variable is not set.
@@ -746,7 +804,7 @@ POSTGRES_PASSWORD=<redacted>
 DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 ```
 
-`COMPOSE_PROFILES=postgres` enables the profile-gated `postgres` service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
+`COMPOSE_PROFILES=postgres` enables the profile-gated Postgres 18 service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
 
 For the bundled llama.cpp server, include the `llama` profile:
 
@@ -769,7 +827,7 @@ LLAMA_N_PREDICT=180
 LLAMA_PARALLEL=1
 ```
 
-The llama.cpp sidecar serves the same OpenAI-compatible chat endpoint the app already uses, so `AI_PROVIDER` can stay at `openai_compatible`. The first startup downloads the configured GGUF into the `llama-cache` volume mounted at `/root/.cache`, which preserves both Hugging Face model downloads and llama.cpp cache files across container recreations. Compose passes `AI_MODEL` to `llama-server` as the model alias so `/diag` can match the configured model against `/v1/models`. The bundled profile defaults `LLAMA_PARALLEL=1` because the app already serializes local AI provider calls; using one llama-server slot makes prompt-prefix reuse more predictable on CPU-only hosts. The Compose service starts `llama-server` with `--mlock`; Docker hosts that disallow memory locking can remove or override that flag in a local Compose override. The sidecar healthcheck probes `/v1/models`, and the app container waits for that healthcheck when the `llama` profile is enabled.
+The llama.cpp sidecar serves the same OpenAI-compatible chat endpoint the app already uses, so `AI_PROVIDER` can stay at `openai_compatible`. The first startup downloads the configured GGUF into the `llama-cache` volume mounted at `/root/.cache`, which preserves both Hugging Face model downloads and llama.cpp cache files across container recreations. Compose passes `AI_MODEL` to `llama-server` as the model alias so `/diag` can match the configured model against `/v1/models`. The bundled profile defaults `LLAMA_PARALLEL=1` because the app already serializes local AI provider calls; using one llama-server slot makes prompt-prefix reuse more predictable on CPU-only hosts. The Compose service does not enable `llama-server --mlock` by default because memory locking depends on host and Docker runtime limits and can make the local sidecar fail to start. If your host is tuned for memory locking and you want that optimization, add `IPC_LOCK`, a `memlock` ulimit, and `--mlock` in a local Compose override. The sidecar healthcheck probes `/v1/models`, and the app container waits for that healthcheck when the `llama` profile is enabled.
 
 The base Compose file defaults `AI_BASE_URL` to `http://llama:8080` and `AI_MODEL` to `Llama-3.1-8B-Instruct`, so those two lines can stay commented in `.env` when you use the bundled llama.cpp sidecar.
 
@@ -788,6 +846,7 @@ Postgres connection notes:
 - URL-encode special characters in the password before putting it in `DATABASE_URL`.
 - App Postgres connections disable JIT by default because the UI favors predictable low-latency page requests over long analytical queries. Set `DATABASE_POSTGRES_JIT=true` only after measuring that your workload benefits from it.
 - If `POSTGRES_PASSWORD` changes after the `postgres-data` volume already exists, Postgres does not automatically change the existing role password. Change the role password manually or recreate the volume intentionally.
+- The bundled Postgres service uses the Postgres 18 Docker image layout and mounts `postgres-data` at `/var/lib/postgresql`. If you have an older darklab_shell `postgres-data` volume created under Postgres 17's `/var/lib/postgresql/data` layout, export it before upgrading and restore into a fresh Postgres 18 volume. See [docs/postgres-migration.md](docs/postgres-migration.md#bundled-postgres-major-upgrades).
 - Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
 
 For an existing SQLite install, run the offline migration before switching the app over. See [docs/postgres-migration.md](docs/postgres-migration.md).
@@ -814,13 +873,15 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 ## Docker Compose Files
 
-The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, Redis, the writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated `postgres` service with a named volume and healthcheck for the production backend track:
+The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
 
 ```bash
 docker compose --profile postgres up -d postgres
 ```
 
 The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. When `database_backend` is `postgres`, startup runs the app-owned schema migrations and normal app database calls route through the Postgres pool.
+
+The bundled Redis service runs with a read-only root filesystem and persistence disabled (`--save ""`, `--appendonly no`). It stores coordination, broker, rate-limit, and cache-like state; durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
 The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
 
@@ -850,6 +911,8 @@ Files/workspace storage has two coordinated settings:
 - `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
 
 Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
+
+Team Files use the same root as personal Files. Personal directories are named `sess_*`; team directories are named `team_*`. For durable shared team Files, use the `volume` backend with a persistent shared mount. The `tmpfs` backend is useful for scratch personal sessions, but team Files stored there are lost on container restart and are only shared inside one running container.
 
 ### Short-lived tmpfs storage
 
@@ -952,7 +1015,7 @@ echo "net.netfilter.nf_conntrack_max=131072" | sudo tee /etc/sysctl.d/99-conntra
 
 ### Redis memory overcommit
 
-Redis may warn that memory overcommit must be enabled. Apply immediately:
+The bundled Redis service disables RDB/AOF persistence, but Redis can still warn that memory overcommit must be enabled, especially if you point the app at a custom persistent Redis. Apply immediately:
 
 ```bash
 sudo sysctl vm.overcommit_memory=1
@@ -1029,6 +1092,22 @@ Metrics use the `darklab_` prefix and bounded labels such as command root, provi
 
 Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
 
+### Tune Atlas Import Limits
+
+```yaml
+# app/conf/config.local.yaml
+atlas_import_max_upload_mb: 10
+atlas_import_max_rows: 5000
+atlas_import_max_findings: 5000
+atlas_import_max_warnings: 100
+atlas_import_max_xml_elements: 100000
+atlas_import_preview_sample_limit: 20
+atlas_import_warning_sample_limit: 50
+atlas_import_draft_ttl_minutes: 30
+```
+
+These caps apply to Atlas imports before and during apply, so lowering them can make large Nessus, ZAP, Burp, Nuclei, CSV, or JSONL files fail preview with a clear limit error. Invalid values and `0` fall back to the server defaults above.
+
 ### Set The Default Theme
 
 ```yaml
@@ -1048,12 +1127,60 @@ log_level: INFO
 
 Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
 
-### Customize FAQ, Welcome, Commands, and Workflows
+### Customize Package Presets
+
+Evidence package presets live in `app/conf/package_presets.yaml` by default. Set `package_presets_file` in `config.local.yaml` if you want to keep an operator-managed catalog somewhere else:
+
+```yaml
+# app/conf/config.local.yaml
+package_presets_file: package_presets.local.yaml
+```
+
+Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
+
+A preset controls the wizard defaults only. Users can still adjust the package before creating it, and package size limits, redaction rules, artifact safety checks, and project link validation still apply.
+
+```yaml
+# app/conf/package_presets.local.yaml
+version: 1
+presets:
+  - id: customer_handoff
+    label: Customer Handoff
+    description: Client-ready package with reviewed findings and redacted artifacts.
+    name_suffix: customer
+    redaction_mode: redacted
+    include_artifacts: true
+    include_private_notes: false
+    labels:
+      - client
+    notes: Ready for customer review.
+    selection:
+      runs: all
+      transcripts: with_findings
+      findings: non_false_positive
+      artifacts: selectable
+      targets: all
+```
+
+Supported selection policies are:
+
+| Field | Policies |
+| --- | --- |
+| `runs` | `all`, `none` |
+| `transcripts` | `all`, `none`, `with_findings` |
+| `findings` | `all`, `none`, `non_false_positive` |
+| `artifacts` | `all`, `none`, `selectable` |
+| `targets` | `all`, `none` |
+
+Preset ids must use lowercase letters, numbers, underscores, or hyphens. Keep the shipped `evidence`, `summary`, `full`, and `redacted` presets if you want old package manifests to stay easy to read.
+
+### Customize FAQ, Welcome, Commands, Workflows, and Package Presets
 
 - Add FAQ entries in `app/conf/faq.local.yaml`.
 - Add welcome samples in `app/conf/welcome.local.yaml`.
 - Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
 - Add deployment-specific workflows in `app/conf/workflows.local.yaml` or through the in-app workflow editor.
+- Add deployment-specific evidence package presets in `app/conf/package_presets.local.yaml` and point `package_presets_file` at that file.
 
 ---
 
@@ -1075,7 +1202,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior

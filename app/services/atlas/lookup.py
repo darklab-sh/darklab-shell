@@ -10,8 +10,32 @@ from typing import Any
 from core.database import DB_BACKEND
 from core.database_backend import dialect_for_backend
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
+from services.atlas.scope import (
+    entity_exists_in_scope as entity_exists_in_scope,
+    entity_import_exists_sql as _entity_import_exists_sql,
+    entity_run_exists_sql as _entity_run_exists_sql,
+    entity_scope_params as _entity_scope_params,
+    entity_scope_sql as _entity_scope_sql,
+    finding_exists_in_scope as finding_exists_in_scope,
+    finding_import_exists_sql as _finding_import_exists_sql,
+    finding_run_exists_sql as _finding_run_exists_sql,
+    finding_source_scope_params as _finding_source_scope_params,
+    finding_source_scope_sql as _finding_source_scope_sql,
+    metadata_owner_id,
+    metadata_owner_params as _metadata_owner_params,
+    metadata_owner_sql as _metadata_owner_sql,
+    normalize_team_id as _normalize_team_id,
+    project_scope_params as _project_scope_params,
+    project_scope_sql as _project_scope_sql,
+    run_scope_params as _run_scope_params,
+    run_scope_sql as _run_scope_sql,
+)
 from services.intel.registry import provider_label
-from services.projects.contracts import FINDING_REVIEW_STATES
+from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES, ProjectWorkspaceError
+from services.projects.metadata import (
+    attach_finding_triage_details,
+    finding_triage_verification_status_filter_sql_and_params,
+)
 from services.storage.body_store import load_text_body, stored_body_pointer
 
 
@@ -51,6 +75,126 @@ def _sql_join(parts: tuple[str, ...]) -> str:
     return "".join(parts)
 
 
+def _finding_run_filter_sql(team_id: str = "") -> str:
+    occurrence_scope_sql = _run_scope_sql("filter_run", team_id)
+    direct_scope_sql = _run_scope_sql("direct_run", team_id)
+    first_scope_sql = _run_scope_sql("first_run", team_id)
+    last_scope_sql = _run_scope_sql("last_run", team_id)
+    return _sql_join((
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
+        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
+        "  WHERE filter_run_fo.finding_id = f.id ",
+        "  AND ",
+        occurrence_scope_sql,
+        "  AND filter_run_fo.run_id = ?",
+        ") OR EXISTS (",
+        "  SELECT 1 FROM runs direct_run WHERE direct_run.id = f.run_id ",
+        "  AND direct_run.id = ? AND ",
+        direct_scope_sql,
+        ") OR EXISTS (",
+        "  SELECT 1 FROM runs first_run WHERE first_run.id = f.first_run_id ",
+        "  AND first_run.id = ? AND ",
+        first_scope_sql,
+        ") OR EXISTS (",
+        "  SELECT 1 FROM runs last_run WHERE last_run.id = f.last_run_id ",
+        "  AND last_run.id = ? AND ",
+        last_scope_sql,
+        ")) ",
+    ))
+
+
+def _finding_run_filter_params(session_id: str, run_filter: str, team_id: str = "") -> list[str]:
+    run_params = _run_scope_params(session_id, team_id)
+    return [
+        run_filter,
+        *run_params,
+        run_filter,
+        run_filter,
+        *run_params,
+        run_filter,
+        *run_params,
+        run_filter,
+        *run_params,
+    ]
+
+
+def _orphan_entity_clause(alias: str, team_id: str = "") -> str:
+    if _normalize_team_id(team_id):
+        return "AND ? != 'only' "
+    source_exists = _sql_join((
+        "(",
+        _entity_run_exists_sql(alias, "orphan_run", team_id),
+        " OR ",
+        _entity_import_exists_sql(alias, "orphan_import_batch", team_id),
+        ")",
+    ))
+    return _sql_join((
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND ",
+        source_exists,
+        ") ",
+        "OR (? = 'only' AND NOT ",
+        source_exists,
+        ")) ",
+    ))
+
+
+def _orphan_entity_params(session_id: str, orphan_filter: str, team_id: str = "") -> list[str]:
+    normalized = _normalize_orphan_filter(orphan_filter)
+    if _normalize_team_id(team_id):
+        return [normalized]
+    run_params = _run_scope_params(session_id, team_id)
+    import_params = _project_scope_params(session_id, team_id)
+    return [
+        normalized,
+        normalized,
+        *run_params,
+        *import_params,
+        normalized,
+        *run_params,
+        *import_params,
+    ]
+
+
+def _orphan_finding_clause(alias: str, team_id: str = "") -> str:
+    if _normalize_team_id(team_id):
+        return "AND ? != 'only' "
+    source_exists = _sql_join((
+        "(",
+        _finding_run_exists_sql(alias, "orphan_run", team_id),
+        " OR ",
+        _finding_import_exists_sql(alias, "orphan_import_batch", team_id),
+        ")",
+    ))
+    return _sql_join((
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND ",
+        source_exists,
+        ") ",
+        "OR (? = 'only' AND NOT ",
+        source_exists,
+        ")) ",
+    ))
+
+
+def _orphan_finding_params(session_id: str, orphan_filter: str, team_id: str = "") -> list[str]:
+    normalized = _normalize_orphan_filter(orphan_filter)
+    if _normalize_team_id(team_id):
+        return [normalized]
+    run_params = _run_scope_params(session_id, team_id)
+    import_params = _project_scope_params(session_id, team_id)
+    return [
+        normalized,
+        normalized,
+        *run_params,
+        *import_params,
+        normalized,
+        *run_params,
+        *import_params,
+    ]
+
+
 def _row_to_entity(row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -80,7 +224,7 @@ def _row_to_source_run(row) -> dict[str, Any]:
     }
 
 
-def atlas_counts_by_run(conn, session_id: str, run_ids: list[str]) -> dict[str, dict[str, int]]:
+def atlas_counts_by_run(conn, session_id: str, run_ids: list[str], *, team_id: str = "") -> dict[str, dict[str, int]]:
     ids = list(dict.fromkeys(str(run_id or "").strip() for run_id in run_ids if str(run_id or "").strip()))
     counts = {
         run_id: {"atlas_entity_count": 0, "atlas_finding_count": 0}
@@ -90,32 +234,32 @@ def atlas_counts_by_run(conn, session_id: str, run_ids: list[str]) -> dict[str, 
         return counts
     dialect = dialect_for_backend(DB_BACKEND)
     run_filter_sql, run_filter_params = dialect.in_clause("id", ids)
+    run_scope_sql = _run_scope_sql("", team_id)
+    run_scope_params = _run_scope_params(session_id, team_id)
     rows_sql = _sql_join((
         "WITH candidate_runs AS (",
-        "  SELECT id FROM runs WHERE session_id = ? AND ",
+        "  SELECT id FROM runs WHERE ",
+        run_scope_sql,
+        " AND ",
         run_filter_sql,
         "), entity_counts AS (",
         "  SELECT erl.run_id, COUNT(DISTINCT erl.entity_id) AS entity_count ",
         "  FROM entity_run_links erl ",
         "  JOIN candidate_runs candidate ON candidate.id = erl.run_id ",
-        "  JOIN entities e ON e.id = erl.entity_id ",
-        "  WHERE e.session_id = ? ",
         "  GROUP BY erl.run_id",
         "), finding_run_pairs AS (",
         "  SELECT fo.run_id, fo.finding_id ",
         "  FROM findings_occurrences fo ",
         "  JOIN candidate_runs candidate ON candidate.id = fo.run_id ",
-        "  JOIN findings f ON f.id = fo.finding_id ",
-        "  WHERE f.session_id = ? ",
         "  UNION ",
         "  SELECT f.run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.run_id ",
-        "  WHERE f.session_id = ? AND COALESCE(f.run_id, '') != '' ",
+        "  WHERE COALESCE(f.run_id, '') != '' ",
         "  UNION ",
         "  SELECT f.first_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.first_run_id ",
-        "  WHERE f.session_id = ? AND COALESCE(f.first_run_id, '') != '' ",
+        "  WHERE COALESCE(f.first_run_id, '') != '' ",
         "  UNION ",
         "  SELECT f.last_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.last_run_id ",
-        "  WHERE f.session_id = ? AND COALESCE(f.last_run_id, '') != ''",
+        "  WHERE COALESCE(f.last_run_id, '') != ''",
         "), finding_counts AS (",
         "  SELECT run_id, COUNT(DISTINCT finding_id) AS finding_count ",
         "  FROM finding_run_pairs ",
@@ -130,7 +274,7 @@ def atlas_counts_by_run(conn, session_id: str, run_ids: list[str]) -> dict[str, 
     ))
     rows = conn.execute(
         rows_sql,
-        [session_id, *run_filter_params, session_id, session_id, session_id, session_id, session_id],
+        [*run_scope_params, *run_filter_params],
     ).fetchall()
     for row in rows:
         run_id = str(row["run_id"] or "")
@@ -172,6 +316,7 @@ def list_source_runs(
     conn,
     session_id: str,
     *,
+    team_id: str = "",
     query: str = "",
     run_id: str = "",
     limit: int = ATLAS_RUN_FILTER_LIMIT,
@@ -181,30 +326,46 @@ def list_source_runs(
     selected_run_id = str(run_id or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
     safe_limit = max(1, min(int(limit or ATLAS_RUN_FILTER_LIMIT), ATLAS_RUN_FILTER_LIMIT))
+    run_scope_sql = _run_scope_sql("r", team_id)
+    run_scope_params = _run_scope_params(session_id, team_id)
     rows_sql = _sql_join((
         "WITH source_run_ids AS (",
         "  SELECT erl.run_id AS run_id ",
         "  FROM entity_run_links erl ",
         "  JOIN entities e ON e.id = erl.entity_id ",
-        "  WHERE e.session_id = ? ",
+        "  JOIN runs source_run ON source_run.id = erl.run_id ",
+        "  WHERE ",
+        _run_scope_sql("source_run", team_id),
         "  UNION ",
         "  SELECT fo.run_id AS run_id ",
         "  FROM findings_occurrences fo ",
         "  JOIN findings f ON f.id = fo.finding_id ",
-        "  WHERE f.session_id = ? ",
+        "  JOIN runs source_run ON source_run.id = fo.run_id ",
+        "  WHERE ",
+        _run_scope_sql("source_run", team_id),
         "  UNION ",
-        "  SELECT f.run_id AS run_id FROM findings f WHERE f.session_id = ? AND COALESCE(f.run_id, '') != '' ",
+        "  SELECT f.run_id AS run_id FROM findings f JOIN runs source_run ON source_run.id = f.run_id ",
+        "  WHERE ",
+        _run_scope_sql("source_run", team_id),
+        "  AND COALESCE(f.run_id, '') != '' ",
         "  UNION ",
-        "  SELECT f.first_run_id AS run_id FROM findings f WHERE f.session_id = ? AND COALESCE(f.first_run_id, '') != '' ",
+        "  SELECT f.first_run_id AS run_id FROM findings f JOIN runs source_run ON source_run.id = f.first_run_id ",
+        "  WHERE ",
+        _run_scope_sql("source_run", team_id),
+        "  AND COALESCE(f.first_run_id, '') != '' ",
         "  UNION ",
-        "  SELECT f.last_run_id AS run_id FROM findings f WHERE f.session_id = ? AND COALESCE(f.last_run_id, '') != '' ",
+        "  SELECT f.last_run_id AS run_id FROM findings f JOIN runs source_run ON source_run.id = f.last_run_id ",
+        "  WHERE ",
+        _run_scope_sql("source_run", team_id),
+        "  AND COALESCE(f.last_run_id, '') != '' ",
         "  UNION ",
         "  SELECT ? AS run_id WHERE ? != ''",
         "), candidate_runs AS (",
         "  SELECT r.id, r.command, r.started, r.finished, r.exit_code ",
         "  FROM runs r ",
         "  JOIN source_run_ids source ON source.run_id = r.id ",
-        "  WHERE r.session_id = ? ",
+        "  WHERE ",
+        run_scope_sql,
         "  AND (? = '' OR r.id = ? OR ",
         dialect_for_backend(DB_BACKEND).text_search_expr("r.command"),
         "  ) ",
@@ -214,24 +375,20 @@ def list_source_runs(
         "  SELECT erl.run_id, COUNT(DISTINCT erl.entity_id) AS entity_count ",
         "  FROM entity_run_links erl ",
         "  JOIN candidate_runs candidate ON candidate.id = erl.run_id ",
-        "  JOIN entities e ON e.id = erl.entity_id ",
-        "  WHERE e.session_id = ? ",
         "  GROUP BY erl.run_id",
         "), finding_run_pairs AS (",
         "  SELECT fo.run_id, fo.finding_id ",
         "  FROM findings_occurrences fo ",
         "  JOIN candidate_runs candidate ON candidate.id = fo.run_id ",
-        "  JOIN findings f ON f.id = fo.finding_id ",
-        "  WHERE f.session_id = ? ",
         "  UNION ",
         "  SELECT f.run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.run_id ",
-        "  WHERE f.session_id = ? AND COALESCE(f.run_id, '') != '' ",
+        "  WHERE COALESCE(f.run_id, '') != '' ",
         "  UNION ",
         "  SELECT f.first_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.first_run_id ",
-        "  WHERE f.session_id = ? AND COALESCE(f.first_run_id, '') != '' ",
+        "  WHERE COALESCE(f.first_run_id, '') != '' ",
         "  UNION ",
         "  SELECT f.last_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.last_run_id ",
-        "  WHERE f.session_id = ? AND COALESCE(f.last_run_id, '') != ''",
+        "  WHERE COALESCE(f.last_run_id, '') != ''",
         "), finding_counts AS (",
         "  SELECT run_id, COUNT(DISTINCT finding_id) AS finding_count ",
         "  FROM finding_run_pairs ",
@@ -248,24 +405,19 @@ def list_source_runs(
     rows = conn.execute(
         rows_sql,
         [
-            session_id,
-            session_id,
-            session_id,
-            session_id,
-            session_id,
+            *_run_scope_params(session_id, team_id),
+            *_run_scope_params(session_id, team_id),
+            *_run_scope_params(session_id, team_id),
+            *_run_scope_params(session_id, team_id),
+            *_run_scope_params(session_id, team_id),
             selected_run_id,
             selected_run_id,
-            session_id,
+            *run_scope_params,
             search,
             selected_run_id,
             search_like,
             selected_run_id,
             safe_limit,
-            session_id,
-            session_id,
-            session_id,
-            session_id,
-            session_id,
             selected_run_id,
         ],
     ).fetchall()
@@ -318,6 +470,74 @@ def _row_to_run_link(row) -> dict[str, Any]:
     }
 
 
+def _row_to_import_source(row) -> dict[str, Any]:
+    return {
+        "batch_id": row["batch_id"],
+        "source_tool": row["source_tool"] or "",
+        "format_id": row["format_id"] or "",
+        "import_name": row["import_name"] or "",
+        "filename": row["filename"] or "",
+        "applied_at": row["applied_at"] or "",
+        "first_observed_at": row["first_observed_at"] or "",
+        "last_observed_at": row["last_observed_at"] or "",
+        "occurrence_count": int(row["occurrence_count"] or 0),
+        "created_record": bool(row["created_record"]) if "created_record" in row.keys() else False,
+    }
+
+
+def _entity_import_sources(conn, session_id: str, entity_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
+    batch_scope_sql = _project_scope_sql("batch", team_id)
+    batch_scope_params = _project_scope_params(session_id, team_id)
+    rows = conn.execute(
+        "SELECT link.batch_id, batch.source_tool, batch.format_id, batch.import_name, batch.filename, "
+        "batch.applied_at, link.first_observed_at, link.last_observed_at, link.occurrence_count, "
+        "link.created_entity AS created_record "
+        "FROM atlas_entity_import_links link "
+        "JOIN atlas_import_batches batch ON batch.id = link.batch_id "
+        "WHERE link.entity_id = ? AND " + batch_scope_sql + " "  # nosec
+        "ORDER BY link.last_observed_at DESC, batch.applied_at DESC, batch.id DESC",
+        [entity_id, *batch_scope_params],
+    ).fetchall()
+    return [_row_to_import_source(row) for row in rows]
+
+
+def _finding_import_sources_by_id(
+    conn,
+    session_id: str,
+    finding_ids: list[str],
+    *,
+    team_id: str = "",
+) -> dict[str, list[dict[str, Any]]]:
+    ids = list(dict.fromkeys(str(finding_id or "").strip() for finding_id in finding_ids if str(finding_id or "").strip()))
+    if not ids:
+        return {}
+    dialect = dialect_for_backend(DB_BACKEND)
+    id_filter_sql, id_filter_params = dialect.in_clause("occ.finding_id", ids)
+    batch_scope_sql = _project_scope_sql("batch", team_id)
+    batch_scope_params = _project_scope_params(session_id, team_id)
+    rows = conn.execute(
+        "SELECT occ.finding_id, occ.batch_id, batch.source_tool, batch.format_id, batch.import_name, "
+        "batch.filename, batch.applied_at, MIN(occ.observed_at) AS first_observed_at, "
+        "MAX(occ.observed_at) AS last_observed_at, COUNT(*) AS occurrence_count, "
+        "FALSE AS created_record "
+        "FROM atlas_finding_import_occurrences occ "
+        "JOIN atlas_import_batches batch ON batch.id = occ.batch_id "
+        "WHERE " + id_filter_sql + " AND " + batch_scope_sql + " "  # nosec
+        "GROUP BY occ.finding_id, occ.batch_id, batch.source_tool, batch.format_id, "
+        "batch.import_name, batch.filename, batch.applied_at, batch.id "
+        "ORDER BY MAX(occ.observed_at) DESC, batch.applied_at DESC, batch.id DESC",
+        [*id_filter_params, *batch_scope_params],
+    ).fetchall()
+    sources_by_id: dict[str, list[dict[str, Any]]] = {finding_id: [] for finding_id in ids}
+    for row in rows:
+        sources_by_id.setdefault(str(row["finding_id"] or ""), []).append(_row_to_import_source(row))
+    return sources_by_id
+
+
+def _finding_import_sources(conn, session_id: str, finding_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
+    return _finding_import_sources_by_id(conn, session_id, [finding_id], team_id=team_id).get(finding_id, [])
+
+
 def _label_order_sql(prefix: str = "") -> str:
     column = f"{prefix}label" if prefix else "label"
     return dialect_for_backend(DB_BACKEND).case_insensitive_order(column) + ", created ASC"
@@ -339,12 +559,38 @@ def _atlas_search_clause(columns: list[str], extra_exprs: tuple[str, ...] = ()) 
     return "AND (? = '' OR " + " OR ".join(expressions) + ") "
 
 
-def _metadata_search_expr(table_name: str, alias: str, owner_alias: str, entity_type: str, entity_id_sql: str) -> str:
+def _atlas_search_params(
+    search: str,
+    search_like: str,
+    columns: list[str],
+    extra_expr_count: int = 0,
+    *,
+    metadata_owner_params: list[str] | None = None,
+) -> list[Any]:
+    params: list[Any] = [search]
+    params.extend([search_like] * len(columns))
+    owner_params = metadata_owner_params or [""]
+    for _ in range(extra_expr_count):
+        params.extend([*owner_params, search_like])
+    return params
+
+
+def _metadata_search_expr(
+    table_name: str,
+    alias: str,
+    entity_type: str,
+    entity_id_sql: str,
+    *,
+    team_id: str = "",
+) -> str:
     column = "label" if table_name == "entity_labels" else "body"
+    owner_sql = _metadata_owner_sql(alias, team_id)
     return _sql_join((
         "EXISTS (",
         f"SELECT 1 FROM {table_name} {alias} ",  # nosec
-        f"WHERE {alias}.session_id = {owner_alias}.session_id ",
+        "WHERE ",
+        owner_sql,
+        " ",
         f"AND {alias}.entity_type = '{entity_type}' ",
         f"AND {alias}.entity_id = {entity_id_sql} ",
         "AND ",
@@ -353,19 +599,19 @@ def _metadata_search_expr(table_name: str, alias: str, owner_alias: str, entity_
     ))
 
 
-def _entity_metadata_search_exprs(owner_alias: str, entity_id_sql: str) -> tuple[str, str]:
+def _entity_metadata_search_exprs(team_id: str, entity_id_sql: str) -> tuple[str, str]:
     return (
-        _metadata_search_expr("entity_labels", "entity_search_label", owner_alias, "atlas_entity", entity_id_sql),
-        _metadata_search_expr("entity_notes", "entity_search_note", owner_alias, "atlas_entity", entity_id_sql),
+        _metadata_search_expr("entity_labels", "entity_search_label", "atlas_entity", entity_id_sql, team_id=team_id),
+        _metadata_search_expr("entity_notes", "entity_search_note", "atlas_entity", entity_id_sql, team_id=team_id),
     )
 
 
-def _finding_metadata_search_exprs() -> tuple[str, str, str, str]:
+def _finding_metadata_search_exprs(team_id: str) -> tuple[str, str, str, str]:
     return (
-        _metadata_search_expr("entity_labels", "finding_search_label", "f", "finding", "f.id"),
-        _metadata_search_expr("entity_notes", "finding_search_note", "f", "finding", "f.id"),
-        _metadata_search_expr("entity_labels", "finding_entity_search_label", "f", "atlas_entity", "e.id"),
-        _metadata_search_expr("entity_notes", "finding_entity_search_note", "f", "atlas_entity", "e.id"),
+        _metadata_search_expr("entity_labels", "finding_search_label", "finding", "f.id", team_id=team_id),
+        _metadata_search_expr("entity_notes", "finding_search_note", "finding", "f.id", team_id=team_id),
+        _metadata_search_expr("entity_labels", "finding_entity_search_label", "atlas_entity", "e.id", team_id=team_id),
+        _metadata_search_expr("entity_notes", "finding_entity_search_note", "atlas_entity", "e.id", team_id=team_id),
     )
 
 
@@ -759,24 +1005,28 @@ def _row_to_finding(row) -> dict[str, Any]:
     }
 
 
-def _metadata_for_entity(conn, session_id: str, entity_id: str) -> dict[str, Any]:
+def _metadata_for_entity(conn, session_id: str, entity_id: str, *, team_id: str = "") -> dict[str, Any]:
+    metadata_owner_sql = _metadata_owner_sql("", team_id)
+    metadata_owner_params = _metadata_owner_params(session_id, team_id)
+    project_scope_sql = _project_scope_sql("p", team_id)
+    project_scope_params = _project_scope_params(session_id, team_id)
     labels = conn.execute(
-        "SELECT id, label, source, created "  # nosec B608
-        "FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ? "
+        "SELECT id, label, source, created "  # nosec
+        "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' AND entity_id = ? "
         "ORDER BY " + _label_order_sql(),
-        (session_id, entity_id),
+        (*metadata_owner_params, entity_id),
     ).fetchall()
     note = conn.execute(
         "SELECT id, body, created, updated "
-        "FROM entity_notes WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-        (session_id, entity_id),
+        "FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' AND entity_id = ?",  # nosec
+        (*metadata_owner_params, entity_id),
     ).fetchone()
     links = conn.execute(
         "SELECT l.id, l.project_id, p.name AS project_name, l.entity_type, l.entity_id, l.source, l.created "
         "FROM project_links l JOIN projects p ON p.id = l.project_id "
-        "WHERE p.session_id = ? AND l.entity_type = 'atlas_entity' AND l.entity_id = ? "
+        "WHERE " + project_scope_sql + " AND l.entity_type = 'atlas_entity' AND l.entity_id = ? "  # nosec
         "ORDER BY l.created DESC",
-        (session_id, entity_id),
+        [*project_scope_params, entity_id],
     ).fetchall()
     return {
         "labels": [_row_to_label(row) for row in labels],
@@ -785,12 +1035,16 @@ def _metadata_for_entity(conn, session_id: str, entity_id: str) -> dict[str, Any
     }
 
 
-def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str], *, team_id: str = "") -> dict[str, dict[str, Any]]:
     if not entity_ids:
         return {}
+    metadata_owner_sql = _metadata_owner_sql("", team_id)
+    metadata_owner_params = _metadata_owner_params(session_id, team_id)
     dialect = dialect_for_backend(DB_BACKEND)
     entity_filter_sql, entity_filter_params = dialect.in_clause("entity_id", entity_ids)
     link_filter_sql, link_filter_params = dialect.in_clause("l.entity_id", entity_ids)
+    project_scope_sql = _project_scope_sql("p", team_id)
+    project_scope_params = _project_scope_params(session_id, team_id)
     metadata = {
         entity_id: {
             "labels": [],
@@ -800,9 +1054,9 @@ def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str]) ->
     }
     labels = conn.execute(
         "SELECT entity_id, id, label, source, created "
-        "FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' "  # nosec
         "AND " + entity_filter_sql + " ORDER BY " + _label_order_sql(),  # nosec
-        [session_id, *entity_filter_params],
+        [*metadata_owner_params, *entity_filter_params],
     ).fetchall()
     for row in labels:
         entity_id = str(row["entity_id"] or "")
@@ -811,9 +1065,9 @@ def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str]) ->
     links = conn.execute(
         "SELECT l.entity_id, COUNT(*) AS count "
         "FROM project_links l JOIN projects p ON p.id = l.project_id "
-        "WHERE p.session_id = ? AND l.entity_type = 'atlas_entity' "
+        "WHERE " + project_scope_sql + " AND l.entity_type = 'atlas_entity' "  # nosec
         "AND " + link_filter_sql + " GROUP BY l.entity_id",  # nosec
-        [session_id, *link_filter_params],
+        [*project_scope_params, *link_filter_params],
     ).fetchall()
     for row in links:
         entity_id = str(row["entity_id"] or "")
@@ -826,6 +1080,7 @@ def atlas_summary(
     conn,
     session_id: str,
     *,
+    team_id: str = "",
     run_id: str = "",
     project_id: str = "",
     orphan_filter: str = "hide",
@@ -835,13 +1090,26 @@ def atlas_summary(
     project_filter = str(project_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
+    entity_scope_sql = _entity_scope_sql("e", team_id)
+    entity_scope_params = _entity_scope_params(session_id, team_id)
+    filter_run_scope_sql = _run_scope_sql("filter_run", team_id)
+    filter_run_scope_params = _run_scope_params(session_id, team_id)
+    finding_run_filter_sql = _finding_run_filter_sql(team_id)
+    finding_run_filter_params = _finding_run_filter_params(session_id, run_filter, team_id)
+    project_scope_sql = _project_scope_sql("filter_project", team_id)
+    project_scope_params = _project_scope_params(session_id, team_id)
+    finding_scope_sql = _finding_source_scope_sql("f", team_id)
+    finding_scope_params = _finding_source_scope_params(session_id, team_id)
     entity_counts_sql = _sql_join((
-        "SELECT e.type, COUNT(*) AS count FROM entities e WHERE e.session_id = ? ",
+        "SELECT e.type, COUNT(*) AS count FROM entities e WHERE ",
+        entity_scope_sql,
+        " ",
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM entity_run_links filter_erl ",
         "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
         "  WHERE filter_erl.entity_id = e.id ",
-        "  AND filter_run.session_id = e.session_id ",
+        "  AND ",
+        filter_run_scope_sql,
         "  AND filter_erl.run_id = ?",
         ")) ",
         "AND (? = '' OR EXISTS (",
@@ -850,80 +1118,57 @@ def atlas_summary(
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = e.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
         _suppression_clause("e"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        "))) ",
+        _orphan_entity_clause("e", team_id),
         "GROUP BY e.type",
     ))
     rows = conn.execute(
         entity_counts_sql,
         [
-            session_id,
+            *entity_scope_params,
             run_filter,
+            *filter_run_scope_params,
             run_filter,
             project_filter,
             project_filter,
+            *project_scope_params,
             *_suppression_params(normalized_suppression_filter),
-            *_orphan_params(normalized_orphan_filter),
+            *_orphan_entity_params(session_id, normalized_orphan_filter, team_id),
         ],
     ).fetchall()
     counts = {entity_type: 0 for entity_type in sorted(ATLAS_ENTITY_TYPES)}
     for row in rows:
         counts[str(row["type"])] = int(row["count"] or 0)
     finding_count_sql = _sql_join((
-        "SELECT COUNT(*) AS count FROM findings f WHERE f.session_id = ? ",
-        "AND (? = '' OR EXISTS (",
-        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
-        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
-        "  WHERE filter_run_fo.finding_id = f.id ",
-        "  AND filter_run.session_id = f.session_id ",
-        "  AND filter_run_fo.run_id = ?",
-        ") OR f.run_id = ? OR f.first_run_id = ? OR f.last_run_id = ?) ",
+        "SELECT COUNT(*) AS count FROM findings f WHERE ",
+        finding_scope_sql,
+        " ",
+        finding_run_filter_sql,
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM project_links filter_link ",
         "  JOIN projects filter_project ON filter_project.id = filter_link.project_id ",
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = f.entity_id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = f.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
         _suppression_clause("f"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        "))) ",
+        _orphan_finding_clause("f", team_id),
     ))
     finding_count = int(conn.execute(
         finding_count_sql,
         [
-            session_id,
-            run_filter,
-            run_filter,
-            run_filter,
-            run_filter,
-            run_filter,
+            *finding_scope_params,
+            *finding_run_filter_params,
             project_filter,
             project_filter,
+            *project_scope_params,
             *_suppression_params(normalized_suppression_filter),
-            *_orphan_params(normalized_orphan_filter),
+            *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
         ],
     ).fetchone()["count"] or 0)
     return {
@@ -942,14 +1187,31 @@ def _normalize_finding_statuses(values: list[str] | None) -> list[str]:
     return statuses
 
 
+def _normalize_verification_statuses(values: list[str] | None) -> list[str]:
+    statuses = []
+    for value in values or []:
+        status = str(value or "").strip().lower()
+        if not status:
+            continue
+        if status not in FINDING_VERIFICATION_STATES:
+            raise ProjectWorkspaceError(
+                "verification_status must be not_started, ready_to_verify, verified, needs_retest, or not_applicable"
+            )
+        if status not in statuses:
+            statuses.append(status)
+    return statuses
+
+
 def list_findings(
     conn,
     session_id: str,
     *,
+    team_id: str = "",
     query: str = "",
     project_id: str = "",
     run_id: str = "",
     review_states: list[str] | None = None,
+    verification_statuses: list[str] | None = None,
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
     limit: int = 50,
@@ -963,34 +1225,53 @@ def list_findings(
         "f.tool_root",
         "e.canonical_value",
     ]
-    search_exprs = _finding_metadata_search_exprs()
+    metadata_params = _metadata_owner_params(session_id, team_id)
+    search_exprs = _finding_metadata_search_exprs(team_id)
     search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
     run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     statuses = _normalize_finding_statuses(review_states)
+    verified_statuses = _normalize_verification_statuses(verification_statuses)
     status_params = [*statuses, "", "", "", "", ""][:5]
-    params: list[Any] = [
+    verification_status_sql, verification_status_params = finding_triage_verification_status_filter_sql_and_params(
         session_id,
-        search,
-        *([search_like] * (len(search_columns) + len(search_exprs))),
+        verified_statuses,
+        team_id=team_id,
+    )
+    verification_status_clause = _sql_join(("AND ", verification_status_sql, " ")) if verification_status_sql else ""
+    finding_scope_sql = _finding_source_scope_sql("f", team_id)
+    finding_scope_params = _finding_source_scope_params(session_id, team_id)
+    project_scope_sql = _project_scope_sql("filter_project", team_id)
+    project_scope_params = _project_scope_params(session_id, team_id)
+    run_filter_sql = _finding_run_filter_sql(team_id)
+    run_filter_params = _finding_run_filter_params(session_id, run_filter, team_id)
+    params: list[Any] = [
+        *finding_scope_params,
+        *_atlas_search_params(
+            search,
+            search_like,
+            search_columns,
+            len(search_exprs),
+            metadata_owner_params=metadata_params,
+        ),
         project_filter,
         project_filter,
-        run_filter,
-        run_filter,
-        run_filter,
-        run_filter,
-        run_filter,
+        *project_scope_params,
+        *run_filter_params,
         len(statuses),
         *status_params,
+        *verification_status_params,
         *_suppression_params(normalized_suppression_filter),
-        *_orphan_params(normalized_orphan_filter),
+        *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
     ]
     total_sql = _sql_join((
         "SELECT COUNT(*) AS count FROM findings f ",
         "LEFT JOIN entities e ON e.id = f.entity_id ",
-        "WHERE f.session_id = ? ",
+        "WHERE ",
+        finding_scope_sql,
+        " ",
         search_clause,
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM project_links filter_link ",
@@ -998,28 +1279,14 @@ def list_findings(
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = f.entity_id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = f.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
-        "AND (? = '' OR EXISTS (",
-        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
-        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
-        "  WHERE filter_run_fo.finding_id = f.id ",
-        "  AND filter_run.session_id = f.session_id ",
-        "  AND filter_run_fo.run_id = ?",
-        ") OR f.run_id = ? OR f.first_run_id = ? OR f.last_run_id = ?) ",
+        run_filter_sql,
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
+        verification_status_clause,
         _suppression_clause("f"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        "))) ",
+        _orphan_finding_clause("f", team_id),
     ))
     total = int(conn.execute(total_sql, params).fetchone()["count"] or 0)
     page_limit = max(1, min(int(limit or 50), 200))
@@ -1036,8 +1303,12 @@ def list_findings(
         " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet ",
         "FROM findings f ",
         "LEFT JOIN entities e ON e.id = f.entity_id ",
-        "LEFT JOIN runs r ON r.id = f.last_run_id AND r.session_id = f.session_id ",
-        "WHERE f.session_id = ? ",
+        "LEFT JOIN runs r ON r.id = f.last_run_id AND ",
+        _run_scope_sql("r", team_id),
+        " ",
+        "WHERE ",
+        finding_scope_sql,
+        " ",
         search_clause,
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM project_links filter_link ",
@@ -1045,64 +1316,55 @@ def list_findings(
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = f.entity_id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = f.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
-        "AND (? = '' OR EXISTS (",
-        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
-        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
-        "  WHERE filter_run_fo.finding_id = f.id ",
-        "  AND filter_run.session_id = f.session_id ",
-        "  AND filter_run_fo.run_id = ?",
-        ") OR f.run_id = ? OR f.first_run_id = ? OR f.last_run_id = ?) ",
+        run_filter_sql,
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
+        verification_status_clause,
         _suppression_clause("f"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        "))) ",
+        _orphan_finding_clause("f", team_id),
         "ORDER BY CASE f.status ",
         "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 ",
         "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, ",
         "f.last_seen_at DESC, f.created DESC LIMIT ? OFFSET ?",
     ))
-    rows = conn.execute(rows_sql, [*params, page_limit, page_offset]).fetchall()
+    rows = conn.execute(
+        rows_sql,
+        [*_run_scope_params(session_id, team_id), *params, page_limit, page_offset],
+    ).fetchall()
     counts = {status: 0 for status in sorted(FINDING_REVIEW_STATES, key=lambda item: FINDING_STATUS_ORDER.get(item, 99))}
     status_counts_sql = _sql_join((
-        "SELECT f.status, COUNT(*) AS count FROM findings f WHERE f.session_id = ? ",
+        "SELECT f.status, COUNT(*) AS count FROM findings f WHERE ",
+        finding_scope_sql,
+        " ",
         _suppression_clause("f"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM findings_occurrences orphan_fo ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
-        "))) ",
+        _orphan_finding_clause("f", team_id),
         "GROUP BY f.status",
     ))
     count_rows = conn.execute(
         status_counts_sql,
         [
-            session_id,
+            *finding_scope_params,
             *_suppression_params(normalized_suppression_filter),
-            *_orphan_params(normalized_orphan_filter),
+            *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
         ],
     ).fetchall()
+    findings = [_row_to_finding(row) for row in rows]
+    sources_by_finding = _finding_import_sources_by_id(
+        conn,
+        session_id,
+        [finding["id"] for finding in findings],
+        team_id=team_id,
+    )
+    for finding in findings:
+        finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
+    attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)
     return {
-        "findings": [_row_to_finding(row) for row in rows],
+        "findings": findings,
         "total": total,
         "limit": page_limit,
         "offset": page_offset,
@@ -1110,7 +1372,11 @@ def list_findings(
     }
 
 
-def finding_detail(conn, session_id: str, finding_id: str) -> dict[str, Any] | None:
+def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "") -> dict[str, Any] | None:
+    finding_scope_sql = _finding_source_scope_sql("f", team_id)
+    finding_scope_params = _finding_source_scope_params(session_id, team_id)
+    occurrence_scope_sql = _run_scope_sql("r", team_id)
+    occurrence_scope_params = _run_scope_params(session_id, team_id)
     row = conn.execute(
         "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, "
         "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, "
@@ -1123,9 +1389,9 @@ def finding_detail(conn, session_id: str, finding_id: str) -> dict[str, Any] | N
         " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet "
         "FROM findings f "
         "LEFT JOIN entities e ON e.id = f.entity_id "
-        "LEFT JOIN runs r ON r.id = f.last_run_id AND r.session_id = f.session_id "
-        "WHERE f.session_id = ? AND f.id = ?",
-        (session_id, finding_id),
+        "LEFT JOIN runs r ON r.id = f.last_run_id AND " + _run_scope_sql("r", team_id) + " "  # nosec
+        "WHERE " + finding_scope_sql + " AND f.id = ?",  # nosec
+        [*_run_scope_params(session_id, team_id), *finding_scope_params, finding_id],
     ).fetchone()
     if not row:
         return None
@@ -1134,12 +1400,15 @@ def finding_detail(conn, session_id: str, finding_id: str) -> dict[str, Any] | N
         "fo.line_number, fo.snippet, fo.seen_at "
         "FROM findings_occurrences fo "
         "JOIN runs r ON r.id = fo.run_id "
-        "WHERE fo.finding_id = ? AND r.session_id = ? "
+        "WHERE fo.finding_id = ? AND " + occurrence_scope_sql + " "  # nosec
         "ORDER BY fo.seen_at DESC, fo.run_id DESC, fo.line_number DESC LIMIT ?",
-        (finding_id, session_id, ENTITY_DETAIL_RUN_LIMIT),
+        [finding_id, *occurrence_scope_params, ENTITY_DETAIL_RUN_LIMIT],
     ).fetchall()
     return {
-        "finding": _row_to_finding(row),
+        "finding": {
+            **_row_to_finding(row),
+            "import_sources": _finding_import_sources(conn, session_id, finding_id, team_id=team_id),
+        },
         "occurrences": [
             {
                 "run_id": occurrence["run_id"],
@@ -1169,6 +1438,7 @@ def list_entities(
     conn,
     session_id: str,
     *,
+    team_id: str = "",
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
@@ -1184,29 +1454,45 @@ def list_entities(
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
     search_columns = ["e.canonical_value"]
-    search_exprs = _entity_metadata_search_exprs("e", "e.id")
+    metadata_params = _metadata_owner_params(session_id, team_id)
+    search_exprs = _entity_metadata_search_exprs(team_id, "e.id")
     search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
     run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
+    entity_scope_sql = _entity_scope_sql("e", team_id)
+    entity_scope_params = _entity_scope_params(session_id, team_id)
+    project_scope_sql = _project_scope_sql("filter_project", team_id)
+    project_scope_params = _project_scope_params(session_id, team_id)
+    filter_run_scope_sql = _run_scope_sql("filter_run", team_id)
+    filter_run_scope_params = _run_scope_params(session_id, team_id)
     common_params: list[Any] = [
-        session_id,
+        *entity_scope_params,
         normalized_type,
         normalized_type,
-        search,
-        *([search_like] * (len(search_columns) + len(search_exprs))),
+        *_atlas_search_params(
+            search,
+            search_like,
+            search_columns,
+            len(search_exprs),
+            metadata_owner_params=metadata_params,
+        ),
         project_filter,
         project_filter,
+        *project_scope_params,
         run_filter,
+        *filter_run_scope_params,
         run_filter,
         *_suppression_params(normalized_suppression_filter),
-        *_orphan_params(normalized_orphan_filter),
+        *_orphan_entity_params(session_id, normalized_orphan_filter, team_id),
     ]
     total_sql = _sql_join((
         "SELECT COUNT(*) AS count ",
         "FROM entities e ",
-        "WHERE e.session_id = ? ",
+        "WHERE ",
+        entity_scope_sql,
+        " ",
         "AND (? = '' OR e.type = ?) ",
         search_clause,
         "AND (? = '' OR EXISTS (",
@@ -1215,27 +1501,19 @@ def list_entities(
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = e.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM entity_run_links filter_erl ",
         "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
         "  WHERE filter_erl.entity_id = e.id ",
-        "  AND filter_run.session_id = e.session_id ",
+        "  AND ",
+        filter_run_scope_sql,
         "  AND filter_erl.run_id = ?",
         ")) ",
         _suppression_clause("e"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        "))) ",
+        _orphan_entity_clause("e", team_id),
     ))
     total = int(conn.execute(total_sql, common_params).fetchone()["count"] or 0)
     page_limit = max(1, min(int(limit or 50), 200))
@@ -1246,8 +1524,12 @@ def list_entities(
         "COUNT(DISTINCT entity_run.id) AS run_count ",
         "FROM entities e ",
         "LEFT JOIN entity_run_links erl ON erl.entity_id = e.id ",
-        "LEFT JOIN runs entity_run ON entity_run.id = erl.run_id AND entity_run.session_id = e.session_id ",
-        "WHERE e.session_id = ? ",
+        "LEFT JOIN runs entity_run ON entity_run.id = erl.run_id AND ",
+        _run_scope_sql("entity_run", team_id),
+        " ",
+        "WHERE ",
+        entity_scope_sql,
+        " ",
         "AND (? = '' OR e.type = ?) ",
         search_clause,
         "AND (? = '' OR EXISTS (",
@@ -1256,32 +1538,27 @@ def list_entities(
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = e.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM entity_run_links filter_erl ",
         "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
         "  WHERE filter_erl.entity_id = e.id ",
-        "  AND filter_run.session_id = e.session_id ",
+        "  AND ",
+        filter_run_scope_sql,
         "  AND filter_erl.run_id = ?",
         ")) ",
         _suppression_clause("e"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        "))) ",
+        _orphan_entity_clause("e", team_id),
         "GROUP BY e.id ",
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ? OFFSET ?",
     ))
-    rows = conn.execute(rows_sql, [*common_params, page_limit, page_offset]).fetchall()
-    list_metadata = _list_metadata_for_entities(conn, session_id, [str(row["id"]) for row in rows])
+    rows = conn.execute(
+        rows_sql,
+        [*_run_scope_params(session_id, team_id), *common_params, page_limit, page_offset],
+    ).fetchall()
+    list_metadata = _list_metadata_for_entities(conn, session_id, [str(row["id"]) for row in rows], team_id=team_id)
     entities = []
     for row in rows:
         item = _row_to_entity(row)
@@ -1315,6 +1592,7 @@ def _query_export_entities(
     conn,
     session_id: str,
     *,
+    team_id: str = "",
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
@@ -1329,32 +1607,50 @@ def _query_export_entities(
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
     search_columns = ["e.canonical_value"]
-    search_exprs = _entity_metadata_search_exprs("e", "e.id")
+    metadata_params = _metadata_owner_params(session_id, team_id)
+    search_exprs = _entity_metadata_search_exprs(team_id, "e.id")
     search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
     run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     page_limit = max(1, min(int(limit or 10000), 10000))
+    entity_scope_sql = _entity_scope_sql("e", team_id)
+    entity_scope_params = _entity_scope_params(session_id, team_id)
+    project_scope_sql = _project_scope_sql("filter_project", team_id)
+    project_scope_params = _project_scope_params(session_id, team_id)
+    export_project_scope_sql = _project_scope_sql("p", team_id)
+    export_project_scope_params = _project_scope_params(session_id, team_id)
+    filter_run_scope_sql = _run_scope_sql("filter_run", team_id)
+    filter_run_scope_params = _run_scope_params(session_id, team_id)
     params: list[Any] = [
-        session_id,
+        *entity_scope_params,
         normalized_type,
         normalized_type,
-        search,
-        *([search_like] * (len(search_columns) + len(search_exprs))),
+        *_atlas_search_params(
+            search,
+            search_like,
+            search_columns,
+            len(search_exprs),
+            metadata_owner_params=metadata_params,
+        ),
         project_filter,
         project_filter,
+        *project_scope_params,
         run_filter,
+        *filter_run_scope_params,
         run_filter,
         *_suppression_params(normalized_suppression_filter),
-        *_orphan_params(normalized_orphan_filter),
+        *_orphan_entity_params(session_id, normalized_orphan_filter, team_id),
         page_limit,
     ]
     rows_sql = _sql_join((
         "SELECT e.id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, e.occurrence_count, "
         "e.suppressed, e.suppressed_reason, e.suppressed_at ",
         "FROM entities e ",
-        "WHERE e.session_id = ? ",
+        "WHERE ",
+        entity_scope_sql,
+        " ",
         "AND (? = '' OR e.type = ?) ",
         search_clause,
         "AND (? = '' OR EXISTS (",
@@ -1363,27 +1659,19 @@ def _query_export_entities(
         "  WHERE filter_link.entity_type = 'atlas_entity' ",
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
-        "  AND filter_project.session_id = e.session_id",
+        "  AND ",
+        project_scope_sql,
         ")) ",
         "AND (? = '' OR EXISTS (",
         "  SELECT 1 FROM entity_run_links filter_erl ",
         "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
         "  WHERE filter_erl.entity_id = e.id ",
-        "  AND filter_run.session_id = e.session_id ",
+        "  AND ",
+        filter_run_scope_sql,
         "  AND filter_erl.run_id = ?",
         ")) ",
         _suppression_clause("e"),
-        "AND (? = 'all' ",
-        "OR (? = 'hide' AND EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        ")) ",
-        "OR (? = 'only' AND NOT EXISTS (",
-        "  SELECT 1 FROM entity_run_links orphan_erl ",
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
-        "))) ",
+        _orphan_entity_clause("e", team_id),
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
     ))
     rows = conn.execute(rows_sql, params).fetchall()
@@ -1409,28 +1697,30 @@ def _query_export_entities(
     if not entity_ids:
         return entities
     placeholders = ",".join("?" for _ in entity_ids)
+    metadata_owner_sql = _metadata_owner_sql("", team_id)
+    metadata_owner_params = _metadata_owner_params(session_id, team_id)
     labels = conn.execute(
         "SELECT entity_id, label FROM entity_labels "
-        "WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' "  # nosec
         f"AND entity_id IN ({placeholders}) ORDER BY " + _label_order_sql(),  # nosec
-        [session_id, *entity_ids],
+        [*metadata_owner_params, *entity_ids],
     ).fetchall()
     notes = conn.execute(
         "SELECT entity_id, body FROM entity_notes "
-        "WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "WHERE " + metadata_owner_sql + " AND entity_type = 'atlas_entity' "  # nosec
         f"AND entity_id IN ({placeholders})",  # nosec
-        [session_id, *entity_ids],
+        [*metadata_owner_params, *entity_ids],
     ).fetchall()
     projects = conn.execute(
         "SELECT l.entity_id, p.name FROM project_links l JOIN projects p ON p.id = l.project_id "
-        "WHERE p.session_id = ? AND l.entity_type = 'atlas_entity' "
+        "WHERE " + export_project_scope_sql + " AND l.entity_type = 'atlas_entity' "  # nosec
         f"AND l.entity_id IN ({placeholders}) ORDER BY " + _name_order_sql("p."),  # nosec
-        [session_id, *entity_ids],
+        [*export_project_scope_params, *entity_ids],
     ).fetchall()
     snapshots = conn.execute(
         "SELECT entity_id, provider, data_json FROM entity_intel_snapshots "
         f"WHERE session_id = ? AND entity_id IN ({placeholders}) ORDER BY " + _provider_order_sql(),  # nosec
-        [session_id, *entity_ids],
+        [metadata_owner_id(session_id, team_id), *entity_ids],
     ).fetchall()
     by_id = {str(entity["id"]): entity for entity in entities}
     for row in labels:
@@ -1449,6 +1739,7 @@ def atlas_entities_export(
     conn,
     session_id: str,
     *,
+    team_id: str = "",
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
@@ -1460,6 +1751,7 @@ def atlas_entities_export(
     return _query_export_entities(
         conn,
         session_id,
+        team_id=team_id,
         entity_type=entity_type,
         query=query,
         project_id=project_id,
@@ -1498,31 +1790,38 @@ def entity_detail(
     session_id: str,
     entity_id: str,
     *,
+    team_id: str = "",
     runs_offset: int = 0,
     findings_offset: int = 0,
 ) -> dict[str, Any] | None:
     safe_runs_offset = max(0, int(runs_offset or 0))
     safe_findings_offset = max(0, int(findings_offset or 0))
+    entity_scope_sql = _entity_scope_sql("e", team_id)
+    entity_scope_params = _entity_scope_params(session_id, team_id)
+    run_scope_sql = _run_scope_sql("r", team_id)
+    run_scope_params = _run_scope_params(session_id, team_id)
+    finding_scope_sql = _finding_source_scope_sql("f", team_id)
+    finding_scope_params = _finding_source_scope_params(session_id, team_id)
     row = conn.execute(
-        "SELECT id, session_id, type, canonical_value, first_seen_at, last_seen_at, "
-        "occurrence_count, suppressed, suppressed_reason, suppressed_at, created "
-        "FROM entities WHERE session_id = ? AND id = ?",
-        (session_id, entity_id),
+        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, "
+        "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created "
+        "FROM entities e WHERE " + entity_scope_sql + " AND e.id = ?",  # nosec
+        [*entity_scope_params, entity_id],
     ).fetchone()
     if not row:
         return None
     entity = _row_to_entity(row)
-    metadata = _metadata_for_entity(conn, session_id, entity["id"])
+    metadata = _metadata_for_entity(conn, session_id, entity["id"], team_id=team_id)
     entity.update(metadata)
     run_total_row = conn.execute(
         "SELECT COUNT(*) AS count FROM entity_run_links erl JOIN runs r ON r.id = erl.run_id "
-        "WHERE erl.entity_id = ? AND r.session_id = ?",
-        (entity_id, session_id),
+        "WHERE erl.entity_id = ? AND " + run_scope_sql,  # nosec
+        [entity_id, *run_scope_params],
     ).fetchone()
     finding_total_row = conn.execute(
-        "SELECT COUNT(*) AS count FROM findings WHERE session_id = ? AND entity_id = ? "
+        "SELECT COUNT(*) AS count FROM findings f WHERE " + finding_scope_sql + " AND entity_id = ? "  # nosec
         "AND COALESCE(suppressed, FALSE) = FALSE",
-        (session_id, entity_id),
+        [*finding_scope_params, entity_id],
     ).fetchone()
     run_total = int(run_total_row["count"] or 0) if run_total_row else 0
     finding_total = int(finding_total_row["count"] or 0) if finding_total_row else 0
@@ -1530,31 +1829,42 @@ def entity_detail(
         "SELECT erl.run_id, r.command, r.run_kind, r.started, r.finished, r.exit_code, "
         "erl.first_seen_at, erl.last_seen_at, erl.occurrence_count "
         "FROM entity_run_links erl JOIN runs r ON r.id = erl.run_id "
-        "WHERE erl.entity_id = ? AND r.session_id = ? "
+        "WHERE erl.entity_id = ? AND " + run_scope_sql + " "  # nosec
         "ORDER BY erl.last_seen_at DESC, r.started DESC LIMIT ? OFFSET ?",
-        (entity_id, session_id, ENTITY_DETAIL_RUN_LIMIT, safe_runs_offset),
+        [entity_id, *run_scope_params, ENTITY_DETAIL_RUN_LIMIT, safe_runs_offset],
     ).fetchall()
     snapshot_rows = conn.execute(
         "SELECT id, provider, status, summary, data_json, fetched_at, expires_at "
         "FROM entity_intel_snapshots WHERE session_id = ? AND entity_id = ? "
         "ORDER BY fetched_at DESC, provider ASC",
-        (session_id, entity_id),
+        (metadata_owner_id(session_id, team_id), entity_id),
     ).fetchall()
     finding_rows = conn.execute(
         "SELECT id, entity_id, subject_key, severity, kind, tool_root, first_run_id, last_run_id, "
         "first_seen_at, last_seen_at, occurrence_count, status, suppressed, suppressed_reason, suppressed_at, "
         "title, raw_line, created "
-        "FROM findings WHERE session_id = ? AND entity_id = ? AND COALESCE(suppressed, FALSE) = FALSE "
+        "FROM findings f WHERE " + finding_scope_sql + " AND entity_id = ? "  # nosec
+        "AND COALESCE(suppressed, FALSE) = FALSE "
         "ORDER BY last_seen_at DESC, created DESC LIMIT ? OFFSET ?",
-        (session_id, entity_id, ENTITY_DETAIL_FINDING_LIMIT, safe_findings_offset),
+        [*finding_scope_params, entity_id, ENTITY_DETAIL_FINDING_LIMIT, safe_findings_offset],
     ).fetchall()
     intel_snapshots = [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows]
+    findings = [_row_to_finding(finding) for finding in finding_rows]
+    sources_by_finding = _finding_import_sources_by_id(
+        conn,
+        session_id,
+        [finding["id"] for finding in findings],
+        team_id=team_id,
+    )
+    for finding in findings:
+        finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     return {
         "entity": entity,
         "runs": [_row_to_run_link(run) for run in run_rows],
+        "import_sources": _entity_import_sources(conn, session_id, entity_id, team_id=team_id),
         "intel_snapshots": intel_snapshots,
         "intel_summary": summarize_intel_snapshots(entity["type"], intel_snapshots),
-        "findings": [_row_to_finding(finding) for finding in finding_rows],
+        "findings": findings,
         "detail_limits": {
             "runs": {
                 "limit": ENTITY_DETAIL_RUN_LIMIT,

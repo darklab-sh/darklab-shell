@@ -76,11 +76,30 @@
     function entityMetadataChips(entity) {
       const chips = entityLabelValues(entity).map(label => ({ label, kind: 'label' }));
       if (entityNoteBody(entity)) chips.push({ label: 'note', kind: 'note' });
+      const triage = entity && entity.triage && typeof entity.triage === 'object' ? entity.triage : null;
+      if (triage) {
+        const status = String(triage.verification_status || entity.verification_status || 'not_started');
+        if (status && status !== 'not_started') {
+          const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+          const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+          const kind = tone === 'green' ? 'success' : (tone === 'amber' ? 'warning' : 'label');
+          chips.push({ label, kind });
+        }
+        if (triage.has_remediation) chips.push({ label: 'remediation', kind: 'note' });
+        if (triage.has_verification_steps) chips.push({ label: 'verification steps', kind: 'label' });
+      }
       return chips;
     }
 
     function entityMetadataChipClass(kind = 'label') {
-      const tone = String(kind || '') === 'note' ? 'badge-tone-cyan' : 'badge-tone-muted';
+      const normalized = String(kind || '');
+      const tone = normalized === 'note'
+        ? 'badge-tone-cyan'
+        : (
+            normalized === 'success'
+              ? 'badge-tone-green'
+              : (normalized === 'warning' ? 'badge-tone-amber' : 'badge-tone-muted')
+          );
       return `project-explorer-metadata-chip badge ${tone}`;
     }
 
@@ -143,6 +162,61 @@
       empty.className = 'project-explorer-empty';
       empty.textContent = text;
       return empty;
+    }
+
+    function actionCapability(action) {
+      const triageActions = new Set([
+        'bulk-delete-project-findings',
+        'edit-finding-metadata',
+      ]);
+      const mutateActions = new Set([
+        'use',
+        'clear',
+        'archive',
+        'unarchive',
+        'delete',
+        'edit-project-metadata',
+        'bulk-unlink-project-entities',
+        'unlink-project-entity',
+        'open-entity-picker',
+        'entity-picker-add',
+        'new-target',
+        'edit-target',
+        'delete-target',
+        'confirm-target',
+        'dismiss-target',
+        'edit-run-metadata',
+        'edit-artifact-metadata',
+        'link-last-run',
+        'unlink-run',
+        'package-edit',
+        'package-repackage',
+        'package-delete',
+        'package-wizard-open',
+        'package-wizard-next',
+        'new-project-auto-promote-rule',
+        'edit-project-auto-promote-rule',
+        'save-project-auto-promote-rule',
+        'apply-project-auto-promote-rule',
+        'delete-project-auto-promote-rule',
+      ]);
+      const normalized = String(action || '');
+      if (triageActions.has(normalized)) return 'triage_findings';
+      if (mutateActions.has(normalized)) return 'mutate_projects';
+      return '';
+    }
+
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(capability) {
+      const action = capability === 'triage_findings' ? 'triage team findings' : 'change team projects';
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
     function metaRow(label, value) {
@@ -227,6 +301,11 @@
       btn.textContent = label;
       btn.dataset.projectAction = action;
       if (projectId) btn.dataset.projectId = projectId;
+      const capability = actionCapability(action);
+      if (capability && !activeTeamScopeCan(capability)) {
+        btn.disabled = true;
+        btn.title = teamScopeDeniedMessage(capability);
+      }
       ctx.bindProjectRuntimePressable?.(btn);
       return btn;
     }
@@ -246,12 +325,18 @@
       if (successMessage) ctx.setProjectWorkspaceMessage?.(successMessage);
     }
 
+    function downloadUrlAsAttachment(url, filename = '', successMessage = '') {
+      ctx.downloadUrlAsAttachment?.(url, filename ? { filename } : {});
+      if (successMessage) ctx.setProjectWorkspaceMessage?.(successMessage);
+    }
+
     return {
       comparableRuns,
       countEntries,
       counts,
       displayName,
       downloadBlobAsAttachment,
+      downloadUrlAsAttachment,
       emptyPanel,
       entityEditorLabelForType,
       entityLabelValues,

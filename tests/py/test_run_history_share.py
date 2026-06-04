@@ -585,12 +585,15 @@ class TestInteractivePtyRuns:
         assert "__wrapper-limiter-instance" in run_routes.send_interactive_pty_input.__dict__
         assert "__wrapper-limiter-instance" in run_routes.resize_interactive_pty_run.__dict__
 
-    def test_interactive_pty_input_route_uses_dedicated_rate_limit(self):
+    def test_interactive_pty_control_routes_use_dedicated_rate_limits(self):
         with mock.patch.dict(run_routes.CFG, {
             "interactive_pty_input_rate_limit_per_minute": 500,
             "interactive_pty_input_rate_limit_per_second": 10,
+            "interactive_pty_resize_rate_limit_per_minute": 600,
+            "interactive_pty_resize_rate_limit_per_second": 30,
         }):
             assert run_routes._interactive_pty_input_limit() == "500 per minute; 10 per second"
+            assert run_routes._interactive_pty_resize_limit() == "600 per minute; 30 per second"
 
 
 # ── /runs streaming ───────────────────────────────────────────────────────────
@@ -665,6 +668,7 @@ class TestRunStreaming:
                 run_id="run-broker-worker",
                 proc=fake_proc,
                 session_id="session-worker",
+                team_id="",
                 client_ip="203.0.113.10",
                 original_command="printf lines | grep keep",
                 run_started=started,
@@ -718,6 +722,7 @@ class TestRunStreaming:
                 run_id="run-broker-timeout",
                 proc=fake_proc,
                 session_id="session-worker",
+                team_id="",
                 client_ip="203.0.113.10",
                 original_command="sleep 10",
                 run_started=started,
@@ -758,6 +763,7 @@ class TestRunStreaming:
                 run_id="run-broker-error",
                 proc=fake_proc,
                 session_id="session-worker",
+                team_id="",
                 client_ip="203.0.113.10",
                 original_command="broken",
                 run_started=datetime.now(timezone.utc).isoformat(),
@@ -1815,7 +1821,12 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run._run_session_visibility", return_value={
+                 "allowed": True,
+                 "active_match": True,
+                 "db_match": False,
+                 "active_count": 1,
+             }), \
              mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("boom")):
             resp = _post_run(client, json={"command": "echo hi"})
             body = resp.get_data(as_text=True)
@@ -1902,6 +1913,7 @@ class TestRunStreaming:
         assert "Run `commands` to browse built-in and allowed external commands.\\n" in body
         assert "Use `commands --built-in` or `commands --external` to filter that catalog.\\n" in body
         assert "Use `commands info <command>` to see examples, flags, and subcommands for a supported command.\\n" in body
+        assert "Use `commands search <term>` to find commands by name, description, category, or guidance notes.\\n" in body
         assert "Run `faq` to browse the configured FAQ entries inside the terminal.\\n" in body
         assert "Run `shortcuts` to see the current keyboard shortcuts.\\n" in body
         assert "README:" in body
@@ -2118,9 +2130,10 @@ class TestRunStreaming:
         assert "httpx.txt" not in list_body
 
         long_body = list_long_resp.get_data(as_text=True)
-        assert "\\u001b[4mpath\\u001b[0m  " in long_body
-        assert "\\u001b[4msize\\u001b[0m    " in long_body
-        assert "\\u001b[4mmodified\\u001b[0m" in long_body
+        assert "  path" in long_body
+        assert "size" in long_body
+        assert "modified" in long_body
+        assert "\\u001b[4mpath\\u001b[0m" not in long_body
         assert "reports/" in long_body
         assert "targets.txt" in long_body
         assert "amass.txt" not in long_body
@@ -2381,8 +2394,9 @@ class TestRunStreaming:
         assert "success rate" in stats_body
         assert "\\u001b[32m" in stats_body
         assert "\\u001b[31m" in stats_body
-        assert "\\u001b[4mcommand\\u001b[0m" in stats_body
-        assert "\\u001b[4mruns\\u001b[0m" in stats_body
+        assert "  command" in stats_body
+        assert "runs" in stats_body
+        assert "\\u001b[4mcommand\\u001b[0m" not in stats_body
 
     def test_builtin_last_lists_recent_completed_runs(self):
         client = get_client()
@@ -3749,6 +3763,7 @@ class TestRunOutputArtifacts:
         run_routes._save_completed_run(
             run_id,
             session_id,
+            "",
             "lookup alias-target",
             "2026-05-21T00:00:00Z",
             "2026-05-21T00:00:01Z",

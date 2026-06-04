@@ -290,6 +290,73 @@ function _historyRunOutputEntries(run) {
   return [];
 }
 
+function _historyCommandOutcomeSummariesEnabled() {
+  if (typeof getCommandOutcomeSummariesPreference === 'function') {
+    return getCommandOutcomeSummariesPreference() !== 'off';
+  }
+  return true;
+}
+
+function _historyNormalizeCommandOutcomeSummary(raw) {
+  const normalizer = typeof window !== 'undefined' && window.DarklabOutputCore
+    && typeof window.DarklabOutputCore.normalizeCommandOutcomeSummary === 'function'
+    ? window.DarklabOutputCore.normalizeCommandOutcomeSummary
+    : null;
+  if (normalizer) return normalizer(raw);
+  if (!raw || typeof raw !== 'object') return null;
+  const title = String(raw.title || raw.heading || 'Command outcome').trim() || 'Command outcome';
+  const sourceItems = Array.isArray(raw.items) ? raw.items : (Array.isArray(raw.lines) ? raw.lines : []);
+  const items = sourceItems.map(item => {
+    if (item == null) return null;
+    if (typeof item !== 'object') {
+      const value = String(item).trim();
+      return value ? { value } : null;
+    }
+    const label = String(item.label || item.key || '').trim();
+    const value = String(item.value || item.text || item.summary || '').trim();
+    return label || value ? { ...(label ? { label } : {}), value } : null;
+  }).filter(Boolean);
+  return items.length ? { kind: 'command_outcome', title, items } : null;
+}
+
+function _historyRunCommandOutcomeSummary(run) {
+  const explicit = _historyNormalizeCommandOutcomeSummary(
+    run && (run.command_outcome_summary || run.output_outcome_summary || run.commandOutcomeSummary),
+  );
+  if (explicit) return explicit;
+  const builder = typeof window !== 'undefined' && window.DarklabOutputCore
+    && typeof window.DarklabOutputCore.buildCommandOutcomeSummary === 'function'
+    ? window.DarklabOutputCore.buildCommandOutcomeSummary
+    : null;
+  if (!builder) return null;
+  return builder(run && run.command || '', _historyRunOutputEntries(run));
+}
+
+function _historyCommandOutcomeSummaryToLines(summary) {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.commandOutcomeSummaryToLines === 'function') {
+    return ExportHtmlUtils.commandOutcomeSummaryToLines(summary);
+  }
+  if (!summary || !Array.isArray(summary.items) || !summary.items.length) return [];
+  const lines = [{
+    text: summary.title || 'Command outcome',
+    cls: 'command-outcome-summary command-outcome-summary-title',
+    command_outcome_summary: true,
+  }];
+  summary.items.forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const label = String(item.label || '').trim();
+    const value = String(item.value || '').trim();
+    const text = label && value ? `${label}: ${value}` : (value || label);
+    if (!text) return;
+    lines.push({
+      text,
+      cls: 'command-outcome-summary command-outcome-summary-row',
+      command_outcome_summary: true,
+    });
+  });
+  return lines;
+}
+
 function _historyRunMetaRow(label, value) {
   const row = document.createElement('div');
   row.className = 'history-run-meta-row';
@@ -305,13 +372,32 @@ function _historyRunMetaRow(label, value) {
   return row;
 }
 
-function _historyRunScheduleLink(run) {
+function _historyRunScheduleSummary(run) {
+  const scheduleId = String(run?.schedule_id || '').trim();
+  const ownerKind = String(run?.schedule_owner_kind || '').trim();
+  const ownerId = String(run?.schedule_owner_id || run?.watcher_id || '').trim();
+  const isWatcherRun = ownerKind === 'watcher' && ownerId;
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-schedule-summary';
+  const label = document.createElement('span');
+  label.className = 'history-run-schedule-label';
+  const ownerLabel = String(run?.schedule_label || run?.schedule_name || '').trim();
+  label.textContent = ownerLabel || (isWatcherRun ? 'Watcher run' : 'Scheduled run');
+  wrap.appendChild(label);
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn btn-secondary btn-compact history-run-schedule-link';
   btn.dataset.historyRunAction = 'open-schedule';
-  btn.textContent = `scheduled · ${run.schedule_id}`;
-  return btn;
+  btn.textContent = isWatcherRun ? 'View watcher' : 'View schedule';
+  if (isWatcherRun) {
+    btn.title = `Open watcher ${ownerId}`;
+    btn.setAttribute('aria-label', `Open watcher ${ownerId}`);
+  } else if (scheduleId) {
+    btn.title = `Open schedule ${scheduleId}`;
+    btn.setAttribute('aria-label', `Open schedule ${scheduleId}`);
+  }
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 function _historyRunActionButton(label, action, { disabled = false, tone = 'secondary' } = {}) {
@@ -322,6 +408,11 @@ function _historyRunActionButton(label, action, { disabled = false, tone = 'seco
   btn.textContent = label;
   btn.disabled = !!disabled;
   return btn;
+}
+
+function _historyRunCanEditMetadata() {
+  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
 }
 
 function _historyRunAiSummaryEnabled() {
@@ -526,8 +617,8 @@ function _historyRunActionMenu() {
     ['copy-command', 'Copy command'],
     ['schedule-command', 'Schedule this command'],
     ['watch-command', 'Create watcher from this baseline'],
-    ['edit-metadata', 'Edit metadata'],
   ];
+  if (_historyRunCanEditMetadata()) items.push(['edit-metadata', 'Edit metadata']);
   if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
   const projectLinks = typeof _historyRunProjectLinks === 'function'
     ? _historyRunProjectLinks(_historyRunPrimary())
@@ -886,7 +977,7 @@ function _renderHistoryRunSummary(body, run) {
     ),
   ];
   if (run.schedule_id) {
-    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', _historyRunScheduleLink(run)));
+    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', _historyRunScheduleSummary(run)));
   }
   summary.append(...summaryRows);
   body.appendChild(summary);
@@ -900,7 +991,7 @@ function _renderHistoryRunSummary(body, run) {
   metadata.className = 'history-run-section';
   metadata.appendChild(_historyRunSectionHeader(
     'Metadata',
-    _historyRunActionButton('Edit', 'edit-metadata'),
+    _historyRunCanEditMetadata() ? _historyRunActionButton('Edit', 'edit-metadata') : null,
   ));
 
   const metadataFields = document.createElement('div');
@@ -965,9 +1056,16 @@ function _renderHistoryRunSummary(body, run) {
 
   const actions = document.createElement('div');
   actions.className = 'history-run-actions history-run-primary-actions';
+  const deleteDisabled = typeof _historyCanManageHistory === 'function' && !_historyCanManageHistory();
+  const deleteButton = _historyRunActionButton('Delete', 'delete', { disabled: deleteDisabled });
+  if (deleteDisabled) {
+    deleteButton.title = typeof _historyScopeDeniedMessage === 'function'
+      ? _historyScopeDeniedMessage('delete team history')
+      : 'View-only team members cannot delete team history.';
+  }
   actions.append(
     _historyRunActionButton('Restore', 'restore'),
-    _historyRunActionButton('Delete', 'delete'),
+    deleteButton,
     _historyRunActionButton('Permalink', 'permalink'),
     _historyRunActionButton('Compare', 'compare'),
   );
@@ -1033,8 +1131,39 @@ function _renderHistoryOutputSummary(body, run) {
   body.appendChild(section);
 }
 
+function _renderHistoryCommandOutcomeSummary(body, run) {
+  if (!_historyCommandOutcomeSummariesEnabled()) return;
+  const summary = _historyRunCommandOutcomeSummary(run);
+  if (!summary) return;
+  const section = document.createElement('div');
+  section.className = 'history-run-section history-run-command-outcome-summary command-outcome-summary';
+  section.appendChild(_historyRunSectionHeader(summary.title || 'Command outcome'));
+  const list = document.createElement('div');
+  list.className = 'history-run-command-outcome-list';
+  summary.items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'history-run-command-outcome-row';
+    const label = String(item && item.label || '').trim();
+    const value = String(item && item.value || '').trim();
+    if (label) {
+      const key = document.createElement('span');
+      key.className = 'history-run-command-outcome-label';
+      key.textContent = label;
+      row.appendChild(key);
+    }
+    const text = document.createElement('span');
+    text.className = 'history-run-command-outcome-value';
+    text.textContent = value || label;
+    row.appendChild(text);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  body.appendChild(section);
+}
+
 function _renderHistoryRunOutput(body, run) {
   const output = _historyRunOutputEntries(run);
+  const outcomeSummary = _historyRunCommandOutcomeSummary(run);
   if (!output.length && _historyRunModalState.loadingDetails) {
     const loading = document.createElement('div');
     loading.className = 'history-run-empty';
@@ -1047,6 +1176,7 @@ function _renderHistoryRunOutput(body, run) {
     empty.className = 'history-run-empty';
     empty.textContent = 'No saved output preview is available.';
     body.appendChild(empty);
+    if (outcomeSummary) _renderHistoryCommandOutcomeSummary(body, run);
     return;
   }
   _renderHistoryOutputSummary(body, run);
@@ -1065,6 +1195,7 @@ function _renderHistoryRunOutput(body, run) {
     if (index < output.length - 1) pre.appendChild(document.createTextNode('\n'));
   });
   body.appendChild(pre);
+  _renderHistoryCommandOutcomeSummary(body, run);
   if (run.preview_notice) {
     const notice = document.createElement('div');
     notice.className = 'history-run-notice';
@@ -1577,6 +1708,16 @@ function _historyRunExportLines(run) {
   return lines.filter(line => line && typeof line.text === 'string');
 }
 
+function _historyRunExportLinesWithOutcome(run) {
+  const rawLines = _historyRunExportLines(run);
+  if (!_historyCommandOutcomeSummariesEnabled()) {
+    return rawLines;
+  }
+  const summary = _historyRunCommandOutcomeSummary(run);
+  if (!summary) return rawLines;
+  return rawLines.concat(_historyCommandOutcomeSummaryToLines(summary));
+}
+
 async function _historyRunLoadExportRun() {
   const run = _historyRunPrimary();
   if (!run || !run.id) return run || {};
@@ -1591,6 +1732,11 @@ function _historyRunBuildExportModel(run) {
   const rawLines = typeof omitRawOnlyLineEntries === 'function'
     ? omitRawOnlyLineEntries(exportLines)
     : exportLines;
+  const visibleLines = _historyRunExportLinesWithOutcome({
+    ...(run || {}),
+    output_entries: rawLines,
+    preview_notice: null,
+  });
   if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
     return ExportHtmlUtils.buildExportDocumentModel({
       appName: APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell',
@@ -1603,7 +1749,7 @@ function _historyRunBuildExportModel(run) {
         lines: `${rawLines.length.toLocaleString()} lines`,
         version: APP_CONFIG && APP_CONFIG.version || null,
       },
-      rawLines,
+      rawLines: visibleLines,
     });
   }
   return {
@@ -1616,12 +1762,12 @@ function _historyRunBuildExportModel(run) {
       lines: `${rawLines.length.toLocaleString()} lines`,
       version: APP_CONFIG && APP_CONFIG.version || null,
     },
-    rawLines,
+    rawLines: visibleLines,
   };
 }
 
 function _historyRunPlainExportText(run) {
-  return _historyRunExportLines(run)
+  return _historyRunExportLinesWithOutcome(run)
     .map(line => String(line.text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''))
     .join('\n');
 }
@@ -1994,7 +2140,11 @@ async function _handleHistoryRunModalAction(action) {
     }
   } else if (action === 'open-schedule') {
     closeHistoryRunOverlay();
-    if (run.schedule_id && typeof openSchedulesModal === 'function') {
+    const ownerKind = String(run.schedule_owner_kind || '');
+    const watcherId = String(run.schedule_owner_id || run.watcher_id || '');
+    if (ownerKind === 'watcher' && watcherId && typeof openWatchersModal === 'function') {
+      void openWatchersModal({ watcherId });
+    } else if (run.schedule_id && typeof openSchedulesModal === 'function') {
       void openSchedulesModal({ scheduleId: run.schedule_id });
     }
   } else if (action === 'permalink') {

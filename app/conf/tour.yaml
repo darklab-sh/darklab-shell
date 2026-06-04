@@ -24,7 +24,7 @@
 # The tour kill-switch lives in config.yaml as `tour_enabled` alongside
 # other <feature>_enabled keys; this file stays content-only.
 
-version: 2
+version: 3
 
 chapters:
   - id: running_commands
@@ -93,6 +93,18 @@ chapters:
       output.
     sample: "project help"
     illustration: project_summary
+
+  - id: team_mode
+    title: "Work in Team-Mode"
+    summary: |
+      Team-Mode lets trusted operators share the same instance without losing
+      their personal workspace. Use Options > Teams or the team command to
+      create a team, invite members, switch active scope, and choose whether
+      new runs, History, Projects, Atlas, Files, Workflows, schedules, watchers,
+      AI assists, notifications, and team secrets belong to you or the team.
+      Viewer roles can follow along without changing team-owned work.
+    sample: "team help"
+    illustration: team_scope
 
   - id: atlas
     title: "Triage Entities in Atlas"

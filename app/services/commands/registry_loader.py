@@ -12,6 +12,65 @@ import yaml
 SECRET_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
+# ── Knowledge field schema ─────────────────────────────────────────────────────
+# Phase 0 locked decisions — these constants are the contract that Phase 1
+# normalization, merge, and catalog projection must implement.
+#
+# Merge strategy (locked):
+#   - List fields  (.local overlays extend, dedupe after normalization)
+#   - Scalar fields (.local overlays replace entirely)
+# All knowledge fields are descriptive only; none affect allow/deny policy
+# or runtime behaviour in any way.
+KNOWLEDGE_LIST_FIELDS: frozenset[str] = frozenset({"notes", "gotchas", "safe_defaults", "common_flags"})
+KNOWLEDGE_SCALAR_FIELDS: frozenset[str] = frozenset({"artifact_behavior"})
+KNOWLEDGE_FIELDS: frozenset[str] = KNOWLEDGE_LIST_FIELDS | KNOWLEDGE_SCALAR_FIELDS
+# Caps: max items per list field; max characters per item (list or scalar).
+KNOWLEDGE_LIST_MAX_ITEMS: int = 5
+KNOWLEDGE_TEXT_MAX_CHARS: int = 200
+
+# Top-level fields explicitly consumed by normalize_commands_registry_entry.
+# "knowledge" is listed here now so that Phase 1's addition of that key never
+# trips the lint even before the normalizer wire-up lands.
+# Anything not in this set is silently ignored during normalisation; the lint
+# function check_unknown_command_fields() surfaces such keys in tests and
+# startup validation passes without hard-failing on .local overlays.
+_KNOWN_TOP_LEVEL_COMMAND_FIELDS: frozenset[str] = frozenset({
+    "root", "description", "category", "policy", "help",
+    "workspace_flags", "autocomplete", "runtime_adaptations",
+    "requires_secrets", "interactive", "allow_grouping_flags",
+    # Feature-gate aliases — all three map to the same normalized value.
+    "feature_required", "requires_feature", "feature",
+    # Knowledge fields (consumed after Phase 1 normalization lands).
+    "knowledge",
+})
+# Pipe helpers have a narrower field set; any extra key is a likely typo.
+_KNOWN_TOP_LEVEL_PIPE_HELPER_FIELDS: frozenset[str] = frozenset({
+    "root", "autocomplete",
+    "feature_required", "requires_feature", "feature",
+})
+
+
+def check_unknown_command_fields(entry: object, *, pipe_helper: bool = False) -> list[str]:
+    """Return unknown top-level keys in a registry entry (for lint use only).
+
+    Not called on the hot path.  Use in tests or a startup validation pass to
+    surface typos in commands.yaml and .local overlays without hard-failing
+    normalisation (silent-ignore is the runtime policy; this is the companion
+    lint that makes the policy visible to authors).
+
+    Returns a sorted list of unrecognised key names, or [] if the entry is
+    clean.  Returns [] for non-dict input.
+    """
+    if not isinstance(entry, dict):
+        return []
+    known = _KNOWN_TOP_LEVEL_PIPE_HELPER_FIELDS if pipe_helper else _KNOWN_TOP_LEVEL_COMMAND_FIELDS
+    unknown = [k for k in entry if k not in known]
+    raw_knowledge = entry.get("knowledge")
+    if not pipe_helper and isinstance(raw_knowledge, dict):
+        unknown.extend(f"knowledge.{k}" for k in raw_knowledge if k not in KNOWLEDGE_FIELDS)
+    return sorted(unknown)
+
+
 def dedupe_preserve_order(values):
     return list(dict.fromkeys(values))
 
@@ -336,6 +395,57 @@ def normalize_interactive_spec(raw_spec: object) -> dict:
     }
 
 
+def normalize_command_knowledge(raw_knowledge: object) -> dict[str, object]:
+    """Normalize the optional ``knowledge`` sub-dict from a registry entry.
+
+    Returns a sparse dict — fields are omitted when empty after normalization.
+    All fields are descriptive only; none affect allow/deny policy or any
+    runtime behaviour.  Normalization rules per Phase 0 locked decisions:
+    - List fields: strip, truncate to KNOWLEDGE_TEXT_MAX_CHARS, drop empties,
+      dedupe, cap at KNOWLEDGE_LIST_MAX_ITEMS items.
+    - Scalar fields: strip, truncate to KNOWLEDGE_TEXT_MAX_CHARS.
+    - Unknown sub-keys: silently ignored.
+    """
+    if not isinstance(raw_knowledge, dict):
+        return {}
+
+    result: dict[str, object] = {}
+
+    for field in KNOWLEDGE_LIST_FIELDS:
+        raw_items = raw_knowledge.get(field)
+        if raw_items is None:
+            continue
+        items_raw: list[object] = raw_items if isinstance(raw_items, list) else [raw_items]
+        items: list[str] = []
+        seen: set[str] = set()
+        for item in items_raw:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if len(text) > KNOWLEDGE_TEXT_MAX_CHARS:
+                text = text[:KNOWLEDGE_TEXT_MAX_CHARS]
+            if text in seen:
+                continue
+            seen.add(text)
+            items.append(text)
+            if len(items) >= KNOWLEDGE_LIST_MAX_ITEMS:
+                break
+        if items:
+            result[field] = items
+
+    for field in KNOWLEDGE_SCALAR_FIELDS:
+        raw_value = raw_knowledge.get(field)
+        if raw_value is None:
+            continue
+        text = str(raw_value).strip()
+        if len(text) > KNOWLEDGE_TEXT_MAX_CHARS:
+            text = text[:KNOWLEDGE_TEXT_MAX_CHARS]
+        if text:
+            result[field] = text
+
+    return result
+
+
 def normalize_commands_registry_entry(
     raw_entry,
     normalize_autocomplete: Callable[[str, object], dict],
@@ -385,6 +495,9 @@ def normalize_commands_registry_entry(
         )
     if interactive:
         entry["interactive"] = interactive
+    knowledge = normalize_command_knowledge(raw_entry.get("knowledge"))
+    if knowledge:
+        entry["knowledge"] = knowledge
     return entry
 
 
@@ -541,6 +654,29 @@ def merge_command_registry_entries(
                 copied = deepcopy(secret)
                 merged.setdefault("requires_secrets", []).append(copied)
                 existing_secrets[key] = copied
+        overlay_knowledge = overlay_entry.get("knowledge")
+        if isinstance(overlay_knowledge, dict) and overlay_knowledge:
+            base_knowledge = merged.setdefault("knowledge", {})
+            # Scalar fields: overlay replaces entirely (Phase 0 locked).
+            for field in KNOWLEDGE_SCALAR_FIELDS:
+                if field in overlay_knowledge:
+                    base_knowledge[field] = overlay_knowledge[field]
+            # List fields: overlay extends then dedupes (Phase 0 locked).
+            for field in KNOWLEDGE_LIST_FIELDS:
+                overlay_items = overlay_knowledge.get(field)
+                if not isinstance(overlay_items, list):
+                    continue
+                existing: list[str] = list(base_knowledge.get(field) or [])
+                seen: set[str] = set(existing)
+                for item in overlay_items:
+                    if isinstance(item, str) and item and item not in seen:
+                        existing.append(item)
+                        seen.add(item)
+                    if len(existing) >= KNOWLEDGE_LIST_MAX_ITEMS:
+                        break
+                base_knowledge[field] = existing
+            if not base_knowledge:
+                merged.pop("knowledge", None)
 
     base_autocomplete = merged.get("autocomplete") or empty_autocomplete_entry()
     overlay_autocomplete = overlay_entry.get("autocomplete") or {}

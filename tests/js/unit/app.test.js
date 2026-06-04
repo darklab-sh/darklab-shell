@@ -35,7 +35,7 @@ function loadSchedulesModalTestFns({
 } = {}) {
   document.body.innerHTML = `
     <div id="schedules-overlay" class="u-hidden">
-      <div id="schedules-modal">
+      <div id="schedules-modal" tabindex="-1">
         <button class="schedules-close" type="button"></button>
         <button id="schedules-new-btn" type="button"></button>
         <button id="schedules-refresh-btn" type="button"></button>
@@ -56,10 +56,11 @@ function loadSchedulesModalTestFns({
       showToast,
       openHistoryRunDetails,
       fetchAndRenderHistoryComparison,
+      _closeMajorOverlays: vi.fn(),
       bindDismissible,
       refocusComposerAfterAction: vi.fn(),
     },
-    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, closeSchedulesModal })',
+    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, openSchedulesModal, closeSchedulesModal })',
   )
   return {
     ...fns,
@@ -83,7 +84,7 @@ function loadWatchersModalTestFns({
 } = {}) {
   document.body.innerHTML = `
     <div id="watchers-overlay" class="u-hidden">
-      <div id="watchers-modal">
+      <div id="watchers-modal" tabindex="-1">
         <button class="watchers-close" type="button"></button>
         <button id="watchers-new-btn" type="button"></button>
         <button id="watchers-refresh-btn" type="button"></button>
@@ -338,6 +339,7 @@ describe('app helpers', () => {
       'pref_project_auto_link_external_runs',
       'pref_project_auto_link_run_entities',
       'pref_run_notify',
+      'pref_command_outcome_summaries',
       'pref_hud_clock',
       'pref_prompt_username',
       'pref_compare_view_mode',
@@ -359,8 +361,11 @@ describe('app helpers', () => {
       'project-package-manifest-modal',
       'project-package-wizard-modal',
       'project-entity-editor-modal',
+      'finding-triage-modal',
+      'atlas-import-modal',
       'schedules-modal',
       'watchers-modal',
+      'team-scope-modal',
     ].forEach((id) => {
       expect(document.getElementById(id)?.dataset.focusTrapBound).toBe('1')
     })
@@ -531,14 +536,15 @@ describe('app helpers', () => {
     })
     const showToast = vi.fn()
     const fetchAndRenderHistoryComparison = vi.fn()
-    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({
+    const { _bindSchedulesModal, openSchedulesModal } = loadSchedulesModalTestFns({
       apiFetch,
       showToast,
       fetchAndRenderHistoryComparison,
     })
     _bindSchedulesModal()
 
-    await refreshSchedulesModal()
+    await openSchedulesModal()
+    expect(document.activeElement).toBe(document.getElementById('schedules-modal'))
     await vi.waitFor(() => expect(document.getElementById('schedules-detail').textContent).toContain('Action schedule'))
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Pause').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule paused', 'success'))
@@ -707,6 +713,7 @@ describe('app helpers', () => {
     _bindWatchersModal()
 
     await openWatchersModal({ baselineRun: { id: 'run_base', command: 'nmap -sV darklab.sh' } })
+    expect(document.activeElement).toBe(document.getElementById('watchers-modal'))
     await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
     const baselineHelp = document.querySelector('.watchers-help-trigger')
     expect(baselineHelp.textContent).toBe('?')
@@ -929,7 +936,7 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-clock')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
     expect(document.getElementById('options-compare-view-mode-select').value).toBe('unified')
     expect(document.getElementById('options-compare-context-select').value).toBe('10')
@@ -1054,6 +1061,10 @@ describe('app helpers', () => {
   })
 
   it('persists the selected options tab and keeps desktop-only controls in the preferences panel', async () => {
+    let createdTeam = null
+    let failScopeRefresh = false
+    let failInviteCreate = false
+    const ownerCapabilities = ['manage_owners', 'manage_members', 'manage_invites', 'manage_recovery', 'archive_team']
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/session/preferences' && opts.method === 'POST') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
@@ -1064,9 +1075,61 @@ describe('app helpers', () => {
       if (url === '/session/secrets') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
       }
+      if (url === '/session/teams' && opts.method === 'POST') {
+        createdTeam = {
+          id: 'team_options_1',
+          name: 'Ops team',
+          slug: 'ops-team',
+          status: 'active',
+          member: { id: 'tmem_1', role: 'owner', capabilities: ownerCapabilities, display_name: 'Nona' },
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ team: createdTeam, recovery_code: 'trec_once' }) })
+      }
+      if (url === '/session/teams') {
+        if (failScopeRefresh) return Promise.reject(new Error('scope offline'))
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ teams: createdTeam ? [createdTeam] : [] }) })
+      }
+      if (url === '/session/teams/team_options_1/invites' && opts.method === 'POST') {
+        if (failInviteCreate) {
+          return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({ message: 'invite denied' }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ invite: { code: 'tinv_once' } }) })
+      }
+      if (url === '/session/teams/team_options_1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            team: createdTeam,
+            members: [{
+              id: 'tmem_1',
+              role: 'owner',
+              capabilities: ownerCapabilities,
+              display_name: 'Nona',
+              status: 'active',
+              is_current: true,
+            }],
+            invites: [{
+              id: 'tinv_1',
+              role: 'operator',
+              label: 'Alice laptop',
+              use_count: 0,
+              max_uses: 1,
+              created_at: '2026-05-28T00:00:00+00:00',
+            }],
+            recovery_codes: [{ id: 'trec_1', created_at: '2026-05-28T00:00:00+00:00' }],
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference } = await loadAppFns({ apiFetch })
+    const bindMobileSheet = vi.fn()
+    const reloadSessionHistory = vi.fn(() => Promise.resolve())
+    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference, logClientError, storage } = await loadAppFns({
+      apiFetch,
+      bindMobileSheet,
+      reloadSessionHistory,
+      sessionId: 'tok_options_tab',
+    })
 
     activateOptionsTab('secrets')
 
@@ -1082,15 +1145,290 @@ describe('app helpers', () => {
       expect(payload.preferences.pref_options_modal_last_tab).toBe('secrets')
     })
 
+    activateOptionsTab('teams')
+
+    expect(document.getElementById('options-tab-teams').getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('options-panel-teams').hidden).toBe(false)
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(true)
+    expect(getOptionsModalLastTabPreference()).toBe('teams')
+    await vi.waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith('/session/teams', expect.objectContaining({ cache: 'no-store' }))
+    })
+    await vi.waitFor(() => expect(document.getElementById('options-team-create-btn').disabled).toBe(false))
+
+    document.getElementById('options-team-create-btn').click()
+    const createForm = document.querySelector('[data-team-form="create"]')
+    createForm.querySelector('[name="name"]').value = 'Ops team'
+    createForm.querySelector('[name="slug"]').value = 'ops-team'
+    createForm.querySelector('[name="display_name"]').value = 'Nona'
+    const teamListCallsBeforeCreate = apiFetch.mock.calls.filter(([url, opts = {}]) => (
+      url === '/session/teams' && (!opts.method || opts.method === 'GET')
+    )).length
+    createForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith('/session/teams', expect.objectContaining({ method: 'POST' }))
+      expect(document.getElementById('options-team-detail').textContent).toContain('Recovery code')
+      expect(document.getElementById('options-team-detail').textContent).toContain('trec_once')
+    })
+    const teamListCallsAfterCreate = apiFetch.mock.calls.filter(([url, opts = {}]) => (
+      url === '/session/teams' && (!opts.method || opts.method === 'GET')
+    )).length
+    expect(teamListCallsAfterCreate).toBe(teamListCallsBeforeCreate + 1)
+    ;[
+      '.options-team-member-row',
+      '.options-team-invite-row',
+      '.options-team-recovery-row',
+    ].forEach((selector) => {
+      expect(document.querySelector(selector)?.classList.contains('panel-row')).toBe(true)
+    })
+    expect(document.querySelector('#options-panel-teams .options-team-list')).not.toBeNull()
+    expect(document.querySelector('#options-panel-teams [class*="options-secret-"]')).toBeNull()
+    failInviteCreate = true
+    const inviteForm = document.querySelector('[data-team-invite-form]')
+    inviteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      const failureLog = logClientError.mock.calls.find(([context, error]) => (
+        String(context).startsWith('TEAM_ACTION_FAILED')
+        && String(context).includes('"action":"create_invite"')
+        && String(context).includes('"team_id":"team_options_1"')
+        && error.message === 'invite denied'
+      ))
+      expect(failureLog).toBeTruthy()
+    })
+    const originalSetActiveTeamId = window.setActiveTeamId
+    window.setActiveTeamId = vi.fn(() => { throw new Error('scope setter exploded') })
+    document.querySelector('#options-teams-list [data-team-action="switch-team"]').click()
+    await vi.waitFor(() => {
+      const failureLog = logClientError.mock.calls.find(([context, error]) => (
+        String(context).startsWith('TEAM_UI_ACTION_FAILED')
+        && String(context).includes('"action":"switch-team"')
+        && String(context).includes('"team_id":"team_options_1"')
+        && error.message === 'scope setter exploded'
+      ))
+      expect(failureLog).toBeTruthy()
+    })
+    window.setActiveTeamId = originalSetActiveTeamId
+    document.getElementById('team-scope-trigger').click()
+    const scopeMenu = document.getElementById('team-scope-menu')
+    expect(scopeMenu.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('team-scope-trigger').getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById('team-scope-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('team-scope-overlay').hasAttribute('inert')).toBe(true)
+    expect(document.getElementById('team-scope-overlay').getAttribute('aria-hidden')).toBe('true')
+    await vi.waitFor(() => {
+      expect(scopeMenu.textContent).toContain('Ops team')
+    })
+    expect(scopeMenu.textContent).not.toContain('Loading teams...')
+    const personalScopeOption = scopeMenu.querySelector('[data-team-scope-menu-option="personal"]')
+    expect(personalScopeOption?.textContent).toContain('Personal')
+    const teamScopeOption = scopeMenu.querySelector('[data-team-scope-menu-option="team_options_1"]')
+    expect(teamScopeOption.classList.contains('dropdown-item')).toBe(true)
+    expect(teamScopeOption.classList.contains('dropdown-item-compact')).toBe(true)
+    teamScopeOption.click()
+    expect(scopeMenu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('team-scope-trigger').getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById('team-scope-label').textContent).toBe('Ops team')
+    expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Ops team')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-announcer').textContent).toBe('Active scope changed to Ops team.')
+    })
+    const scopeChangedLogs = () => apiFetch.mock.calls
+      .filter(([url, opts]) => url === '/log' && JSON.parse(opts.body).event === 'TEAM_SCOPE_CHANGED')
+      .map(([, opts]) => JSON.parse(opts.body))
+    const firstScopeChange = scopeChangedLogs().at(-1)
+    expect(firstScopeChange.level).toBe('debug')
+    expect(JSON.parse(firstScopeChange.message)).toEqual({
+      team_id: 'team_options_1',
+      scope: 'team',
+      persisted: true,
+      source: 'selector',
+    })
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(1)
+    await window.refreshTeamScopes()
+    document.getElementById('team-scope-trigger').click()
+    document.querySelector('[data-team-scope-menu-option="personal"]').click()
+    expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-announcer').textContent).toBe('Active scope changed to Personal.')
+    })
+    expect(storage.getItem('active_team_id:tok_options_tab')).toBeNull()
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(2)
+    document.getElementById('team-scope-trigger').click()
+    document.querySelector('[data-team-scope-menu-option="team_options_1"]').click()
+    expect(document.getElementById('team-scope-label').textContent).toBe('Ops team')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(3)
+    await window.refreshTeamScopes()
+
+    const dispatchScopeStorage = (value) => {
+      if (value) storage.setItem('active_team_id:tok_options_tab', value)
+      else storage.removeItem('active_team_id:tok_options_tab')
+      const event = new Event('storage')
+      Object.defineProperty(event, 'key', { value: 'active_team_id:tok_options_tab' })
+      Object.defineProperty(event, 'newValue', { value })
+      window.dispatchEvent(event)
+    }
+    dispatchScopeStorage('team_options_1')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(3)
+    dispatchScopeStorage('')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(4)
+    expect(JSON.parse(scopeChangedLogs().at(-1).message)).toEqual({
+      team_id: '',
+      scope: 'personal',
+      persisted: false,
+      source: 'storage',
+    })
+    dispatchScopeStorage('')
+    expect(reloadSessionHistory).toHaveBeenCalledTimes(4)
+    failScopeRefresh = true
+    dispatchScopeStorage('team_missing_1')
+    expect(document.getElementById('team-scope-label').textContent).toBe('Loading...')
+    expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Loading...')
+    await vi.waitFor(() => {
+      expect(document.getElementById('team-scope-label').textContent).toBe('Team unavailable')
+      expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Team unavailable')
+      expect(document.getElementById('team-scope-current').textContent).toBe('Team unavailable')
+      expect(document.getElementById('team-scope-trigger').classList.contains('is-error')).toBe(true)
+      expect(document.querySelector('[data-menu-action="scope"]').classList.contains('is-error')).toBe(true)
+    })
+    const refreshLog = logClientError.mock.calls.find(([context]) => (
+      String(context).startsWith('TEAM_SCOPE_REFRESH_FAILED')
+      && String(context).includes('"surface":"teams"')
+      && String(context).includes('"team_id":"team_missing_1"')
+    ))
+    expect(refreshLog?.[1]?.message).toBe('scope offline')
+
+    failScopeRefresh = false
+    const originalGetItem = storage.getItem.bind(storage)
+    storage.getItem = vi.fn(() => { throw new Error('blocked storage read') })
+    await window.refreshTeamScopes()
+    storage.getItem = originalGetItem
+    const storageLog = apiFetch.mock.calls
+      .filter(([url, opts]) => url === '/log' && JSON.parse(opts.body).event === 'TEAM_SCOPE_STORAGE_UNAVAILABLE')
+      .map(([, opts]) => JSON.parse(opts.body))
+      .at(-1)
+    expect(storageLog.level).toBe('debug')
+    const storagePayload = JSON.parse(storageLog.message)
+    expect(storagePayload.operation).toBe('read')
+    expect(storagePayload.key_suffix).not.toContain('tok_options_tab')
+    expect(storagePayload.message).toBe('blocked storage read')
+
     activateOptionsTab('preferences')
 
     expect(document.getElementById('options-tab-preferences').getAttribute('aria-selected')).toBe('true')
     expect(document.querySelectorAll('#options-panel-preferences .options-desktop-only')).toHaveLength(2)
     expect(document.getElementById('options-panel-secrets').hidden).toBe(true)
 
-    expect(cycleOptionsTab(-1)).toBe(true)
+    expect(cycleOptionsTab(1)).toBe(true)
     expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement?.matches('[data-options-tab]')).toBe(false)
+
+    const offlineApiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/session/preferences') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      if (url === '/session/teams') {
+        return Promise.reject(new Error('team API unreachable'))
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    await loadAppFns({
+      apiFetch: offlineApiFetch,
+      sessionId: 'tok_options_offline',
+      localStorageEntries: { 'active_team_id:tok_options_offline': 'team_cached_1' },
+    })
+    document.dispatchEvent(new Event('DOMContentLoaded'))
+    await vi.waitFor(() => {
+      expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Team unavailable')
+      expect(document.querySelector('[data-menu-action="scope"]').classList.contains('is-error')).toBe(true)
+      expect(document.getElementById('team-scope-label').textContent).toBe('Team unavailable')
+    })
+  })
+
+  it('explains that reactivated teams keep archived automation paused', async () => {
+    const adminCapabilities = ['manage_members', 'manage_invites', 'archive_team']
+    let archivedTeam = {
+      id: 'team_archived_1',
+      name: 'Archive ops',
+      slug: 'archive-ops',
+      status: 'archived',
+      member: { id: 'tmem_archived_1', role: 'admin', capabilities: adminCapabilities, display_name: 'Nona' },
+    }
+    const showConfirm = vi.fn(async () => 'confirm')
+    const showToast = vi.fn()
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/session/preferences') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      if (url === '/session/teams') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ teams: [archivedTeam] }) })
+      }
+      if (url === '/session/teams/team_archived_1' && opts.method === 'PATCH') {
+        expect(JSON.parse(opts.body)).toEqual({ status: 'active' })
+        archivedTeam = { ...archivedTeam, status: 'active' }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ team: archivedTeam }) })
+      }
+      if (url === '/session/teams/team_archived_1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            team: archivedTeam,
+            members: [{
+              id: 'tmem_archived_1',
+              role: 'admin',
+              capabilities: adminCapabilities,
+              display_name: 'Nona',
+              status: 'active',
+              is_current: true,
+            }],
+            invites: [],
+            recovery_codes: [{
+              id: 'trec_archived_1',
+              created_at: '2026-05-28T00:00:00+00:00',
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { activateOptionsTab } = await loadAppFns({
+      apiFetch,
+      sessionId: 'tok_options_team_reactivate',
+      showConfirm,
+      showToast,
+    })
+
+    activateOptionsTab('teams')
+    await vi.waitFor(() => expect(document.getElementById('options-teams-list').textContent).toContain('Archive ops'))
+    document.querySelector('[data-team-action="select-team"]').click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('options-team-detail').textContent).toContain('automation stays paused')
+    })
+
+    document.querySelector('[data-team-action="reactivate-team"]').click()
+
+    await vi.waitFor(() => {
+      expect(showConfirm).toHaveBeenCalled()
+      expect(showConfirm.mock.calls[0][0].body.note)
+        .toContain('schedules and watchers paused by archival stay paused')
+      expect(showToast).toHaveBeenCalledWith('Team reactivated; schedules and watchers remain paused', 'success')
+    })
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/session/teams/team_archived_1',
+      expect.objectContaining({ method: 'PATCH' })
+    )
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -1198,7 +1536,7 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ts-clock')).toBe(false)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
   })
 
   it('_setLnMode updates body classes and button labels', async () => {
@@ -1207,12 +1545,12 @@ describe('app helpers', () => {
     _setLnMode('on')
 
     expect(document.body.classList.contains('ln-on')).toBe(true)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
 
     _setLnMode('off')
 
     expect(document.body.classList.contains('ln-on')).toBe(false)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
   })
 
   it('allows timestamps and line numbers to be enabled at the same time', async () => {
@@ -1223,7 +1561,7 @@ describe('app helpers', () => {
 
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
   })
 
@@ -1596,6 +1934,7 @@ describe('app helpers', () => {
           pref_welcome_intro: 'animated',
           pref_project_auto_link_external_runs: 'on',
           pref_project_auto_link_run_entities: 'on',
+          pref_command_outcome_summaries: 'on',
           pref_prompt_username: '',
           pref_compare_view_mode: 'auto',
           pref_compare_context: '3',
@@ -1607,10 +1946,12 @@ describe('app helpers', () => {
     await handleConfigCommand('config set welcome static', 'tab-1')
     await handleConfigCommand('config set project-auto-link-runs off', 'tab-1')
     await handleConfigCommand('config set project-auto-link-run-entities off', 'tab-1')
+    await handleConfigCommand('config set command-outcome-summaries off', 'tab-1')
     await handleConfigCommand('config set prompt-username nona', 'tab-1')
     await handleConfigCommand('config set compare-view changes-only', 'tab-1')
     await handleConfigCommand('config set compare-context all', 'tab-1')
     await handleConfigCommand('config get project-auto-link-run-entities', 'tab-1')
+    await handleConfigCommand('config get command-outcome-summaries', 'tab-1')
     await handleConfigCommand('config get prompt-username', 'tab-1')
     await handleConfigCommand('config list', 'tab-1')
 
@@ -1620,6 +1961,7 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
     expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
+    expect(document.cookie).toContain('pref_command_outcome_summaries=off')
     expect(document.cookie).toContain('pref_prompt_username=nona')
     expect(document.cookie).toContain('pref_compare_view_mode=changes_only')
     expect(document.cookie).toContain('pref_compare_context=all')
@@ -1628,12 +1970,22 @@ describe('app helpers', () => {
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-runs off')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-run-entities off')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set command-outcome-summaries off')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-view changes-only')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-context all')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get project-auto-link-run-entities')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get command-outcome-summaries')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
+    const configHeader = document.querySelector('.line.builtin-table-header')
+    const configRows = Array.from(document.querySelectorAll('.line.builtin-table-row'))
+      .map(line => line.textContent)
+    expect(configHeader?.textContent).toMatch(/^option\s+value$/)
+    expect(configRows).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^project-auto-link-run-entities\s+off$/),
+      expect.stringMatching(/^command-outcome-summaries\s+off$/),
+    ]))
     expect(setStatus).toHaveBeenCalledWith('ok')
   })
 
@@ -1850,7 +2202,9 @@ describe('app helpers', () => {
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
     expect(context.config.arg_hints.set.map(item => item.value)).toContain('prompt-username')
     expect(context.config.arg_hints.set.map(item => item.value)).toContain('compare-view')
+    expect(context.config.arg_hints.set.map(item => item.value)).toContain('command-outcome-summaries')
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.config.sequence_arg_hints['set command-outcome-summaries'].map(item => item.value)).toEqual(['on', 'off'])
     expect(context.config.sequence_arg_hints['set compare-view'].map(item => item.value)).toEqual([
       'auto',
       'side-by-side',
@@ -2426,7 +2780,8 @@ describe('app helpers', () => {
     _setTsMode('off')
 
     expect(tsBtn.classList.contains('active')).toBe(false)
-    expect(tsBtn.textContent).toBe('timestamps: off')
+    expect(tsBtn.textContent).toBe('timestamps')
+    expect(tsBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
   it('bootstraps cleanly when config and allowed-commands fetches fail', async () => {
@@ -4524,7 +4879,7 @@ describe('app helpers', () => {
     expect(activateTab).not.toHaveBeenCalled()
 
     const activateTabForOptions = vi.fn()
-    const { handleTabShortcut: handleOptionsTabShortcut } = await loadAppFns({
+    const { activateOptionsTab, handleTabShortcut: handleOptionsTabShortcut } = await loadAppFns({
       activateTab: activateTabForOptions,
       activeTabId: 'tab-1',
       tabs: [
@@ -4532,6 +4887,7 @@ describe('app helpers', () => {
         { id: 'tab-2', st: 'idle' },
       ],
     })
+    activateOptionsTab('teams', { persist: false })
     document.getElementById('options-overlay').classList.add('open')
     const preventDefault = vi.fn()
 
@@ -6017,6 +6373,7 @@ describe('app helpers', () => {
       getShareRedactionDefaultPreference,
       getProjectAutoLinkExternalRunsPreference,
       getProjectAutoLinkRunEntitiesPreference,
+      getCommandOutcomeSummariesPreference,
       getHudClockPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
@@ -6093,11 +6450,15 @@ describe('app helpers', () => {
     document
       .getElementById('options-project-auto-link-run-entities-toggle')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-command-outcome-summaries-toggle').checked = false
+    document
+      .getElementById('options-command-outcome-summaries-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
     expect(document.cookie).toContain('pref_timestamps=elapsed')
     expect(document.cookie).toContain('pref_line_numbers=on')
@@ -6105,6 +6466,7 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
     expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
     expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
+    expect(document.cookie).toContain('pref_command_outcome_summaries=off')
     expect(document.cookie).toContain('pref_hud_clock=local')
     expect(document.cookie).toContain('pref_compare_view_mode=side_by_side')
     expect(document.cookie).toContain('pref_compare_context=10')
@@ -6112,6 +6474,7 @@ describe('app helpers', () => {
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
     expect(getProjectAutoLinkRunEntitiesPreference()).toBe('off')
+    expect(getCommandOutcomeSummariesPreference()).toBe('off')
     expect(getHudClockPreference()).toBe('local')
     expect(getCompareViewModePreference()).toBe('side_by_side')
     expect(getCompareContextPreference()).toBe('10')
@@ -6130,6 +6493,7 @@ describe('app helpers', () => {
         pref_share_redaction_default: 'redacted',
         pref_project_auto_link_external_runs: 'off',
         pref_project_auto_link_run_entities: 'off',
+        pref_command_outcome_summaries: 'off',
         pref_hud_clock: 'local',
         pref_compare_view_mode: 'side_by_side',
         pref_compare_context: '10',
@@ -6690,13 +7054,15 @@ describe('syncOptionsControls notify toggle', () => {
     const { syncOptionsControls } = await loadAppFns({})
     syncOptionsControls()
     expect(document.getElementById('options-notify-toggle').checked).toBe(false)
+    expect(document.getElementById('options-command-outcome-summaries-toggle').checked).toBe(true)
   })
 
   it('reflects on preference as checked toggle', async () => {
     const { syncOptionsControls } = await loadAppFns({
-      cookies: { pref_run_notify: 'on' },
+      cookies: { pref_run_notify: 'on', pref_command_outcome_summaries: 'off' },
     })
     syncOptionsControls()
     expect(document.getElementById('options-notify-toggle').checked).toBe(true)
+    expect(document.getElementById('options-command-outcome-summaries-toggle').checked).toBe(false)
   })
 })

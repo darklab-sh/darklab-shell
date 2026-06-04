@@ -1,0 +1,57 @@
+version: 1
+presets:
+  - id: evidence
+    label: Evidence
+    description: Reviewed findings, related transcripts, targets, and selected raw artifacts.
+    name_suffix: evidence
+    redaction_mode: raw
+    include_artifacts: true
+    include_private_notes: false
+    selection:
+      runs: all
+      transcripts: with_findings
+      findings: non_false_positive
+      artifacts: selectable
+      targets: all
+
+  - id: summary
+    label: Summary
+    description: Findings, targets, and metadata without transcript HTML or raw artifacts.
+    name_suffix: summary
+    redaction_mode: raw
+    include_artifacts: false
+    include_private_notes: false
+    selection:
+      runs: all
+      transcripts: none
+      findings: non_false_positive
+      artifacts: none
+      targets: all
+
+  - id: full
+    label: Full Archive
+    description: All linked runs, findings, targets, and available raw artifacts.
+    name_suffix: full
+    redaction_mode: raw
+    include_artifacts: true
+    include_private_notes: false
+    selection:
+      runs: all
+      transcripts: all
+      findings: all
+      artifacts: selectable
+      targets: all
+
+  - id: redacted
+    label: Redacted
+    description: Metadata, findings, targets, and transcripts with sensitive fields redacted.
+    name_suffix: redacted
+    redaction_mode: redacted
+    include_artifacts: true
+    include_private_notes: false
+    selection:
+      runs: all
+      transcripts: with_findings
+      findings: non_false_positive
+      artifacts: selectable
+      targets: all

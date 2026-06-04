@@ -278,6 +278,20 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0012",
         "0013",
         "0014",
+        "0015",
+        "0016",
+        "0017",
+        "0018",
+        "0019",
+        "0020",
+        "0021",
+        "0022",
+        "0023",
+        "0024",
+        "0025",
+        "0026",
+        "0027",
+        "0028",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -297,14 +311,47 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             (table_name = 'session_preferences' AND column_name = 'preferences')
             OR (table_name = 'secrets' AND column_name = 'ciphertext')
             OR (table_name = 'runs' AND column_name = 'preview_truncated')
+            OR (table_name = 'project_auto_promote_rules' AND column_name IN (
+                'filters_json',
+                'enabled',
+                'apply_on_run',
+                'match_count',
+                'linked_count'
+            ))
+            OR (table_name = 'atlas_import_drafts' AND column_name IN (
+                'normalized_rows_json',
+                'preview_counts_json',
+                'warning_summary_json'
+            ))
+            OR (table_name = 'atlas_import_batches' AND column_name IN (
+                'counts_json',
+                'warning_summary_json'
+            ))
+            OR (table_name = 'atlas_entity_import_links' AND column_name IN (
+                'occurrence_count',
+                'source_detail_json',
+                'created_entity'
+            ))
+            OR (table_name = 'atlas_finding_import_occurrences' AND column_name IN (
+                'row_number',
+                'source_detail_json'
+            ))
         )
         """,
         (postgres_schema.schema,),
     ).fetchall()
 
-    assert {"runs", "entities", "entity_intel_snapshots", "schema_migrations"}.issubset({
-        row["table_name"] for row in table_rows
-    })
+    assert {
+        "runs",
+        "entities",
+        "entity_intel_snapshots",
+        "project_auto_promote_rules",
+        "atlas_import_drafts",
+        "atlas_import_batches",
+        "atlas_entity_import_links",
+        "atlas_finding_import_occurrences",
+        "schema_migrations",
+    }.issubset({row["table_name"] for row in table_rows})
     assert {
         (row["table_name"], row["column_name"], row["data_type"])
         for row in column_rows
@@ -312,6 +359,21 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("session_preferences", "preferences", "jsonb"),
         ("secrets", "ciphertext", "bytea"),
         ("runs", "preview_truncated", "boolean"),
+        ("project_auto_promote_rules", "filters_json", "jsonb"),
+        ("project_auto_promote_rules", "enabled", "boolean"),
+        ("project_auto_promote_rules", "apply_on_run", "boolean"),
+        ("project_auto_promote_rules", "match_count", "bigint"),
+        ("project_auto_promote_rules", "linked_count", "bigint"),
+        ("atlas_import_drafts", "normalized_rows_json", "jsonb"),
+        ("atlas_import_drafts", "preview_counts_json", "jsonb"),
+        ("atlas_import_drafts", "warning_summary_json", "jsonb"),
+        ("atlas_import_batches", "counts_json", "jsonb"),
+        ("atlas_import_batches", "warning_summary_json", "jsonb"),
+        ("atlas_entity_import_links", "occurrence_count", "bigint"),
+        ("atlas_entity_import_links", "source_detail_json", "jsonb"),
+        ("atlas_entity_import_links", "created_entity", "boolean"),
+        ("atlas_finding_import_occurrences", "row_number", "bigint"),
+        ("atlas_finding_import_occurrences", "source_detail_json", "jsonb"),
     }
     runs_index_rows = conn.execute(
         """
@@ -342,6 +404,217 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_findings_tool_root_trgm",
         "idx_entity_run_links_entity_seen",
     }.issubset({row["indexname"] for row in atlas_index_rows})
+    auto_promote_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename = 'project_auto_promote_rules'
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_project_auto_promote_rules_project_updated",
+        "idx_project_auto_promote_rules_run_scan",
+    }.issubset({row["indexname"] for row in auto_promote_index_rows})
+    import_index_rows = conn.execute(
+        """
+        SELECT tablename, indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN (
+            'atlas_import_drafts',
+            'atlas_import_batches',
+            'atlas_entity_import_links',
+            'atlas_finding_import_occurrences'
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_atlas_import_drafts_scope_created",
+        "idx_atlas_import_drafts_expires",
+        "idx_atlas_import_batches_scope_applied",
+        "idx_atlas_entity_import_links_batch",
+        "idx_atlas_entity_import_links_entity_seen",
+        "idx_atlas_finding_import_occurrences_batch",
+        "idx_atlas_finding_import_occurrences_finding_seen",
+    }.issubset({row["indexname"] for row in import_index_rows})
+
+
+@pytest.mark.postgres
+def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema):
+    from app import app
+    import blueprints.api_v1 as api_blueprint
+    from core import database as core_database
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.api_v1 import auth as api_auth
+    from services.projects import active as project_active
+    from services.projects import crud as project_crud
+    from services.projects import findings as project_findings
+    from services.projects import links as project_links
+    from services.projects import metadata as project_metadata
+    from services.projects import models as project_models
+    from services.projects import preferences as project_preferences
+    from services.projects import queries as project_queries
+    from services.projects import targets as project_targets
+    from services.teams import request_scope as team_request_scope
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    owner_token = "tok_pg_team_owner_" + uuid.uuid4().hex
+    operator_token = "tok_pg_team_operator_" + uuid.uuid4().hex
+    outsider_token = "tok_pg_team_outsider_" + uuid.uuid4().hex
+    created = "2026-05-29T00:00:00+00:00"
+    for token in (owner_token, operator_token, outsider_token):
+        conn.execute(
+            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (%s, %s, %s)",
+            (token, created, ""),
+        )
+    conn.commit()
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    for module in (api_blueprint, project_links, project_models, project_queries, project_targets):
+        monkeypatch.setattr(module, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    for module in (
+        api_auth,
+        api_blueprint,
+        core_database,
+        project_active,
+        project_crud,
+        project_findings,
+        project_links,
+        project_queries,
+        project_targets,
+        team_request_scope,
+    ):
+        monkeypatch.setattr(module, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(project_metadata, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    def api_headers(token: str, *, team_id: str = "") -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {token}"}
+        if team_id:
+            headers["X-Team-ID"] = team_id
+        return headers
+
+    def browser_headers(token: str, *, team_id: str = "") -> dict[str, str]:
+        headers = {"X-Session-ID": token}
+        if team_id:
+            headers["X-Team-ID"] = team_id
+        return headers
+
+    client = app.test_client()
+    team_resp = client.post(
+        "/api/v1/teams",
+        headers=api_headers(owner_token),
+        json={"name": "Postgres Team " + uuid.uuid4().hex[:8], "display_name": "Postgres owner"},
+    )
+    team_payload = json.loads(team_resp.data)
+    team_id = team_payload["team"]["id"]
+    invite_resp = client.post(
+        f"/api/v1/teams/{team_id}/invites",
+        headers=api_headers(owner_token),
+        json={"role": "operator", "label": "Postgres operator"},
+    )
+    invite_code = json.loads(invite_resp.data)["invite"]["code"]
+    join_resp = client.post(
+        "/api/v1/teams/join",
+        headers=api_headers(operator_token),
+        json={"code": invite_code, "display_name": "Postgres operator"},
+    )
+    recovery_resp = client.post(f"/api/v1/teams/{team_id}/recovery/rotate", headers=api_headers(owner_token))
+
+    personal_run_id = "run-pg-team-personal-" + uuid.uuid4().hex
+    team_run_id = "run-pg-team-owned-" + uuid.uuid4().hex
+    for run_id, session_id, run_team_id, command, output in (
+        (personal_run_id, owner_token, "", "echo postgres personal", "postgres personal output"),
+        (team_run_id, owner_token, team_id, "echo postgres team", "postgres team output"),
+    ):
+        conn.execute(
+            """
+            INSERT INTO runs
+            (id, session_id, team_id, run_kind, command, started, finished, exit_code, output,
+             output_preview, preview_truncated, output_line_count, full_output_available,
+             full_output_truncated, output_search_text)
+            VALUES (%s, %s, %s, 'external', %s, %s, %s, 0, '[]', %s, false, 1, false, false, %s)
+            """,
+            (
+                run_id,
+                session_id,
+                run_team_id,
+                command,
+                created,
+                created,
+                json.dumps([{"text": output, "cls": "", "tsC": "", "tsE": ""}]),
+                output,
+            ),
+        )
+    conn.commit()
+
+    personal_history = client.get("/api/v1/history?limit=20", headers=api_headers(owner_token))
+    team_history = client.get("/api/v1/history?limit=20", headers=api_headers(operator_token, team_id=team_id))
+    team_run = client.get(f"/api/v1/runs/{team_run_id}", headers=api_headers(operator_token, team_id=team_id))
+    outsider_history = client.get("/api/v1/history?limit=20", headers=api_headers(outsider_token, team_id=team_id))
+
+    personal_project_resp = client.post(
+        "/projects",
+        headers=browser_headers(owner_token),
+        json={"name": "Postgres Scoped Slug"},
+    )
+    team_project_resp = client.post(
+        "/projects",
+        headers=browser_headers(owner_token, team_id=team_id),
+        json={"name": "Postgres Scoped Slug"},
+    )
+    duplicate_team_project_resp = client.post(
+        "/projects",
+        headers=browser_headers(operator_token, team_id=team_id),
+        json={"name": "Postgres Scoped Slug"},
+    )
+    team_projects_resp = client.get("/projects", headers=browser_headers(operator_token, team_id=team_id))
+    personal_projects_resp = client.get("/projects", headers=browser_headers(owner_token))
+
+    assert team_resp.status_code == 201
+    assert team_payload["team"]["member"]["role"] == "owner"
+    assert invite_resp.status_code == 201
+    assert join_resp.status_code == 201
+    assert recovery_resp.status_code == 200
+    assert json.loads(recovery_resp.data)["recovery_code"].startswith("trec_")
+
+    assert personal_history.status_code == 200
+    personal_ids = {item["id"] for item in json.loads(personal_history.data)["runs"]}
+    assert personal_run_id in personal_ids
+    assert team_run_id not in personal_ids
+    assert team_history.status_code == 200
+    team_ids = {item["id"] for item in json.loads(team_history.data)["runs"]}
+    assert team_run_id in team_ids
+    assert personal_run_id not in team_ids
+    assert team_run.status_code == 200
+    assert json.loads(team_run.data)["run"]["id"] == team_run_id
+    assert outsider_history.status_code == 403
+    assert json.loads(outsider_history.data)["error"]["code"] == "team_forbidden"
+
+    assert personal_project_resp.status_code == 201
+    assert team_project_resp.status_code == 201
+    assert duplicate_team_project_resp.status_code == 201
+    personal_project = json.loads(personal_project_resp.data)["project"]
+    team_project = json.loads(team_project_resp.data)["project"]
+    duplicate_team_project = json.loads(duplicate_team_project_resp.data)["project"]
+    assert personal_project["slug"] == "postgres-scoped-slug"
+    assert team_project["slug"] == "postgres-scoped-slug"
+    assert duplicate_team_project["slug"] == "postgres-scoped-slug-2"
+    assert json.loads(team_projects_resp.data)["projects"][0]["id"] in {
+        team_project["id"],
+        duplicate_team_project["id"],
+    }
+    assert {item["id"] for item in json.loads(personal_projects_resp.data)["projects"]} == {
+        personal_project["id"],
+    }
 
 
 @pytest.mark.postgres
@@ -819,6 +1092,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     active_project_link = run_blueprint._save_completed_run(
         run_id,
         session_id,
+        "",
         "nuclei -u https://darklab.sh",
         timestamp,
         "2026-05-17T00:00:01Z",
@@ -947,6 +1221,7 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
     active_project_link = run_blueprint._save_completed_run(
         run_id,
         session_id,
+        "",
         "nuclei -u https://darklab.sh",
         timestamp,
         "2026-05-17T00:00:01Z",
@@ -1537,6 +1812,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     from services.atlas import cleanup as atlas_cleanup
     from services.atlas import lookup as atlas_lookup
+    from services.projects import metadata as project_metadata
     from services.projects import preferences as project_preferences
 
     conn = postgres_schema.conn
@@ -1627,6 +1903,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     monkeypatch.setattr(atlas_blueprint, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(atlas_lookup, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(atlas_cleanup, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(project_metadata, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     client = app.test_client()
@@ -1646,6 +1923,22 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         },
     )
     saved_views_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+    triage_resp = client.put(
+        f"/findings/{finding_id}/triage",
+        headers={"X-Session-ID": session_id},
+        json={
+            "remediation": "Patch the Postgres service.",
+            "verification_status": "ready_to_verify",
+        },
+    )
+    triage_update_resp = client.put(
+        f"/findings/{finding_id}/triage",
+        headers={"X-Session-ID": session_id},
+        json={
+            "remediation": "Patch and restart the Postgres service.",
+            "verification_status": "verified",
+        },
+    )
     review_resp = client.post(
         "/atlas/findings/review",
         headers={"X-Session-ID": session_id},
@@ -1680,6 +1973,12 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     saved_view = json.loads(saved_views_resp.data)["views"][0]
     assert saved_view["name"] == "Postgres Atlas"
     assert saved_view["filters"]["run_id"] == run_id
+    assert triage_resp.status_code == 200
+    assert json.loads(triage_resp.data)["triage"]["verification_status"] == "ready_to_verify"
+    assert triage_update_resp.status_code == 200
+    updated_triage = json.loads(triage_update_resp.data)["triage"]
+    assert updated_triage["verification_status"] == "verified"
+    assert updated_triage["remediation"] == "Patch and restart the Postgres service."
     assert review_resp.status_code == 200
     assert json.loads(review_resp.data)["counts"] == {"updated": 1, "not_found": 0}
     assert suppression_resp.status_code == 200

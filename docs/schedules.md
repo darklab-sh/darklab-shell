@@ -2,7 +2,7 @@
 
 Scheduled runs let a durable session token keep running one saved command on a cadence, even when no browser tab is open. Use them for routine checks such as a daily `nmap`, an hourly health probe, or a recurring passive recon command that should land in normal History.
 
-Schedules are owned by `tok_` session tokens. Anonymous browser sessions cannot create them because the worker needs a durable owner it can check after the browser closes, and token revocation must stop future fires.
+Schedules are owned by the active personal or team scope. Anonymous browser sessions cannot create them because the worker needs a durable `tok_` token it can check after the browser closes, and token revocation must stop future personal fires. Team-owned schedules stay with the team and are visible to other members when that team scope is active. Team viewers can read schedules and fire audit rows, while schedule creation, edits, deletes, and manual fires require automation-management permission.
 
 ## Creating Schedules
 
@@ -52,9 +52,11 @@ darklab schedule create --every hourly -- nmap -p 80 darklab.sh
 
 ## Firing And History Links
 
-Due schedules are fired by the scheduler worker, not by Flask request handlers. The worker launches user-owned schedules through the same brokered run path as browser and API starts, including command policy, command registry rewrites, workspace output handling, history persistence, Atlas capture, active-project capture, and outbound `run_complete` notifications.
+Due schedules are fired by the scheduler worker, not by Flask request handlers. The worker launches schedules through the same brokered run path as browser and API starts, including command policy, command registry rewrites, workspace output handling, history persistence, Atlas capture, active-project capture, and outbound `run_complete` notifications. Scheduled runs keep the personal or team scope of the schedule that created them.
 
 Each fire writes a `schedule_fires` audit row. Successful fires store the run id on the audit row and on the schedule. History rows and Run Details use that link to show a `scheduled` badge, and clicking the badge reopens the originating schedule.
+
+If a scheduled run is still active when you open or reload the UI, it stays in the Status Monitor instead of automatically taking over the terminal. Use **Attach** from Status Monitor when you want to watch that run live.
 
 Manual **Run now** actions use the same fire-audit path. They run directly from the request that the operator initiated, so they do not depend on the background scheduler process being healthy.
 
@@ -77,9 +79,11 @@ The current overlap policy is `skip`. If the previous scheduled run is still act
 
 The overlap policy is stored on the schedule row for forward compatibility, but v1 always writes and enforces `skip`.
 
-## Revoked Tokens
+## Revoked Tokens And Archived Teams
 
-Schedules belong to the session token that created them. If that token is revoked, the worker records `skipped_revoked`, disables the schedule, and keeps the row in storage instead of deleting it. Clients using the revoked token lose access to session-scoped schedule routes, so they will not be able to list or edit those rows after revocation.
+Personal schedules belong to the session token that created them. If that token is revoked, the worker records `skipped_revoked`, disables the schedule, and keeps the row in storage instead of deleting it. Clients using the revoked token lose access to session-scoped schedule routes, so they will not be able to list or edit those rows after revocation.
+
+Team-owned schedules pause when the team is archived. They do not move into any member's personal scope, which keeps the ownership trail clear if the team is later reactivated or inspected. Reactivating the team does not resume them automatically; resume the schedule when it should fire again.
 
 ## Notifications
 
@@ -93,10 +97,10 @@ See [docs/notifications.md](notifications.md) for channel setup and delivery beh
 
 ## Limits
 
-- `scheduler.max_per_session` defaults to `32` normal schedules per durable session token.
+- `scheduler.max_per_session` defaults to `32` normal schedules per durable personal or team scope.
 - Watcher-owned schedules use the same physical table but are hidden from normal schedule lists and cannot be edited as ordinary command schedules.
 - Interactive PTY commands cannot be scheduled.
-- Workflow scheduling, blackout calendars, holiday handling, cross-session schedules, and per-target schedules are not part of scheduled runs.
+- Workflow scheduling, blackout calendars, holiday handling, and per-target schedules are not part of scheduled runs.
 
 ## Configuration
 
@@ -106,7 +110,7 @@ Scheduler settings live under `scheduler` in `config.yaml`:
 | --- | --- | --- |
 | `scheduler.lock_path` | `APP_DATA_DIR/scheduler.lock` | SQLite scheduler worker lock path. Postgres uses an advisory lock. |
 | `scheduler.tick_seconds` | `5` | How often the worker checks for due schedules when nothing is ready now. |
-| `scheduler.max_per_session` | `32` | Maximum normal schedules per durable session token. |
+| `scheduler.max_per_session` | `32` | Maximum normal schedules per durable personal or team scope. |
 | `scheduler.missed_fire_policy` | `coalesce` | Missed-fire behavior on worker startup. |
 | `scheduler.max_catchup_window_seconds` | `3600` | How far back the worker will coalesce a missed fire. |
 | `scheduler.default_timezone` | `UTC` | Default timezone for new schedules. |
@@ -143,7 +147,7 @@ Useful places to inspect scheduler behavior:
 - [docs/api.md](api.md) - API and `darklab schedule` CLI usage
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](notifications.md) - outbound notification channels, triggers, and retry behavior
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](../tests/README.md) - test coverage appendix and focused test commands

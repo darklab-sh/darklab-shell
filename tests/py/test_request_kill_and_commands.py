@@ -16,6 +16,7 @@ from services.commands.builtins import (
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
     _run_builtin_commands,
+    execute_builtin_command,
     resolve_builtin_command,
 )
 from services.commands.registry import (
@@ -266,7 +267,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -319,13 +320,208 @@ class TestIsCommandAllowedEdges:
         assert db_is_dir
         assert db_mode == 0o770
 
-    def test_workspace_file_flags_resolve_relative_to_workspace_cwd(self):
+    def test_workspace_file_flags_resolve_against_team_owner_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 2,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import (
+                    owner_workspace_name,
+                    resolve_owner_workspace_path,
+                    write_owner_workspace_text_file,
+                )
+
+                owner = team_owner_context("team-command-files", actor_session_id="tok_command_actor")
+                write_owner_workspace_text_file(owner, "targets.txt", "ip.darklab.sh\n", cfg)
+
+                result = validate_command(
+                    "nmap -iL targets.txt -oN scan.txt",
+                    session_id="tok_command_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+                expected_read = str(resolve_owner_workspace_path(owner, "targets.txt", cfg))
+                expected_write = str(resolve_owner_workspace_path(owner, "scan.txt", cfg))
+
+        assert result.allowed, result.reason
+        assert result.workspace_reads == ["targets.txt"]
+        assert result.workspace_writes == ["scan.txt"]
+        assert expected_read in result.exec_command
+        assert expected_write in result.exec_command
+        assert owner_workspace_name(owner) in result.exec_command
+        assert "tok_command_actor" not in result.exec_command
+
+    def test_workspace_file_write_flags_reserve_team_quota_before_command_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = {
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
                 "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import resolve_owner_workspace_path, write_owner_workspace_text_file
+
+                owner = team_owner_context("team-command-quota", actor_session_id="tok_command_actor")
+                write_owner_workspace_text_file(owner, "existing.txt", "x" * (1024 * 1024), cfg)
+
+                result = validate_command(
+                    "nmap -oN scan.txt darklab.sh",
+                    session_id="tok_command_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+                reserved_path = resolve_owner_workspace_path(owner, "scan.txt", cfg)
+
+        assert not result.allowed
+        assert result.reason == "workspace file quota exceeded"
+        assert not reserved_path.exists()
+
+    def test_workspace_file_write_flags_precreate_team_output_under_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 2,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import resolve_owner_workspace_path
+
+                owner = team_owner_context("team-command-reserve", actor_session_id="tok_command_actor")
+                result = validate_command(
+                    "nmap -oN scan.txt darklab.sh",
+                    session_id="tok_command_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+                reserved_path = resolve_owner_workspace_path(owner, "scan.txt", cfg)
+                reserved_exists = reserved_path.is_file()
+                reserved_size = reserved_path.stat().st_size
+                reserved_mode = os.stat(reserved_path).st_mode & 0o777
+
+        assert result.allowed, result.reason
+        assert reserved_exists
+        assert reserved_size == 0
+        assert reserved_mode == 0o660
+
+    def test_restricted_workspace_list_files_read_team_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+                "restricted_command_input_cidrs": ["10.0.0.0/8"],
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "scan",
+                        "category": "Scanning",
+                        "policy": {"allow": ["scan"], "deny": ["scan -iL"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                        ],
+                        "autocomplete": {
+                            "flags": [
+                                {
+                                    "value": "-iL",
+                                    "takes_value": True,
+                                    "feature_required": "workspace",
+                                    "value_hint": {
+                                        "placeholder": "<target-file>",
+                                        "value_type": "target",
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.teams.scope import team_owner_context
+                from services.workspace.files import write_owner_workspace_text_file
+
+                owner = team_owner_context("team-restricted-files", actor_session_id="tok_restricted_actor")
+                write_owner_workspace_text_file(owner, "targets.txt", "10.1.2.3\n", cfg)
+                result = validate_command(
+                    "scan -iL targets.txt",
+                    session_id="tok_restricted_actor",
+                    cfg=cfg,
+                    owner_context=owner,
+                )
+
+        assert not result.allowed
+        assert "targets.txt contains restricted IP/CIDR value: 10.1.2.3" in result.reason
+
+    def test_workspace_file_flags_resolve_relative_to_workspace_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -414,7 +610,7 @@ class TestIsCommandAllowedEdges:
         assert result.allowed, result.reason
         assert result.workspace_reads == ["targets.txt"]
         assert not denied.allowed
-        assert "escapes the session directory" in denied.reason
+        assert "escapes the workspace directory" in denied.reason
         assert not absolute_denied.allowed
         assert "Invalid file path: /../../scan.txt" in absolute_denied.reason
         assert "Command not allowed" not in absolute_denied.reason
@@ -425,7 +621,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -476,7 +672,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 2,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -537,7 +733,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 20,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
@@ -628,7 +824,7 @@ class TestIsCommandAllowedEdges:
                     cfg=cfg,
                 )
                 assert not denied.allowed
-                assert "managed tools/amass session directory" in denied.reason
+                assert "managed tools/amass workspace directory" in denied.reason
 
                 denied = validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
@@ -790,6 +986,44 @@ class TestIsCommandAllowedEdges:
 
 
 class TestBuiltinCommandResolution:
+    def test_workspace_builtin_reads_team_files_and_denies_viewer_writes(self, tmp_path):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        from services.teams.scope import team_owner_context
+        from services.workspace.files import write_owner_workspace_text_file
+
+        owner = team_owner_context("team-builtins-files", actor_session_id="tok_builtin_actor")
+        write_owner_workspace_text_file(owner, "notes.txt", "team notes\n", cfg)
+
+        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, **cfg}), \
+             mock.patch("services.commands.builtins_workspace.CFG", {**shell_app.CFG, **cfg}):
+            read_events, read_exit = execute_builtin_command(
+                "cat notes.txt",
+                "tok_builtin_actor",
+                team_id="team-builtins-files",
+                team_role="viewer",
+                owner_context=owner,
+            )
+            move_events, move_exit = execute_builtin_command(
+                "mv notes.txt moved.txt",
+                "tok_builtin_actor",
+                team_id="team-builtins-files",
+                team_role="viewer",
+                owner_context=owner,
+            )
+
+        assert read_exit == 0
+        assert any(str(event.get("text", "")) == "team notes" for event in read_events)
+        assert move_exit == 0
+        assert any("can view Files but can't change them" in str(event.get("text", "")) for event in move_events)
+
     def test_documented_builtin_commands_are_backed_by_runtime_dispatch(self):
         for entry in _DOCUMENTED_BUILTIN_COMMANDS:
             if "root" in entry:
@@ -872,11 +1106,19 @@ class TestBuiltinCommandResolution:
                     "category": "Registry Group",
                     "policy": {"allow": []},
                 },
+                {
+                    "root": "workspace-tool",
+                    "category": "Registry Group",
+                    "description": "Requires workspace.",
+                    "policy": {"allow": ["workspace-tool"]},
+                    "feature_required": "workspace",
+                },
             ],
             "pipe_helpers": [{"root": "grep"}],
         }
 
-        with mock.patch("services.commands.builtins.load_commands_registry", return_value=registry) as loader:
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value=registry) as loader, \
+             mock.patch.dict("config.CFG", {"workspace_enabled": False}):
             lines = _run_builtin_commands("commands --external")
 
         text = "\n".join(str(line.get("text", "")) for line in lines)
@@ -886,6 +1128,7 @@ class TestBuiltinCommandResolution:
         assert "sentinel-scan  - Runs sentinel scans." in text
         assert "sentinel-http  - Checks sentinel HTTP targets." in text
         assert "policyless-tool" not in text
+        assert "workspace-tool" not in text
         assert "grep" not in text
 
     def test_commands_info_renders_registry_catalog_entry(self):
@@ -927,10 +1170,126 @@ class TestBuiltinCommandResolution:
         assert "Adds `--safe` automatically when needed." in text
 
     def test_commands_info_unknown_root_returns_usage_hint(self):
-        with mock.patch("services.commands.registry.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+        registry = {
+            "commands": [
+                {
+                    "root": "workspace-tool",
+                    "description": "Requires workspace.",
+                    "policy": {"allow": ["workspace-tool"]},
+                    "feature_required": "workspace",
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch.dict("config.CFG", {"workspace_enabled": False}):
             lines = _run_builtin_commands("commands info nope")
+            disabled = _run_builtin_commands("commands info workspace-tool")
 
         assert lines[0]["text"] == "commands: no catalog entry for nope"
+        assert disabled[0]["text"] == "commands: no catalog entry for workspace-tool"
+
+    def test_commands_info_renders_knowledge_list_fields(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "description": "Probe a target safely.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                    "knowledge": {
+                        "notes": ["Check the rate limits before running."],
+                        "gotchas": ["May trigger IDS on hardened targets."],
+                        "safe_defaults": ["Use --rate 100 for cautious scans."],
+                        "common_flags": ["--timeout 5s for slow networks."],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands info sentinel-scan")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert "Notes:" in text
+        assert "Check the rate limits before running." in text
+        assert "Gotchas:" in text
+        assert "May trigger IDS on hardened targets." in text
+        assert "Safe Defaults:" in text
+        assert "Use --rate 100 for cautious scans." in text
+        assert "Common Flags:" in text
+        assert "--timeout 5s for slow networks." in text
+
+    def test_commands_info_renders_artifact_behavior(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "description": "Probe a target safely.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                    "knowledge": {
+                        "artifact_behavior": "Creates scan-output.json in the workspace.",
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands info sentinel-scan")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert "Artifact Behavior:" in text
+        assert "Creates scan-output.json in the workspace." in text
+
+    def test_commands_info_json_flag_returns_single_builtin_json_line(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "description": "Probe a target safely.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                    "knowledge": {
+                        "notes": ["Check rate limits."],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands info sentinel-scan --json")
+
+        assert len(lines) == 1
+        assert lines[0]["cls"] == "builtin-json"
+        data = json.loads(str(lines[0]["text"]))
+        assert data["root"] == "sentinel-scan"
+        assert data["knowledge"]["notes"] == ["Check rate limits."]
+
+    def test_commands_info_json_flag_accepted_before_root(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "description": "Probe a target safely.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands info --json sentinel-scan")
+
+        assert len(lines) == 1
+        assert lines[0]["cls"] == "builtin-json"
+
+    def test_commands_info_json_only_returns_usage_error(self):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+            lines = _run_builtin_commands("commands info --json")
+
+        assert len(lines) == 1
+        assert "Usage:" in str(lines[0]["text"])
 
     def test_rejects_non_builtin_commands(self):
         assert resolve_builtin_command("ping darklab.sh") is None
@@ -939,3 +1298,201 @@ class TestBuiltinCommandResolution:
         assert resolve_builtin_command("rm ../file") is None
         assert resolve_builtin_command("ls /tmp") is None
         assert resolve_builtin_command("") is None
+
+
+class TestCommandsSearch:
+    """commands search <term> — coverage for search matching, ranking, grouping, and gating."""
+
+    _REGISTRY = {
+        "commands": [
+            {
+                "root": "nmap",
+                "category": "Network Reconnaissance",
+                "description": "Scans hosts for open ports and services.",
+                "policy": {"allow": ["nmap"]},
+                "autocomplete": {
+                    "examples": [{"value": "nmap 192.168.1.0/24", "description": "Subnet scan"}],
+                },
+            },
+            {
+                "root": "gobuster",
+                "category": "Web Enumeration",
+                "description": "Directory and DNS brute-forcing tool.",
+                "policy": {"allow": ["gobuster"]},
+                "knowledge": {
+                    "notes": ["Throttle requests with --delay to avoid detection."],
+                    "gotchas": ["High thread counts can overwhelm slow targets."],
+                },
+            },
+            {
+                "root": "nuclei",
+                "category": "Network Reconnaissance",
+                "description": "Template-based vulnerability scanner.",
+                "policy": {"allow": ["nuclei"]},
+            },
+            {
+                "root": "workspace-tool",
+                "category": "Workspace",
+                "description": "A tool requiring the workspace feature.",
+                "policy": {"allow": ["workspace-tool"]},
+                "feature_required": "workspace",
+            },
+        ],
+        "pipe_helpers": [],
+    }
+
+    def _run(self, term: str, registry: dict | None = None) -> list[dict]:
+        reg = registry if registry is not None else self._REGISTRY
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=reg):
+            return _run_builtin_commands(f"commands search {term}")
+
+    def _text(self, lines: list[dict]) -> str:
+        return "\n".join(str(line.get("text", "")) for line in lines)
+
+    def test_usage_error_when_no_term(self):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=self._REGISTRY):
+            lines = _run_builtin_commands("commands search")
+        assert "Usage:" in str(lines[0]["text"])
+
+    def test_root_prefix_match_returns_result(self):
+        text = self._text(self._run("nma"))
+        assert "nmap" in text
+
+    def test_description_match_returns_result(self):
+        text = self._text(self._run("brute-forcing"))
+        assert "gobuster" in text
+
+    def test_category_match_returns_result(self):
+        text = self._text(self._run("Web Enumeration"))
+        assert "gobuster" in text
+
+    def test_example_value_match_returns_result(self):
+        text = self._text(self._run("192.168.1.0"))
+        assert "nmap" in text
+
+    def test_knowledge_notes_match_returns_result(self):
+        text = self._text(self._run("throttle"))
+        assert "gobuster" in text
+
+    def test_knowledge_gotchas_match_returns_result(self):
+        text = self._text(self._run("thread counts"))
+        assert "gobuster" in text
+
+    def test_results_grouped_by_category(self):
+        # "recon" hits category "Network Reconnaissance" (tier 1) for both nmap and nuclei,
+        # exercising the multi-entry group-by-category rendering path.
+        text = self._text(self._run("recon"))
+        assert "[Network Reconnaissance]" in text
+        assert "nmap" in text
+        assert "nuclei" in text
+
+    def test_root_prefix_ranked_above_category_match(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "netcat",
+                    "category": "Tools",
+                    "description": "General purpose networking tool.",
+                    "policy": {"allow": ["netcat"]},
+                },
+                {
+                    "root": "nmap",
+                    "category": "Network Reconnaissance",
+                    "description": "Port scanner.",
+                    "policy": {"allow": ["nmap"]},
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        # "net" prefix-matches "netcat" (tier 0) and category-matches "Network ..." on nmap (tier 1)
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands search net")
+        items = [str(line.get("text", "")) for line in lines if line.get("cls") == "builtin-catalog-item"]
+        assert items[0].strip().startswith("netcat")
+
+    def test_feature_required_excluded_when_disabled(self):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=self._REGISTRY):
+            with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+                lines = _run_builtin_commands("commands search workspace")
+        text = self._text(lines)
+        assert "workspace-tool" not in text
+        assert "no matches" in text
+
+    def test_feature_required_included_when_enabled(self):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=self._REGISTRY):
+            with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+                lines = _run_builtin_commands("commands search workspace")
+        text = self._text(lines)
+        assert "workspace-tool" in text
+
+    def test_no_matches_returns_message(self):
+        text = self._text(self._run("xyzzy-nonexistent-term"))
+        assert "no matches" in text
+
+
+class TestCommandsPipesSection:
+    # Registry with one external command and two pipe helpers in normalized form.
+    # pipe_command=True is the normalized flag set by _normalize_registry_autocomplete.
+    _REGISTRY = {
+        "commands": [
+            {
+                "root": "nmap",
+                "category": "Network Reconnaissance",
+                "description": "Port scanner.",
+                "policy": {"allow": ["nmap"]},
+            },
+        ],
+        "pipe_helpers": [
+            {
+                "root": "grep",
+                "autocomplete": {
+                    "pipe_command": True,
+                    "pipe_description": "Filter lines by pattern",
+                    "flags": [
+                        {"value": "-i", "description": "Ignore case"},
+                        {"value": "-v", "description": "Invert match"},
+                    ],
+                },
+            },
+            {
+                "root": "head",
+                "autocomplete": {
+                    "pipe_command": True,
+                    "pipe_description": "Show the first lines",
+                    "flags": [],
+                },
+            },
+        ],
+    }
+
+    def _run(self, cmd: str) -> list[dict]:
+        # Patch both module-level bindings so external commands AND the pipes
+        # section both use the test registry rather than the real commands.yaml.
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=self._REGISTRY), \
+             mock.patch("services.commands.builtins.load_commands_registry", return_value=self._REGISTRY):
+            return _run_builtin_commands(cmd)
+
+    def _text(self, lines: list[dict]) -> str:
+        return "\n".join(str(line.get("text", "")) for line in lines)
+
+    def test_commands_shows_pipes_section_header(self):
+        text = self._text(self._run("commands"))
+        assert "App-native pipe helpers:" in text
+
+    def test_commands_pipes_section_includes_disclaimer(self):
+        text = self._text(self._run("commands"))
+        assert "App-managed filters" in text
+        assert "not arbitrary shell pipelines" in text
+
+    def test_commands_pipes_listed_in_catalog_order(self):
+        lines = self._run("commands")
+        texts = [str(line.get("text", "")) for line in lines]
+        header_idx = next(i for i, t in enumerate(texts) if "App-native pipe helpers:" in t)
+        grep_idx = next(i for i, t in enumerate(texts) if "grep" in t and i > header_idx)
+        head_idx = next(i for i, t in enumerate(texts) if "head" in t and i > header_idx)
+        assert grep_idx < head_idx, "grep should appear before head (catalog order)"
+
+    def test_commands_builtin_only_flag_omits_pipes_section(self):
+        text = self._text(self._run("commands --built-in"))
+        assert "App-native pipe helpers:" not in text
+        assert "App-managed filters" not in text

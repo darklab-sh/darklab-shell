@@ -75,6 +75,13 @@ _NMAP_PORT_FLAGS = frozenset({"-p", "--ports"})
 _KNOWN_INVALID_FLAGS = {
     "testssl": frozenset({"-u"}),
 }
+_KNOWN_INVALID_NMAP_SCRIPTS = frozenset({
+    "smb-vuln-cve2009-1231",
+})
+_KNOWN_SMB_CVE_NMAP_SCRIPTS = frozenset({
+    "smb-vuln-cve2009-3103",
+    "smb-vuln-cve-2017-7494",
+})
 _FALLBACK_WORDLIST_FLAGS_BY_ROOT = {
     "dnsrecon": {"-D": {"dns"}},
     "dnsx": {"-w": {"dns"}},
@@ -204,6 +211,7 @@ def _validate_one(
     target = str(item.get("target") or _safe_extract_target(normalized) or "").strip()
     normalized, target, unresolved_placeholder = _replace_source_target_placeholder(normalized, target, source_targets)
     normalized, target = _replace_target_redaction_placeholders(normalized, target, source_targets)
+    normalized, target = _normalize_bracketed_target_tokens(normalized, target)
     root = output_command_root(normalized) or ""
     normalized, wordlist_rejection = _normalize_command_wordlists(normalized, root)
     command_target = _safe_extract_target(normalized)
@@ -230,6 +238,8 @@ def _validate_one(
             rejection_reason = "missing_secret"
         elif _known_invalid_flag(normalized, root):
             rejection_reason = "invalid_flag"
+        elif _known_invalid_nmap_script(normalized, root):
+            rejection_reason = "invalid_script"
         else:
             if root in NETWORK_TARGET_ROOTS:
                 if not command_target:
@@ -411,6 +421,40 @@ def _replace_target_redaction_placeholders(command: str, target: str, source_tar
     return replace_source_target_aliases(command, source_targets), replace_source_target_aliases(target, source_targets)
 
 
+def _normalize_bracketed_target_tokens(command: str, target: str) -> tuple[str, str]:
+    changed = False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = []
+    if tokens:
+        normalized_tokens = []
+        for token in tokens:
+            normalized_token = _unbracket_plain_target_token(token)
+            changed = changed or normalized_token != token
+            normalized_tokens.append(normalized_token)
+        if changed:
+            command = shlex.join(normalized_tokens)
+    normalized_target = _unbracket_plain_target_token(target)
+    if normalized_target != target:
+        target = normalized_target
+    return command, target
+
+
+def _unbracket_plain_target_token(value: str) -> str:
+    text = str(value or "").strip()
+    if not text.startswith("[") or not text.endswith("]") or text.count("[") != 1 or text.count("]") != 1:
+        return value
+    inner = text[1:-1].strip()
+    if not inner or inner.lower() == "target-unresolved" or _is_target_redaction_marker(inner):
+        return value
+    try:
+        normalized = _normalize_target(inner)
+    except ValueError:
+        normalized = ""
+    return inner if normalized else value
+
+
 def _target_candidates(value: object) -> set[str]:
     text = str(value or "").strip()
     if not text:
@@ -464,6 +508,41 @@ def _known_invalid_flag(command: str, root: str) -> bool:
     except ValueError:
         tokens = command.split()
     return any(token in invalid_flags for token in tokens[1:])
+
+
+def _known_invalid_nmap_script(command: str, root: str) -> bool:
+    if root != "nmap":
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for script in _nmap_script_names(tokens):
+        normalized = script.casefold()
+        if normalized in _KNOWN_INVALID_NMAP_SCRIPTS:
+            return True
+        if normalized.startswith("smb-vuln-cve") and normalized not in _KNOWN_SMB_CVE_NMAP_SCRIPTS:
+            return True
+    return False
+
+
+def _nmap_script_names(tokens: list[str]) -> list[str]:
+    values: list[str] = []
+    for index, token in enumerate(tokens):
+        value = ""
+        if token.startswith("--script="):
+            value = token.split("=", 1)[1]
+        elif token in {"--script", "-script", "-sC"} and index + 1 < len(tokens):
+            if token == "-sC":
+                continue
+            value = tokens[index + 1]
+        if not value:
+            continue
+        for part in re.split(r"[,;]", value):
+            script = part.strip().casefold()
+            if script and re.fullmatch(r"[a-z0-9_.-]+", script):
+                values.append(script)
+    return values
 
 
 def _normalize_command_wordlists(command: str, root: str) -> tuple[str, str]:

@@ -52,7 +52,7 @@ test.describe('runner stall handling', () => {
             headers: { 'Content-Type': 'text/event-stream' },
           })
         }
-        if (url.endsWith('/history/active')) {
+        if (new URL(url, window.location.origin).pathname === '/history/active') {
           return new Response(JSON.stringify({
             runs: runActive ? [{
               run_id: 'stall-test-run',
@@ -125,7 +125,7 @@ test.describe('runner stall handling', () => {
             headers: { 'Content-Type': 'text/event-stream' },
           })
         }
-        if (url.endsWith('/history/active')) {
+        if (new URL(url, window.location.origin).pathname === '/history/active') {
           return new Response(JSON.stringify({
             runs: runActive ? [{
               run_id: 'stall-recover-run',

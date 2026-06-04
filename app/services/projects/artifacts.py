@@ -10,12 +10,24 @@ import re
 from services.projects.contracts import MAX_ENTITY_ID_LEN, ProjectWorkspaceError
 from services.projects.utils import new_run_file_artifact_id, now, trim_text as _trim_text
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
+from services.teams.scope import OwnerContext, personal_owner_context, team_owner_context
 from services.workspace.files import (
     WorkspaceDisabled,
     WorkspaceError,
-    open_workspace_file_for_download,
-    resolve_workspace_path,
+    open_owner_workspace_file_for_download,
+    resolve_owner_workspace_path,
 )
+
+
+def _row_value(row, key, default=""):
+    if not row:
+        return default
+    try:
+        if hasattr(row, "keys") and key not in row.keys():
+            return default
+        return row[key]
+    except (KeyError, TypeError):
+        return default
 
 
 def row_to_run_file_artifact(row):
@@ -34,6 +46,7 @@ def row_to_run_file_artifact(row):
         "preview_type": row["preview_type"],
         "content_sha256": row["content_sha256"],
         "created": row["created"],
+        "run_team_id": _row_value(row, "run_team_id", ""),
     }
 
 
@@ -42,9 +55,19 @@ def normalize_sha256(value):
     return candidate if re.fullmatch(r"[0-9a-f]{64}", candidate) else ""
 
 
-def workspace_file_sha256(session_id, workspace_path):
+def artifact_owner_context(session_id: str, artifact) -> OwnerContext:
+    """Resolve an artifact's workspace owner from the source run, not the viewer."""
+    team_id = _trim_text((artifact or {}).get("run_team_id") or (artifact or {}).get("team_id"), MAX_ENTITY_ID_LEN)
+    if team_id:
+        return team_owner_context(team_id, actor_session_id=str(session_id or ""))
+    artifact_session_id = str((artifact or {}).get("session_id") or session_id or "").strip()
+    return personal_owner_context(artifact_session_id)
+
+
+def workspace_file_sha256(session_id, workspace_path, *, owner_context: OwnerContext | None = None):
     try:
-        with open_workspace_file_for_download(session_id, workspace_path) as handle:
+        owner = owner_context or personal_owner_context(str(session_id or ""))
+        with open_owner_workspace_file_for_download(owner, workspace_path) as handle:
             digest = hashlib.sha256()
             while True:
                 chunk = handle.read(1024 * 1024)
@@ -70,7 +93,7 @@ def path_sha256(path):
         return ""
 
 
-def artifact_availability(session_id, artifact):
+def artifact_availability(session_id, artifact, *, owner_context: OwnerContext | None = None):
     workspace_path = _trim_text((artifact or {}).get("workspace_path"), MAX_ENTITY_ID_LEN)
     result = {
         "file_status": "missing",
@@ -82,7 +105,8 @@ def artifact_availability(session_id, artifact):
         result["file_status_detail"] = "workspace path is missing"
         return result
     try:
-        resolved = resolve_workspace_path(session_id, workspace_path)
+        owner = owner_context or artifact_owner_context(str(session_id or ""), artifact or {})
+        resolved = resolve_owner_workspace_path(owner, workspace_path)
         if not resolved.is_file():
             return result
         current_size = max(0, int(resolved.stat().st_size))
@@ -108,7 +132,7 @@ def artifact_availability(session_id, artifact):
         }
     recorded_hash = normalize_sha256((artifact or {}).get("content_sha256"))
     if recorded_hash:
-        current_hash = workspace_file_sha256(session_id, workspace_path)
+        current_hash = workspace_file_sha256(session_id, workspace_path, owner_context=owner)
         if current_hash and current_hash != recorded_hash:
             return {
                 "file_status": "changed",
@@ -143,7 +167,7 @@ def artifact_snapshot_mismatch_reason(artifact, resolved):
     return ""
 
 
-def record_run_file_artifacts(conn, session_id, run_id, artifacts):
+def record_run_file_artifacts(conn, session_id, run_id, artifacts, *, owner_context: OwnerContext | None = None):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     run = conn.execute(
         "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
@@ -173,7 +197,7 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
         preview_type = _trim_text(item.get("preview_type"), 64)
         content_sha256 = (
             normalize_sha256(item.get("content_sha256"))
-            or workspace_file_sha256(session_id, workspace_path)
+            or workspace_file_sha256(session_id, workspace_path, owner_context=owner_context)
         )
         try:
             byte_size = max(0, int(item.get("byte_size") or 0))

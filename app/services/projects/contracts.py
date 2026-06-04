@@ -12,6 +12,9 @@ MAX_PROJECT_NOTES_LEN = 20000
 MAX_ENTITY_ID_LEN = 512
 MAX_LABEL_LEN = 80
 MAX_ENTITY_NOTE_BODY_LEN = 20000
+MAX_FINDING_REMEDIATION_LEN = 20000
+MAX_FINDING_VERIFICATION_STEPS_LEN = 20000
+MAX_FINDING_VERIFICATION_NOTES_LEN = 20000
 MAX_TARGET_VALUE_LEN = 512
 MAX_FINDING_TITLE_LEN = 240
 MAX_PACKAGE_NAME_LEN = 120
@@ -22,6 +25,7 @@ MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES = 2000
 MAX_BULK_RUN_ACTION_ITEMS = 100
 BULK_AUDIT_FAILURE_LIMIT = 20
 ACTIVE_PROJECT_PREF_KEY = "pref_active_project_id"
+ACTIVE_PROJECT_RECENTS_PREF_KEY = "pref_active_project_recent_ids"
 PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs"
 PROJECT_AUTO_LINK_RUN_ENTITIES_PREF_KEY = "pref_project_auto_link_run_entities"
 
@@ -45,6 +49,13 @@ PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip"})
 PROJECT_TARGET_REVIEW_STATES = frozenset({"confirmed", "pending", "dismissed"})
 PROJECT_TARGET_SOURCES = frozenset({"user", "auto_command", "auto_input_file"})
 FINDING_REVIEW_STATES = frozenset({"new", "reviewed", "important", "false_positive", "needs_followup"})
+FINDING_VERIFICATION_STATES = frozenset({
+    "not_started",
+    "ready_to_verify",
+    "verified",
+    "needs_retest",
+    "not_applicable",
+})
 EVIDENCE_PACKAGE_STATUSES = frozenset({"draft"})
 PROJECT_TARGET_SELECT_COLUMNS = (
     "id, project_id, type, value, source_run_id, confidence, "

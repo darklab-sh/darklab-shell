@@ -45,8 +45,8 @@ class PushoverChannel(Channel):
         user_key_secret = _secret_name(self.channel.secrets, PUSHOVER_USER_KEY_SECRET_KEYS)
         if not app_token_secret or not user_key_secret:
             return ChannelResult.terminal("Pushover app token and user key secrets are unavailable")
-        app_token = get_channel_secret(self.channel.session_token, app_token_secret)
-        user_key = get_channel_secret(self.channel.session_token, user_key_secret)
+        app_token = get_channel_secret(self.channel.secret_owner_token, app_token_secret)
+        user_key = get_channel_secret(self.channel.secret_owner_token, user_key_secret)
         if not app_token or not user_key:
             return ChannelResult.terminal("Pushover app token and user key secrets are unavailable")
 

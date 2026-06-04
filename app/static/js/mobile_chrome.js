@@ -34,7 +34,11 @@
   const menuLnState           = document.getElementById('mobile-menu-ln-state');
   const menuTsState           = document.getElementById('mobile-menu-ts-state');
   const menuWorkflowsCount    = document.getElementById('mobile-menu-workflows-count');
+  const menuSchedulesCount    = document.getElementById('mobile-menu-schedules-count');
+  const menuWatchersCount     = document.getElementById('mobile-menu-watchers-count');
   const menuHistoryCount      = document.getElementById('mobile-menu-history-count');
+  const menuAtlasHint         = document.getElementById('mobile-menu-atlas-hint');
+  const menuFilesHint         = document.getElementById('mobile-menu-files-hint');
   const menuProjectHint       = document.getElementById('mobile-menu-project-hint');
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
   const kbHelper              = document.getElementById('mobile-kb-helper');
@@ -147,10 +151,58 @@
     const list = Array.isArray(items) ? items : [];
     menuWorkflowsCount.textContent = list.length ? `${list.length} saved` : '';
   }
+  function setSavedCount(el, count) {
+    if (!el) return;
+    const total = Math.max(0, Number(count || 0));
+    el.textContent = total > 0 ? `${total} saved` : '';
+  }
+  function pluralCount(count, singular, plural = `${singular}s`) {
+    const total = Math.max(0, Number(count || 0));
+    if (!total) return '';
+    return `${total} ${total === 1 ? singular : plural}`;
+  }
+  let schedulesCountRequestSeq = 0;
+  function refreshSchedulesCount(items = null) {
+    if (!menuSchedulesCount) return;
+    if (Array.isArray(items)) {
+      setSavedCount(menuSchedulesCount, items.length);
+      return;
+    }
+    if (typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++schedulesCountRequestSeq;
+    global.apiFetch('/schedules', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== schedulesCountRequestSeq) return;
+        setSavedCount(menuSchedulesCount, Array.isArray(data?.schedules) ? data.schedules.length : 0);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load schedules count for mobile menu', err);
+      });
+  }
+  let watchersCountRequestSeq = 0;
+  function refreshWatchersCount(items = null) {
+    if (!menuWatchersCount) return;
+    if (Array.isArray(items)) {
+      setSavedCount(menuWatchersCount, items.length);
+      return;
+    }
+    if (typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++watchersCountRequestSeq;
+    global.apiFetch('/watchers', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== watchersCountRequestSeq) return;
+        setSavedCount(menuWatchersCount, Array.isArray(data?.watchers) ? data.watchers.length : 0);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load watchers count for mobile menu', err);
+      });
+  }
   let historyCountRequestSeq = 0;
   function setMenuHistoryCount(count) {
     const total = Number(count || 0);
-    menuHistoryCount.textContent = total > 0 ? `${total}` : '';
+    menuHistoryCount.textContent = total > 0 ? `${total} saved` : '';
   }
   function _recentsTotalCountFromCache() {
     if (!_recentsLoaded) return null;
@@ -162,18 +214,47 @@
     const runs = readCmdHistory();
     setMenuHistoryCount(runs.length);
     const requestSeq = ++historyCountRequestSeq;
-    const cachedTotal = _recentsTotalCountFromCache();
-    if (cachedTotal !== null) {
-      setMenuHistoryCount(cachedTotal);
-      return;
-    }
-    _recentsPrefetch()
+    _recentsRefresh({ render: false })
       .then(() => {
         if (requestSeq !== historyCountRequestSeq) return;
         const total = _recentsTotalCountFromCache();
         if (total !== null) setMenuHistoryCount(total);
       })
       .catch(() => {});
+  }
+  let atlasHintRequestSeq = 0;
+  function refreshAtlasHint() {
+    if (!menuAtlasHint || typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++atlasHintRequestSeq;
+    global.apiFetch('/atlas?orphan_filter=hide&suppression_filter=hide', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== atlasHintRequestSeq) return;
+        const total = Math.max(0, Number(data?.total || 0));
+        const findings = Math.max(0, Number(data?.findings || 0));
+        menuAtlasHint.textContent = total
+          ? pluralCount(total, 'entity', 'entities')
+          : pluralCount(findings, 'finding');
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load Atlas count for mobile menu', err);
+      });
+  }
+  let filesHintRequestSeq = 0;
+  function refreshFilesHint() {
+    if (!menuFilesHint || typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++filesHintRequestSeq;
+    global.apiFetch('/workspace/files', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== filesHintRequestSeq) return;
+        const usageCount = Number(data?.usage?.file_count);
+        const files = Number.isFinite(usageCount) ? usageCount : (Array.isArray(data?.files) ? data.files.length : 0);
+        menuFilesHint.textContent = pluralCount(files, 'file');
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load Files count for mobile menu', err);
+      });
   }
   function _projectHintName(project) {
     if (!project || typeof project !== 'object') return '';
@@ -220,6 +301,10 @@
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
+    refreshAtlasHint();
+    refreshFilesHint();
+    refreshSchedulesCount();
+    refreshWatchersCount();
     refreshProjectHintFromServer();
     tsDisclosure?.close();
     show(menuSheetScrim);
@@ -562,6 +647,16 @@
       .then(() => global.showToast && global.showToast('Command copied'))
       .catch(() => global.showToast && global.showToast('Failed to copy command', 'error'));
   }
+  function _recentsCanManageHistory() {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan('manage_history')
+      : true;
+  }
+  function _recentsCanMutateProjects() {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan('mutate_projects')
+      : true;
+  }
   function _recentsRunActionMenu(run) {
     const wrap = document.createElement('div');
     wrap.className = 'sheet-item-action-menu-wrap save-menu-wrap save-menu-down';
@@ -602,21 +697,25 @@
         closeRecentsSheet();
       }
     });
-    addItem('edit', () => {
-      if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
-    });
-    addItem('add to active project', () => {
-      if (typeof global._historyAddRunToActiveProject === 'function') {
-        global._historyAddRunToActiveProject(run)
-          .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
-      }
-    });
-    addItem('add to project', () => {
-      if (typeof global._historyAddRunToProject === 'function') {
-        global._historyAddRunToProject(run)
-          .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
-      }
-    });
+    if (_recentsCanManageHistory()) {
+      addItem('edit', () => {
+        if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
+      });
+    }
+    if (_recentsCanMutateProjects()) {
+      addItem('add to active project', () => {
+        if (typeof global._historyAddRunToActiveProject === 'function') {
+          global._historyAddRunToActiveProject(run)
+            .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
+        }
+      });
+      addItem('add to project', () => {
+        if (typeof global._historyAddRunToProject === 'function') {
+          global._historyAddRunToProject(run)
+            .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
+        }
+      });
+    }
     addItem('copy run id', () => {
       if (typeof global.copyTextToClipboard === 'function') {
         global.copyTextToClipboard(run.id)
@@ -624,11 +723,13 @@
           .catch(() => global.showToast && global.showToast('Failed to copy run ID', 'error'));
       }
     });
-    addItem('delete', () => {
-      if (run.id && typeof global.confirmHistAction === 'function') {
-        global.confirmHistAction('delete', run.id, run.command, 'run');
-      }
-    });
+    if (_recentsCanManageHistory()) {
+      addItem('delete', () => {
+        if (run.id && typeof global.confirmHistAction === 'function') {
+          global.confirmHistAction('delete', run.id, run.command, 'run');
+        }
+      });
+    }
     bindPressable(trigger, {
       refocusComposer: false,
       clearPressStyle: true,
@@ -796,12 +897,14 @@
         }));
       }
       if (!isRun) {
-        actions.appendChild(_recentsMakeAction('delete', () => {
-          if (!entryData.id) return;
-          if (typeof global.confirmHistAction === 'function') {
-            global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
-          }
-        }));
+        if (_recentsCanManageHistory()) {
+          actions.appendChild(_recentsMakeAction('delete', () => {
+            if (!entryData.id) return;
+            if (typeof global.confirmHistAction === 'function') {
+              global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
+            }
+          }));
+        }
       }
 
       item.appendChild(head);
@@ -929,6 +1032,7 @@
       refocusComposer: false,
       clearPressStyle: true,
       onActivate: () => {
+        if (!_recentsCanManageHistory()) return;
         if (typeof global.confirmHistAction === 'function') {
           global.confirmHistAction('clear');
         }
@@ -1043,7 +1147,11 @@
 
   function _recentsSyncFilterUI() {
     const runOnlyEnabled = _recentsFilterState.type !== 'snapshots';
-    if (recentsSheetClearBtn) recentsSheetClearBtn.classList.toggle('u-hidden', !runOnlyEnabled);
+    if (recentsSheetClearBtn) {
+      const showClear = runOnlyEnabled && _recentsCanManageHistory();
+      recentsSheetClearBtn.classList.toggle('u-hidden', !showClear);
+      recentsSheetClearBtn.disabled = !showClear;
+    }
     if (recentsFilterRoot) {
       recentsFilterRoot.value = _recentsFilterState.root;
       recentsFilterRoot.closest('.sheet-filter-row')?.classList.toggle('active', !!_recentsFilterState.root.trim());
@@ -1261,6 +1369,12 @@
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:workflows-rendered', (e) => {
       try { refreshWorkflowsCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:schedules-rendered', (e) => {
+      try { refreshSchedulesCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:watchers-rendered', (e) => {
+      try { refreshWatchersCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:active-project-changed', (e) => {
       try { refreshProjectHint(e.detail && e.detail.project); } catch (_) { /* non-critical */ }

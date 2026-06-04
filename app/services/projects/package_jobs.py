@@ -131,25 +131,27 @@ def cleanup_evidence_package_archive_jobs():
             pass
 
 
-def _matches(job, session_id, project_id, package_id):
-    return (
-        isinstance(job, dict)
-        and job.get("session_id") == session_id
-        and job.get("project_id") == project_id
-        and job.get("package_id") == package_id
-    )
+def _matches(job, session_id, project_id, package_id, *, team_id=""):
+    if not isinstance(job, dict):
+        return False
+    if job.get("project_id") != project_id or job.get("package_id") != package_id:
+        return False
+    job_team_id = str(job.get("team_id") or "")
+    if team_id:
+        return job_team_id == str(team_id or "")
+    return not job_team_id and job.get("session_id") == session_id
 
 
-def get_evidence_package_archive_job(session_id, project_id, package_id, job_id):
+def get_evidence_package_archive_job(session_id, project_id, package_id, job_id, *, team_id=""):
     job = _read_job(job_id)
-    if not isinstance(job, dict) or not _matches(job, session_id, project_id, package_id):
+    if not isinstance(job, dict) or not _matches(job, session_id, project_id, package_id, team_id=team_id):
         return None
     return _public_job(job)
 
 
-def evidence_package_archive_for_job(session_id, project_id, package_id, job_id):
+def evidence_package_archive_for_job(session_id, project_id, package_id, job_id, *, team_id=""):
     job = _read_job(job_id)
-    if not isinstance(job, dict) or not _matches(job, session_id, project_id, package_id):
+    if not isinstance(job, dict) or not _matches(job, session_id, project_id, package_id, team_id=team_id):
         return None
     if job.get("status") != "complete":
         return {"status": job.get("status") or "unknown", "error": job.get("error") or ""}
@@ -214,11 +216,14 @@ def _run_job(job_id, cfg_snapshot):
             cfg=cfg_snapshot,
             progress_callback=_progress,
             archive_dir=str(_JOB_DIR),
+            team_id=str(job.get("team_id") or ""),
         )
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - started)
         log.warning("PACKAGE_BUILD_FAILED", extra={
             "session": get_log_session_id(str(job.get("session_id") or "")),
+            "team_id": str(job.get("team_id") or ""),
+            "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
             "package_id": job.get("package_id"),
             "job_id": job_id,
@@ -232,6 +237,8 @@ def _run_job(job_id, cfg_snapshot):
         app_metrics.record_evidence_package_build("error", time.perf_counter() - started)
         log.error("PACKAGE_JOB_FAILED", exc_info=True, extra={
             "session": get_log_session_id(str(job.get("session_id") or "")),
+            "team_id": str(job.get("team_id") or ""),
+            "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
             "package_id": job.get("package_id"),
             "job_id": job_id,
@@ -275,13 +282,15 @@ def _run_job(job_id, cfg_snapshot):
     )
 
 
-def start_evidence_package_archive_job(session_id, project_id, package_id, *, cfg=None):
+def start_evidence_package_archive_job(session_id, project_id, package_id, *, cfg=None, team_id="", actor_member_id=""):
     cleanup_evidence_package_archive_jobs()
     _ensure_job_dir()
     created = _iso(_now())
     job = {
         "id": _job_id(),
         "session_id": session_id,
+        "team_id": str(team_id or ""),
+        "actor_member_id": str(actor_member_id or ""),
         "project_id": project_id,
         "package_id": package_id,
         "status": "queued",

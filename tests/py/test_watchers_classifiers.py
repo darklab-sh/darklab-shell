@@ -1,11 +1,14 @@
 import json
 import sqlite3
+from collections.abc import Sequence
+from typing import Any
 
 from services.watchers import diff as watcher_diff
-from services.watchers.classifiers import registered_classifiers
+from services.diff.classifiers import registered_classifiers as registered_diff_classifiers
+from services.watchers.classifiers import registered_classifiers as registered_watcher_classifiers
 
 
-def _run(run_id: str, command: str, lines: list[str], *, session_id: str = "tok_watchers"):
+def _run(run_id: str, command: str, lines: Sequence[str | dict[str, Any]], *, session_id: str = "tok_watchers"):
     return {
         "id": run_id,
         "session_id": session_id,
@@ -86,17 +89,63 @@ def test_textual_classifier_is_fallback_and_honors_suppress_removals():
 
 
 def test_ports_classifier_reports_added_changed_and_removed_ports():
-    diff = watcher_diff.diff_runs(
-        _run("run_base", "nmap -sV darklab.sh", ["22/tcp open ssh", "80/tcp open http"]),
-        _run("run_current", "nmap -sV darklab.sh", ["22/tcp open openssh", "443/tcp open https"]),
+    from services.runs import comparison as run_comparison
+
+    left_entries = [
+        {"text": "Starting Nmap 7.95", "line_index": 0},
+        {"text": "22/tcp open ssh OpenSSH 9.9", "line_index": 1},
+        {"text": "Nmap scan report for 192.168.1.5", "line_index": 2},
+        {"text": "80/tcp open http", "line_index": 3},
+    ]
+    right_entries = [
+        {"text": "Starting Nmap 7.95", "line_index": 4},
+        {"text": "22/tcp open ssh OpenSSH 10.0", "line_index": 5},
+        {"text": "443/tcp open https", "line_index": 6},
+        {"text": "Nmap done: 1 IP address (1 host up) scanned in 0.42 seconds", "line_index": 7},
+    ]
+    left_run = _run(
+        "run_base",
+        "nmap -sV 192.168.1.5",
+        left_entries,
     )
+    right_run = _run(
+        "run_current",
+        "nmap -sV 192.168.1.10",
+        right_entries,
+    )
+    diff = watcher_diff.diff_runs(left_run, right_run)
 
     assert diff.kind == "signal"
     assert diff.summary["classifier"] == "ports"
     assert diff.summary["added_port_count"] == 1
     assert diff.summary["removed_port_count"] == 1
     assert diff.summary["changed_port_count"] == 1
+    assert diff.summary["added_ports"][0]["line_index"] == 6
     assert diff.summary["changed_ports"][0]["key"] == "22/tcp"
+    assert diff.summary["changed_ports"][0]["before"]["service"] == "ssh"
+    assert diff.summary["changed_ports"][0]["after"]["service"] == "ssh"
+    assert diff.summary["changed_ports"][0]["before"]["service_text"] == "ssh OpenSSH 9.9"
+    assert diff.summary["changed_ports"][0]["after"]["service_text"] == "ssh OpenSSH 10.0"
+    compare_changes = run_comparison.compare_derived_changes(
+        left_run,
+        right_run,
+        left_entries,
+        right_entries,
+    )
+    port_group = compare_changes["groups"][0]
+    assert port_group["id"] == "nmap_ports"
+    assert port_group["added_count"] == diff.summary["added_port_count"]
+    assert port_group["removed_count"] == diff.summary["removed_port_count"]
+    assert port_group["changed_count"] == diff.summary["changed_port_count"]
+    assert port_group["target_ambiguous"] is True
+    assert port_group["left_target"] == "192.168.1.5"
+    assert port_group["right_target"] == "192.168.1.10"
+    assert port_group["added"][0]["key"] == "443/tcp"
+    assert port_group["added"][0]["compare_line_index"] == 2
+    assert port_group["removed"][0]["key"] == "80/tcp"
+    assert port_group["removed"][0]["compare_line_index"] == 3
+    assert port_group["changed"][0]["before"]["compare_line_index"] == 1
+    assert port_group["changed"][0]["after"]["compare_line_index"] == 1
 
 
 def test_hosts_classifier_reports_added_hosts_for_subdomain_lists():
@@ -132,7 +181,9 @@ def test_tls_classifier_reports_certificate_field_changes():
 
 
 def test_classifier_registry_keeps_structured_classifiers_before_textual_fallback():
-    names = [classifier.name for classifier in registered_classifiers()]
+    names = [classifier.name for classifier in registered_diff_classifiers()]
+    compatibility_names = [classifier.name for classifier in registered_watcher_classifiers()]
 
     assert names[:4] == ["findings", "ports", "hosts", "tls"]
     assert names[-1] == "textual"
+    assert compatibility_names == names

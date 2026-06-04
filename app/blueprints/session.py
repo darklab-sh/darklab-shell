@@ -20,6 +20,9 @@ from services.notifications.channels_store import migrate_notification_channels_
 from services.projects.migration import migrate_project_workspace_session
 from services.secrets.storage import migrate_session_secrets
 from services.session.variables import list_session_variables
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
+from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
 from services.workflows.user_workflows import (
     UserWorkflowError,
     create_user_workflow,
@@ -60,6 +63,7 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_welcome_intro",
     "pref_share_redaction_default",
     "pref_run_notify",
+    "pref_command_outcome_summaries",
     "pref_hud_clock",
     "pref_prompt_username",
     "pref_compare_view_mode",
@@ -73,7 +77,7 @@ _SESSION_PREFERENCE_KEYS = {
 _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 _COMPARE_VIEW_MODES = {"auto", "side_by_side", "unified", "changes_only", "findings_only"}
 _COMPARE_CONTEXT_MODES = {"3", "10", "all"}
-_OPTIONS_MODAL_TABS = {"preferences", "secrets", "notifications"}
+_OPTIONS_MODAL_TABS = {"preferences", "secrets", "teams", "notifications"}
 _ATLAS_SAVED_VIEW_TABS = {"findings", "ip", "domain", "hash", "cve", "url"}
 _ATLAS_SAVED_VIEW_FILTER_VALUES = {"hide", "all", "only"}
 _ATLAS_SAVED_VIEW_ID_RE = re.compile(r"^atv_[0-9a-f]{16,32}$")
@@ -86,6 +90,25 @@ _IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 def _session_kind(session_id):
     return "token" if str(session_id or "").startswith("tok_") else "anonymous"
+
+
+def _active_scope_or_response(session_id):
+    try:
+        return current_request_scope(session_id, request), None
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return None, (jsonify(payload), status)
+
+
+def _require_team_workflow_manager(scope):
+    if not scope or not scope.is_team:
+        return None
+    role = str((scope.member or {}).get("role") or "")
+    try:
+        require_capability(role, Capability.MANAGE_WORKFLOWS)
+    except TeamPermissionDenied:
+        return jsonify({"error": "team_forbidden", "message": "Your team role cannot manage shared workflows."}), 403
+    return None
 
 
 def _command_root(command):
@@ -118,7 +141,11 @@ def _normalize_session_preferences(raw):
             continue
         if key == "pref_active_project_id" and not re.fullmatch(r"prj_[0-9a-f]{16}", value):
             continue
-        if key in {"pref_project_auto_link_external_runs", "pref_project_auto_link_run_entities"}:
+        if key in {
+            "pref_project_auto_link_external_runs",
+            "pref_project_auto_link_run_entities",
+            "pref_command_outcome_summaries",
+        }:
             value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
         if key == "pref_constellation_full_day":
             value = "on" if value.lower() in {"1", "true", "yes", "on"} else "off"
@@ -370,15 +397,15 @@ def _recent_values_response(rows):
     return values
 
 
-def _list_recent_values(conn, session_id, kinds=None):
+def _list_recent_values(conn, session_id, team_id="", kinds=None):
     normalized_kinds = [kind for kind in (kinds or _RECENT_VALUE_KINDS) if kind in _RECENT_VALUE_KINDS]
     if not normalized_kinds:
         return {kind: [] for kind in _RECENT_VALUE_KINDS}
     rows = conn.execute(
         "SELECT kind, value FROM recent_values "
-        "WHERE session_id = ? "
+        "WHERE session_id = ? AND team_id = ? "
         "ORDER BY kind ASC, last_used DESC, value ASC",
-        (session_id,),
+        (session_id, team_id),
     ).fetchall()
     kind_set = set(normalized_kinds)
     values = _recent_values_response([row for row in rows if row["kind"] in kind_set])
@@ -388,22 +415,22 @@ def _list_recent_values(conn, session_id, kinds=None):
     }
 
 
-def _prune_recent_values(conn, session_id, kind):
+def _prune_recent_values(conn, session_id, team_id, kind):
     conn.execute(
         "DELETE FROM recent_values "
-        "WHERE session_id = ? "
+        "WHERE session_id = ? AND team_id = ? "
         "AND kind = ? "
         "AND value NOT IN ("
         "    SELECT value FROM recent_values "
-        "    WHERE session_id = ? AND kind = ? "
+        "    WHERE session_id = ? AND team_id = ? AND kind = ? "
         "    ORDER BY last_used DESC, value ASC "
         "    LIMIT ?"
         ")",
-        (session_id, kind, session_id, kind, _RECENT_VALUE_LIMIT),
+        (session_id, team_id, kind, session_id, team_id, kind, _RECENT_VALUE_LIMIT),
     )
 
 
-def _upsert_recent_values(conn, session_id, values):
+def _upsert_recent_values(conn, session_id, team_id, values):
     entries = _normalize_recent_value_entries(values)
     if not entries:
         return 0
@@ -412,51 +439,51 @@ def _upsert_recent_values(conn, session_id, values):
     for index, entry in enumerate(entries):
         last_used = (base_time - timedelta(microseconds=index)).strftime("%Y-%m-%d %H:%M:%S.%f")
         conn.execute(
-            "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
-            "VALUES (?, ?, ?, ?, 1) "
-            "ON CONFLICT(session_id, kind, value) DO UPDATE SET "
+            "INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count) "
+            "VALUES (?, ?, ?, ?, ?, 1) "
+            "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
             "last_used = excluded.last_used, "
             "use_count = recent_values.use_count + 1",
-            (session_id, entry["kind"], entry["value"], last_used),
+            (session_id, team_id, entry["kind"], entry["value"], last_used),
         )
         touched_kinds.add(entry["kind"])
     for kind in touched_kinds:
-        _prune_recent_values(conn, session_id, kind)
+        _prune_recent_values(conn, session_id, team_id, kind)
     return len(entries)
 
 
 def _migrate_recent_values(conn, from_session_id, to_session_id):
     rows = conn.execute(
-        "SELECT kind, value, last_used, use_count FROM recent_values "
+        "SELECT team_id, kind, value, last_used, use_count FROM recent_values "
         "WHERE session_id = ? "
-        "ORDER BY kind ASC, last_used DESC, value ASC",
+        "ORDER BY team_id ASC, kind ASC, last_used DESC, value ASC",
         (from_session_id,),
     ).fetchall()
     migrated = 0
-    touched_kinds = set()
+    touched_scopes = set()
     for row in rows:
         kind, value = _normalize_recent_value(row["kind"], row["value"])
         if not kind or not value:
             continue
         conn.execute(
-            "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(session_id, kind, value) DO UPDATE SET "
+            "INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
             "last_used = CASE "
             "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
             "  ELSE recent_values.last_used "
             "END, "
             "use_count = recent_values.use_count + excluded.use_count",
-            (to_session_id, kind, value, row["last_used"], int(row["use_count"] or 1)),
+            (to_session_id, str(row["team_id"] or ""), kind, value, row["last_used"], int(row["use_count"] or 1)),
         )
         migrated += 1
-        touched_kinds.add(kind)
+        touched_scopes.add((str(row["team_id"] or ""), kind))
     conn.execute(
         "DELETE FROM recent_values WHERE session_id = ?",
         (from_session_id,),
     )
-    for kind in touched_kinds:
-        _prune_recent_values(conn, to_session_id, kind)
+    for team_id, kind in touched_scopes:
+        _prune_recent_values(conn, to_session_id, team_id, kind)
     return migrated
 
 
@@ -614,8 +641,13 @@ def session_recent_values_list():
     if error:
         return jsonify({"error": error}), 400
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     with db_connect() as conn:
-        values = _list_recent_values(conn, session_id, kinds)
+        values = _list_recent_values(conn, session_id, owner_scope.team_id, kinds)
     return jsonify({"values": values})
 
 
@@ -627,9 +659,14 @@ def session_recent_values_save():
     if not isinstance(raw_values, list):
         return jsonify({"error": "values must be a list"}), 400
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
     with db_connect() as conn:
-        saved = _upsert_recent_values(conn, session_id, raw_values)
-        values = _list_recent_values(conn, session_id)
+        saved = _upsert_recent_values(conn, session_id, owner_scope.team_id, raw_values)
+        values = _list_recent_values(conn, session_id, owner_scope.team_id)
         conn.commit()
     total_count = sum(len(items) for items in values.values())
     log.debug("SESSION_RECENT_VALUES_SAVED", extra={
@@ -902,7 +939,10 @@ def session_variables_list():
 def session_workflows_list():
     """Return user-created workflows for the current session."""
     session_id = get_session_id()
-    workflows = list_user_workflows(session_id)
+    scope, error_response = _active_scope_or_response(session_id)
+    if error_response:
+        return error_response
+    workflows = list_user_workflows(session_id, team_id=scope.team_id if scope else "")
     log.debug("USER_WORKFLOWS_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -916,14 +956,25 @@ def session_workflows_list():
 def session_workflows_create():
     """Create a user workflow for the current session."""
     session_id = get_session_id()
+    scope, error_response = _active_scope_or_response(session_id)
+    if error_response:
+        return error_response
+    forbidden = _require_team_workflow_manager(scope)
+    if forbidden:
+        return forbidden
     try:
-        workflow = create_user_workflow(session_id, request.get_json(silent=True) or {})
+        workflow = create_user_workflow(
+            session_id,
+            request.get_json(silent=True) or {},
+            team_id=scope.team_id if scope else "",
+        )
     except UserWorkflowError as exc:
         return jsonify({"error": str(exc)}), 400
     log.info("USER_WORKFLOW_CREATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
+        "team_id": scope.team_id if scope else "",
         "workflow_id": workflow["id"] if workflow else "",
     })
     return jsonify({"ok": True, "workflow": workflow}), 201
@@ -933,7 +984,10 @@ def session_workflows_create():
 def session_workflows_get(workflow_id):
     """Return one user workflow for the current session."""
     session_id = get_session_id()
-    workflow = get_user_workflow(session_id, workflow_id)
+    scope, error_response = _active_scope_or_response(session_id)
+    if error_response:
+        return error_response
+    workflow = get_user_workflow(session_id, workflow_id, team_id=scope.team_id if scope else "")
     if not workflow:
         return jsonify({"error": "workflow not found"}), 404
     return jsonify({"workflow": workflow})
@@ -943,8 +997,19 @@ def session_workflows_get(workflow_id):
 def session_workflows_update(workflow_id):
     """Update a user workflow for the current session."""
     session_id = get_session_id()
+    scope, error_response = _active_scope_or_response(session_id)
+    if error_response:
+        return error_response
+    forbidden = _require_team_workflow_manager(scope)
+    if forbidden:
+        return forbidden
     try:
-        workflow = update_user_workflow(session_id, workflow_id, request.get_json(silent=True) or {})
+        workflow = update_user_workflow(
+            session_id,
+            workflow_id,
+            request.get_json(silent=True) or {},
+            team_id=scope.team_id if scope else "",
+        )
     except UserWorkflowError as exc:
         return jsonify({"error": str(exc)}), 400
     if not workflow:
@@ -953,6 +1018,7 @@ def session_workflows_update(workflow_id):
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
+        "team_id": scope.team_id if scope else "",
         "workflow_id": workflow_id,
     })
     return jsonify({"ok": True, "workflow": workflow})
@@ -962,12 +1028,19 @@ def session_workflows_update(workflow_id):
 def session_workflows_delete(workflow_id):
     """Delete a user workflow for the current session."""
     session_id = get_session_id()
-    if not delete_user_workflow(session_id, workflow_id):
+    scope, error_response = _active_scope_or_response(session_id)
+    if error_response:
+        return error_response
+    forbidden = _require_team_workflow_manager(scope)
+    if forbidden:
+        return forbidden
+    if not delete_user_workflow(session_id, workflow_id, team_id=scope.team_id if scope else ""):
         return jsonify({"error": "workflow not found"}), 404
     log.info("USER_WORKFLOW_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
+        "team_id": scope.team_id if scope else "",
         "workflow_id": workflow_id,
     })
     return jsonify({"ok": True})

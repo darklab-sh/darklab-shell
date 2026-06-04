@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from services.diff import models as diff_models
+
 WATCHER_STATE_OK = "ok"
 WATCHER_STATE_CHANGED = "changed"
 WATCHER_STATE_FIRING = "firing"
@@ -18,10 +20,10 @@ WATCHER_STATES = frozenset({
     WATCHER_STATE_ERROR,
 })
 
-DIFF_KIND_SIGNAL = "signal"
-DIFF_KIND_TEXTUAL = "textual"
-DIFF_KIND_NONE = "none"
-DIFF_KINDS = frozenset({DIFF_KIND_SIGNAL, DIFF_KIND_TEXTUAL, DIFF_KIND_NONE})
+DIFF_KIND_SIGNAL = diff_models.DIFF_KIND_SIGNAL
+DIFF_KIND_TEXTUAL = diff_models.DIFF_KIND_TEXTUAL
+DIFF_KIND_NONE = diff_models.DIFF_KIND_NONE
+DIFF_KINDS = diff_models.DIFF_KINDS
 
 WATCHER_OPTION_DEFAULTS: dict[str, bool] = {
     "suppress_removals": False,
@@ -33,6 +35,7 @@ WATCHER_OPTION_DEFAULTS: dict[str, bool] = {
 class Watcher:
     id: str
     session_token: str
+    team_id: str
     label: str
     command_text: str
     schedule_id: str
@@ -54,6 +57,7 @@ class Watcher:
 class WatcherFire:
     id: str
     watcher_id: str
+    team_id: str
     baseline_run_id: str
     run_id: str
     diff_summary: dict[str, Any]
@@ -64,11 +68,7 @@ class WatcherFire:
     created: str
 
 
-@dataclass(frozen=True)
-class WatcherDiff:
-    summary: dict[str, Any]
-    kind: str
-    truncated: bool = False
+WatcherDiff = diff_models.DiffResult
 
 
 WATCHER_FAILURE_DISABLE_THRESHOLD = 5

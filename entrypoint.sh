@@ -8,19 +8,52 @@ chmod 700 /data 2>/dev/null || true
 # Normalize the optional per-session workspace mount before dropping to
 # appuser. Bind mounts are commonly root-owned on first boot, so app-mediated
 # workspace files need their shared appuser/scanner group restored here.
+repair_workspace_root() {
+    workspace_root="$1"
+    create_root="$2"
+    if [ "$create_root" = "1" ]; then
+        mkdir -p "$workspace_root" 2>/dev/null || true
+    elif [ ! -d "$workspace_root" ]; then
+        return
+    fi
+    chown appuser:appuser "$workspace_root" 2>/dev/null || true
+    chmod 730 "$workspace_root" 2>/dev/null || true
+    find "$workspace_root" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chown appuser:appuser {} \; -exec chmod 3730 {} \; 2>/dev/null || true
+    # shellcheck disable=SC2156  # session dirs are passed as sh -c positional parameters via {} +
+    find "$workspace_root" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -c '
+        for session_dir do
+            for child in "$session_dir"/*; do
+                [ -e "$child" ] || continue
+                if [ -d "$child" ] && [ ! -L "$child" ]; then
+                    chown scanner:appuser "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                    chmod 3770 "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                elif [ -f "$child" ]; then
+                    chown scanner:appuser "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                    chmod 640 "$child" 2>/tmp/workspace-repair.err \
+                        || echo "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+                fi
+            done
+            find "$session_dir" -mindepth 1 -print0 \
+                | xargs -0r chown scanner:appuser 2>/tmp/workspace-repair.err \
+                || echo "WORKSPACE_REPAIR_FAILED stage=recursive-chown path=$session_dir error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+            find "$session_dir" -mindepth 1 -type d -print0 \
+                | xargs -0r chmod 3770 2>/tmp/workspace-repair.err \
+                || echo "WORKSPACE_REPAIR_FAILED stage=recursive-dir-chmod path=$session_dir error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+            find "$session_dir" -mindepth 1 -type f -print0 \
+                | xargs -0r chmod 640 2>/tmp/workspace-repair.err \
+                || echo "WORKSPACE_REPAIR_FAILED stage=recursive-file-chmod path=$session_dir error=$(cat /tmp/workspace-repair.err 2>/dev/null)" >&2
+        done
+    ' sh {} + || true
+}
+
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
-mkdir -p "$WORKSPACE_ROOT" 2>/dev/null || true
-chown appuser:appuser "$WORKSPACE_ROOT" 2>/dev/null || true
-chmod 730 "$WORKSPACE_ROOT" 2>/dev/null || true
-find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chown appuser:appuser {} \; -exec chmod 3730 {} \; 2>/dev/null || true
-# shellcheck disable=SC2156  # session dirs are passed as sh -c positional parameters via {} +
-find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -c '
-    for session_dir do
-        find "$session_dir" -mindepth 1 -exec chown scanner:appuser {} \;
-        find "$session_dir" -mindepth 1 -type d -exec chmod 3770 {} \;
-        find "$session_dir" -mindepth 1 -type f -exec chmod 640 {} \;
-    done
-' sh {} + 2>/dev/null || true
+repair_workspace_root "$WORKSPACE_ROOT" 1
+if [ "$WORKSPACE_ROOT" != "/workspaces" ]; then
+    repair_workspace_root /workspaces 0
+fi
 
 # Ensure /tmp is world-writable so the scanner user can write tool cache/config
 # (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount
@@ -48,6 +81,30 @@ chmod -R 755 /tmp/.config /tmp/.cache
 # gosu drop, so iptables is available. The || true keeps startup safe if the
 # kernel module is absent in unusual environments.
 iptables -A OUTPUT -m owner --uid-owner scanner -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null || true
+
+# Optional operator-defined scanner egress block. This is the network-layer
+# backstop for targets that arrive through DNS, CNAMEs, tool-managed resolver
+# input, or raw workspace files where command parsing cannot prove intent.
+if [ -n "${RESTRICTED_COMMAND_INPUT_CIDRS:-}" ]; then
+    printf '%s\n' "$RESTRICTED_COMMAND_INPUT_CIDRS" | tr ',' '\n' | while IFS= read -r restricted_cidr; do
+        restricted_cidr="$(printf '%s' "$restricted_cidr" | xargs)"
+        [ -n "$restricted_cidr" ] || continue
+        case "$restricted_cidr" in
+            *:*)
+                if command -v ip6tables >/dev/null 2>&1; then
+                    ip6tables -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                        || ip6tables -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                        || echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
+                fi
+                ;;
+            *)
+                iptables -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                    || iptables -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+                    || echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
+                ;;
+        esac
+    done
+fi
 
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
 WEB_THREADS="${WEB_THREADS:-4}"

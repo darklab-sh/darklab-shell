@@ -244,6 +244,7 @@ def _redis_stream_id_after(left: str, right: str) -> bool:
         return str(left) > str(right)
     return (left_ms, left_seq) > (right_ms, right_seq)
 
+
 redis_client = None
 if _FAKE_REDIS_ENABLED:
     REDIS_URL = REDIS_URL or "memory://"
@@ -282,6 +283,8 @@ _pid_lock = threading.Lock()
 # PID entries expire after 4 hours as a safety net for orphaned entries
 # left behind if a worker crashes mid-stream.
 _PID_TTL = 14400
+_ACTIVE_RUN_CLEANUP_INTERVAL_SECONDS = 60.0
+_last_active_run_cleanup_monotonic = 0.0
 
 
 def _active_run_owner_stale_seconds() -> int:
@@ -509,6 +512,27 @@ def pid_for_session(run_id: str, session_id: str) -> int | None:
         return _coerce_pid(meta.get("pid") or _pid_map.get(run_id))
 
 
+def pid_for_team(run_id: str, team_id: str) -> int | None:
+    """Return a PID only when the active run belongs to team_id."""
+    team_id = str(team_id or "").strip()
+    if not run_id or not team_id:
+        return None
+
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw, meta_key)
+        if not payload or str(payload.get("team_id", "") or "") != team_id:
+            return None
+        return _coerce_pid(payload.get("pid") or redis_client.get(f"proc:{run_id}"))
+
+    with _pid_lock:
+        meta = _active_run_meta.get(run_id)
+        if not meta or str(meta.get("team_id", "") or "") != team_id:
+            return None
+        return _coerce_pid(meta.get("pid") or _pid_map.get(run_id))
+
+
 def pid_pop_for_session(run_id: str, session_id: str) -> int | None:
     """Remove and return a PID only when the active run belongs to session_id."""
     if not run_id or not session_id:
@@ -547,6 +571,7 @@ def active_run_register(
     owner_client_id: str = "",
     owner_tab_id: str = "",
     run_type: str = "command",
+    team_id: str = "",
 ) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
     from services import metrics as app_metrics  # noqa: PLC0415
@@ -556,6 +581,7 @@ def active_run_register(
         "pid": pid,
         "pid_start_time": _pid_start_time(pid),
         "session_id": session_id,
+        "team_id": team_id,
         "command": command,
         "started": started,
         "owner_client_id": owner_client_id,
@@ -707,6 +733,27 @@ def active_run_belongs_to_session(run_id: str, session_id: str) -> bool:
     return bool(payload and str(payload.get("session_id", "")) == session_id)
 
 
+def active_run_belongs_to_scope(run_id: str, session_id: str, team_id: str = "") -> bool:
+    """Return whether active-run metadata links a run to this owner scope."""
+    if not run_id or not session_id:
+        return False
+
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        payload = _load_active_run_payload(redis_client.get(meta_key), meta_key)
+    else:
+        with _pid_lock:
+            payload = dict(_active_run_meta.get(run_id) or {})
+    if not payload:
+        return False
+    if team_id:
+        return str(payload.get("team_id", "") or "") == str(team_id)
+    return (
+        str(payload.get("session_id", "")) == session_id
+        and str(payload.get("team_id", "") or "") == ""
+    )
+
+
 def active_run_remove(run_id: str) -> None:
     """Remove active-run metadata after completion or explicit kill."""
     from services import metrics as app_metrics  # noqa: PLC0415
@@ -785,6 +832,29 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
     return {"metadata_removed": removed_meta, "session_members_removed": removed_members}
 
 
+def _maybe_cleanup_stale_active_run_metadata() -> None:
+    """Periodically prune stale Redis active-run rows from normal read paths."""
+    global _last_active_run_cleanup_monotonic
+    if not redis_client:
+        return
+    now = time.monotonic()
+    if now - _last_active_run_cleanup_monotonic < _ACTIVE_RUN_CLEANUP_INTERVAL_SECONDS:
+        return
+    _last_active_run_cleanup_monotonic = now
+    try:
+        result = cleanup_stale_active_run_metadata()
+    except Exception:
+        log.warning("ACTIVE_RUN_METADATA_CLEANUP_ERROR", exc_info=True)
+        return
+    removed = int(result.get("metadata_removed", 0) or 0)
+    members = int(result.get("session_members_removed", 0) or 0)
+    if removed or members:
+        log.info("ACTIVE_RUN_METADATA_CLEANUP", extra={
+            "metadata_removed": removed,
+            "session_members_removed": members,
+        })
+
+
 def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = "") -> dict[str, object]:
     pid = int(item.get("pid", 0) or 0)
     run_id = str(item.get("run_id", ""))
@@ -796,6 +866,9 @@ def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = 
         "source": source,
         "run_type": str(item.get("run_type", "command") or "command"),
     }
+    team_id = str(item.get("team_id", "") or "")
+    if team_id:
+        public_item["team_id"] = team_id
     public_item.update(_active_run_owner_state(item, client_id=client_id))
     usage = _active_run_resource_usage(run_id, pid)
     if usage is not None:
@@ -807,16 +880,17 @@ def _active_run_started_sort_key(item: dict[str, object]) -> str:
     return str(item.get("started", ""))
 
 
-def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
+def active_runs_for_session(session_id: str, client_id: str = "", team_id: str | None = None) -> list[dict]:
     """Return in-flight runs for one session, ordered oldest-first by start time."""
     if not session_id:
         return []
 
     if redis_client:
+        _maybe_cleanup_stale_active_run_metadata()
         session_key = f"sessionprocs:{session_id}"
         run_ids = sorted(_redis_smembers_strings(session_key))
         items = []
-        stale = []
+        stale: list[str] = []
         for run_id in run_ids:
             meta_key = f"procmeta:{run_id}"
             raw = redis_client.get(meta_key)
@@ -829,6 +903,8 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
                 continue
             if str(payload.get("session_id", "")) != session_id:
                 stale.append(run_id)
+                continue
+            if team_id is not None and str(payload.get("team_id", "") or "") != str(team_id or ""):
                 continue
             if not _active_run_is_alive(payload):
                 stale.append(run_id)
@@ -859,6 +935,8 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
             if not _active_run_is_alive(item):
                 stale.append(run_id)
                 continue
+            if team_id is not None and str(item.get("team_id", "") or "") != str(team_id or ""):
+                continue
             if client_id and str(item.get("owner_client_id", "") or "") == client_id:
                 item["owner_last_seen"] = time.time()
             items.append(_active_run_public_item(item, "memory", client_id=client_id))
@@ -868,5 +946,65 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
                 _session_run_ids[session_id].discard(run_id)
         if session_id in _session_run_ids and not _session_run_ids[session_id]:
             _session_run_ids.pop(session_id, None)
+        public_items = [item for item in items if item["run_id"] and item["command"] and item["started"]]
+        return sorted(public_items, key=_active_run_started_sort_key)
+
+
+def active_runs_for_team(team_id: str, client_id: str = "") -> list[dict]:
+    """Return in-flight runs for one team scope, regardless of the actor token."""
+    team_id = str(team_id or "").strip()
+    if not team_id:
+        return []
+
+    if redis_client:
+        _maybe_cleanup_stale_active_run_metadata()
+        items = []
+        stale_redis: list[tuple[str, str]] = []
+        for meta_key in _redis_scan_strings("procmeta:*"):
+            raw = redis_client.get(meta_key)
+            payload = _load_active_run_payload(raw, meta_key)
+            if not payload:
+                stale_redis.append((meta_key, ""))
+                continue
+            if str(payload.get("team_id", "") or "") != team_id:
+                continue
+            run_id = str(payload.get("run_id", "") or "")
+            if not _active_run_is_alive(payload):
+                stale_redis.append((meta_key, run_id))
+                continue
+            if client_id and str(payload.get("owner_client_id", "") or "") == client_id:
+                payload["owner_last_seen"] = time.time()
+                redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
+            items.append(payload)
+        for meta_key, run_id in stale_redis:
+            redis_client.delete(meta_key)
+            if run_id:
+                redis_client.delete(f"proc:{run_id}")
+        public_items = [
+            _active_run_public_item(item, "redis", client_id=client_id)
+            for item in items
+            if item.get("run_id") and item.get("command") and item.get("started")
+        ]
+        return sorted(public_items, key=_active_run_started_sort_key)
+
+    with _pid_lock:
+        items = []
+        stale_memory: list[str] = []
+        for run_id, item in _active_run_meta.items():
+            if str(item.get("team_id", "") or "") != team_id:
+                continue
+            if not _active_run_is_alive(item):
+                stale_memory.append(run_id)
+                continue
+            if client_id and str(item.get("owner_client_id", "") or "") == client_id:
+                item["owner_last_seen"] = time.time()
+            items.append(_active_run_public_item(item, "memory", client_id=client_id))
+        for run_id in stale_memory:
+            meta = _active_run_meta.pop(run_id, None)
+            session_id = str((meta or {}).get("session_id", "") or "")
+            if session_id in _session_run_ids:
+                _session_run_ids[session_id].discard(run_id)
+                if not _session_run_ids[session_id]:
+                    _session_run_ids.pop(session_id, None)
         public_items = [item for item in items if item["run_id"] and item["command"] and item["started"]]
         return sorted(public_items, key=_active_run_started_sort_key)

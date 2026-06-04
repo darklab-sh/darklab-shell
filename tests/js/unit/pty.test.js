@@ -367,10 +367,27 @@ describe('interactive PTY terminal', () => {
     document.querySelector('.tab-panel[data-id="tab-2"]').classList.add('active')
     document.dispatchEvent(new CustomEvent('app:tab-activated'))
     vi.runOnlyPendingTimers()
+    vi.runOnlyPendingTimers()
 
     expect(fit).toHaveBeenCalled()
     expect(apiFetch).toHaveBeenCalledWith('/pty/runs/run-1/resize', expect.any(Object))
     expect(focus).toHaveBeenCalled()
+
+    apiFetch.mockClear()
+    _ptyPostResize(session)
+    _ptyPostResize(session)
+    vi.runOnlyPendingTimers()
+    expect(apiFetch).not.toHaveBeenCalled()
+
+    session.term.rows = 30
+    session.term.cols = 120
+    _ptyPostResize(session)
+    session.term.cols = 121
+    _ptyPostResize(session)
+    vi.runOnlyPendingTimers()
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(apiFetch.mock.calls[0][1].body)).toEqual({ rows: 30, cols: 121 })
+    vi.useRealTimers()
   })
 
   it('uses the running-tab close confirmation from the PTY modal close button', () => {

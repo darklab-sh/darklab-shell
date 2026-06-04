@@ -6,7 +6,7 @@ Browser desktop notifications are still controlled by the **Run Notifications** 
 
 ## Channel Types
 
-Notification channels belong to a durable `tok_` session. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked.
+Notification channels belong to a durable `tok_` session or to the active team scope. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked. In team scope, owners and admins manage shared channels, and every team member can read the team's delivery audit rows.
 
 | Kind | Sends to | Secret fields | Config fields |
 | --- | --- | --- | --- |
@@ -214,7 +214,7 @@ The SMTP password is read from the environment variable named by `notifications.
 - [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior

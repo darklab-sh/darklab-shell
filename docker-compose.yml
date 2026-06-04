@@ -1,8 +1,19 @@
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: darklab-redis
     restart: unless-stopped
+    # Redis is coordination/cache state for this stack, not durable app data.
+    # Disable persistence so Redis 8 does not try to write RDB/AOF files under
+    # the read-only root filesystem and enter MISCONF.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --stop-writes-on-bgsave-error
+      - "no"
     read_only: true
     tmpfs:
       - /tmp
@@ -14,7 +25,7 @@ services:
       start_period: 5s
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: darklab-postgres
     restart: unless-stopped
     profiles:
@@ -24,7 +35,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-darklab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darklab_dev_password}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-darklab} -d ${POSTGRES_DB:-darklab_shell}"]
       interval: 30s
@@ -38,12 +49,6 @@ services:
     restart: unless-stopped
     profiles:
       - llama
-    cap_add:
-      - IPC_LOCK
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
     volumes:
       - llama-cache:/root/.cache
     command:
@@ -63,7 +68,6 @@ services:
       - "${LLAMA_N_PREDICT:-180}"
       - -np
       - "${LLAMA_PARALLEL:-1}"
-      - --mlock
       - --cont-batching
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
@@ -127,6 +131,9 @@ services:
       # dropping privileges. The app also treats WORKSPACE_ROOT as the runtime
       # workspace_root override, so Compose deployments only need this setting.
       - WORKSPACE_ROOT=${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
+      # Comma-separated CIDRs that command validation rejects and the scanner
+      # user cannot reach at the container OUTPUT layer.
+      - RESTRICTED_COMMAND_INPUT_CIDRS=${RESTRICTED_COMMAND_INPUT_CIDRS:-}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s

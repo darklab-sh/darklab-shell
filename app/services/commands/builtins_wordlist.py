@@ -28,14 +28,14 @@ def _wordlist_rows(items: list[dict], *, heading: str) -> list[dict[str, object]
         output_line(heading, "builtin-section"),
         output_line(
             f"  {'category':<{widths['category']}}  {'name':<{widths['name']}}  path",
-            "builtin-help-row",
+            "builtin-table-header",
         ),
     ]
     for item in items:
         category = str(item.get("category") or "")
         name = str(item.get("name") or "")
         path = str(item.get("path") or "")
-        lines.append(output_line(f"  {category:<{widths['category']}}  {name:<{widths['name']}}  {path}", "builtin-help-row"))
+        lines.append(output_line(f"  {category:<{widths['category']}}  {name:<{widths['name']}}  {path}", "builtin-table-row"))
     return lines
 
 

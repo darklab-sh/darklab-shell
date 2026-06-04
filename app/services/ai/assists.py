@@ -11,7 +11,7 @@ from config import CFG
 from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs
 from core.output_signals import extract_target
-from core.process import active_runs_for_session
+from core.process import active_run_belongs_to_scope, active_runs_for_session
 from services.ai import ai_cfg
 from services.ai.context import build_run_context
 from services.ai.coordination import AICoordinationUnavailable, check_ai_route_rate_limit, enqueue_lock
@@ -35,16 +35,17 @@ class AIAssistRouteError(RuntimeError):
         self.message = message
 
 
-def list_run_assists(session_id: str, run_id: str) -> list[dict[str, Any]]:
-    if not _run_belongs_to_session(session_id, run_id):
+def list_run_assists(session_id: str, run_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
+    if not _run_belongs_to_owner(session_id, run_id, team_id=team_id):
         raise AIAssistRouteError("not_found", "Run not found.", status_code=404)
-    return [_public_assist(row) for row in list_recent_assists_for_run(session_id, run_id)]
+    return [_public_assist(row) for row in list_recent_assists_for_run(session_id, run_id, team_id=team_id)]
 
 
 def enqueue_summary_assist(
     session_id: str,
     run_id: str,
     *,
+    team_id: str = "",
     force: bool = False,
     cfg: dict | None = None,
 ) -> tuple[dict[str, Any], int]:
@@ -54,20 +55,20 @@ def enqueue_summary_assist(
         raise AIAssistRouteError("ai_disabled", "AI assists are disabled.", status_code=403)
     if not settings["feature_summary"]:
         raise AIAssistRouteError("ai_feature_disabled", "AI summaries are disabled.", status_code=403)
-    if _active_run_exists(session_id, run_id):
+    if _active_run_exists(session_id, run_id, team_id=team_id):
         raise AIAssistRouteError("ai_run_active", "AI assists are only available for completed runs.", status_code=409)
-    row = _owned_run_row(session_id, run_id)
+    row = _owned_run_row(session_id, run_id, team_id=team_id)
     if row is None:
         raise AIAssistRouteError("not_found", "Run not found.", status_code=404)
     if not str(row.get("finished") or ""):
         raise AIAssistRouteError("ai_run_active", "AI assists are only available for completed runs.", status_code=409)
     _enforce_ai_write_rate_limit(session_id, active_cfg, variant="summary")
 
-    context = build_run_context(run_id, session_id=session_id, cfg=active_cfg, variant="summary")
+    context = build_run_context(run_id, session_id=session_id, team_id=team_id, cfg=active_cfg, variant="summary")
     if not context.useful:
         raise AIAssistRouteError("ai_no_context", "Run does not have enough useful context for an AI assist.", status_code=422)
     prompt_version, prompt_source = resolved_prompt_version(settings.get("prompt_version_override"))
-    active_project_id, project_targets = _active_project_snapshot(session_id)
+    active_project_id, project_targets = _active_project_snapshot(session_id, team_id=team_id)
     project_targets = [*project_targets, *_source_run_targets(row)]
     try:
         with enqueue_lock(
@@ -76,6 +77,7 @@ def enqueue_summary_assist(
             "summary",
             model=settings["model"],
             prompt_version=prompt_version,
+            team_id=team_id,
         ) as locked:
             if not locked:
                 raise AIAssistRouteError("ai_busy", "AI assist request is already being queued.", status_code=429)
@@ -84,6 +86,7 @@ def enqueue_summary_assist(
                 run_id,
                 "summary",
                 context,
+                team_id=team_id,
                 cfg=active_cfg,
                 prompt_version=prompt_version,
                 prompt_version_source=prompt_source,
@@ -119,6 +122,7 @@ def enqueue_next_commands_assist(
     session_id: str,
     run_id: str,
     *,
+    team_id: str = "",
     force: bool = False,
     cfg: dict | None = None,
 ) -> tuple[dict[str, Any], int]:
@@ -128,20 +132,20 @@ def enqueue_next_commands_assist(
         raise AIAssistRouteError("ai_disabled", "AI assists are disabled.", status_code=403)
     if not settings["feature_next_commands"]:
         raise AIAssistRouteError("ai_feature_disabled", "AI next-command suggestions are disabled.", status_code=403)
-    if _active_run_exists(session_id, run_id):
+    if _active_run_exists(session_id, run_id, team_id=team_id):
         raise AIAssistRouteError("ai_run_active", "AI assists are only available for completed runs.", status_code=409)
-    row = _owned_run_row(session_id, run_id)
+    row = _owned_run_row(session_id, run_id, team_id=team_id)
     if row is None:
         raise AIAssistRouteError("not_found", "Run not found.", status_code=404)
     if not str(row.get("finished") or ""):
         raise AIAssistRouteError("ai_run_active", "AI assists are only available for completed runs.", status_code=409)
     _enforce_ai_write_rate_limit(session_id, active_cfg, variant="next_commands")
 
-    context = build_run_context(run_id, session_id=session_id, cfg=active_cfg, variant="next_commands")
+    context = build_run_context(run_id, session_id=session_id, team_id=team_id, cfg=active_cfg, variant="next_commands")
     if not context.useful:
         raise AIAssistRouteError("ai_no_context", "Run does not have enough useful context for an AI assist.", status_code=422)
     prompt_version, prompt_source = resolved_prompt_version(settings.get("prompt_version_override"))
-    active_project_id, project_targets = _active_project_snapshot(session_id)
+    active_project_id, project_targets = _active_project_snapshot(session_id, team_id=team_id)
     project_targets = [*project_targets, *_source_run_targets(row)]
     try:
         with enqueue_lock(
@@ -150,6 +154,7 @@ def enqueue_next_commands_assist(
             "next_commands",
             model=settings["model"],
             prompt_version=prompt_version,
+            team_id=team_id,
         ) as locked:
             if not locked:
                 raise AIAssistRouteError("ai_busy", "AI assist request is already being queued.", status_code=429)
@@ -158,6 +163,7 @@ def enqueue_next_commands_assist(
                 run_id,
                 "next_commands",
                 context,
+                team_id=team_id,
                 cfg=active_cfg,
                 prompt_version=prompt_version,
                 prompt_version_source=prompt_source,
@@ -269,31 +275,42 @@ def _log_enqueue_result(
     )
 
 
-def _owned_run_row(session_id: str, run_id: str) -> dict[str, Any] | None:
+def _owned_run_row(session_id: str, run_id: str, *, team_id: str = "") -> dict[str, Any] | None:
+    if team_id:
+        sql = "SELECT id, session_id, team_id, command, finished, exit_code FROM runs WHERE team_id = ? AND id = ?"
+        params = (team_id, run_id)
+    else:
+        sql = (
+            "SELECT id, session_id, team_id, command, finished, exit_code FROM runs "
+            "WHERE session_id = ? AND (team_id IS NULL OR team_id = '') AND id = ?"
+        )
+        params = (session_id, run_id)
     with db_connect() as conn:
-        row = conn.execute(
-            "SELECT id, session_id, command, finished, exit_code FROM runs WHERE session_id = ? AND id = ?",
-            (session_id, run_id),
-        ).fetchone()
+        row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
 
 
-def _run_belongs_to_session(session_id: str, run_id: str) -> bool:
-    if _active_run_exists(session_id, run_id):
+def _run_belongs_to_owner(session_id: str, run_id: str, *, team_id: str = "") -> bool:
+    if _active_run_exists(session_id, run_id, team_id=team_id):
         return True
-    return _owned_run_row(session_id, run_id) is not None
+    return _owned_run_row(session_id, run_id, team_id=team_id) is not None
 
 
-def _active_run_exists(session_id: str, run_id: str) -> bool:
-    return any(str(active.get("run_id") or "") == run_id for active in active_runs_for_session(session_id))
+def _active_run_exists(session_id: str, run_id: str, *, team_id: str = "") -> bool:
+    if active_run_belongs_to_scope(run_id, session_id, team_id):
+        return True
+    return any(
+        str(active.get("run_id") or "") == run_id
+        for active in active_runs_for_session(session_id, team_id=team_id)
+    )
 
 
-def _active_project_snapshot(session_id: str) -> tuple[str, list[dict[str, Any]]]:
-    project = get_active_project(session_id)
+def _active_project_snapshot(session_id: str, *, team_id: str = "") -> tuple[str, list[dict[str, Any]]]:
+    project = get_active_project(session_id, team_id=team_id)
     if not project:
         return "", []
     project_id = str(project.get("id") or "")
-    page = list_project_targets(session_id, project_id, limit=100, offset=0)
+    page = list_project_targets(session_id, project_id, limit=100, offset=0, team_id=team_id)
     targets = []
     for target in (page or {}).get("targets", []):
         value = str(target.get("canonical_value") or target.get("value") or "").strip()

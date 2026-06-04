@@ -888,14 +888,74 @@ async function _historyPostBulkDelete(url, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!resp.ok) {
+    if (typeof _historyMutationError === 'function') {
+      throw await _historyMutationError(resp, 'Failed to delete selected history items');
+    }
+    throw new Error(`HTTP ${resp.status}`);
+  }
   return resp.json();
+}
+
+function _historyBulkExportFilename(format) {
+  const suffix = format === 'jsonl' ? 'jsonl' : 'txt';
+  return `darklab-history-${new Date().toISOString().replace(/[:.]/g, '-')}.${suffix}`;
+}
+
+function _historyFilenameFromDisposition(value) {
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(String(value || ''));
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1].replace(/"$/u, ''));
+  } catch (_) {
+    return match[1].replace(/"$/u, '');
+  }
+}
+
+async function _historyBulkExportSelectedItems(format) {
+  const runIds = _historySelectedRunIds();
+  const snapshotIds = _historySelectedSnapshotIds();
+  if (!runIds.length && !snapshotIds.length) return;
+  const downloader = typeof window !== 'undefined' && typeof window.downloadBlobAsAttachment === 'function'
+    ? window.downloadBlobAsAttachment
+    : downloadBlobAsAttachment;
+  if (typeof downloader !== 'function') {
+    showToast('Downloads are not available', 'error');
+    return;
+  }
+  const exportFormat = format === 'jsonl' ? 'jsonl' : 'txt';
+  _historySetBulkBusy(true);
+  try {
+    const resp = await apiFetch('/history/bulk-export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_ids: runIds,
+        snapshot_ids: snapshotIds,
+        format: exportFormat,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const filename = _historyFilenameFromDisposition(resp.headers?.get?.('content-disposition'))
+      || _historyBulkExportFilename(exportFormat);
+    downloader(blob, filename, { container: historyPanel });
+    showToast(`History ${exportFormat.toUpperCase()} export started`);
+  } catch (_) {
+    showToast('Failed to export selected history items', 'error');
+  } finally {
+    _historySetBulkBusy(false);
+  }
 }
 
 async function _historyBulkDeleteSelectedItems() {
   const runIds = _historySelectedRunIds();
   const snapshotIds = _historySelectedSnapshotIds();
   if (!runIds.length && !snapshotIds.length) return;
+  if (typeof _historyCanManageHistory === 'function' && !_historyCanManageHistory()) {
+    if (typeof _historyShowPermissionDenied === 'function') _historyShowPermissionDenied('delete team history');
+    return;
+  }
   const label = _historyBulkDeleteLabel(runIds.length, snapshotIds.length);
   const choice = await showConfirm({
     body: {
@@ -930,8 +990,8 @@ async function _historyBulkDeleteSelectedItems() {
     const message = [pieces.join(' - '), reasonSummary].filter(Boolean).join(' - ');
     _historyBulkToast(message, counts);
     await _historyRefreshAfterBulk();
-  } catch (_) {
-    showToast('Failed to delete selected history items', 'error');
+  } catch (err) {
+    showToast(err.userFacing ? err.message : 'Failed to delete selected history items', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
@@ -959,6 +1019,8 @@ function _historyBuildBulkActionMenu(disabled) {
     ['bulk-add-active-project', 'add to active project'],
     ['bulk-add-project', 'add to project'],
     ['bulk-remove-project', 'remove from project'],
+    ['bulk-export-txt', 'export text'],
+    ['bulk-export-jsonl', 'export JSONL'],
     ['bulk-delete', 'delete'],
   ].forEach(([action, label]) => {
     const item = document.createElement('button');
@@ -966,12 +1028,21 @@ function _historyBuildBulkActionMenu(disabled) {
     item.className = 'dropdown-item dropdown-item-compact';
     item.dataset.action = action;
     item.textContent = label;
-    const projectActionDisabled = action !== 'bulk-delete' && !hasOnlyProjectLinkableRuns;
+    const projectActionDisabled = !['bulk-delete', 'bulk-export-txt', 'bulk-export-jsonl'].includes(action)
+      && !hasOnlyProjectLinkableRuns;
+    const historyDeleteDisabled = action === 'bulk-delete'
+      && typeof _historyCanManageHistory === 'function'
+      && !_historyCanManageHistory();
     item.disabled = disabled
       || projectActionDisabled
+      || historyDeleteDisabled
       || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
     if (action === 'bulk-add-active-project' && !(activeProject && activeProject.id)) {
       item.title = 'Select an active project first.';
+    } else if (historyDeleteDisabled) {
+      item.title = typeof _historyScopeDeniedMessage === 'function'
+        ? _historyScopeDeniedMessage('delete team history')
+        : 'View-only team members cannot delete team history.';
     } else if (projectActionDisabled) {
       item.title = 'Project actions apply to selected external runs.';
     }
@@ -1024,7 +1095,10 @@ function _renderHistoryBulkToolbar() {
   selectAll.textContent = allSelected && someSelected ? 'Deselect all' : 'Select all';
   selectAll.disabled = !_historySelection.selectMode || !visibleSelectable.length || _historySelection.bulkInFlight;
   selectAll.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
-  selectAll.addEventListener('click', () => _historySelectAllVisibleItems());
+  selectAll.addEventListener('click', (event) => {
+    event.stopPropagation();
+    _historySelectAllVisibleItems();
+  });
   actionRow.appendChild(selectAll);
 
   const clear = document.createElement('button');
@@ -1032,7 +1106,8 @@ function _renderHistoryBulkToolbar() {
   clear.type = 'button';
   clear.textContent = 'Clear';
   clear.disabled = selectedCount === 0 || _historySelection.bulkInFlight;
-  clear.addEventListener('click', () => {
+  clear.addEventListener('click', (event) => {
+    event.stopPropagation();
     _historyClearSelection({ render: false });
     _historyRenderCurrentPanel();
   });
@@ -1076,6 +1151,24 @@ function _renderHistoryBulkToolbar() {
       event.stopPropagation();
       _closeHistoryBulkActionMenu();
       _historyBulkRemoveFromAllProjects();
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-export-txt"]'), {
+    refocusComposer: false,
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _closeHistoryBulkActionMenu();
+      _historyBulkExportSelectedItems('txt');
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-export-jsonl"]'), {
+    refocusComposer: false,
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _closeHistoryBulkActionMenu();
+      _historyBulkExportSelectedItems('jsonl');
     },
   });
   bindPressable(actions.querySelector('[data-action="bulk-delete"]'), {
@@ -1496,8 +1589,13 @@ function _historyRenderPanelData(data) {
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          const scheduleId = event.currentTarget?.dataset?.scheduleId || run.schedule_id || '';
-          if (scheduleId && typeof openSchedulesModal === 'function') {
+          const target = event.currentTarget;
+          const ownerKind = target?.dataset?.scheduleOwnerKind || run.schedule_owner_kind || '';
+          const watcherId = target?.dataset?.scheduleOwnerId || run.schedule_owner_id || run.watcher_id || '';
+          const scheduleId = target?.dataset?.scheduleId || run.schedule_id || '';
+          if (ownerKind === 'watcher' && watcherId && typeof openWatchersModal === 'function') {
+            void openWatchersModal({ watcherId });
+          } else if (scheduleId && typeof openSchedulesModal === 'function') {
             void openSchedulesModal({ scheduleId });
           }
         },

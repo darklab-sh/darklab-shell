@@ -9,6 +9,91 @@
     let wizard = null;
     const downloadTimers = new WeakMap();
     const packageJobPollMs = 750;
+    const defaultPackagePresets = Object.freeze([
+      Object.freeze({
+        id: 'evidence',
+        label: 'Evidence',
+        description: 'Reviewed findings, related transcripts, targets, and selected raw artifacts.',
+        name_suffix: 'evidence',
+        redaction_mode: 'raw',
+        include_artifacts: true,
+        include_private_notes: false,
+        labels: Object.freeze([]),
+        notes: '',
+        selection: Object.freeze({
+          runs: 'all',
+          transcripts: 'with_findings',
+          findings: 'non_false_positive',
+          artifacts: 'selectable',
+          targets: 'all',
+        }),
+      }),
+      Object.freeze({
+        id: 'summary',
+        label: 'Summary',
+        description: 'Findings, targets, and metadata without transcript HTML or raw artifacts.',
+        name_suffix: 'summary',
+        redaction_mode: 'raw',
+        include_artifacts: false,
+        include_private_notes: false,
+        labels: Object.freeze([]),
+        notes: '',
+        selection: Object.freeze({
+          runs: 'all',
+          transcripts: 'none',
+          findings: 'non_false_positive',
+          artifacts: 'none',
+          targets: 'all',
+        }),
+      }),
+      Object.freeze({
+        id: 'full',
+        label: 'Full Archive',
+        description: 'All linked runs, findings, targets, and available raw artifacts.',
+        name_suffix: 'full',
+        redaction_mode: 'raw',
+        include_artifacts: true,
+        include_private_notes: false,
+        labels: Object.freeze([]),
+        notes: '',
+        selection: Object.freeze({
+          runs: 'all',
+          transcripts: 'all',
+          findings: 'all',
+          artifacts: 'selectable',
+          targets: 'all',
+        }),
+      }),
+      Object.freeze({
+        id: 'redacted',
+        label: 'Redacted',
+        description: 'Metadata, findings, targets, and transcripts with sensitive fields redacted.',
+        name_suffix: 'redacted',
+        redaction_mode: 'redacted',
+        include_artifacts: true,
+        include_private_notes: false,
+        labels: Object.freeze([]),
+        notes: '',
+        selection: Object.freeze({
+          runs: 'all',
+          transcripts: 'with_findings',
+          findings: 'non_false_positive',
+          artifacts: 'selectable',
+          targets: 'all',
+        }),
+      }),
+    ]);
+    const packagePresetSelectionDefaults = Object.freeze({
+      runs: 'none',
+      transcripts: 'none',
+      findings: 'none',
+      artifacts: 'none',
+      targets: 'none',
+    });
+    let packagePresetCatalog = defaultPackagePresets.map(preset => ({ ...preset, selection: { ...preset.selection } }));
+    let packagePresetCatalogPromise = null;
+    let packagePresetCatalogLoaded = false;
+    let packagePresetCatalogError = '';
 
     function selectedProjectId() {
       return String(ctx.getSelectedProjectId?.() || '');
@@ -22,8 +107,100 @@
       return summary && Array.isArray(summary.packages) ? summary.packages : [];
     }
 
+    function mergePackageIntoSummary(projectId, pkg) {
+      const packageId = String(pkg && pkg.id || '');
+      const summary = summaryFor(projectId);
+      if (!packageId || !summary || !Array.isArray(summary.packages)) return;
+      summary.packages = summary.packages.map(item => (
+        String(item && item.id || '') === packageId
+          ? { ...item, ...pkg }
+          : item
+      ));
+    }
+
     function selectableArtifactItems(summary) {
       return ctx.projectArtifactItems(summary).filter(artifact => ctx.projectArtifactStatus(artifact) === 'available');
+    }
+
+    function safePackagePresetText(value, fallback = '') {
+      return String(value || fallback || '').trim();
+    }
+
+    function normalizePackagePresetEntry(entry) {
+      if (!entry || typeof entry !== 'object') return null;
+      const id = safePackagePresetText(entry.id).toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) return null;
+      const selection = entry.selection && typeof entry.selection === 'object' ? entry.selection : {};
+      return {
+        id,
+        label: safePackagePresetText(entry.label, id.replace(/_/g, ' ')) || id,
+        description: safePackagePresetText(entry.description),
+        name_suffix: safePackagePresetText(entry.name_suffix, id),
+        redaction_mode: safePackagePresetText(entry.redaction_mode) === 'redacted' ? 'redacted' : 'raw',
+        include_artifacts: !!entry.include_artifacts,
+        include_private_notes: !!entry.include_private_notes,
+        labels: Array.isArray(entry.labels)
+          ? entry.labels.map(label => safePackagePresetText(label)).filter(Boolean)
+          : [],
+        notes: safePackagePresetText(entry.notes),
+        selection: {
+          ...packagePresetSelectionDefaults,
+          ...Object.fromEntries(
+            Object.entries(selection)
+              .map(([key, value]) => [key, safePackagePresetText(value).toLowerCase()])
+              .filter(([key, value]) => key in packagePresetSelectionDefaults && value),
+          ),
+        },
+      };
+    }
+
+    function normalizePackagePresetCatalog(data) {
+      const rawPresets = Array.isArray(data?.presets) ? data.presets : [];
+      const presets = [];
+      const seen = new Set();
+      rawPresets.forEach((entry) => {
+        const preset = normalizePackagePresetEntry(entry);
+        if (!preset || seen.has(preset.id)) return;
+        seen.add(preset.id);
+        presets.push(preset);
+      });
+      return presets.length ? presets : defaultPackagePresets.map(preset => ({ ...preset, selection: { ...preset.selection } }));
+    }
+
+    function packagePresets() {
+      return packagePresetCatalog.length
+        ? packagePresetCatalog
+        : defaultPackagePresets.map(preset => ({ ...preset, selection: { ...preset.selection } }));
+    }
+
+    function packagePresetById(preset, { fallback = true } = {}) {
+      const presetId = safePackagePresetText(preset).toLowerCase();
+      const found = packagePresets().find(item => item.id === presetId) || null;
+      if (found || !fallback) return found;
+      return packagePresets()[0] || defaultPackagePresets[0];
+    }
+
+    async function ensurePackagePresetCatalog() {
+      if (packagePresetCatalogLoaded) return packagePresets();
+      if (packagePresetCatalogPromise) return packagePresetCatalogPromise;
+      if (typeof ctx.apiFetch !== 'function') return packagePresets();
+      packagePresetCatalogPromise = ctx.apiFetch('/projects/package-presets', { cache: 'no-store' })
+        .then(resp => readJsonResponse(resp, 'Unable to load package presets.'))
+        .then((data) => {
+          packagePresetCatalog = normalizePackagePresetCatalog(data);
+          packagePresetCatalogError = '';
+          return packagePresetCatalog;
+        })
+        .catch((err) => {
+          packagePresetCatalog = defaultPackagePresets.map(preset => ({ ...preset, selection: { ...preset.selection } }));
+          packagePresetCatalogError = err?.message || 'Package presets could not be loaded.';
+          return packagePresetCatalog;
+        })
+        .finally(() => {
+          packagePresetCatalogLoaded = true;
+          packagePresetCatalogPromise = null;
+        });
+      return packagePresetCatalogPromise;
     }
 
     function packageDownloadName(pkg) {
@@ -100,46 +277,64 @@
       return !!(ctx.manifestOverlay && ctx.manifestOverlay.classList.contains('open'));
     }
 
+    function selectionPolicy(presetConfig, key) {
+      const policy = safePackagePresetText(presetConfig?.selection?.[key]).toLowerCase();
+      return policy || packagePresetSelectionDefaults[key] || 'none';
+    }
+
     function presetDefaults(preset, summary, findings) {
-      const normalizedPreset = String(preset || 'evidence').trim() || 'evidence';
+      const presetConfig = packagePresetById(preset);
+      const normalizedPreset = presetConfig.id;
       const runs = ctx.projectRunItems(summary);
       const artifacts = ctx.projectArtifactItems(summary);
       const targets = ctx.projectTargetItems(summary);
       const findingItems = Array.isArray(findings) ? findings : [];
       const runIds = runs.map(run => String(run.id || '')).filter(Boolean);
       const findingRunIds = new Set(findingItems.map(finding => String(finding.run_id || '')).filter(Boolean));
-      const redactionMode = normalizedPreset === 'redacted' ? 'redacted' : 'raw';
-      const includeArtifacts = normalizedPreset !== 'summary' && ctx.projectFilesEnabled();
-      const selectedFindings = findingItems.filter(finding => (
-        normalizedPreset === 'full' || String(finding.review_state || 'new') !== 'false_positive'
-      ));
+      const redactionMode = presetConfig.redaction_mode === 'redacted' ? 'redacted' : 'raw';
+      const includeArtifacts = !!presetConfig.include_artifacts && ctx.projectFilesEnabled();
+      let selectedFindings = [];
+      const findingPolicy = selectionPolicy(presetConfig, 'findings');
+      if (findingPolicy === 'all') {
+        selectedFindings = findingItems;
+      } else if (findingPolicy === 'non_false_positive') {
+        selectedFindings = findingItems.filter(finding => String(finding.review_state || 'new') !== 'false_positive');
+      }
       let selectedTranscriptRunIds = [];
-      if (normalizedPreset === 'full') {
+      const transcriptPolicy = selectionPolicy(presetConfig, 'transcripts');
+      if (transcriptPolicy === 'all') {
         selectedTranscriptRunIds = runIds;
-      } else if (normalizedPreset !== 'summary') {
+      } else if (transcriptPolicy === 'with_findings') {
         selectedTranscriptRunIds = runIds.filter(runId => findingRunIds.has(runId));
+      }
+      let selectedArtifactIds = [];
+      const artifactPolicy = selectionPolicy(presetConfig, 'artifacts');
+      if (includeArtifacts && artifactPolicy === 'all') {
+        selectedArtifactIds = artifacts.map(artifact => String(artifact.id || '')).filter(Boolean);
+      } else if (includeArtifacts && artifactPolicy === 'selectable') {
+        selectedArtifactIds = selectableArtifactItems(summary).map(artifact => String(artifact.id || '')).filter(Boolean);
       }
       return {
         preset: normalizedPreset,
         step: 1,
         includeArtifacts,
         redactionMode,
-        includePrivateNotes: false,
+        includePrivateNotes: !!presetConfig.include_private_notes,
         name: '',
         description: '',
-        labels: '',
-        notes: '',
+        labels: Array.isArray(presetConfig.labels) ? presetConfig.labels.join(', ') : '',
+        notes: safePackagePresetText(presetConfig.notes),
         collapsedRunIds: new Set(),
         selection: {
-          runIds: new Set(runIds),
+          runIds: new Set(selectionPolicy(presetConfig, 'runs') === 'all' ? runIds : []),
           transcriptRunIds: new Set(selectedTranscriptRunIds),
           findingIds: new Set(selectedFindings.map(finding => String(finding.id || '')).filter(Boolean)),
-          artifactIds: new Set(
-            includeArtifacts
-              ? selectableArtifactItems(summary).map(artifact => String(artifact.id || '')).filter(Boolean)
+          artifactIds: new Set(selectedArtifactIds),
+          targetIds: new Set(
+            selectionPolicy(presetConfig, 'targets') === 'all'
+              ? targets.map(target => String(target.id || '')).filter(Boolean)
               : [],
           ),
-          targetIds: new Set(targets.map(target => String(target.id || '')).filter(Boolean)),
         },
       };
     }
@@ -150,6 +345,45 @@
 
     function isWizardOpen() {
       return !!(ctx.wizardOverlay && ctx.wizardOverlay.classList.contains('open'));
+    }
+
+    function updateWizardField(field, value) {
+      if (!wizard) return false;
+      if (field === 'name') {
+        wizard.name = String(value || '');
+        wizard.nameTouched = true;
+        return true;
+      }
+      if (field === 'description') {
+        wizard.description = String(value || '');
+        wizard.descriptionTouched = true;
+        return true;
+      }
+      if (field === 'labels') {
+        wizard.labels = String(value || '');
+        wizard.labelsTouched = true;
+        return true;
+      }
+      if (field === 'notes') {
+        wizard.notes = String(value || '');
+        wizard.notesTouched = true;
+        return true;
+      }
+      return false;
+    }
+
+    function syncVisibleWizardFields() {
+      if (!wizard || !ctx.wizardBody) return;
+      ctx.wizardBody.querySelectorAll('[data-project-package-field]').forEach((fieldEl) => {
+        const field = String(fieldEl.dataset.projectPackageField || '');
+        if (field === 'redaction_mode') {
+          const mode = String(fieldEl.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
+          wizard.redactionMode = mode;
+          wizard.redactionTouched = true;
+          return;
+        }
+        updateWizardField(field, fieldEl.value);
+      });
     }
 
     function hideWizardOverlay() {
@@ -199,7 +433,46 @@
         .replace(/[^a-z0-9._-]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'project';
       const today = new Date().toISOString().slice(0, 10);
-      return `${slug}-${today}-${String(preset || 'evidence')}`;
+      const presetConfig = packagePresetById(preset, { fallback: false });
+      const suffix = safePackagePresetText(presetConfig?.name_suffix, preset || 'evidence') || 'evidence';
+      return `${slug}-${today}-${suffix}`;
+    }
+
+    function reapplyPresetDefaults(projectId, { preserveTouched = true } = {}) {
+      if (!wizard || !isWizardActive(projectId)) return;
+      syncVisibleWizardFields();
+      const previous = wizard;
+      const refreshed = presetDefaults(previous.preset, summaryFor(projectId), ctx.projectFindingItems(projectId));
+      refreshed.step = previous.step || refreshed.step;
+      refreshed.collapsedRunIds = previous.collapsedRunIds || new Set();
+      refreshed.notice = previous.notice || '';
+      refreshed.noticeError = !!previous.noticeError;
+      refreshed.nameTouched = !!previous.nameTouched;
+      refreshed.descriptionTouched = !!previous.descriptionTouched;
+      refreshed.labelsTouched = !!previous.labelsTouched;
+      refreshed.notesTouched = !!previous.notesTouched;
+      refreshed.redactionTouched = !!previous.redactionTouched;
+      refreshed.includeArtifactsTouched = !!previous.includeArtifactsTouched;
+      refreshed.privateNotesTouched = !!previous.privateNotesTouched;
+      if (preserveTouched && previous.nameTouched) {
+        refreshed.name = previous.name || '';
+      } else {
+        refreshed.name = suggestedName(ctx.selectedProject?.(), refreshed.preset);
+      }
+      if (preserveTouched && previous.descriptionTouched) refreshed.description = previous.description || '';
+      if (preserveTouched && previous.labelsTouched) refreshed.labels = previous.labels || '';
+      if (preserveTouched && previous.notesTouched) refreshed.notes = previous.notes || '';
+      if (preserveTouched && previous.redactionTouched) refreshed.redactionMode = previous.redactionMode || refreshed.redactionMode;
+      if (preserveTouched && previous.includeArtifactsTouched) refreshed.includeArtifacts = !!previous.includeArtifacts;
+      if (preserveTouched && previous.privateNotesTouched) refreshed.includePrivateNotes = !!previous.includePrivateNotes;
+      wizard = { projectId: String(projectId || ''), ...refreshed };
+    }
+
+    function refreshWizardAfterAsyncLoad(projectId) {
+      if (!isWizardActive(projectId)) return;
+      reapplyPresetDefaults(projectId);
+      ctx.renderProjectExplorer?.();
+      renderWizardModal();
     }
 
     function openWizard(projectId, preset = 'evidence') {
@@ -208,37 +481,27 @@
       wizard = {
         projectId: String(projectId || ''),
         ...presetDefaults(preset, summary, findings),
+        nameTouched: false,
+        descriptionTouched: false,
+        labelsTouched: false,
+        notesTouched: false,
+        redactionTouched: false,
+        includeArtifactsTouched: false,
+        privateNotesTouched: false,
       };
       wizard.name = suggestedName(ctx.selectedProject?.(), wizard.preset);
       ctx.setProjectWorkspaceMessage?.('');
+      ensurePackagePresetCatalog().then(() => {
+        refreshWizardAfterAsyncLoad(projectId);
+      });
       if (!ctx.projectFindingsLoaded(projectId)) {
         ctx.loadProjectFindings(projectId).then(() => {
-          if (isWizardActive(projectId)) {
-            const refreshed = presetDefaults(wizard.preset, summaryFor(projectId), ctx.projectFindingItems(projectId));
-            refreshed.name = wizard.name;
-            refreshed.description = wizard.description;
-            refreshed.labels = wizard.labels || '';
-            refreshed.notes = wizard.notes || '';
-            refreshed.collapsedRunIds = wizard.collapsedRunIds || new Set();
-            wizard = { projectId: String(projectId || ''), ...refreshed };
-            ctx.renderProjectExplorer?.();
-            renderWizardModal();
-          }
+          refreshWizardAfterAsyncLoad(projectId);
         }).catch(() => {});
       }
       if (typeof ctx.loadAllProjectArtifacts === 'function' && Number(summary?.counts?.artifacts || 0) > 0) {
         ctx.loadAllProjectArtifacts(projectId, summary).then(() => {
-          if (isWizardActive(projectId)) {
-            const refreshed = presetDefaults(wizard.preset, summaryFor(projectId), ctx.projectFindingItems(projectId));
-            refreshed.name = wizard.name;
-            refreshed.description = wizard.description;
-            refreshed.labels = wizard.labels || '';
-            refreshed.notes = wizard.notes || '';
-            refreshed.collapsedRunIds = wizard.collapsedRunIds || new Set();
-            wizard = { projectId: String(projectId || ''), ...refreshed };
-            ctx.renderProjectExplorer?.();
-            renderWizardModal();
-          }
+          refreshWizardAfterAsyncLoad(projectId);
         }).catch(() => {});
       }
       ctx.renderProjectExplorer?.();
@@ -681,15 +944,10 @@
     }
 
     function renderPreset(wrap, projectId, summary) {
-      const presets = [
-        ['evidence', 'Evidence', 'Reviewed findings, related transcripts, targets, and selected raw artifacts.'],
-        ['summary', 'Summary', 'Findings, targets, and metadata without transcript HTML or raw artifacts.'],
-        ['full', 'Full Archive', 'All linked runs, findings, targets, and available raw artifacts.'],
-        ['redacted', 'Redacted', 'Metadata, findings, targets, and transcripts with sensitive fields redacted.'],
-      ];
       const list = document.createElement('div');
       list.className = 'project-package-preset-list';
-      presets.forEach(([id, title, detail]) => {
+      packagePresets().forEach((preset) => {
+        const id = String(preset.id || '');
         const row = document.createElement('label');
         row.className = 'project-package-preset';
         row.classList.toggle('is-active', wizard.preset === id);
@@ -703,14 +961,20 @@
         const text = document.createElement('span');
         text.className = 'project-package-preset-text';
         const titleEl = document.createElement('span');
-        titleEl.textContent = title;
+        titleEl.textContent = preset.label || id;
         const detailEl = document.createElement('small');
-        detailEl.textContent = detail;
+        detailEl.textContent = preset.description || '';
         text.append(titleEl, detailEl);
         row.append(input, text);
         list.appendChild(row);
       });
       wrap.appendChild(list);
+      if (packagePresetCatalogError) {
+        const fallbackNote = document.createElement('p');
+        fallbackNote.className = 'project-package-wizard-note is-warning';
+        fallbackNote.textContent = 'Configured package presets could not be loaded; using shipped defaults.';
+        wrap.appendChild(fallbackNote);
+      }
       const metadata = document.createElement('div');
       metadata.className = 'project-package-preset-metadata';
       const labelsLabel = document.createElement('label');
@@ -1150,6 +1414,7 @@
 
     async function createFromWizard(projectId) {
       if (!wizard) return;
+      syncVisibleWizardFields();
       const body = payload();
       if (!body.name) {
         ctx.setProjectWorkspaceMessage?.('Package name is required.', { error: true });
@@ -1172,13 +1437,15 @@
         renderWizardModal();
         return;
       }
-      await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages`, {
+      const createResp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
+      const created = await readJsonResponse(createResp, 'Unable to create package.');
       wizard = null;
       hideWizardOverlay();
       await ctx.refreshProjectWorkspace();
+      mergePackageIntoSummary(projectId, created.package);
       ctx.setWorkspaceTab?.('packages');
       ctx.setProjectWorkspaceMessage?.('Package created.');
     }
@@ -1256,15 +1523,15 @@
       const startData = await readJsonResponse(startResp, 'Unable to start package archive build.');
       const job = await waitForPackageJob(projectId, packageId, startData.job || {});
       const downloadResp = await ctx.apiFetch(
-        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs/${encodeURIComponent(job.id || '')}/download`,
-        { cache: 'no-store' },
+        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs/${encodeURIComponent(job.id || '')}/download-ticket`,
+        { method: 'POST', cache: 'no-store' },
       );
       if (!downloadResp.ok) {
         const data = await downloadResp.json().catch(() => ({}));
         throw new Error(data.error || 'Unable to download package.');
       }
-      const blob = await downloadResp.blob();
-      ctx.downloadBlobAsAttachment(blob, packageDownloadName(pkg), 'Package download started.');
+      const data = await downloadResp.json().catch(() => ({}));
+      ctx.downloadUrlAsAttachment(data.url, packageDownloadName(pkg), 'Package download started.');
     }
 
     function packageBuildStatusText(elapsedSeconds) {
@@ -1374,13 +1641,11 @@
       const packageField = event.target.closest?.('[data-project-package-field]');
       if (!packageField || !wizard) return false;
       const field = String(packageField.dataset.projectPackageField || '');
-      if (field === 'name') wizard.name = String(packageField.value || '');
-      if (field === 'description') wizard.description = String(packageField.value || '');
-      if (field === 'labels') wizard.labels = String(packageField.value || '');
-      if (field === 'notes') wizard.notes = String(packageField.value || '');
+      updateWizardField(field, packageField.value);
       if (field === 'redaction_mode') {
         const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
         wizard.redactionMode = mode;
+        wizard.redactionTouched = true;
         if (!ctx.projectFilesEnabled()) wizard.includeArtifacts = false;
         wizard.notice = '';
         renderWizardModal();
@@ -1437,6 +1702,7 @@
       if (packagePrivateNotes && wizard) {
         event.stopPropagation();
         wizard.includePrivateNotes = !!packagePrivateNotes.checked;
+        wizard.privateNotesTouched = true;
         wizard.notice = '';
         renderWizardModal({ scrollTop: wizardScrollTop() });
         return true;
@@ -1445,6 +1711,7 @@
       if (packageIncludeArtifacts && wizard) {
         event.stopPropagation();
         wizard.includeArtifacts = ctx.projectFilesEnabled() && !!packageIncludeArtifacts.checked;
+        wizard.includeArtifactsTouched = true;
         wizard.notice = '';
         renderWizardModal({ scrollTop: wizardScrollTop() });
         return true;
@@ -1472,6 +1739,7 @@
       }
       if (action === 'package-wizard-back') {
         if (wizard) {
+          syncVisibleWizardFields();
           wizard.step = Math.max(1, wizard.step - 1);
           wizard.notice = '';
         }
@@ -1512,6 +1780,7 @@
       }
       if (action === 'package-wizard-next') {
         if (!wizard) return true;
+        syncVisibleWizardFields();
         if (wizard.step >= 4) {
           await createFromWizard(projectId);
           return true;

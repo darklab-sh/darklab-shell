@@ -91,14 +91,14 @@ def _schedule_lines(session_id: str) -> list[dict[str, object]]:
     if not schedules:
         return [output_line("schedule: no schedules yet. Run `schedule create --every hourly -- <cmd>`.", "builtin-note")]
     lines = [output_line("Schedules:", "builtin-section")]
-    lines.append(output_line(f"{'id':<36} {'state':<16} {'next run':<26} command", "builtin-help-row"))
+    lines.append(output_line(f"{'id':<36} {'state':<16} {'next run':<26} command", "builtin-table-header"))
     for schedule in schedules:
         state = "active" if schedule.enabled else "paused"
         next_run = schedule.next_run_at or "-"
         label = _display_schedule_label(schedule)
         lines.append(output_line(
             f"{schedule.id:<36} {state:<16} {next_run:<26} {label}",
-            "builtin-help-row",
+            "builtin-table-row",
         ))
     return lines
 

@@ -3,7 +3,7 @@
 // Loaded after dom.js, state.js, ui_helpers.js, history.js, tabs.js, app.js,
 // project_details.js, project_list.js, project_navigation.js, project_entity_editor.js,
 // project_active_context.js, project_workspace_constants.js, project_workspace_state.js, project_workspace_lifecycle.js, project_workspace_renderer.js, project_workspace_bootstrap.js, project_shared_ui.js, project_nested_sheets.js, project_mobile_compare.js, project_mobile_shell.js, project_mobile_detail.js,
-// project_entities.js, project_findings.js, project_artifacts.js, project_packages.js, and controller.js
+// project_entities.js, project_findings.js, project_findings_board.js, findings_board_modal.js, project_artifacts.js, project_packages.js, and controller.js
 // so the helpers and overlays it delegates to are already defined.
 
 (function initShellChrome(global) {
@@ -454,6 +454,10 @@
       void global.openAtlas({ source: 'rail' });
       return;
     }
+    if (action === 'findings-board' && typeof global.openFindingsBoard === 'function') {
+      void global.openFindingsBoard({ source: 'rail' });
+      return;
+    }
     if (action === 'status-monitor' && typeof global.openStatusMonitor === 'function') {
       void global.openStatusMonitor({ source: 'rail' });
       return;
@@ -507,17 +511,395 @@
 
   window.addEventListener('resize', positionRailMoreMenu);
 
-  function _openProjectsFromHud(event) {
+  let hudProjectMenu = null;
+  let hudProjectMenuSearchInput = null;
+  let hudProjectMenuProjects = null;
+  let hudProjectMenuNote = null;
+  let hudProjectMenuSearchTimer = null;
+  let hudProjectMenuRequestId = 0;
+
+  function _isHudProjectMenuOpen() {
+    return !!(hudProjectMenu && !hudProjectMenu.classList.contains('u-hidden'));
+  }
+
+  function _openProjectsFromHudMenu(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
+    closeHudProjectMenu();
     if (typeof global.openProjectWorkspace === 'function') {
       void global.openProjectWorkspace();
     }
   }
 
-  hudProjectCell?.addEventListener('click', _openProjectsFromHud);
-  hudProjectCell?.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') _openProjectsFromHud(event);
+  function _canCreateProjectFromHud() {
+    return typeof global.activeTeamScopeCan === 'function' ? global.activeTeamScopeCan('mutate_projects') : true;
+  }
+
+  function _projectCreateDeniedTitle() {
+    return typeof global.teamScopeDeniedMessage === 'function'
+      ? global.teamScopeDeniedMessage('create team projects')
+      : "View-only team members can't create team projects. Switch to Personal or ask for operator access.";
+  }
+
+  function _showHudProjectToast(message, tone = 'info') {
+    if (typeof showToast === 'function') showToast(message, tone);
+  }
+
+  async function _hudProjectResponseMessage(resp, fallback) {
+    try {
+      const data = await resp.json();
+      return data?.error || data?.message || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function _createHudProjectMenuButton({ label, action, title = '', disabled = false, selected = false, onActivate }) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dropdown-item dropdown-item-compact';
+    btn.dataset.action = action || '';
+    btn.setAttribute('role', selected ? 'menuitemradio' : 'menuitem');
+    if (selected) btn.setAttribute('aria-checked', 'true');
+    btn.textContent = label;
+    if (title) btn.title = title;
+    if (disabled) {
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+    }
+    if (typeof bindPressable === 'function') {
+      bindPressable(btn, {
+        refocusComposer: false,
+        onActivate,
+      });
+    } else if (typeof onActivate === 'function') {
+      btn.addEventListener('click', onActivate);
+    }
+    return btn;
+  }
+
+  function _positionHudProjectMenu() {
+    if (!hudProjectMenu || !hudProjectCell || !_isHudProjectMenuOpen()) return;
+    const rect = hudProjectCell.getBoundingClientRect();
+    const menuWidth = hudProjectMenu.offsetWidth || 260;
+    const viewportWidth = global.innerWidth || document.documentElement.clientWidth || 0;
+    const left = Math.max(8, Math.min(rect.left, Math.max(8, viewportWidth - menuWidth - 8)));
+    hudProjectMenu.style.left = `${left}px`;
+    hudProjectMenu.style.bottom = `${Math.max(8, (global.innerHeight || 0) - rect.top - 1)}px`;
+  }
+
+  function closeHudProjectMenu({ restoreFocus = false } = {}) {
+    if (!hudProjectMenu) return;
+    if (hudProjectMenuSearchTimer) {
+      global.clearTimeout?.(hudProjectMenuSearchTimer);
+      hudProjectMenuSearchTimer = null;
+    }
+    hudProjectMenuRequestId += 1;
+    hudProjectMenu.classList.add('u-hidden');
+    hudProjectCell?.classList.remove('open');
+    hudProjectCell?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && hudProjectCell && typeof hudProjectCell.focus === 'function') {
+      hudProjectCell.focus({ preventScroll: true });
+    }
+  }
+
+  function _focusHudProjectMenuItem(delta) {
+    if (!hudProjectMenu) return;
+    const items = Array.from(hudProjectMenu.querySelectorAll('.dropdown-item:not([disabled])'));
+    if (!items.length) return;
+    const currentIdx = items.indexOf(document.activeElement);
+    const fallbackIdx = delta > 0 ? -1 : 0;
+    const nextIdx = (currentIdx >= 0 ? currentIdx : fallbackIdx) + delta;
+    items[(nextIdx + items.length) % items.length]?.focus({ preventScroll: true });
+  }
+
+  function _setHudProjectMenuNote(text) {
+    if (!hudProjectMenuNote) return;
+    hudProjectMenuNote.textContent = text || '';
+    hudProjectMenuNote.classList.toggle('u-hidden', !text);
+  }
+
+  function _scheduleHudProjectMenuLoad(query) {
+    if (hudProjectMenuSearchTimer) {
+      global.clearTimeout?.(hudProjectMenuSearchTimer);
+      hudProjectMenuSearchTimer = null;
+    }
+    hudProjectMenuSearchTimer = global.setTimeout?.(() => {
+      hudProjectMenuSearchTimer = null;
+      void _loadHudProjectMenu(query);
+    }, 120) || null;
+  }
+
+  async function _selectHudProject(project, event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!project || !project.id) return;
+    try {
+      const resp = await apiFetch('/projects/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: project.id }),
+      });
+      if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to set active project.'));
+      const data = await resp.json();
+      _setActiveProject(data?.project || project);
+      closeHudProjectMenu();
+      _showHudProjectToast('Active project updated.');
+    } catch (err) {
+      const message = err?.message || 'Unable to set active project.';
+      _setHudProjectMenuNote(message);
+      if (typeof logClientError === 'function') logClientError('failed to set active project from HUD switcher', err);
+      _showHudProjectToast(message, 'error');
+    }
+  }
+
+  async function _clearHudProject(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    try {
+      const resp = await apiFetch('/projects/active', { method: 'DELETE' });
+      if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to clear active project.'));
+      _setActiveProject(null);
+      closeHudProjectMenu();
+      _showHudProjectToast('Active project cleared.');
+    } catch (err) {
+      const message = err?.message || 'Unable to clear active project.';
+      _setHudProjectMenuNote(message);
+      if (typeof logClientError === 'function') logClientError('failed to clear active project from HUD switcher', err);
+      _showHudProjectToast(message, 'error');
+    }
+  }
+
+  function _openCreateProjectFromHudMenu(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!_canCreateProjectFromHud()) {
+      const message = _projectCreateDeniedTitle();
+      _setHudProjectMenuNote(message);
+      _showHudProjectToast(message, 'error');
+      return;
+    }
+    closeHudProjectMenu();
+    if (typeof global.openProjectWorkspace === 'function') {
+      void global.openProjectWorkspace();
+    }
+  }
+
+  function _renderHudProjectMenuProjects(projects, query = '') {
+    if (!hudProjectMenuProjects) return;
+    hudProjectMenuProjects.textContent = '';
+    const activeProject = _activeProject();
+    const activeProjectId = activeProject?.id ? String(activeProject.id) : '';
+    const rows = Array.isArray(projects) ? projects : [];
+
+    if (activeProjectId) {
+      hudProjectMenuProjects.appendChild(_createHudProjectMenuButton({
+        label: 'No project',
+        action: 'clear-active-project',
+        title: 'Clear active project',
+        onActivate: _clearHudProject,
+      }));
+    }
+
+    rows.forEach((project) => {
+      if (!project || !project.id) return;
+      const name = _projectDisplayName(project) || String(project.id);
+      const selected = String(project.id) === activeProjectId;
+      hudProjectMenuProjects.appendChild(_createHudProjectMenuButton({
+        label: selected ? `${name} (active)` : name,
+        action: 'select-project',
+        title: selected ? `Active project: ${name}` : `Set active project: ${name}`,
+        selected,
+        onActivate: event => _selectHudProject(project, event),
+      }));
+    });
+
+    if (!hudProjectMenuProjects.children.length) {
+      _setHudProjectMenuNote(query ? 'No matching projects.' : 'No projects yet.');
+    } else {
+      _setHudProjectMenuNote('');
+    }
+    _positionHudProjectMenu();
+  }
+
+  async function _loadHudProjectMenu(query = '') {
+    if (!hudProjectMenuProjects) return;
+    const requestId = ++hudProjectMenuRequestId;
+    const trimmedQuery = String(query || '').trim();
+    const params = new URLSearchParams({ mode: 'switcher', limit: '8' });
+    if (trimmedQuery) params.set('q', trimmedQuery);
+    if (!hudProjectMenuProjects.children.length) {
+      _setHudProjectMenuNote('Loading projects...');
+    }
+    try {
+      const resp = await apiFetch(`/projects?${params.toString()}`, { cache: 'no-store' });
+      if (requestId !== hudProjectMenuRequestId) return;
+      if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to load projects.'));
+      const data = await resp.json();
+      if (requestId !== hudProjectMenuRequestId) return;
+      _renderHudProjectMenuProjects(data?.projects || [], trimmedQuery);
+    } catch (err) {
+      if (requestId !== hudProjectMenuRequestId) return;
+      const message = err?.message || 'Unable to load projects.';
+      hudProjectMenuProjects.textContent = '';
+      _setHudProjectMenuNote(message);
+      if (typeof logClientError === 'function') logClientError('failed to load HUD project switcher', err);
+    }
+  }
+
+  function _refreshHudProjectCreateAction() {
+    const createBtn = hudProjectMenu?.querySelector('[data-action="create-project"]');
+    if (!createBtn) return;
+    const allowed = _canCreateProjectFromHud();
+    createBtn.disabled = !allowed;
+    createBtn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+    createBtn.title = allowed ? 'Open Projects to create a project' : _projectCreateDeniedTitle();
+  }
+
+  function _ensureHudProjectMenu() {
+    if (hudProjectMenu) return hudProjectMenu;
+    const menu = document.createElement('div');
+    menu.id = 'hud-project-menu';
+    menu.className = 'hud-project-menu dropdown-surface dropdown-up u-hidden';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Active project switcher');
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'hud-project-search';
+    search.placeholder = 'search projects';
+    search.setAttribute('aria-label', 'Search projects');
+    search.autocomplete = 'off';
+    search.spellcheck = false;
+    search.addEventListener('click', event => event.stopPropagation());
+    search.addEventListener('input', event => {
+      event.stopPropagation();
+      _scheduleHudProjectMenuLoad(search.value);
+    });
+    search.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHudProjectMenu({ restoreFocus: true });
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(-1);
+      } else if (event.key === 'Tab') {
+        closeHudProjectMenu();
+      }
+    });
+    menu.appendChild(search);
+
+    const projectsSection = document.createElement('div');
+    projectsSection.className = 'hud-project-menu-section';
+    menu.appendChild(projectsSection);
+
+    const note = document.createElement('div');
+    note.className = 'hud-project-menu-note u-hidden';
+    menu.appendChild(note);
+
+    const divider = document.createElement('div');
+    divider.className = 'hud-project-menu-divider';
+    menu.appendChild(divider);
+
+    const createProject = _createHudProjectMenuButton({
+      label: 'Create project',
+      action: 'create-project',
+      title: 'Open Projects to create a project',
+      disabled: !_canCreateProjectFromHud(),
+      onActivate: _openCreateProjectFromHudMenu,
+    });
+    menu.appendChild(createProject);
+
+    const openProjects = _createHudProjectMenuButton({
+      label: 'Open Projects',
+      action: 'open-projects',
+      onActivate: _openProjectsFromHudMenu,
+    });
+    menu.appendChild(openProjects);
+
+    menu.addEventListener('click', event => event.stopPropagation());
+    menu.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHudProjectMenu({ restoreFocus: true });
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        _focusHudProjectMenuItem(-1);
+      } else if (event.key === 'Tab') {
+        closeHudProjectMenu();
+      }
+    });
+
+    document.body.appendChild(menu);
+    hudProjectMenu = menu;
+    hudProjectMenuSearchInput = search;
+    hudProjectMenuProjects = projectsSection;
+    hudProjectMenuNote = note;
+
+    if (typeof bindOutsideClickClose === 'function') {
+      bindOutsideClickClose(menu, {
+        capture: true,
+        triggers: hudProjectCell,
+        isOpen: _isHudProjectMenuOpen,
+        onClose: () => closeHudProjectMenu(),
+      });
+    }
+    return hudProjectMenu;
+  }
+
+  function toggleHudProjectMenu(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    _closeHudSaveMenu();
+    _ensureHudProjectMenu();
+    if (_isHudProjectMenuOpen()) {
+      closeHudProjectMenu({ restoreFocus: true });
+      return;
+    }
+    hudProjectMenu.classList.remove('u-hidden');
+    hudProjectCell?.classList.add('open');
+    hudProjectCell?.setAttribute('aria-expanded', 'true');
+    _refreshHudProjectCreateAction();
+    if (hudProjectMenuSearchInput) hudProjectMenuSearchInput.value = '';
+    _renderHudProjectMenuProjects([], '');
+    void _loadHudProjectMenu('');
+    _positionHudProjectMenu();
+    requestAnimationFrame(_positionHudProjectMenu);
+    hudProjectMenuSearchInput?.focus({ preventScroll: true });
+  }
+
+  if (hudProjectCell && typeof bindPressable === 'function') {
+    bindPressable(hudProjectCell, {
+      refocusComposer: false,
+      onActivate: toggleHudProjectMenu,
+    });
+  } else {
+    hudProjectCell?.addEventListener('click', toggleHudProjectMenu);
+    hudProjectCell?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') toggleHudProjectMenu(event);
+    });
+  }
+  global.addEventListener?.('resize', _positionHudProjectMenu);
+  global.addEventListener?.('scroll', _positionHudProjectMenu, true);
+  document.addEventListener?.('app:active-project-changed', () => {
+    if (!_isHudProjectMenuOpen()) return;
+    _refreshHudProjectCreateAction();
+    void _loadHudProjectMenu(hudProjectMenuSearchInput?.value || '');
+  });
+  document.addEventListener?.('app:scope-changed', () => {
+    closeHudProjectMenu();
+    loadActiveProjectContext().catch(() => {});
+  });
+  document.addEventListener?.('app:scope-capabilities-changed', () => {
+    _refreshHudProjectCreateAction();
   });
 
   // ── HUD action buttons ──────────────────────────────────────────
@@ -526,6 +908,7 @@
   // needed; the per-tab footer still exists in the DOM for mobile.
   const hudActions = document.getElementById('hud-actions');
   let hudKillBtn = null;
+  let hudShareSnapshotBtn = null;
 
   function _currentTabId() {
     return (typeof getActiveTabId === 'function') ? getActiveTabId() : null;
@@ -563,6 +946,25 @@
     return el;
   }
 
+  function _canCreateHudShareSnapshot() {
+    return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+  }
+
+  function _hudShareSnapshotDeniedTitle() {
+    return typeof teamScopeDeniedMessage === 'function'
+      ? teamScopeDeniedMessage('create team history snapshots')
+      : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+  }
+
+  function _refreshHudShareSnapshotState() {
+    if (!hudShareSnapshotBtn) return;
+    const allowed = _canCreateHudShareSnapshot();
+    hudShareSnapshotBtn.disabled = !allowed;
+    hudShareSnapshotBtn.title = allowed
+      ? 'Share tab as permalink (Option+P / Alt+P)'
+      : _hudShareSnapshotDeniedTitle();
+  }
+
   function buildHudActions() {
     if (!hudActions) return;
     hudActions.replaceChildren();
@@ -573,10 +975,12 @@
     }, 'btn btn-destructive btn-compact u-hidden', 'Kill current run');
     hudActions.appendChild(hudKillBtn);
 
-    hudActions.appendChild(_makeHudBtn('share snapshot', 'permalink', () => {
+    hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
       if (id && typeof permalinkTab === 'function') permalinkTab(id);
-    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)'));
+    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)');
+    hudActions.appendChild(hudShareSnapshotBtn);
+    _refreshHudShareSnapshotState();
 
     hudActions.appendChild(_makeHudBtn('copy', 'copy', () => {
       const id = _currentTabId();
@@ -587,6 +991,7 @@
     const saveWrap = document.createElement('div');
     saveWrap.className = 'hud-save-wrap';
     const saveBtn = _makeHudBtn('save', 'save-menu', () => {
+      closeHudProjectMenu();
       saveWrap.classList.toggle('open');
     }, 'btn btn-secondary btn-compact', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');
@@ -638,16 +1043,16 @@
     const id = tabId || _currentTabId();
     const tab = (typeof getTab === 'function') ? getTab(id) : null;
     _setHudKillVisible(!!(tab && tab.st === 'running'));
-  }
-
-  function refreshHudRunningState() {
-    if (!hud) return;
-    const id = _currentTabId();
-    const tab = (typeof getTab === 'function') ? getTab(id) : null;
-    hud.classList.toggle('hud-running', !!(tab && tab.st === 'running'));
+    _refreshHudShareSnapshotState();
   }
 
   buildHudActions();
+  document.addEventListener('app:scope-changed', () => {
+    _refreshHudShareSnapshotState();
+  });
+  document.addEventListener('app:scope-capabilities-changed', () => {
+    _refreshHudShareSnapshotState();
+  });
 
   // ── HUD metrics ─────────────────────────────────────────────────
   // Live-updating pills on the left side of the HUD. State is owned here;
@@ -805,6 +1210,7 @@
     projectSharedUiController = factory({
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       downloadBlobAsAttachment,
+      downloadUrlAsAttachment,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
     });
     return projectSharedUiController;
@@ -983,6 +1389,8 @@
       getPicker: projectWorkspaceState.entityPicker,
       setPicker: projectWorkspaceState.setEntityPicker,
       getSelectedProjectId: projectWorkspaceState.selectedId,
+      projectRows: projectWorkspaceState.rows,
+      projectIsArchived: _projectIsArchived,
       formatDate: _formatProjectDate,
       shortProjectRunId: _shortProjectRunId,
       makeProjectButton: _makeProjectButton,
@@ -1003,10 +1411,12 @@
       renderProjectMobileDetail: _renderProjectMobileDetail,
       mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
       logClientError: (message, err) => {
         if (typeof logClientError === 'function') logClientError(message, err);
       },
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
       closeProjectWorkspace,
       openAtlas: global.openAtlas,
       projectDisplayName: _projectDisplayName,
@@ -1060,6 +1470,7 @@
       renderProjectExplorer: _renderProjectExplorer,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
       setWorkspaceTab: projectWorkspaceState.setTab,
       syncProjectWorkspaceNestedSuppression: _syncProjectWorkspaceNestedSuppression,
       focusProjectNestedSheet: _focusProjectNestedSheet,
@@ -1136,6 +1547,26 @@
 
   let projectFindingsController = null;
 
+  let projectFindingsBoardController = null;
+
+  function _projectFindingsBoardController() {
+    if (projectFindingsBoardController) return projectFindingsBoardController;
+    const factory = global.DarklabProjectFindingsBoard
+      && global.DarklabProjectFindingsBoard.createProjectFindingsBoardController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectFindingsBoard is unavailable');
+    projectFindingsBoardController = factory({
+      entityMetadataChipClass: _entityMetadataChipClass,
+      entityMetadataChips: _entityMetadataChips,
+      projectFindingTargetText: _projectFindingTargetText,
+      projectTargetLabel: _projectTargetLabel,
+      makeProjectButton: _makeProjectButton,
+      reviewControl: (finding, projectId) => _projectFindingsController().reviewControl(finding, projectId),
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      metaSeparator: ' · ',
+    });
+    return projectFindingsBoardController;
+  }
+
   function _projectFindingsController() {
     if (projectFindingsController) return projectFindingsController;
     const factory = global.DarklabProjectFindings && global.DarklabProjectFindings.createProjectFindingsController;
@@ -1146,18 +1577,25 @@
       collapsedFindingGroupLabels: _projectCollapsedFindingGroupLabels,
       findingsLoadingId: () => _projectFindingsDataController().loadingId(),
       hasFindings: projectId => _projectFindingsDataController().loaded(projectId),
+      findingViewMode: projectWorkspaceState.findingViewMode,
       findingSelectMode: projectWorkspaceState.findingSelectMode,
       selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       projectFindingPagination: (projectId, summary) => _projectFindingsDataController().page(projectId, summary),
       projectFindingItems: _projectFindingItems,
+      projectFindingBoard: (projectId, summary, options) => _projectFindingsDataController().board(projectId, summary, options),
       filteredProjectFindings: _filteredProjectFindings,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
+      findingsBoardAvailable: () => !(document.body && document.body.classList.contains('mobile-terminal-mode')),
       projectFindingTargetText: _projectFindingTargetText,
       projectTargetLabel: _projectTargetLabel,
       entityMetadataChips: _entityMetadataChips,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
+      renderProjectFindingBoard: (container, projectId, summary, board) => (
+        _projectFindingsBoardController().renderBoard(container, projectId, summary, board)
+      ),
+      setFindingSelectMode: projectWorkspaceState.setFindingSelectMode,
       projectItemRow: _projectItemRow,
       groupBy: _groupBy,
       metaSeparator: ' · ',
@@ -1202,6 +1640,7 @@
       },
       groupBy: _groupBy,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
       metaSeparator: ' · ',
       groupCaret: '▾',
     });
@@ -1830,11 +2269,13 @@
       selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       selectedProjectId: projectWorkspaceState.selectedId,
       selectProjectFromMobile: _selectProjectFromMobile,
+      setFindingViewMode: projectWorkspaceState.setFindingViewMode,
       setProjectFindingPageOffset: _setProjectFindingPageOffset,
       setProjectArtifactPageOffset: _setProjectArtifactPageOffset,
       setProjectRunPageOffset: _setProjectRunPageOffset,
       setProjectPaginationOffset: _setProjectPaginationOffset,
       setCachedFindingReviewState: _setCachedFindingReviewState,
+      updateCachedProjectFinding: _updateCachedProjectFinding,
       setFindingSelectMode: projectWorkspaceState.setFindingSelectMode,
       setProjectMobileCreateOpen: _setProjectMobileCreateOpen,
       setProjectMobileView: _setProjectMobileView,
@@ -2112,6 +2553,10 @@
 
   function _downloadBlobAsAttachment(blob, filename, successMessage = '') {
     _projectSharedUiController().downloadBlobAsAttachment(blob, filename, successMessage);
+  }
+
+  function _downloadUrlAsAttachment(url, filename = '', successMessage = '') {
+    _projectSharedUiController().downloadUrlAsAttachment(url, filename, successMessage);
   }
 
   function _syncProjectWorkspaceNestedSuppression() {
@@ -2625,6 +3070,80 @@
     await _projectWorkspaceShellController().open();
   }
 
+  function _autoPromoteProjectPickerContent(projects, preferredProjectId = '') {
+    const wrap = document.createElement('div');
+    wrap.className = 'history-project-picker';
+    const select = document.createElement('select');
+    select.className = 'form-select form-control-compact';
+    select.setAttribute('aria-label', 'Project');
+    projects.forEach((project) => {
+      const option = document.createElement('option');
+      option.value = String(project.id || '');
+      option.textContent = _projectDisplayName(project) || String(project.id || '');
+      select.appendChild(option);
+    });
+    if (preferredProjectId && projects.some(project => String(project.id || '') === preferredProjectId)) {
+      select.value = preferredProjectId;
+    }
+    const help = document.createElement('div');
+    help.className = 'history-project-picker-help';
+    help.textContent = 'Choose a project for the new auto-promote rule.';
+    wrap.append(select, help);
+    return { wrap, select };
+  }
+
+  async function _promptAutoPromoteRuleProject(preferredProjectId = '') {
+    if (typeof showConfirm !== 'function') return '';
+    const resp = await apiFetch('/projects?include_archived=1&include_counts=0&limit=100&offset=0', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const projects = (Array.isArray(data.projects) ? data.projects : [])
+      .filter(project => String(project && project.status || 'active') !== 'archived');
+    if (!projects.length) {
+      if (typeof showToast === 'function') showToast('Create an active project before creating an auto-promote rule.', 'error');
+      return '';
+    }
+    const activeProject = _activeProject();
+    const preferredId = preferredProjectId
+      || (activeProject && activeProject.id ? String(activeProject.id) : '');
+    const ordered = _orderedProjectRows(preferredId, projects);
+    const { wrap, select } = _autoPromoteProjectPickerContent(ordered, preferredId);
+    const choicePromise = showConfirm({
+      body: 'Create auto-promote rule from Atlas view',
+      content: wrap,
+      defaultFocus: select,
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'create', label: 'Create rule', role: 'primary' },
+      ],
+      refocusOnResolve: false,
+    });
+    if (typeof enhanceAppSelects === 'function') {
+      enhanceAppSelects(wrap);
+      if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+        wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
+      }
+    }
+    const choice = await choicePromise;
+    return choice === 'create' ? String(select.value || '') : '';
+  }
+
+  async function openProjectAutoPromoteRuleFromAtlas(draft = {}) {
+    const activeProject = _activeProject();
+    let projectId = String(draft.project_id || '').trim();
+    if (!projectId && activeProject && activeProject.id) projectId = String(activeProject.id);
+    if (!projectId) projectId = await _promptAutoPromoteRuleProject();
+    if (!projectId) return false;
+    await openProjectWorkspace();
+    projectWorkspaceState.setSelectedId(projectId);
+    projectWorkspaceState.setTab('entities');
+    await _ensureProjectSummary(projectId);
+    _projectEntitiesController().openAutoPromoteRuleFromAtlas(projectId, draft);
+    _renderProjectWorkspace();
+    _renderProjectExplorer();
+    return true;
+  }
+
   function closeProjectWorkspace({ refocus = true } = {}) {
     _projectWorkspaceShellController().close({ refocus });
   }
@@ -2667,6 +3186,10 @@
 
   function _setCachedFindingReviewState(projectId, findingId, reviewState) {
     _projectFindingsDataController().setCachedReviewState(projectId, findingId, reviewState);
+  }
+
+  function _updateCachedProjectFinding(projectId, findingId, updates) {
+    _projectFindingsDataController().updateCachedFinding(projectId, findingId, updates);
   }
 
   _projectWorkspaceBootstrapController().bindAll();
@@ -2810,22 +3333,18 @@
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-activated', () => {
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-created', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-closed', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:last-exit-changed', (e) => {
       hudState.lastExit = e.detail ? e.detail.value : null;
@@ -2849,7 +3368,6 @@
   _renderDb();
   _renderRedis();
   _renderActiveProject();
-  refreshHudRunningState();
 
   _startHudStatusPoll({ pollNow: true });
   setInterval(() => { _renderClock(); _renderUptime(); _renderSession(); }, CLOCK_TICK_MS);
@@ -2873,6 +3391,7 @@
   global.getActiveProjectContext = _activeProject;
   global.refreshActiveProjectContext = loadActiveProjectContext;
   global.openProjectWorkspace = openProjectWorkspace;
+  global.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
   global.closeProjectWorkspace = closeProjectWorkspace;
   global.isProjectWorkspaceOpen = isProjectWorkspaceOpen;
   global.cycleProjectWorkspaceTab = cycleProjectWorkspaceTab;

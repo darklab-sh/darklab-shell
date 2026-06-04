@@ -14,6 +14,7 @@ from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.projects import preferences as project_preferences
 from services.atlas.intel_bridge import refresh_entity_intel
+from services.atlas.import_workflow import AtlasImportError, apply_atlas_import, preview_atlas_import
 from services.atlas.cleanup import (
     atlas_entity_delete_preview,
     atlas_finding_delete_preview,
@@ -30,6 +31,8 @@ from services.atlas.lookup import (
     atlas_entities_export_jsonl,
     atlas_summary,
     entity_detail,
+    entity_exists_in_scope,
+    finding_exists_in_scope,
     list_entities,
     list_findings,
     list_source_runs,
@@ -44,6 +47,9 @@ from services.projects.links import (
     link_project_entity,
     unlink_project_entity,
 )
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
+from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
 
 import logging
 
@@ -57,6 +63,7 @@ ATLAS_SAVED_VIEW_FILTER_VALUES = {"hide", "all", "only"}
 ATLAS_SAVED_VIEW_MAX_COUNT = 30
 ATLAS_SAVED_VIEW_NAME_MAX_LEN = 60
 ATLAS_SAVED_VIEW_ID_RE = re.compile(r"^atv_[0-9a-f]{16,32}$")
+ATLAS_IMPORT_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 
 
 def _atlas_write_limit():
@@ -69,6 +76,192 @@ def _parse_int(value, default, *, minimum=0, maximum=200):
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _atlas_import_max_upload_bytes() -> int:
+    try:
+        configured_mb = int(CFG.get("atlas_import_max_upload_mb", 10))
+    except (TypeError, ValueError):
+        configured_mb = 10
+    return max(1, configured_mb) * 1024 * 1024
+
+
+def _atlas_import_request_limit_bytes() -> int:
+    return _atlas_import_max_upload_bytes() + ATLAS_IMPORT_MULTIPART_OVERHEAD_BYTES
+
+
+def _atlas_import_request_too_large_response(session_id, scope, member):
+    content_length = request.content_length
+    request_limit = _atlas_import_request_limit_bytes()
+    if content_length is None or content_length <= request_limit:
+        return None
+    max_upload_bytes = _atlas_import_max_upload_bytes()
+    log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
+        **_atlas_import_scope_fields(session_id, scope, member),
+        "reason": "request_too_large",
+        "content_length": int(content_length),
+        "max_upload_bytes": max_upload_bytes,
+        "request_limit_bytes": request_limit,
+        "status": 413,
+    })
+    return jsonify({
+        "error": "invalid_import_file",
+        "message": f"Import file exceeds the configured {max_upload_bytes} byte limit.",
+    }), 413
+
+
+def _atlas_permission_error_response(exc):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _atlas_request_scope_response(session_id, required_capability=None):
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return None, (jsonify(payload), status)
+    if scope.is_team and required_capability is not None:
+        try:
+            require_capability(str((scope.member or {}).get("role") or ""), required_capability)
+        except TeamPermissionDenied as exc:
+            return None, _atlas_permission_error_response(exc)
+    return scope, None
+
+
+def _atlas_import_error_response(exc):
+    return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+
+
+def _atlas_import_option_flags(options):
+    raw = options if isinstance(options, dict) else {}
+    return {
+        "import_entities": bool(raw.get("import_entities")),
+        "import_findings": bool(raw.get("import_findings")),
+        "link_to_project": bool(raw.get("link_to_project")),
+        "create_project_targets": bool(raw.get("create_project_targets")),
+    }
+
+
+def _atlas_import_option_log_fields(options):
+    flags = _atlas_import_option_flags(options)
+    return {
+        **flags,
+        **{f"option_{key}": value for key, value in flags.items()},
+    }
+
+
+def _atlas_import_scope_fields(session_id, scope, member):
+    return {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": scope.team_id if scope else "",
+        "actor_member_id": str(member.get("id") or ""),
+        "actor_role": str(member.get("role") or ""),
+    }
+
+
+def _atlas_import_source_tool_key(value):
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    return normalized.strip("_")[:64]
+
+
+def _atlas_import_preview_log_fields(session_id, scope, member):
+    upload = request.files.get("file")
+    return {
+        **_atlas_import_scope_fields(session_id, scope, member),
+        "format_id": str(request.form.get("format_id") or "")[:64],
+        "source_tool_key": _atlas_import_source_tool_key(request.form.get("source_tool")),
+        "has_file": upload is not None,
+        "filename_present": bool(upload and upload.filename),
+        "content_length": int(request.content_length or 0),
+    }
+
+
+def _atlas_import_count_log_fields(counts):
+    raw = counts if isinstance(counts, dict) else {}
+    fields = {}
+    for key in (
+        "rows",
+        "valid",
+        "skipped",
+        "warnings",
+        "new",
+        "updated",
+        "entity_valid",
+        "entity_new",
+        "entity_duplicate",
+        "finding_valid",
+        "finding_new",
+        "finding_duplicate",
+        "finding_subject_entities_to_create",
+        "project_target_candidates",
+        "entities_created",
+        "entities_updated",
+        "findings_created",
+        "findings_updated",
+        "entity_links",
+        "finding_occurrences",
+        "project_links_added",
+        "project_links_existing",
+        "project_targets_created",
+        "project_targets_existing",
+    ):
+        if key in raw:
+            try:
+                fields[key] = int(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                fields[key] = 0
+    return fields
+
+
+def _log_atlas_import_preview_rejected(exc, *, session_id, scope, member):
+    log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
+        **_atlas_import_preview_log_fields(session_id, scope, member),
+        "reason": exc.code,
+        "status": exc.status_code,
+    })
+
+
+def _log_atlas_import_preview_succeeded(result, *, session_id, scope, member):
+    result = result if isinstance(result, dict) else {}
+    log.info("ATLAS_IMPORT_PREVIEW_SUCCEEDED", extra={
+        **_atlas_import_preview_log_fields(session_id, scope, member),
+        "draft_id": str(result.get("draft_id") or ""),
+        "expires_at": str(result.get("expires_at") or ""),
+        **_atlas_import_count_log_fields(result.get("counts")),
+    })
+
+
+def _log_atlas_import_apply_succeeded(result, *, session_id, scope, member, payload, options):
+    result = result if isinstance(result, dict) else {}
+    counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+    log.info("ATLAS_IMPORT_APPLY_SUCCEEDED", extra={
+        **_atlas_import_scope_fields(session_id, scope, member),
+        "draft_id": str(payload.get("draft_id") or "") if isinstance(payload, dict) else "",
+        "batch_id": str(result.get("batch_id") or ""),
+        "project_id": str(payload.get("project_id") or "") if isinstance(payload, dict) else "",
+        "already_applied": bool(result.get("already_applied")),
+        "format_id": str(result.get("format_id") or ""),
+        **_atlas_import_option_log_fields(options),
+        **_atlas_import_count_log_fields(counts),
+    })
+
+
+def _log_atlas_import_apply_rejected(exc, *, session_id, scope, member, payload, options):
+    project_id = str(payload.get("project_id") or "") if isinstance(payload, dict) else ""
+    log.warning("ATLAS_IMPORT_APPLY_REJECTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": scope.team_id if scope else "",
+        "actor_member_id": str(member.get("id") or ""),
+        "actor_role": str(member.get("role") or ""),
+        "draft_id": str(payload.get("draft_id") or "") if isinstance(payload, dict) else "",
+        "project_id": project_id,
+        "project_present": bool(project_id),
+        "reason": exc.code,
+        "status": exc.status_code,
+        **_atlas_import_option_log_fields(options),
+    })
 
 
 def _normalize_finding_ids(values):
@@ -240,10 +433,15 @@ def _save_saved_views(conn, session_id, preferences, views):
 @atlas_bp.route("/atlas")
 def atlas_index():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     with db_connect() as conn:
         return jsonify(atlas_summary(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             run_id=request.args.get("run_id") or "",
             project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
@@ -345,14 +543,106 @@ def atlas_saved_view_delete(view_id):
     return jsonify({"ok": True, "views": kept})
 
 
+@atlas_bp.route("/atlas/imports/preview", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_import_preview():
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    scope, error_response = _atlas_request_scope_response(session_id)
+    if error_response:
+        return error_response
+    member = (scope.member or {}) if scope else {}
+    oversized_response = _atlas_import_request_too_large_response(session_id, scope, member)
+    if oversized_response is not None:
+        return oversized_response
+    upload = request.files.get("file")
+    if upload is None:
+        log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
+            **_atlas_import_preview_log_fields(session_id, scope, member),
+            "reason": "file_required",
+            "status": 400,
+        })
+        return jsonify({"error": "file_required", "message": "An import file is required."}), 400
+    try:
+        result = preview_atlas_import(
+            session_id=session_id,
+            team_id=scope.team_id if scope else "",
+            actor_member_id=str(member.get("id") or ""),
+            role=str(member.get("role") or ""),
+            file_content=upload.stream,
+            filename=upload.filename or "",
+            format_id=str(request.form.get("format_id") or ""),
+            source_tool=str(request.form.get("source_tool") or ""),
+            import_name=str(request.form.get("import_name") or ""),
+        )
+    except AtlasImportError as exc:
+        _log_atlas_import_preview_rejected(exc, session_id=session_id, scope=scope, member=member)
+        return _atlas_import_error_response(exc)
+    _log_atlas_import_preview_succeeded(result, session_id=session_id, scope=scope, member=member)
+    return jsonify(result)
+
+
+@atlas_bp.route("/atlas/imports/apply", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_import_apply():
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    scope, error_response = _atlas_request_scope_response(session_id)
+    if error_response:
+        return error_response
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_json", "message": "Apply payload must be a JSON object."}), 400
+    member = (scope.member or {}) if scope else {}
+    raw_options = payload.get("options")
+    apply_options = raw_options if isinstance(raw_options, dict) else {}
+    try:
+        result = apply_atlas_import(
+            session_id=session_id,
+            team_id=scope.team_id if scope else "",
+            actor_member_id=str(member.get("id") or ""),
+            role=str(member.get("role") or ""),
+            draft_id=str(payload.get("draft_id") or ""),
+            row_set_digest=str(payload.get("row_set_digest") or payload.get("normalized_rows_sha256") or ""),
+            options=apply_options,
+            project_id=str(payload.get("project_id") or ""),
+        )
+    except AtlasImportError as exc:
+        _log_atlas_import_apply_rejected(
+            exc,
+            session_id=session_id,
+            scope=scope,
+            member=member,
+            payload=payload,
+            options=apply_options,
+        )
+        return _atlas_import_error_response(exc)
+    _log_atlas_import_apply_succeeded(
+        result,
+        session_id=session_id,
+        scope=scope,
+        member=member,
+        payload=payload,
+        options=apply_options,
+    )
+    return jsonify(result)
+
+
 @atlas_bp.route("/atlas/runs")
 def atlas_runs_list():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 30, minimum=1, maximum=50)
     with db_connect() as conn:
         return jsonify(list_source_runs(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             query=request.args.get("q") or "",
             run_id=request.args.get("run_id") or "",
             limit=limit,
@@ -362,12 +652,17 @@ def atlas_runs_list():
 @atlas_bp.route("/atlas/entities")
 def atlas_entities_list():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
     with db_connect() as conn:
         return jsonify(list_entities(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             entity_type=request.args.get("type") or "",
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
@@ -382,6 +677,10 @@ def atlas_entities_list():
 @atlas_bp.route("/atlas/entities/export")
 def atlas_entities_export_download():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     export_format = str(request.args.get("format") or "csv").strip().lower()
     if export_format not in {"csv", "jsonl"}:
         return jsonify({"error": "format must be csv or jsonl"}), 400
@@ -390,6 +689,7 @@ def atlas_entities_export_download():
         rows = atlas_entities_export(
             conn,
             session_id,
+            team_id=owner_scope.team_id,
             entity_type=request.args.get("type") or "",
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
@@ -424,21 +724,30 @@ def atlas_entities_export_download():
 @atlas_bp.route("/atlas/findings")
 def atlas_findings_list():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
-    with db_connect() as conn:
-        return jsonify(list_findings(
-            conn,
-            session_id,
-            query=request.args.get("q") or "",
-            project_id=request.args.get("project_id") or "",
-            run_id=request.args.get("run_id") or "",
-            review_states=request.args.getlist("review_state"),
-            orphan_filter=request.args.get("orphan_filter") or "hide",
-            suppression_filter=request.args.get("suppression_filter") or "hide",
-            limit=limit,
-            offset=offset,
-        ))
+    try:
+        with db_connect() as conn:
+            return jsonify(list_findings(
+                conn,
+                session_id,
+                team_id=owner_scope.team_id,
+                query=request.args.get("q") or "",
+                project_id=request.args.get("project_id") or "",
+                run_id=request.args.get("run_id") or "",
+                review_states=request.args.getlist("review_state"),
+                verification_statuses=request.args.getlist("verification_status"),
+                orphan_filter=request.args.get("orphan_filter") or "hide",
+                suppression_filter=request.args.get("suppression_filter") or "hide",
+                limit=limit,
+                offset=offset,
+            ))
+    except ProjectWorkspaceError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @atlas_bp.route("/atlas/runs/<run_id>/cleanup-preview")
@@ -487,6 +796,10 @@ def atlas_run_cleanup(run_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_findings_bulk_review_update():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     finding_ids = _normalize_finding_ids(data.get("finding_ids"))
     review_state = _normalize_review_state(data.get("review_state"))
@@ -499,17 +812,13 @@ def atlas_findings_bulk_review_update():
     with db_connect() as conn:
         found_ids: set[str] = set()
         for finding_id in finding_ids:
-            row = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND id = ?",
-                (session_id, finding_id),
-            ).fetchone()
-            if row:
-                found_ids.add(str(row["id"] or ""))
+            if finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
+                found_ids.add(finding_id)
         if found_ids:
             updated_at = _now_for_review()
             conn.executemany(
-                "UPDATE findings SET status = ?, status_updated_at = ? WHERE session_id = ? AND id = ?",
-                [(review_state, updated_at, session_id, finding_id) for finding_id in sorted(found_ids)],
+                "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
+                [(review_state, updated_at, finding_id) for finding_id in sorted(found_ids)],
             )
             conn.commit()
     results = [
@@ -537,6 +846,10 @@ def atlas_findings_bulk_review_update():
 @atlas_bp.route("/atlas/entities/<entity_id>")
 def atlas_entity_detail(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     runs_offset = _parse_int(request.args.get("runs_offset"), 0, minimum=0, maximum=100000)
     findings_offset = _parse_int(request.args.get("findings_offset"), 0, minimum=0, maximum=100000)
     with db_connect() as conn:
@@ -544,6 +857,7 @@ def atlas_entity_detail(entity_id):
             conn,
             session_id,
             entity_id,
+            team_id=owner_scope.team_id,
             runs_offset=runs_offset,
             findings_offset=findings_offset,
         )
@@ -556,18 +870,18 @@ def atlas_entity_detail(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_suppression_update(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
     with db_connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-        if not row:
+        if not entity_exists_in_scope(conn, session_id, entity_id, team_id=owner_scope.team_id):
             return jsonify({"error": "entity not found"}), 404
         conn.execute(
             "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-            "WHERE session_id = ? AND id = ?",
-            (suppressed, reason, _suppression_timestamp(suppressed), session_id, entity_id),
+            "WHERE id = ?",
+            (suppressed, reason, _suppression_timestamp(suppressed), entity_id),
         )
         conn.commit()
     log.info("ATLAS_ENTITY_SUPPRESSION_UPDATED", extra={
@@ -584,6 +898,10 @@ def atlas_entity_suppression_update(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entities_bulk_suppression_update():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     entity_ids = _normalize_entity_ids(data.get("entity_ids"))
     suppressed, reason = _suppression_payload(data)
@@ -592,19 +910,17 @@ def atlas_entities_bulk_suppression_update():
     if len(entity_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
     with db_connect() as conn:
-        placeholders = ",".join("?" for _ in entity_ids)
-        rows = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? "  # nosec
-            f"AND id IN ({placeholders})",
-            [session_id, *entity_ids],
-        ).fetchall()
-        found_ids = {str(row["id"] or "") for row in rows}
+        found_ids = {
+            item_id
+            for item_id in entity_ids
+            if entity_exists_in_scope(conn, session_id, item_id, team_id=owner_scope.team_id)
+        }
         if found_ids:
             conn.executemany(
                 "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-                "WHERE session_id = ? AND id = ?",
+                "WHERE id = ?",
                 [
-                    (suppressed, reason, _suppression_timestamp(suppressed), session_id, item_id)
+                    (suppressed, reason, _suppression_timestamp(suppressed), item_id)
                     for item_id in sorted(found_ids)
                 ],
             )
@@ -761,18 +1077,18 @@ def atlas_findings_bulk_delete():
 @limiter.limit(_atlas_write_limit)
 def atlas_finding_suppression_update(finding_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
     with db_connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? AND id = ?",
-            (session_id, finding_id),
-        ).fetchone()
-        if not row:
+        if not finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
             return jsonify({"error": "finding not found"}), 404
         conn.execute(
             "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-            "WHERE session_id = ? AND id = ?",
-            (suppressed, reason, _suppression_timestamp(suppressed), session_id, finding_id),
+            "WHERE id = ?",
+            (suppressed, reason, _suppression_timestamp(suppressed), finding_id),
         )
         conn.commit()
     log.info("ATLAS_FINDING_SUPPRESSION_UPDATED", extra={
@@ -789,6 +1105,10 @@ def atlas_finding_suppression_update(finding_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_findings_bulk_suppression_update():
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     finding_ids = _normalize_finding_ids(data.get("finding_ids"))
     suppressed, reason = _suppression_payload(data)
@@ -797,19 +1117,17 @@ def atlas_findings_bulk_suppression_update():
     if len(finding_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
     with db_connect() as conn:
-        placeholders = ",".join("?" for _ in finding_ids)
-        rows = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? "  # nosec
-            f"AND id IN ({placeholders})",
-            [session_id, *finding_ids],
-        ).fetchall()
-        found_ids = {str(row["id"] or "") for row in rows}
+        found_ids = {
+            item_id
+            for item_id in finding_ids
+            if finding_exists_in_scope(conn, session_id, item_id, team_id=owner_scope.team_id)
+        }
         if found_ids:
             conn.executemany(
                 "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-                "WHERE session_id = ? AND id = ?",
+                "WHERE id = ?",
                 [
-                    (suppressed, reason, _suppression_timestamp(suppressed), session_id, item_id)
+                    (suppressed, reason, _suppression_timestamp(suppressed), item_id)
                     for item_id in sorted(found_ids)
                 ],
             )
@@ -887,8 +1205,12 @@ def atlas_finding_delete(finding_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_intel_refresh(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
-        result = refresh_entity_intel(session_id, entity_id)
+        result = refresh_entity_intel(session_id, entity_id, team_id=owner_scope.team_id)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     if result is None:
@@ -906,16 +1228,25 @@ def atlas_entity_intel_refresh(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_project_link_create(entity_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.MUTATE_PROJECTS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     data = request.get_json(silent=True) or {}
     project_id = str(data.get("project_id") or "").strip()
     if not project_id:
         return jsonify({"error": "project_id is required"}), 400
     try:
-        link = link_project_entity(session_id, project_id, {
-            "entity_type": "atlas_entity",
-            "entity_id": entity_id,
-            "source": "manual",
-        })
+        link = link_project_entity(
+            session_id,
+            project_id,
+            {
+                "entity_type": "atlas_entity",
+                "entity_id": entity_id,
+                "source": "manual",
+            },
+            team_id=owner_scope.team_id,
+        )
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
     if link is None:
@@ -933,11 +1264,15 @@ def atlas_entity_project_link_create(entity_id):
 @limiter.limit(_atlas_write_limit)
 def atlas_entity_project_link_delete(entity_id, project_id):
     session_id = get_session_id()
+    owner_scope, scope_response = _atlas_request_scope_response(session_id, Capability.MUTATE_PROJECTS)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
         deleted = unlink_project_entity(session_id, project_id, {
             "entity_type": "atlas_entity",
             "entity_id": entity_id,
-        })
+        }, team_id=owner_scope.team_id)
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
     if deleted is None:

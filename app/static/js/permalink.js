@@ -12,12 +12,13 @@
   var transcriptModel = pd.transcript || {};
   var exportModel = pd.export || {};
   var headerModel = pd.header || {};
-  var lines = window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function'
+  var rawLines = window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function'
     ? ExportHtmlUtils.normalizeExportTranscriptLines(transcriptModel.lines || pd.lines || [])
     : (transcriptModel.lines || pd.lines || []);
   var hasTimestampMetadata = transcriptModel.hasTimestampMetadata || pd.hasTimestampMetadata || false;
   var appName = exportModel.appName || pd.appName || headerModel.appName || '';
   var label = exportModel.label || pd.label || '';
+  var command = exportModel.command || transcriptModel.command || pd.command || label;
   var created = exportModel.created || pd.created || '';
   var createdDisplay = exportModel.createdDisplay || pd.createdDisplay || headerModel.createdDisplay || '';
   var fontFacesCss = exportModel.fontFacesCss || pd.fontFacesCss || '';
@@ -41,6 +42,10 @@
   var lnMode = getCookie('pref_line_numbers') === 'on' ? 'on' : 'off';
   var tsMode = tsModes.includes(getCookie('pref_timestamps')) ? getCookie('pref_timestamps') : 'off';
   var highlightMode = getCookie('pref_structured_highlights') === 'off' ? 'off' : 'on';
+  var commandOutcomeSummariesEnabled = getCookie('pref_command_outcome_summaries') !== 'off';
+  var lines = window.ExportHtmlUtils && typeof ExportHtmlUtils.appendCommandOutcomeSummaryLines === 'function'
+    ? ExportHtmlUtils.appendCommandOutcomeSummaryLines(rawLines, { command: command, enabled: commandOutcomeSummariesEnabled })
+    : rawLines;
   if (!hasTimestampMetadata) tsMode = 'off';
 
   function setCookie(name, value) {
@@ -64,6 +69,11 @@
   }
 
   function formatPrefix(index, entry) {
+    if (window.ExportHtmlUtils
+        && typeof ExportHtmlUtils.isCommandOutcomeSummaryLine === 'function'
+        && ExportHtmlUtils.isCommandOutcomeSummaryLine(entry)) {
+      return '';
+    }
     var parts = [];
     if (lnMode === 'on') parts.push(String(index));
     var ts = timestampText(entry);
@@ -221,7 +231,9 @@
       label: label,
       createdText: createdDisplay || created,
       runMeta: permalinkMeta,
-      rawLines: lines,
+      rawLines: rawLines,
+      command: command,
+      includeCommandOutcomeSummary: commandOutcomeSummariesEnabled,
     });
     var result = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: function (entry, i) { return formatPrefix(i + 1, entry); },
@@ -257,7 +269,9 @@
       label: label,
       createdText: createdDisplay || created,
       runMeta: permalinkMeta,
-      rawLines: lines,
+      rawLines: rawLines,
+      command: command,
+      includeCommandOutcomeSummary: commandOutcomeSummariesEnabled,
     });
     var ansiUpPdf = new AnsiUp();
     ansiUpPdf.use_classes = false;

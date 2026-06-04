@@ -84,22 +84,25 @@ def _process_assist(assist: dict, *, cfg: dict | None = None) -> None:
     assist_id = str(assist.get("id") or "")
     run_id = str(assist.get("run_id") or "")
     session_id = str(assist.get("session_id") or "")
+    team_id = str(assist.get("team_id") or "")
     variant = str(assist.get("variant") or "")
     provider_request_started = False
     try:
         runner = _VARIANT_RUNNERS.get(variant)
         if runner is None:
             raise AIClientError("ai_unsupported_variant", f"AI worker does not support variant {variant}")
-        context = build_run_context(run_id, session_id=session_id, cfg=active_cfg, variant=variant)
+        context = build_run_context(run_id, session_id=session_id, team_id=team_id, cfg=active_cfg, variant=variant)
         if str(assist.get("context_hash") or "") != context.context_hash:
             raise AIClientError("ai_context_changed", "Run context changed after assist was queued")
         heartbeat_assist(assist_id)
         client = OpenAICompatibleClient(
             active_cfg,
             session_token=session_id,
+            secret_scope_token=team_id or session_id,
             progress_callback=_progress_updater(assist_id, run_id, variant),
         )
         log.info("AI_ASSIST_PROVIDER_REQUEST", extra={
+            **_assist_scope_log_fields(assist),
             "assist_id": assist_id,
             "run_id": run_id,
             "variant": variant,
@@ -128,6 +131,7 @@ def _process_assist(assist: dict, *, cfg: dict | None = None) -> None:
             duration_ms=result.duration_ms,
         )
         log.info("AI_ASSIST_COMPLETED", extra={
+            **_assist_scope_log_fields(assist),
             "assist_id": assist_id,
             "run_id": run_id,
             "variant": variant,
@@ -172,12 +176,25 @@ def _process_assist(assist: dict, *, cfg: dict | None = None) -> None:
 
 def _assist_failure_log_fields(assist: dict) -> dict[str, str]:
     return {
-        "session": get_log_session_id(assist.get("session_id")),
+        **_assist_scope_log_fields(assist),
         "model": str(assist.get("model") or ""),
         "prompt_version": str(assist.get("prompt_version") or ""),
         "prompt_version_source": str(assist.get("prompt_version_source") or ""),
         "context_hash": str(assist.get("context_hash") or ""),
     }
+
+
+def _assist_scope_log_fields(assist: dict) -> dict[str, str]:
+    team_id = str(assist.get("team_id") or "")
+    fields = {
+        "team_id": team_id,
+        "session": get_log_session_id(assist.get("session_id")),
+        "secret_scope": "team" if team_id else "personal",
+    }
+    actor_member_id = str(assist.get("actor_member_id") or "")
+    if actor_member_id:
+        fields["actor_member_id"] = actor_member_id
+    return fields
 
 
 @contextmanager

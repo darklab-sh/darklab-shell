@@ -33,7 +33,7 @@ class TelegramChannel(Channel):
         token_secret_name = _secret_name(self.channel.secrets)
         if not token_secret_name:
             return ChannelResult.terminal("Telegram bot token secret is unavailable")
-        token = get_channel_secret(self.channel.session_token, token_secret_name)
+        token = get_channel_secret(self.channel.secret_owner_token, token_secret_name)
         if not token:
             return ChannelResult.terminal("Telegram bot token secret is unavailable")
         chat_id = str(self.channel.config.get("chat_id") or "").strip()

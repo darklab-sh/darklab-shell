@@ -3,6 +3,7 @@
 const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 let _optionsSecretsLoaded = false;
 let _optionsSecretsLoading = false;
+let _optionsSecretsCanManage = true;
 let _providerStatusFocusReturn = null;
 
 function _optionsSecretsListEl() {
@@ -54,8 +55,10 @@ function _optionsSecretsSetBusy(busy) {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = _optionsSecretsLoading;
   });
+  const addBtn = document.getElementById('options-secret-new-btn');
+  if (addBtn) addBtn.disabled = _optionsSecretsLoading || !_optionsSecretsCanManage;
   _optionsSecretsListEl()?.querySelectorAll('button').forEach((btn) => {
-    btn.disabled = _optionsSecretsLoading;
+    btn.disabled = _optionsSecretsLoading || (!_optionsSecretsCanManage && btn.closest('.options-secret-actions'));
   });
 }
 
@@ -403,14 +406,19 @@ function _optionsSecretChips(secret) {
   return wrap;
 }
 
-function _renderOptionsSecrets(secrets = []) {
+function _activeSecretScopeLabel(scope = '') {
+  if (scope === 'team') return 'team';
+  return 'personal scope';
+}
+
+function _renderOptionsSecrets(secrets = [], scope = '') {
   const list = _optionsSecretsListEl();
   if (!list) return;
   list.innerHTML = '';
   if (!secrets.length) {
     const empty = document.createElement('div');
     empty.className = 'options-secret-empty';
-    empty.textContent = 'No secrets stored for this session.';
+    empty.textContent = `No secrets stored for this ${_activeSecretScopeLabel(scope)}.`;
     list.appendChild(empty);
     return;
   }
@@ -439,6 +447,7 @@ function _renderOptionsSecrets(secrets = []) {
     edit.type = 'button';
     edit.className = 'btn btn-secondary btn-compact';
     edit.textContent = 'Edit';
+    edit.disabled = !_optionsSecretsCanManage;
     edit.addEventListener('click', () => {
       openSecretEditor({ secret }).catch((err) => {
         _optionsSecretsToast(err.message || 'Unable to edit secret', 'error');
@@ -450,6 +459,7 @@ function _renderOptionsSecrets(secrets = []) {
     del.type = 'button';
     del.className = 'btn btn-secondary btn-compact';
     del.textContent = 'Delete';
+    del.disabled = !_optionsSecretsCanManage;
     del.addEventListener('click', () => {
       deleteOptionsSecret(String(secret?.name || '')).catch((err) => {
         _optionsSecretsToast(err.message || 'Unable to delete secret', 'error');
@@ -472,9 +482,11 @@ async function refreshOptionsSecrets({ force = false } = {}) {
     const resp = await apiFetch('/session/secrets', { cache: 'no-store' });
     const data = await resp.json().catch(() => ({}));
     if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
-    _renderOptionsSecrets(Array.isArray(data.secrets) ? data.secrets : []);
+    _optionsSecretsCanManage = data.can_manage !== false;
+    _renderOptionsSecrets(Array.isArray(data.secrets) ? data.secrets : [], data.scope || '');
     _optionsSecretsLoaded = true;
   } catch (err) {
+    _optionsSecretsCanManage = true;
     _renderOptionsSecrets([]);
     _optionsSecretsToast(`Failed to load secrets — ${err.message || 'network error'}`, 'error');
   } finally {
@@ -766,6 +778,16 @@ document.getElementById('options-secrets-refresh-btn')?.addEventListener('click'
   refreshOptionsSecrets({ force: true }).catch((err) => {
     _optionsSecretsToast(err.message || 'Unable to refresh secrets', 'error');
   });
+});
+
+document.addEventListener('app:scope-changed', () => {
+  invalidateOptionsSecrets();
+  const panel = document.getElementById('options-panel-secrets');
+  if (panel && !panel.hidden) {
+    refreshOptionsSecrets({ force: true }).catch((err) => {
+      _optionsSecretsToast(err.message || 'Unable to refresh secrets', 'error');
+    });
+  }
 });
 
 globalThis.refreshOptionsSecrets = refreshOptionsSecrets;

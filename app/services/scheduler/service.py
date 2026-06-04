@@ -9,6 +9,7 @@ from typing import Any
 
 from core import database
 from core.database_backend import dialect_for_backend
+from core.helpers import get_log_session_id
 from services.notifications.models import require_durable_session_token
 from services.scheduler.cron import default_timezone, next_fire, normalize_cron, validate_timezone
 from services.scheduler.models import (
@@ -75,6 +76,7 @@ def row_to_schedule(row: Any) -> Schedule:
     return Schedule(
         id=str(_value(row, "id")),
         session_token=str(_value(row, "session_token")),
+        team_id=str(_value(row, "team_id")),
         owner_kind=str(_value(row, "owner_kind") or OWNER_KIND_USER),
         owner_id=str(_value(row, "owner_id")),
         kind=str(_value(row, "kind") or SCHEDULE_KIND_COMMAND),
@@ -100,6 +102,7 @@ def row_to_schedule_fire(row: Any) -> ScheduleFire:
     return ScheduleFire(
         id=str(_value(row, "id")),
         schedule_id=str(_value(row, "schedule_id")),
+        team_id=str(_value(row, "team_id")),
         owner_kind=str(_value(row, "owner_kind") or OWNER_KIND_USER),
         owner_id=str(_value(row, "owner_id")),
         fired_at=str(_value(row, "fired_at")),
@@ -141,10 +144,19 @@ def _max_schedules_per_session() -> int:
     return max(1, configured)
 
 
-def _normal_schedule_count(conn, session_token: str) -> int:
+def _owner_schedule_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
+    prefix = f"{table_alias}." if table_alias else ""
+    normalized_team_id = str(team_id or "").strip()
+    if normalized_team_id:
+        return f"{prefix}team_id = ?", (normalized_team_id,)
+    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_token = ?", (session_token,)
+
+
+def _normal_schedule_count(conn, session_token: str, *, team_id: str = "") -> int:
+    owner_sql, owner_params = _owner_schedule_clause(session_token, team_id)
     row = conn.execute(
-        "SELECT COUNT(*) AS count FROM schedules WHERE session_token = ? AND owner_kind = ?",
-        (session_token, OWNER_KIND_USER),
+        f"SELECT COUNT(*) AS count FROM schedules WHERE {owner_sql} AND owner_kind = ?",  # nosec
+        (*owner_params, OWNER_KIND_USER),
     ).fetchone()
     return int(_value(row, "count", 0) or 0)
 
@@ -166,6 +178,7 @@ def _parse_time(value: str) -> datetime | None:
 def create_schedule(
     session_token: str,
     *,
+    team_id: str = "",
     command_text: str,
     cron_expr: str | None = None,
     cadence_preset: str | None = None,
@@ -188,6 +201,7 @@ def create_schedule(
     schedule = Schedule(
         id=_schedule_id(),
         session_token=session,
+        team_id=str(team_id or "").strip(),
         owner_kind=owner,
         owner_id=str(owner_id or ""),
         kind=kind,
@@ -213,20 +227,24 @@ def create_schedule(
         conn = ctx.__enter__()
     assert conn is not None
     try:
-        if schedule.owner_kind == OWNER_KIND_USER and _normal_schedule_count(conn, session) >= _max_schedules_per_session():
-            raise ScheduleError("schedule quota exceeded for this session")
+        if (
+            schedule.owner_kind == OWNER_KIND_USER
+            and _normal_schedule_count(conn, session, team_id=schedule.team_id) >= _max_schedules_per_session()
+        ):
+            raise ScheduleError("schedule quota exceeded for this scope")
         conn.execute(
             """
             INSERT INTO schedules (
-                id, session_token, owner_kind, owner_id, kind, command_text, cron_expr,
+                id, session_token, team_id, owner_kind, owner_id, kind, command_text, cron_expr,
                 cadence_preset, timezone, enabled, next_run_at, last_run_at, last_run_id,
                 overlap_policy, consecutive_failures, label, paused_reason, last_error,
                 created, updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
                 schedule.session_token,
+                schedule.team_id,
                 schedule.owner_kind,
                 schedule.owner_id,
                 schedule.kind,
@@ -280,6 +298,18 @@ def get_schedule(schedule_id: str, *, conn=None) -> Schedule | None:
 
 def list_for_session(session_token: str, *, include_watchers: bool = False, conn=None) -> list[Schedule]:
     session = require_durable_session_token(session_token)
+    return list_for_owner(session, team_id="", include_watchers=include_watchers, conn=conn)
+
+
+def list_for_owner(
+    session_token: str,
+    *,
+    team_id: str = "",
+    include_watchers: bool = False,
+    conn=None,
+) -> list[Schedule]:
+    session = require_durable_session_token(session_token)
+    owner_sql, owner_params = _owner_schedule_clause(session, team_id)
     ctx = None
     if conn is None:
         ctx = database.db_connect()
@@ -288,13 +318,13 @@ def list_for_session(session_token: str, *, include_watchers: bool = False, conn
     try:
         if include_watchers:
             rows = conn.execute(
-                "SELECT * FROM schedules WHERE session_token = ? ORDER BY updated DESC",
-                (session,),
+                f"SELECT * FROM schedules WHERE {owner_sql} ORDER BY updated DESC",  # nosec
+                owner_params,
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM schedules WHERE session_token = ? AND owner_kind = ? ORDER BY updated DESC",
-                (session, OWNER_KIND_USER),
+                f"SELECT * FROM schedules WHERE {owner_sql} AND owner_kind = ? ORDER BY updated DESC",  # nosec
+                (*owner_params, OWNER_KIND_USER),
             ).fetchall()
         return [row_to_schedule(row) for row in rows]
     finally:
@@ -420,6 +450,7 @@ def record_schedule_fire(
     fire = ScheduleFire(
         id=_fire_id(),
         schedule_id=schedule.id,
+        team_id=schedule.team_id,
         owner_kind=schedule.owner_kind,
         owner_id=schedule.owner_id,
         fired_at=fired_at or _utc_now(),
@@ -429,10 +460,20 @@ def record_schedule_fire(
     )
     conn.execute(
         """
-        INSERT INTO schedule_fires (id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO schedule_fires (id, schedule_id, team_id, owner_kind, owner_id, fired_at, run_id, status, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (fire.id, fire.schedule_id, fire.owner_kind, fire.owner_id, fire.fired_at, fire.run_id, fire.status, fire.reason),
+        (
+            fire.id,
+            fire.schedule_id,
+            fire.team_id,
+            fire.owner_kind,
+            fire.owner_id,
+            fire.fired_at,
+            fire.run_id,
+            fire.status,
+            fire.reason,
+        ),
     )
     return fire
 
@@ -465,15 +506,27 @@ def list_schedule_fires(schedule_id: str, *, limit: int = 50, offset: int = 0, c
 
 
 def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
+    refs = schedule_refs_by_run(conn, run_ids)
+    return {
+        run_id: str(ref.get("schedule_id") or "")
+        for run_id, ref in refs.items()
+    }
+
+
+def schedule_refs_by_run(conn, run_ids: list[str]) -> dict[str, dict[str, str]]:
     ids = [str(run_id or "") for run_id in run_ids if str(run_id or "").strip()]
     if not ids:
         return {}
     placeholders = ", ".join("?" for _ in ids)
     try:
         rows = conn.execute(
-            "SELECT run_id, schedule_id FROM schedule_fires "  # nosec
-            f"WHERE status = ? AND run_id IN ({placeholders}) "
-            "ORDER BY fired_at DESC, id DESC",
+            "SELECT sf.run_id, sf.schedule_id, sf.owner_kind, sf.owner_id, "  # nosec
+            "s.label AS schedule_label, w.label AS watcher_label "
+            "FROM schedule_fires sf "
+            "LEFT JOIN schedules s ON s.id = sf.schedule_id "
+            "LEFT JOIN watchers w ON sf.owner_kind = 'watcher' AND w.id = sf.owner_id "
+            f"WHERE sf.status = ? AND sf.run_id IN ({placeholders}) "
+            "ORDER BY sf.fired_at DESC, sf.id DESC",
             (FIRE_STATUS_FIRED, *ids),
         ).fetchall()
     except Exception as exc:
@@ -484,12 +537,18 @@ def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
             })
             return {}
         raise
-    schedule_by_run: dict[str, str] = {}
+    schedule_by_run: dict[str, dict[str, str]] = {}
     for row in rows:
         run_id = str(_value(row, "run_id") or "")
         # Rows are newest first, so the first schedule for a run wins.
         if run_id and run_id not in schedule_by_run:
-            schedule_by_run[run_id] = str(_value(row, "schedule_id") or "")
+            schedule_by_run[run_id] = {
+                "schedule_id": str(_value(row, "schedule_id") or ""),
+                "owner_kind": str(_value(row, "owner_kind") or ""),
+                "owner_id": str(_value(row, "owner_id") or ""),
+                "schedule_label": str(_value(row, "schedule_label") or ""),
+                "watcher_label": str(_value(row, "watcher_label") or ""),
+            }
     return schedule_by_run
 
 
@@ -519,6 +578,21 @@ def due_schedules(conn, *, now: str | None = None, limit: int = 50) -> list[Sche
     return [row_to_schedule(row) for row in rows]
 
 
+def pause_team_schedules(conn, team_id: str, *, reason: str = "team_archived") -> int:
+    normalized_team_id = str(team_id or "").strip()
+    if not normalized_team_id:
+        return 0
+    result = conn.execute(
+        """
+        UPDATE schedules
+        SET enabled = ?, paused_reason = ?, updated = ?
+        WHERE team_id = ? AND enabled = ?
+        """,
+        (_bool_param(False), reason, _utc_now(), normalized_team_id, _bool_param(True)),
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
 def mark_schedule_after_fire(
     conn,
     schedule: Schedule,
@@ -543,7 +617,10 @@ def mark_schedule_after_fire(
         raise ScheduleError("schedule disappeared during fire update")
     log.debug("SCHEDULE_AFTER_FIRE_UPDATED", extra={
         "schedule_id": refreshed.id,
+        "team_id": refreshed.team_id,
+        "session": get_log_session_id(refreshed.session_token),
         "owner_kind": refreshed.owner_kind,
+        "owner_id": refreshed.owner_id,
         "run_id": run_id or "",
         "fired_at": fired_at,
         "next_run_at": refreshed.next_run_at,

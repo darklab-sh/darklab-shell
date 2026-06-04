@@ -14,7 +14,7 @@ from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_ru
 log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
@@ -118,7 +118,7 @@ def _normalize_app_name(value):
     return normalized[:APP_NAME_MAX_CHARS].rstrip() or PROJECT_NAME
 
 
-def _normalize_ai_base_url_allowed_cidrs(value):
+def _normalize_cidr_list(value, warning_event):
     if isinstance(value, str):
         raw_values = [item.strip() for item in value.split(",") if item.strip()]
     elif isinstance(value, (list, tuple, set)):
@@ -130,10 +130,18 @@ def _normalize_ai_base_url_allowed_cidrs(value):
         try:
             ipaddress.ip_network(cidr, strict=False)
         except ValueError:
-            log.warning("AI_BASE_URL_ALLOWED_CIDR_INVALID", extra={"cidr": cidr[:120]})
+            log.warning(warning_event, extra={"cidr": cidr[:120]})
             continue
         normalized.append(cidr)
     return normalized
+
+
+def _normalize_ai_base_url_allowed_cidrs(value):
+    return _normalize_cidr_list(value, "AI_BASE_URL_ALLOWED_CIDR_INVALID")
+
+
+def _normalize_restricted_command_input_cidrs(value):
+    return _normalize_cidr_list(value, "RESTRICTED_COMMAND_INPUT_CIDR_INVALID")
 
 
 def load_config(conf_dir=None):
@@ -194,6 +202,9 @@ def load_config(conf_dir=None):
         "rate_limit_enabled":         True,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
+        "team_read_rate_limit_per_minute": 180,
+        "team_read_rate_limit_per_second": 20,
+        "team_write_rate_limit_per_minute": 30,
         "intel_cache_ttl_shodan_ip_seconds": 86400,
         "intel_cache_ttl_shodan_search_seconds": 21600,
         "intel_cache_ttl_censys_host_seconds": 21600,
@@ -285,14 +296,32 @@ def load_config(conf_dir=None):
         "max_projects_per_session":   100,
         "max_project_links_per_project": 5000,
         "max_project_entities_per_project": 5000,
+        "max_project_auto_promote_preview_matches": 200,
+        "max_project_auto_promote_scan_candidates": 5000,
+        "max_project_auto_promote_apply_matches": 1000,
+        "max_project_auto_promote_run_matches": 100,
+        "max_project_auto_promote_rules_per_run": 50,
+        "max_project_auto_promote_rules_per_project": 100,
+        "project_auto_promote_preview_rate_limit_per_minute": 30,
+        "project_auto_promote_preview_rate_limit_per_second": 2,
+        "atlas_import_max_upload_mb": 10,
+        "atlas_import_max_rows": 5000,
+        "atlas_import_max_findings": 5000,
+        "atlas_import_max_warnings": 100,
+        "atlas_import_max_xml_elements": 100000,
+        "atlas_import_preview_sample_limit": 20,
+        "atlas_import_warning_sample_limit": 50,
+        "atlas_import_draft_ttl_minutes": 30,
         "max_project_targets_per_project": 200,
         "max_evidence_packages_per_project": 25,
         "max_entity_labels_per_session": 5000,
         "max_entity_labels_per_entity": 20,
         "max_entity_notes_per_session": 2000,
+        "max_finding_triage_details_per_owner": 5000,
         "evidence_package_max_mb":    25,
         "evidence_package_max_uncompressed_mb": 500,
         "evidence_package_max_artifacts": 100,
+        "package_presets_file":       "package_presets.yaml",
         "evidence_package_download_rate_limit_per_minute": 10,
         "evidence_package_download_rate_limit_per_second": 2,
         "notifications": {
@@ -345,6 +374,8 @@ def load_config(conf_dir=None):
         "interactive_pty_max_concurrent_per_session": 4,
         "interactive_pty_input_rate_limit_per_minute": 500,
         "interactive_pty_input_rate_limit_per_second": 10,
+        "interactive_pty_resize_rate_limit_per_minute": 600,
+        "interactive_pty_resize_rate_limit_per_second": 30,
         "interactive_pty_buffer_limit": 512,
         "interactive_pty_input_max_bytes": 4096,
         "interactive_pty_heartbeat_seconds": 15,
@@ -381,6 +412,11 @@ def load_config(conf_dir=None):
     env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
     if env_prometheus_multiproc_dir:
         defaults["prometheus_multiproc_dir"] = env_prometheus_multiproc_dir
+    env_restricted_command_input_cidrs = str(os.environ.get("RESTRICTED_COMMAND_INPUT_CIDRS") or "").strip()
+    if env_restricted_command_input_cidrs:
+        defaults["restricted_command_input_cidrs"] = [
+            item.strip() for item in env_restricted_command_input_cidrs.split(",") if item.strip()
+        ]
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         defaults["database_backend"] = env_database_backend
@@ -430,6 +466,9 @@ def load_config(conf_dir=None):
             defaults[cfg_key] = raw
     defaults["ai_base_url_allowed_cidrs"] = _normalize_ai_base_url_allowed_cidrs(
         defaults.get("ai_base_url_allowed_cidrs")
+    )
+    defaults["restricted_command_input_cidrs"] = _normalize_restricted_command_input_cidrs(
+        defaults.get("restricted_command_input_cidrs")
     )
     defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
     defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)

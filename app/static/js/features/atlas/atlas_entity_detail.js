@@ -335,6 +335,67 @@
     return wrap;
   }
 
+  function importSourceTitle(source) {
+    return text(source.import_name, text(source.source_tool, 'Import'));
+  }
+
+  function importSourceLabel(source) {
+    const tool = text(source.source_tool, text(source.format_id, 'external tool'));
+    return source.created_record ? `Created by ${tool} import` : `Also seen in ${tool} import`;
+  }
+
+  function renderImportSources(sources) {
+    const wrap = node('div', 'atlas-source-list atlas-import-source-list');
+    const rows = Array.isArray(sources) ? sources : [];
+    if (!rows.length) {
+      wrap.appendChild(node('div', 'atlas-empty-inline', 'No import sources'));
+      return wrap;
+    }
+    rows.forEach(source => {
+      const row = node('div', 'panel-row atlas-source-row atlas-import-source-row');
+      row.append(
+        node('div', 'atlas-source-command', importSourceTitle(source)),
+        node(
+          'div',
+          'atlas-muted',
+          [
+            importSourceLabel(source),
+            formatCount(source.occurrence_count, 'row'),
+            formatDate(source.last_observed_at || source.applied_at),
+          ].filter(Boolean).join(' · '),
+        ),
+      );
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  function verificationStatusLabel(value) {
+    const normalized = text(value, 'not_started');
+    if (global.DarklabFindingTriageEditor && typeof global.DarklabFindingTriageEditor.verificationStatusLabel === 'function') {
+      return global.DarklabFindingTriageEditor.verificationStatusLabel(normalized);
+    }
+    return normalized.replace(/_/g, ' ');
+  }
+
+  function renderTriageSummary(finding) {
+    const triage = finding && finding.triage && typeof finding.triage === 'object' ? finding.triage : null;
+    const wrap = node('div', 'atlas-triage-summary');
+    if (!triage) {
+      wrap.appendChild(node('div', 'atlas-muted', 'No remediation or verification details yet.'));
+      return wrap;
+    }
+    wrap.appendChild(metaRow('Verification', verificationStatusLabel(triage.verification_status || finding.verification_status)));
+    const remediation = text(triage.remediation_preview || triage.remediation);
+    const steps = text(triage.verification_steps_preview || triage.verification_steps);
+    if (remediation) wrap.appendChild(metaRow('Remediation', remediation));
+    if (steps) wrap.appendChild(metaRow('Steps', steps));
+    if (!remediation && !steps && !triage.has_verification_notes) {
+      wrap.appendChild(node('div', 'atlas-muted', 'No remediation or verification text yet.'));
+    }
+    return wrap;
+  }
+
   function renderFindings(findings, meta = null, onPage = null) {
     const wrap = node('div', 'atlas-finding-list');
     const rows = Array.isArray(findings) ? findings : [];
@@ -358,7 +419,7 @@
     return wrap;
   }
 
-  function reviewStateSelect(value, onChange) {
+  function reviewStateSelect(value, onChange, options = {}) {
     const select = document.createElement('select');
     select.className = 'form-select form-control-compact atlas-finding-review';
     select.setAttribute('aria-label', 'Finding review state');
@@ -375,6 +436,8 @@
       select.appendChild(option);
     });
     select.value = text(value, 'new');
+    select.disabled = !!options.disabled;
+    if (options.disabledReason) select.title = options.disabledReason;
     select.addEventListener('change', () => onChange?.(select.value));
     return select;
   }
@@ -397,7 +460,13 @@
       button.className = `dropdown-item dropdown-item-compact${item.destructive ? ' is-destructive' : ''}`;
       button.setAttribute('role', 'menuitem');
       button.textContent = item.label;
+      button.disabled = !!item.disabled;
+      if (item.disabled) {
+        button.setAttribute('aria-disabled', 'true');
+        if (item.disabledReason) button.title = item.disabledReason;
+      }
       button.addEventListener('click', () => {
+        if (item.disabled) return;
         wrap.classList.remove('open');
         trigger.setAttribute('aria-expanded', 'false');
         item.onSelect();
@@ -441,9 +510,20 @@
     container.append(header);
     if (!handlers.hideInlineActions) {
       const actions = node('div', 'atlas-detail-actions');
-      actions.appendChild(reviewStateSelect(finding.review_state || finding.status, (reviewState) => {
-        handlers.onReviewState?.(finding, reviewState);
-      }));
+      actions.appendChild(reviewStateSelect(
+        finding.review_state || finding.status,
+        (reviewState) => handlers.onReviewState?.(finding, reviewState),
+        {
+          disabled: handlers.canTriageAtlasRows === false,
+          disabledReason: handlers.triageDisabledReason || '',
+        },
+      ));
+      const triage = document.createElement('button');
+      triage.type = 'button';
+      triage.className = 'btn btn-secondary btn-compact';
+      triage.textContent = 'Triage';
+      triage.addEventListener('click', () => handlers.onEditTriage?.(finding));
+      actions.appendChild(triage);
       if (finding.run_id) {
         const run = document.createElement('button');
         run.type = 'button';
@@ -462,11 +542,15 @@
       menuItems.push(
         {
           label: finding.suppressed ? 'Restore finding' : 'Suppress finding',
+          disabled: handlers.canTriageAtlasRows === false,
+          disabledReason: handlers.triageDisabledReason || '',
           onSelect: () => handlers.onSuppressFinding?.(finding),
         },
         {
           label: 'Delete finding',
           destructive: true,
+          disabled: handlers.canDeleteAtlasRows === false,
+          disabledReason: handlers.deleteDisabledReason || '',
           onSelect: () => handlers.onDeleteFinding?.(finding),
         },
       );
@@ -477,7 +561,10 @@
         global.enhanceAppSelects(actions);
       }
     }
-    container.append(meta, section('Evidence', raw));
+    container.append(meta);
+    container.append(section('Remediation and verification', renderTriageSummary(finding)));
+    container.append(section('Import sources', renderImportSources(finding.import_sources)));
+    container.append(section('Evidence', raw));
   }
 
   function renderMetadataEditor(entity, handlers = {}) {
@@ -541,7 +628,9 @@
       const refresh = document.createElement('button');
       refresh.type = 'button';
       refresh.className = 'btn btn-secondary btn-compact';
-      refresh.textContent = 'Refresh intel';
+      refresh.disabled = !!handlers.intelRefreshing;
+      refresh.setAttribute('aria-busy', handlers.intelRefreshing ? 'true' : 'false');
+      refresh.textContent = handlers.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
       refresh.addEventListener('click', () => handlers.onRefreshIntel?.(entity));
       actions.appendChild(refresh);
       if (handlers.activeProject && !handlers.isLinkedToActiveProject?.(entity)) {
@@ -555,11 +644,15 @@
       const menu = detailActionMenu([
         {
           label: entity.suppressed ? 'Restore entity' : 'Suppress entity',
+          disabled: handlers.canTriageAtlasRows === false,
+          disabledReason: handlers.triageDisabledReason || '',
           onSelect: () => handlers.onSuppressEntity?.(entity),
         },
         {
           label: 'Delete entity',
           destructive: true,
+          disabled: handlers.canDeleteAtlasRows === false,
+          disabledReason: handlers.deleteDisabledReason || '',
           onSelect: () => handlers.onDeleteEntity?.(entity),
         },
       ]);
@@ -573,6 +666,7 @@
     container.append(section('Labels', renderLabels(entity.labels)));
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
     container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
+    container.append(section('Import sources', renderImportSources(detail.import_sources)));
     container.append(section('Source runs', renderRuns(
       detail.runs,
       handlers.onSeeRun,

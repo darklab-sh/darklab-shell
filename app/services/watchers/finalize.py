@@ -112,6 +112,7 @@ def _apply_diff(
             watcher.session_token,
             conn=conn,
             run_id=run_id,
+            team_id=watcher.team_id,
         )
         updated_watcher = watcher_service.set_watcher_state(
             watcher.id,
@@ -150,6 +151,7 @@ def _apply_diff(
             watcher.session_token,
             conn=conn,
             run_id=run_id,
+            team_id=watcher.team_id,
         )
         state_reason = "recovered"
     updated_watcher = watcher_service.set_watcher_state(
@@ -252,6 +254,7 @@ def _mark_error(
         watcher.session_token,
         conn=conn,
         run_id=run_id,
+        team_id=watcher.team_id,
     )
     disable = failures >= WATCHER_FAILURE_DISABLE_THRESHOLD
     updated_watcher = watcher_service.set_watcher_state(

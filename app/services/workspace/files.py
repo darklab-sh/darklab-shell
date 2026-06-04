@@ -1,12 +1,13 @@
-"""App-mediated per-session workspace helpers.
+"""App-mediated workspace helpers.
 
 This module intentionally does not expose shell navigation or redirection.
 Every file operation resolves a user-facing relative path inside one hashed
-session directory and enforces quota limits before writes.
+workspace directory and enforces quota limits before writes.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import errno
@@ -24,6 +25,7 @@ import tempfile
 from typing import Any, BinaryIO
 
 from config import CFG
+from services.teams.scope import OwnerContext, owner_context_for_scope
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +144,13 @@ class WorkspaceMigrationResult:
     skipped_file_paths: tuple[str, ...] = ()
 
 
+def _coerce_owner_context(owner: OwnerContext | Any) -> OwnerContext:
+    context = getattr(owner, "context", owner)
+    if isinstance(context, OwnerContext):
+        return context
+    raise WorkspaceError("workspace owner context is required")
+
+
 def _coerce_int(value: Any, default: int, *, minimum: int = 0) -> int:
     try:
         parsed = int(value)
@@ -186,18 +195,33 @@ def session_workspace_name(session_id: str) -> str:
     return f"sess_{digest[:32]}"
 
 
+def owner_workspace_name(owner: OwnerContext | Any) -> str:
+    context = _coerce_owner_context(owner)
+    digest = hashlib.sha256(context.owner_id.encode("utf-8")).hexdigest()
+    prefix = "team" if context.is_team else "sess"
+    return f"{prefix}_{digest[:32]}"
+
+
+def _workspace_session_owner_context(session_id: str) -> OwnerContext:
+    return owner_context_for_scope(session_id)
+
+
 def workspace_root(settings: WorkspaceSettings) -> Path:
     return settings.root.resolve(strict=False)
 
 
-def session_workspace_dir(session_id: str, cfg: dict[str, Any] | None = None) -> Path:
+def owner_workspace_dir(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> Path:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    return workspace_root(settings) / session_workspace_name(session_id)
+    return workspace_root(settings) / owner_workspace_name(owner)
 
 
-def ensure_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) -> Path:
-    path = session_workspace_dir(session_id, cfg)
+def session_workspace_dir(session_id: str, cfg: dict[str, Any] | None = None) -> Path:
+    return owner_workspace_dir(_workspace_session_owner_context(session_id), cfg)
+
+
+def ensure_owner_workspace(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> Path:
+    path = owner_workspace_dir(owner, cfg)
     path.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_DIR_MODE)
@@ -206,13 +230,22 @@ def ensure_session_workspace(session_id: str, cfg: dict[str, Any] | None = None)
     return path
 
 
-def touch_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) -> None:
-    """Mark the session workspace active without exposing that detail to users."""
-    path = ensure_session_workspace(session_id, cfg)
+def ensure_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) -> Path:
+    return ensure_owner_workspace(_workspace_session_owner_context(session_id), cfg)
+
+
+def touch_owner_workspace(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> None:
+    """Mark an owner workspace active without exposing that detail to users."""
+    path = ensure_owner_workspace(owner, cfg)
     try:
         os.utime(path, None)
     except OSError:
         pass
+
+
+def touch_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) -> None:
+    """Mark the session workspace active without exposing that detail to users."""
+    touch_owner_workspace(_workspace_session_owner_context(session_id), cfg)
 
 
 def _validate_relative_path(relative_path: str) -> PurePosixPath:
@@ -248,17 +281,51 @@ def _reject_symlink_components(root: Path, candidate: Path) -> None:
     for part in candidate.relative_to(root).parts:
         cursor = cursor / part
         if cursor.exists() and cursor.is_symlink():
-            raise InvalidWorkspacePath("session file symlinks are not allowed")
+            raise InvalidWorkspacePath("workspace file symlinks are not allowed")
 
 
 def _reject_symlinks_under(path: Path) -> None:
     if path.is_symlink():
-        raise InvalidWorkspacePath("session file symlinks are not allowed")
+        raise InvalidWorkspacePath("workspace file symlinks are not allowed")
     if not path.is_dir():
         return
     for child in path.rglob("*"):
         if child.is_symlink():
-            raise InvalidWorkspacePath("session file symlinks are not allowed")
+            raise InvalidWorkspacePath("workspace file symlinks are not allowed")
+
+
+def resolve_owner_workspace_path(
+    owner: OwnerContext | Any,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+    *,
+    ensure_parent: bool = False,
+) -> Path:
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
+    touch_owner_workspace(owner, cfg)
+    rel = _validate_relative_path(relative_path)
+    candidate = root.joinpath(*rel.parts)
+    _reject_symlink_components(root, candidate)
+    parent = candidate.parent
+    if parent.exists():
+        resolved_parent = parent.resolve(strict=True)
+        if not _is_relative_to(resolved_parent, root):
+            raise InvalidWorkspacePath("file path escapes the workspace directory")
+    elif ensure_parent:
+        parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
+        try:
+            os.chmod(parent, WORKSPACE_DIR_MODE)
+        except OSError as exc:
+            log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", parent, WORKSPACE_DIR_MODE, exc)
+        resolved_parent = parent.resolve(strict=True)
+        if not _is_relative_to(resolved_parent, root):
+            raise InvalidWorkspacePath("file path escapes the workspace directory")
+    else:
+        raise InvalidWorkspacePath("parent directory does not exist")
+    resolved = resolved_parent / candidate.name
+    if not _is_relative_to(resolved.resolve(strict=False), root):
+        raise InvalidWorkspacePath("file path escapes the workspace directory")
+    return resolved
 
 
 def resolve_workspace_path(
@@ -268,31 +335,12 @@ def resolve_workspace_path(
     *,
     ensure_parent: bool = False,
 ) -> Path:
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
-    touch_session_workspace(session_id, cfg)
-    rel = _validate_relative_path(relative_path)
-    candidate = root.joinpath(*rel.parts)
-    _reject_symlink_components(root, candidate)
-    parent = candidate.parent
-    if parent.exists():
-        resolved_parent = parent.resolve(strict=True)
-        if not _is_relative_to(resolved_parent, root):
-            raise InvalidWorkspacePath("file path escapes the session directory")
-    elif ensure_parent:
-        parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
-        try:
-            os.chmod(parent, WORKSPACE_DIR_MODE)
-        except OSError as exc:
-            log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", parent, WORKSPACE_DIR_MODE, exc)
-        resolved_parent = parent.resolve(strict=True)
-        if not _is_relative_to(resolved_parent, root):
-            raise InvalidWorkspacePath("file path escapes the session directory")
-    else:
-        raise InvalidWorkspacePath("parent directory does not exist")
-    resolved = resolved_parent / candidate.name
-    if not _is_relative_to(resolved.resolve(strict=False), root):
-        raise InvalidWorkspacePath("file path escapes the session directory")
-    return resolved
+    return resolve_owner_workspace_path(
+        _workspace_session_owner_context(session_id),
+        relative_path,
+        cfg,
+        ensure_parent=ensure_parent,
+    )
 
 
 def _is_final_symlink_error(exc: OSError) -> bool:
@@ -306,17 +354,17 @@ def _open_workspace_file_no_follow(path: Path) -> tuple[int, os.stat_result]:
     try:
         fd = os.open(path, flags)
     except FileNotFoundError as exc:
-        raise WorkspaceFileNotFound("session file was not found") from exc
+        raise WorkspaceFileNotFound("workspace file was not found") from exc
     except OSError as exc:
         if _is_final_symlink_error(exc):
-            raise InvalidWorkspacePath("session file symlinks are not allowed") from exc
+            raise InvalidWorkspacePath("workspace file symlinks are not allowed") from exc
         if exc.errno in {errno.EACCES, errno.EPERM}:
-            raise WorkspacePermissionDenied("session file is not readable") from exc
+            raise WorkspacePermissionDenied("workspace file is not readable") from exc
         raise
     try:
         file_stat = os.fstat(fd)
         if not stat.S_ISREG(file_stat.st_mode):
-            raise WorkspaceFileNotFound("session file was not found")
+            raise WorkspaceFileNotFound("workspace file was not found")
         return fd, file_stat
     except Exception:
         os.close(fd)
@@ -328,10 +376,18 @@ def open_workspace_file_for_download(
     relative_path: str,
     cfg: dict[str, Any] | None = None,
 ) -> BinaryIO:
+    return open_owner_workspace_file_for_download(_workspace_session_owner_context(session_id), relative_path, cfg)
+
+
+def open_owner_workspace_file_for_download(
+    owner: OwnerContext | Any,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> BinaryIO:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
-    path = resolve_workspace_path(session_id, relative_path, cfg)
+    _repair_owner_workspace_relative_path_for_access(owner, relative_path, cfg, include_final_file=True)
+    path = resolve_owner_workspace_path(owner, relative_path, cfg)
     fd, _ = _open_workspace_file_no_follow(path)
     return os.fdopen(fd, "rb")
 
@@ -417,7 +473,7 @@ def _chmod_workspace_entry(path: Path, mode: int) -> None:
     except PermissionError as exc:
         if _sudo_chmod_workspace_path(path, mode):
             return
-        raise WorkspacePermissionDenied("session workspace permissions need repair") from exc
+        raise WorkspacePermissionDenied("workspace permissions need repair") from exc
     except OSError as exc:
         log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
 
@@ -444,7 +500,7 @@ def _workspace_iterdir_after_permission_repair(path: Path, path_stat: os.stat_re
         try:
             return list(path.iterdir())
         except PermissionError as exc:
-            raise WorkspacePermissionDenied("session folder is not readable") from exc
+            raise WorkspacePermissionDenied("workspace folder is not readable") from exc
 
 
 def _iter_workspace_entries(root: Path):
@@ -458,7 +514,7 @@ def _iter_workspace_entries(root: Path):
             except FileNotFoundError:
                 continue
             if stat.S_ISLNK(child_stat.st_mode):
-                raise InvalidWorkspacePath("session file symlinks are not allowed")
+                raise InvalidWorkspacePath("workspace file symlinks are not allowed")
             if stat.S_ISDIR(child_stat.st_mode):
                 _workspace_repair_dir_if_needed(child, child_stat)
                 yield child, child_stat
@@ -472,20 +528,28 @@ def normalize_session_workspace_permissions(
     cfg: dict[str, Any] | None = None,
 ) -> None:
     """Repair command-created workspace modes so appuser can list and read them."""
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    normalize_owner_workspace_permissions(_workspace_session_owner_context(session_id), cfg)
+
+
+def normalize_owner_workspace_permissions(
+    owner: OwnerContext | Any,
+    cfg: dict[str, Any] | None = None,
+) -> None:
+    """Repair command-created workspace modes so appuser can list and read them."""
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
     for path, path_stat in _iter_workspace_entries(root):
         if stat.S_ISREG(path_stat.st_mode):
             _workspace_repair_file_if_needed(path, path_stat)
 
 
-def _repair_workspace_relative_path_for_access(
-    session_id: str,
+def _repair_owner_workspace_relative_path_for_access(
+    owner: OwnerContext | Any,
     relative_path: str,
     cfg: dict[str, Any] | None = None,
     *,
     include_final_file: bool = False,
 ) -> None:
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
     rel = _validate_relative_path(relative_path)
     current = root
     for index, part in enumerate(rel.parts):
@@ -495,7 +559,7 @@ def _repair_workspace_relative_path_for_access(
         except FileNotFoundError:
             return
         if stat.S_ISLNK(current_stat.st_mode):
-            raise InvalidWorkspacePath("session file symlinks are not allowed")
+            raise InvalidWorkspacePath("workspace file symlinks are not allowed")
         is_final = index == len(rel.parts) - 1
         if stat.S_ISDIR(current_stat.st_mode):
             _workspace_repair_dir_if_needed(current, current_stat)
@@ -503,12 +567,29 @@ def _repair_workspace_relative_path_for_access(
             _workspace_repair_file_if_needed(current, current_stat)
 
 
+def _repair_workspace_relative_path_for_access(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+    *,
+    include_final_file: bool = False,
+) -> None:
+    _repair_owner_workspace_relative_path_for_access(
+        _workspace_session_owner_context(session_id),
+        relative_path,
+        cfg,
+        include_final_file=include_final_file,
+    )
+
+
 def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
     """Make a validated workspace path usable by the unprivileged scanner user."""
     if path.exists() and path.is_file():
         target_mode = WORKSPACE_COMMAND_WRITE_FILE_MODE if mode in {"write", "read_write"} else WORKSPACE_FILE_MODE
         try:
-            os.chmod(path, target_mode)
+            _chmod_workspace_entry(path, target_mode)
+        except WorkspacePermissionDenied:
+            raise
         except OSError as exc:
             log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, target_mode, exc)
 
@@ -516,7 +597,7 @@ def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
 def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
     """Make a validated workspace directory usable by command-managed databases."""
     if path.exists() and not path.is_dir():
-        raise InvalidWorkspacePath("session path is not a directory")
+        raise InvalidWorkspacePath("workspace path is not a directory")
     sudo_bin = _sudo_bin()
     scanner_exists = _scanner_user_exists()
     if sudo_bin and scanner_exists:
@@ -546,7 +627,7 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
                     pass
         if not path.exists():
             if mode not in {"write", "read_write"}:
-                raise WorkspaceFileNotFound(f"session directory not found: {path.name}")
+                raise WorkspaceFileNotFound(f"workspace directory not found: {path.name}")
             try:
                 subprocess.run(
                     [sudo_bin, "-u", "scanner", "-g", "appuser", "mkdir", "-p", str(path)],
@@ -571,10 +652,10 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
                 )
                 return
             except (subprocess.SubprocessError, OSError) as exc:
-                raise InvalidWorkspacePath("failed to prepare session directory for command") from exc
+                raise InvalidWorkspacePath("failed to prepare workspace directory for command") from exc
     if not path.exists():
         if mode not in {"write", "read_write"}:
-            raise WorkspaceFileNotFound(f"session directory not found: {path.name}")
+            raise WorkspaceFileNotFound(f"workspace directory not found: {path.name}")
         path.mkdir(mode=WORKSPACE_COMMAND_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_COMMAND_DIR_MODE)
@@ -582,9 +663,51 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
         log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_COMMAND_DIR_MODE, exc)
 
 
-def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
-    touch_session_workspace(session_id, cfg)
+def prepare_owner_workspace_target_for_command(
+    owner: OwnerContext | Any,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+    *,
+    mode: str,
+    kind: str = "file",
+) -> Path:
+    """Resolve and prepare a command-declared workspace target under owner quota rules."""
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    write_mode = mode in {"write", "read_write"}
+    is_directory = kind == "directory"
+    resolved = resolve_owner_workspace_path(
+        owner,
+        relative_path,
+        cfg,
+        ensure_parent=write_mode or is_directory,
+    )
+    if not write_mode:
+        if is_directory:
+            prepare_workspace_directory_for_command(resolved, mode=mode)
+        else:
+            if mode in {"read", "read_write"} and not resolved.is_file():
+                raise WorkspaceFileNotFound(f"workspace file not found: {relative_path}")
+            prepare_workspace_file_for_command(resolved, mode=mode)
+        return resolved
+
+    with workspace_owner_write_lock(owner):
+        if is_directory:
+            prepare_workspace_directory_for_command(resolved, mode=mode)
+            return resolved
+        if mode == "read_write" and not resolved.is_file():
+            raise WorkspaceFileNotFound(f"workspace file not found: {relative_path}")
+        reserve_bytes = 0 if resolved.exists() else 1
+        _check_owner_write_limits(owner, resolved, reserve_bytes, settings, cfg)
+        if not resolved.exists():
+            resolved.touch(mode=WORKSPACE_COMMAND_WRITE_FILE_MODE, exist_ok=True)
+        prepare_workspace_file_for_command(resolved, mode=mode)
+    return resolved
+
+
+def owner_workspace_usage(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
+    touch_owner_workspace(owner, cfg)
     bytes_used = 0
     file_count = 0
     for path, path_stat in _iter_workspace_entries(root):
@@ -594,9 +717,13 @@ def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> Works
     return WorkspaceUsage(bytes_used=bytes_used, file_count=file_count)
 
 
-def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
-    touch_session_workspace(session_id, cfg)
+def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
+    return owner_workspace_usage(_workspace_session_owner_context(session_id), cfg)
+
+
+def list_owner_workspace_files(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
+    touch_owner_workspace(owner, cfg)
     items: list[dict[str, Any]] = []
     for path, path_stat in _iter_workspace_entries(root):
         if not stat.S_ISREG(path_stat.st_mode):
@@ -609,9 +736,13 @@ def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> 
     return sorted(items, key=lambda item: str(item["path"]))
 
 
-def list_workspace_directories(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
-    touch_session_workspace(session_id, cfg)
+def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return list_owner_workspace_files(_workspace_session_owner_context(session_id), cfg)
+
+
+def list_owner_workspace_directories(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
+    touch_owner_workspace(owner, cfg)
     items: list[dict[str, Any]] = []
     for path, path_stat in _iter_workspace_entries(root):
         if not stat.S_ISDIR(path_stat.st_mode):
@@ -623,23 +754,63 @@ def list_workspace_directories(session_id: str, cfg: dict[str, Any] | None = Non
     return sorted(items, key=lambda item: str(item["path"]))
 
 
-def create_workspace_directory(
-    session_id: str,
+def list_workspace_directories(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return list_owner_workspace_directories(_workspace_session_owner_context(session_id), cfg)
+
+
+def create_owner_workspace_directory(
+    owner: OwnerContext | Any,
     relative_path: str,
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg)
-    path = resolve_workspace_path(session_id, relative_path, cfg, ensure_parent=True)
+    _repair_owner_workspace_relative_path_for_access(owner, relative_path, cfg)
+    path = resolve_owner_workspace_path(owner, relative_path, cfg, ensure_parent=True)
     if path.exists() and not path.is_dir():
-        raise InvalidWorkspacePath("session path is not a directory")
+        raise InvalidWorkspacePath("workspace path is not a directory")
     path.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_DIR_MODE)
     except OSError as exc:
         log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_DIR_MODE, exc)
     return {"path": _validate_relative_path(relative_path).as_posix()}
+
+
+def create_workspace_directory(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return create_owner_workspace_directory(_workspace_session_owner_context(session_id), relative_path, cfg)
+
+
+def _check_owner_write_limits(
+    owner: OwnerContext | Any,
+    destination: Path,
+    new_size: int,
+    settings: WorkspaceSettings,
+    cfg: dict[str, Any] | None,
+) -> None:
+    if new_size > settings.max_file_bytes:
+        app_metrics.record_workspace_quota_rejection()
+        raise WorkspaceQuotaExceeded("file exceeds workspace max file size")
+    usage = owner_workspace_usage(owner, cfg)
+    try:
+        destination_stat = destination.lstat()
+    except FileNotFoundError:
+        destination_stat = None
+    if destination_stat is not None and stat.S_ISLNK(destination_stat.st_mode):
+        raise InvalidWorkspacePath("workspace file symlinks are not allowed")
+    existing_size = destination_stat.st_size if destination_stat and stat.S_ISREG(destination_stat.st_mode) else 0
+    new_file_count = usage.file_count + (0 if destination_stat is not None else 1)
+    if new_file_count > settings.max_files:
+        app_metrics.record_workspace_quota_rejection()
+        raise WorkspaceQuotaExceeded("workspace file count limit exceeded")
+    projected = usage.bytes_used - existing_size + new_size
+    if projected > settings.quota_bytes:
+        app_metrics.record_workspace_quota_rejection()
+        raise WorkspaceQuotaExceeded("workspace file quota exceeded")
 
 
 def _check_write_limits(
@@ -649,25 +820,57 @@ def _check_write_limits(
     settings: WorkspaceSettings,
     cfg: dict[str, Any] | None,
 ) -> None:
-    if new_size > settings.max_file_bytes:
-        app_metrics.record_workspace_quota_rejection()
-        raise WorkspaceQuotaExceeded("file exceeds session max file size")
-    usage = workspace_usage(session_id, cfg)
-    try:
-        destination_stat = destination.lstat()
-    except FileNotFoundError:
-        destination_stat = None
-    if destination_stat is not None and stat.S_ISLNK(destination_stat.st_mode):
-        raise InvalidWorkspacePath("session file symlinks are not allowed")
-    existing_size = destination_stat.st_size if destination_stat and stat.S_ISREG(destination_stat.st_mode) else 0
-    new_file_count = usage.file_count + (0 if destination_stat is not None else 1)
-    if new_file_count > settings.max_files:
-        app_metrics.record_workspace_quota_rejection()
-        raise WorkspaceQuotaExceeded("session file count limit exceeded")
-    projected = usage.bytes_used - existing_size + new_size
-    if projected > settings.quota_bytes:
-        app_metrics.record_workspace_quota_rejection()
-        raise WorkspaceQuotaExceeded("session file quota exceeded")
+    _check_owner_write_limits(_workspace_session_owner_context(session_id), destination, new_size, settings, cfg)
+
+
+@contextmanager
+def workspace_owner_write_lock(owner: OwnerContext | Any):
+    """Serialize quota-gated writes; Postgres locks per owner, SQLite locks all writers."""
+    context = _coerce_owner_context(owner)
+    from core import database  # noqa: PLC0415
+    from core.database_backend import DatabaseBackend, postgres_advisory_lock_id  # noqa: PLC0415
+
+    namespace = f"darklab_shell_workspace:{context.scope}:{context.owner_id}"
+    with database.db_connect() as conn:
+        if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+            conn.execute("SELECT pg_advisory_xact_lock(?)", (postgres_advisory_lock_id(namespace),))
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def write_owner_workspace_text_file(
+    owner: OwnerContext | Any,
+    relative_path: str,
+    text: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    _repair_owner_workspace_relative_path_for_access(owner, relative_path, cfg)
+    destination = resolve_owner_workspace_path(owner, relative_path, cfg, ensure_parent=True)
+    encoded = str(text or "").encode("utf-8")
+    with workspace_owner_write_lock(owner):
+        _check_owner_write_limits(owner, destination, len(encoded), settings, cfg)
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile("wb", delete=False, dir=str(destination.parent)) as tmp:
+                tmp_path = Path(tmp.name)
+                tmp.write(encoded)
+            os.chmod(tmp_path, WORKSPACE_FILE_MODE)
+            tmp_path.replace(destination)
+        finally:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+    return {
+        "path": _validate_relative_path(relative_path).as_posix(),
+        "size": len(encoded),
+    }
 
 
 def write_workspace_text_file(
@@ -676,41 +879,22 @@ def write_workspace_text_file(
     text: str,
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    settings = workspace_settings(cfg)
-    _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg)
-    destination = resolve_workspace_path(session_id, relative_path, cfg, ensure_parent=True)
-    encoded = str(text or "").encode("utf-8")
-    _check_write_limits(session_id, destination, len(encoded), settings, cfg)
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile("wb", delete=False, dir=str(destination.parent)) as tmp:
-            tmp_path = Path(tmp.name)
-            tmp.write(encoded)
-        os.chmod(tmp_path, WORKSPACE_FILE_MODE)
-        tmp_path.replace(destination)
-    finally:
-        if tmp_path and tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-    return {
-        "path": _validate_relative_path(relative_path).as_posix(),
-        "size": len(encoded),
-    }
+    return write_owner_workspace_text_file(_workspace_session_owner_context(session_id), relative_path, text, cfg)
 
 
-def read_workspace_text_file(
-    session_id: str,
+def read_owner_workspace_text_file(
+    owner: OwnerContext | Any,
     relative_path: str,
     cfg: dict[str, Any] | None = None,
 ) -> str:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
-    path = resolve_workspace_path(session_id, relative_path, cfg)
+    _repair_owner_workspace_relative_path_for_access(owner, relative_path, cfg, include_final_file=True)
+    path = resolve_owner_workspace_path(owner, relative_path, cfg)
     fd, file_stat = _open_workspace_file_no_follow(path)
     if file_stat.st_size > settings.max_file_bytes:
         os.close(fd)
-        raise WorkspaceQuotaExceeded("file exceeds session max file size")
+        raise WorkspaceQuotaExceeded("file exceeds workspace max file size")
     with os.fdopen(fd, "rb") as handle:
         content = handle.read()
     if b"\x00" in content:
@@ -721,23 +905,31 @@ def read_workspace_text_file(
         raise WorkspaceBinaryFile("file is not valid UTF-8 text; download it instead") from exc
 
 
-def delete_workspace_file(
+def read_workspace_text_file(
     session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> str:
+    return read_owner_workspace_text_file(_workspace_session_owner_context(session_id), relative_path, cfg)
+
+
+def delete_owner_workspace_file(
+    owner: OwnerContext | Any,
     relative_path: str,
     cfg: dict[str, Any] | None = None,
 ) -> None:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
-    path = resolve_workspace_path(session_id, relative_path, cfg)
+    _repair_owner_workspace_relative_path_for_access(owner, relative_path, cfg, include_final_file=True)
+    path = resolve_owner_workspace_path(owner, relative_path, cfg)
     try:
         path_stat = path.lstat()
     except FileNotFoundError as exc:
-        raise WorkspaceFileNotFound("session file was not found") from exc
+        raise WorkspaceFileNotFound("workspace file was not found") from exc
     if stat.S_ISLNK(path_stat.st_mode):
-        raise InvalidWorkspacePath("session file symlinks are not allowed")
+        raise InvalidWorkspacePath("workspace file symlinks are not allowed")
     if not stat.S_ISREG(path_stat.st_mode):
-        raise WorkspaceFileNotFound("session file was not found")
+        raise WorkspaceFileNotFound("workspace file was not found")
     try:
         path.unlink()
         return
@@ -752,6 +944,14 @@ def delete_workspace_file(
             stderr=subprocess.DEVNULL,
             timeout=5,
         )
+
+
+def delete_workspace_file(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> None:
+    delete_owner_workspace_file(_workspace_session_owner_context(session_id), relative_path, cfg)
 
 
 def _workspace_directory_file_count(path: Path) -> int:
@@ -776,18 +976,143 @@ def _remove_workspace_directory(path: Path) -> None:
         )
 
 
+def _log_workspace_cleanup_skip(path: Path, exc: BaseException) -> None:
+    log.warning(
+        "WORKSPACE_CLEANUP_SKIP path=%s reason=%s error=%s",
+        path,
+        exc.__class__.__name__,
+        exc,
+        extra={"path": str(path), "reason": exc.__class__.__name__},
+    )
+
+
+def _repair_workspace_tree_for_cleanup(path: Path) -> None:
+    def on_walk_error(exc: OSError) -> None:
+        raise exc
+
+    for dirpath, dirnames, filenames in os.walk(path, topdown=True, onerror=on_walk_error):
+        current = Path(dirpath)
+        try:
+            _workspace_repair_dir_if_needed(current, current.lstat())
+        except FileNotFoundError:
+            continue
+        for name in list(dirnames):
+            child = current / name
+            try:
+                _workspace_repair_dir_if_needed(child, child.lstat())
+            except FileNotFoundError:
+                dirnames.remove(name)
+        for name in filenames:
+            child = current / name
+            try:
+                _workspace_repair_file_if_needed(child, child.lstat())
+            except FileNotFoundError:
+                continue
+
+
+def _remove_unreadable_direct_child_directories(path: Path) -> None:
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return
+    for child in children:
+        try:
+            child_stat = child.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(child_stat.st_mode) or not stat.S_ISDIR(child_stat.st_mode):
+            continue
+        try:
+            list(child.iterdir())
+        except PermissionError:
+            try:
+                child.rmdir()
+            except (FileNotFoundError, OSError):
+                continue
+        except OSError:
+            continue
+
+
+def _scanner_owned_cleanup_targets(path: Path) -> list[Path]:
+    targets: list[Path] = []
+    try:
+        root_stat = path.lstat()
+    except FileNotFoundError:
+        return targets
+    if _is_scanner_owned(root_stat):
+        return [path]
+
+    def on_walk_error(exc: OSError) -> None:
+        raise exc
+
+    for dirpath, dirnames, filenames in os.walk(path, topdown=True, onerror=on_walk_error):
+        current = Path(dirpath)
+        for name in list(dirnames):
+            child = current / name
+            try:
+                child_stat = child.lstat()
+            except FileNotFoundError:
+                dirnames.remove(name)
+                continue
+            if _is_scanner_owned(child_stat):
+                targets.append(child)
+                dirnames.remove(name)
+        for name in filenames:
+            child = current / name
+            try:
+                child_stat = child.lstat()
+            except FileNotFoundError:
+                continue
+            if _is_scanner_owned(child_stat):
+                targets.append(child)
+    return targets
+
+
+def _remove_workspace_cleanup_target(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        _remove_workspace_directory(path)
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _remove_inactive_workspace_directory(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        try:
+            _repair_workspace_tree_for_cleanup(path)
+        except OSError:
+            _remove_unreadable_direct_child_directories(path)
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        try:
+            targets = _scanner_owned_cleanup_targets(path)
+        except OSError:
+            _remove_unreadable_direct_child_directories(path)
+            targets = []
+        for target in targets:
+            _remove_workspace_cleanup_target(target)
+    shutil.rmtree(path)
+
+
 def _workspace_path_kind_and_count(path: Path) -> tuple[str, int]:
     try:
         path_stat = path.lstat()
     except FileNotFoundError as exc:
-        raise WorkspacePathNotFound("session file or folder was not found") from exc
+        raise WorkspacePathNotFound("workspace file or folder was not found") from exc
     if stat.S_ISLNK(path_stat.st_mode):
-        raise InvalidWorkspacePath("session file symlinks are not allowed")
+        raise InvalidWorkspacePath("workspace file symlinks are not allowed")
     if stat.S_ISREG(path_stat.st_mode):
         return "file", 1
     if stat.S_ISDIR(path_stat.st_mode):
         return "directory", _workspace_directory_file_count(path)
-    raise WorkspacePathNotFound("session file or folder was not found")
+    raise WorkspacePathNotFound("workspace file or folder was not found")
 
 
 def workspace_path_has_glob(relative_path: str) -> bool:
@@ -802,15 +1127,15 @@ def _workspace_glob_matches(pattern: PurePosixPath, path: PurePosixPath) -> bool
     return all(fnmatch.fnmatchcase(path_part, pattern_part) for pattern_part, path_part in zip(pattern_parts, path_parts))
 
 
-def expand_workspace_path_pattern(
-    session_id: str,
+def expand_owner_workspace_path_pattern(
+    owner: OwnerContext | Any,
     relative_pattern: str,
     cfg: dict[str, Any] | None = None,
     *,
     kind: str = "any",
 ) -> list[WorkspacePathMatch]:
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
-    touch_session_workspace(session_id, cfg)
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
+    touch_owner_workspace(owner, cfg)
     pattern = _validate_relative_path(relative_pattern)
     normalized_kind = str(kind or "any").strip().lower()
     matches: list[WorkspacePathMatch] = []
@@ -837,15 +1162,30 @@ def expand_workspace_path_pattern(
     return matches
 
 
-def workspace_path_info(
+def expand_workspace_path_pattern(
     session_id: str,
+    relative_pattern: str,
+    cfg: dict[str, Any] | None = None,
+    *,
+    kind: str = "any",
+) -> list[WorkspacePathMatch]:
+    return expand_owner_workspace_path_pattern(
+        _workspace_session_owner_context(session_id),
+        relative_pattern,
+        cfg,
+        kind=kind,
+    )
+
+
+def owner_workspace_path_info(
+    owner: OwnerContext | Any,
     relative_path: str,
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
-    path = resolve_workspace_path(session_id, relative_path, cfg)
+    _repair_owner_workspace_relative_path_for_access(owner, relative_path, cfg, include_final_file=True)
+    path = resolve_owner_workspace_path(owner, relative_path, cfg)
     normalized = _validate_relative_path(relative_path).as_posix()
     kind, file_count = _workspace_path_kind_and_count(path)
     if kind == "file":
@@ -853,25 +1193,41 @@ def workspace_path_info(
     return {"path": normalized, "kind": "directory", "file_count": file_count}
 
 
-def delete_workspace_path(
+def workspace_path_info(
     session_id: str,
     relative_path: str,
     cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return owner_workspace_path_info(_workspace_session_owner_context(session_id), relative_path, cfg)
+
+
+def delete_owner_workspace_path(
+    owner: OwnerContext | Any,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
 ) -> WorkspaceDeleteResult:
-    info = workspace_path_info(session_id, relative_path, cfg)
-    path = resolve_workspace_path(session_id, relative_path, cfg)
+    info = owner_workspace_path_info(owner, relative_path, cfg)
+    path = resolve_owner_workspace_path(owner, relative_path, cfg)
     if info["kind"] == "file":
-        delete_workspace_file(session_id, relative_path, cfg)
+        delete_owner_workspace_file(owner, relative_path, cfg)
     elif info["kind"] == "directory":
         _remove_workspace_directory(path)
     else:
-        raise WorkspacePathNotFound("session file or folder was not found")
+        raise WorkspacePathNotFound("workspace file or folder was not found")
     app_metrics.record_workspace_evictions(max(1, int(info["file_count"] or 0)), "manual")
     return WorkspaceDeleteResult(
         path=str(info["path"]),
         kind=str(info["kind"]),
         file_count=int(info["file_count"]),
     )
+
+
+def delete_workspace_path(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> WorkspaceDeleteResult:
+    return delete_owner_workspace_path(_workspace_session_owner_context(session_id), relative_path, cfg)
 
 
 def _move_workspace_path_direct(source: Path, destination: Path) -> None:
@@ -891,21 +1247,21 @@ def _move_workspace_path_direct(source: Path, destination: Path) -> None:
         )
 
 
-def move_workspace_path(
-    session_id: str,
+def move_owner_workspace_path(
+    owner: OwnerContext | Any,
     source_relative_path: str,
     destination_relative_path: str,
     cfg: dict[str, Any] | None = None,
 ) -> WorkspaceMoveResult:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
-    _repair_workspace_relative_path_for_access(session_id, source_relative_path, cfg, include_final_file=True)
+    _repair_owner_workspace_relative_path_for_access(owner, source_relative_path, cfg, include_final_file=True)
     if destination_relative_path not in {"", "/"}:
         destination_parent = PurePosixPath(destination_relative_path or "").parent
         if destination_parent != PurePosixPath("."):
-            _repair_workspace_relative_path_for_access(session_id, destination_parent.as_posix(), cfg)
-    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
-    source_path = resolve_workspace_path(session_id, source_relative_path, cfg)
+            _repair_owner_workspace_relative_path_for_access(owner, destination_parent.as_posix(), cfg)
+    root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
+    source_path = resolve_owner_workspace_path(owner, source_relative_path, cfg)
     source_normalized = _validate_relative_path(source_relative_path).as_posix()
     raw_destination = str(destination_relative_path or "").strip()
     kind, file_count = _workspace_path_kind_and_count(source_path)
@@ -916,7 +1272,7 @@ def move_workspace_path(
         destination_normalized = ""
     else:
         destination_normalized = _validate_relative_path(destination_relative_path).as_posix()
-        destination_path = resolve_workspace_path(session_id, destination_relative_path, cfg)
+        destination_path = resolve_owner_workspace_path(owner, destination_relative_path, cfg)
     if destination_path.exists():
         if not destination_path.is_dir():
             raise InvalidWorkspacePath("destination already exists")
@@ -932,7 +1288,7 @@ def move_workspace_path(
     if final_destination.exists():
         raise InvalidWorkspacePath("destination already exists")
     if not _is_relative_to(final_destination.resolve(strict=False), root):
-        raise InvalidWorkspacePath("file path escapes the session directory")
+        raise InvalidWorkspacePath("file path escapes the workspace directory")
     if source_path.resolve(strict=False) == final_destination.resolve(strict=False):
         raise InvalidWorkspacePath("source and destination are the same")
     if kind == "directory":
@@ -943,13 +1299,28 @@ def move_workspace_path(
 
     final_destination.parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
     _chmod_workspace_dir(final_destination.parent)
-    _move_workspace_path_direct(source_path, final_destination)
-    touch_session_workspace(session_id, cfg)
+    with workspace_owner_write_lock(owner):
+        _move_workspace_path_direct(source_path, final_destination)
+    touch_owner_workspace(owner, cfg)
     return WorkspaceMoveResult(
         source=source_normalized,
         destination=final_destination_relative,
         kind=kind,
         file_count=file_count,
+    )
+
+
+def move_workspace_path(
+    session_id: str,
+    source_relative_path: str,
+    destination_relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> WorkspaceMoveResult:
+    return move_owner_workspace_path(
+        _workspace_session_owner_context(session_id),
+        source_relative_path,
+        destination_relative_path,
+        cfg,
     )
 
 
@@ -993,6 +1364,8 @@ def migrate_session_workspace(
     cfg: dict[str, Any] | None = None,
 ) -> WorkspaceMigrationResult:
     """Merge one session workspace into another without overwriting files."""
+    if str(from_session_id or "").startswith("team_") or str(to_session_id or "").startswith("team_"):
+        raise InvalidWorkspacePath("session workspace migration is personal-only")
     settings = workspace_settings(cfg)
     if not settings.enabled or from_session_id == to_session_id:
         return WorkspaceMigrationResult()
@@ -1115,8 +1488,17 @@ def cleanup_inactive_workspaces(
             continue
         if skip_name and child.name == skip_name:
             continue
-        if child.stat().st_mtime < cutoff:
-            shutil.rmtree(child)
+        try:
+            expired = child.stat().st_mtime < cutoff
+        except OSError as exc:
+            _log_workspace_cleanup_skip(child, exc)
+            continue
+        if expired:
+            try:
+                _remove_inactive_workspace_directory(child)
+            except OSError as exc:
+                _log_workspace_cleanup_skip(child, exc)
+                continue
             removed += 1
     app_metrics.record_workspace_evictions(removed, "inactive")
     return removed

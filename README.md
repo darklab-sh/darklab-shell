@@ -33,27 +33,27 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 - **Terminal workflow** — live output streaming with structured row metadata, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep` and `tail`, keyboard shortcuts, quiet-stream warnings, and same-tab recovery when an active stream detaches or starts moving again
 - **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
-- **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, and a mobile History panel with collapsible search, filter, and bulk-action tools
-- **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, jump-to-live / jump-to-bottom controls, and exports that keep permalink pages, saved HTML, and PDF output visually aligned where the PDF renderer allows
-- **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
-- **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context with lazy expansion, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
+- **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, a desktop-aligned mobile menu with compact context hints, and a mobile History panel with collapsible search, filter, and bulk-action tools
+- **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, deterministic outcome summaries for supported noisy tools, quieter handling for known progress/status chatter, jump-to-live / jump-to-bottom controls, and exports/permalinks that include the same visible summaries while keeping raw transcripts unchanged
+- **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, cleaner saved search text that skips known scanner noise without deleting raw output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, selected-history exports as text or JSONL, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
+- **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context, folded scanner chatter, detected-change summaries for supported scan output, lazy expansion for unchanged lines, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
-- **Encrypted secrets** — per-session API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
+- **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
-- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run, saved views restore repeat filter sets and can be cleared back to defaults, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus bulk updates, visible-page suppression, and visible-page delete actions
-- **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
-- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, and draft evidence packages without copying the source records. Active projects can auto-link completed runs and the Atlas entities those runs produce, manual run-link actions can include the entities found in the same run, run-unlink actions can clean up same-run disposable entity links from the project with a separate curated-entity opt-in and finding-impact counts, terminal `project link run last` stays scoped to the current tab, terminal `project rename` handles quick name changes, project rows show run/finding/artifact/package scale before opening them, project views hide suppressed Atlas noise by default, expose paged, filterable, and bulk finding review, artifact review, cached entity intel context, metadata editing, and project-scoped Atlas exports, and package exports preserve the selected project evidence with polled archive builds, transcript line provenance, raw artifacts, or redacted text/JSON artifact derivatives
-- **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
-- **Session tokens** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, and saved options across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
+- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; the generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
+- **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
+- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, and draft evidence packages without copying the source records. Active projects can auto-link completed runs and the Atlas entities those runs produce, and Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes. Rules set to apply to new runs watch future runs in the same personal or team scope and can add matches to the rule's project even when another project is active. When a rule matches entities for the active project, those links are confirmed as rule-created links instead of entering the normal confirm/dismiss queue. Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, and evidence packages, manual run-link actions can include the entities found in the same run, run-unlink actions can clean up same-run disposable entity links from the project with a separate curated-entity opt-in and finding-impact counts, terminal `project link run last` stays scoped to the current tab, terminal `project rename` handles quick name changes, project rows show run/finding/artifact/package scale before opening them, project views hide suppressed Atlas noise by default, expose paged, filterable finding review in list or board form, artifact review, cached entity intel context, metadata editing, and project-scoped Atlas exports, and package exports preserve selected project evidence through operator-configured presets with raw transcript pages, cleaner manifest line indexes, polled archive builds, raw artifacts, or redacted text/JSON artifact derivatives
+- **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, team-scope sharing for live PTY sessions, and completed transcripts saved back into normal history
+- **Session tokens and teams** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, saved options, and team memberships across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. The Options **Teams** tab and `/api/v1/teams` cover team creation, invites, member edits, recovery codes, archive/reactivate, and shared scope management; `darklab team ...` covers script-friendly team creation, invites, joins, member edits, recovery codes, and saved CLI scope; and the terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation. Team scopes share team-owned runs while they're still running, plus History, Run Details, Files, Projects, project targets, finding review, labels, notes, cached Atlas intel, linked-run artifacts, evidence packages, shared workflows, schedules, watchers, notification delivery history, completed-run AI assists, and explicit team secrets while keeping personal work separate. Archived teams stay visible for review and reactivation, and Files stays readable, but archived teams cannot be used for active team work, invites, membership edits, invite revocation, recovery-code rotation, or file changes until reactivated. Reactivating an archived team restores access, but schedules and watchers paused by archival stay paused until someone resumes them. Team roles keep viewers read-only while operators, admins, and owners handle the write actions their roles allow; view-only team scope disables destructive/write, suppression, finding-review, history metadata edit and delete, share snapshot, and write-only select-mode controls where possible and explains role denials when a stale action is rejected. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; app-native intel response bodies are omitted from share/styled export surfaces, while local text exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion, using command-root-only titles and exit/elapsed summaries without sending anything outside the browser
-- **Outbound notifications** — durable `tok_` sessions can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, terminal `notify` management, retries, and delivery audit rows
-- **Scheduled runs** — durable `tok_` sessions can save recurring commands with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
-- **Watchers** — durable `tok_` sessions can turn a command or completed run into a recurring change monitor, capture the first successful run as the baseline when needed, review the latest diff and fire audit from the browser, pause/resume checks, and accept the latest run as the new baseline when a change is expected
-- **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
-- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
-- **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
-- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. Users can save session-scoped workflows with `{{variables}}`, edit/delete them above the built-ins, and run them from the terminal with `workflow list/show/run`
+- **Outbound notifications** — durable `tok_` sessions and active teams can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, terminal `notify` management, retries, and delivery audit rows
+- **Scheduled runs** — durable `tok_` sessions can save recurring commands in the active personal or team scope with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
+- **Watchers** — durable `tok_` sessions can turn a command or completed run in the active personal or team scope into a recurring change monitor, capture the first successful run as the baseline when needed, review the latest diff and fire audit from the browser, pause/resume checks, and accept the latest run as the new baseline when a change is expected
+- **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior, command outcome summaries, and default share-snapshot redaction that now follow the active session token instead of staying browser-local
+- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` (with `--json` for a machine-readable entry), `commands search <term>`, and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, subcommands, and per-tool knowledge guidance (notes, gotchas, safe defaults, and artifact behavior) from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
+- **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, manage team scope, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
+- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. Users can save personal or team-scoped workflows with `{{variables}}`, edit/delete them above the built-ins, and run them from the terminal with `workflow list/show/run`
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
@@ -93,9 +93,9 @@ Before you begin, make sure you have:
 - Python 3.14+
 - pip3
 - Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- (Optional) Redis 6.2+ (for `GETDEL` support). If not configured or available, the app falls back to in-process mode
+- (Optional) Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. If not configured or available, the app falls back to in-process mode
 
-Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
+Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter, redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
 
 The easiest path is to run:
 
@@ -174,7 +174,7 @@ Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, includ
 - Files/workspace storage recipes
 - production host tuning notes
 
-SQLite is the default backend for local and single-user installs. Postgres is supported for larger deployments; with Compose, set both the `.env` values that start the `postgres` service and the app database settings described in [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection). If you're moving an existing install to Postgres, use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow after you've backed up the SQLite data directory.
+SQLite is the default backend for local and single-user installs. Postgres is supported for larger deployments; with Compose, set both the `.env` values that start the `postgres` service and the app database settings described in [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection). If you're moving an existing install to Postgres, use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow after you've backed up the SQLite data directory. Existing Compose-managed Postgres volumes from older major versions should use the same guide's export/import upgrade path before starting the newer Postgres service.
 
 Theme authoring details stay in [THEME.md](THEME.md), and command registry integration details stay in [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
@@ -227,7 +227,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `urlscan-cli` | urlscan.io URL submission, result lookup, and search; requires `URLSCAN_API_KEY` in the encrypted secrets vault |
 | `chaos` | ProjectDiscovery Chaos subdomain lookups; requires `PDCP_API_KEY` in the encrypted secrets vault |
 
-The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails; `intel url <url>` checks URLhaus, ThreatFox, and urlscan.io; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and paid-only SecurityTrails use encrypted session secrets; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys.
+The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails; `intel url <url>` checks URLhaus, ThreatFox, and urlscan.io; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and paid-only SecurityTrails use encrypted secrets from the active personal or team scope; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys.
 
 ### Tool Notes
 
@@ -265,7 +265,7 @@ When Files are enabled, `wget` downloads go to the active Files folder by defaul
 
 `nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so generic scratch writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
 
-When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active session workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute session-workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, and `naabu` auxiliary input files.
+When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active personal/team workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, and `naabu` auxiliary input files.
 
 ---
 
@@ -278,6 +278,8 @@ docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --bu
 ```
 
 The production overlay adds reverse-proxy-aware environment values, GELF Docker log transport, an external Docker network model, persistent workspace storage at `/workspaces`, scanner-friendly `ulimits` and network sysctls, and optional Gunicorn sizing through `.env`.
+
+The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
 
@@ -293,15 +295,18 @@ darklab_shell uses layered controls rather than trusting the browser alone:
 - loopback targets like `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked
 - shell chaining operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution are blocked when the allowlist is active
 - container startup also adds an OS-level guard so `scanner` cannot connect back to the app port
+- optional `RESTRICTED_COMMAND_INPUT_CIDRS` values reject obvious blocked targets in command validation and add scanner-user egress deny rules in the container
 
 This section is intentionally operator-focused. For the developer-facing details behind cross-user signalling, Redis-backed multi-worker kill, and the `nmap` capability model, use [ARCHITECTURE.md](ARCHITECTURE.md).
+
+`RESTRICTED_COMMAND_INPUT_CIDRS` is the recommended Compose setting when the app runs behind a NAT, VPN, or firewall that can reach internal networks. The app layer catches literal IPs, CIDRs, literal-IP URLs, host:port values, and declared target files before a command starts; the container rule is the backstop for DNS names, CNAMEs, and tool-managed resolver inputs. The rule is scoped to the `scanner` user so app-owned Redis, Postgres, AI, metrics, and notification traffic can keep using Docker-internal networks.
 
 ### Read-only filesystem
 
 The container filesystem is set to read-only (`read_only: true`) and the app volume is mounted read-only (`./app:/app:ro`). There are two intentional exceptions:
 
 - **`/data`** — a writable bind mount for the default SQLite database, run-output artifacts, body-store files, and app-owned secret key file, owned by `appuser` with `chmod 700`. Postgres deployments still use this path for filesystem-backed artifacts and app-owned files. Only Gunicorn can write here; the `scanner` user that runs commands has no access. If `data_dir` is unset and `/data` is not writable, the app falls back to `/tmp` for local/dev runs
-- **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, cache files, and optional session workspaces. Workspace session directories are app-managed, sticky, setgid, and group-scoped so `appuser` and `scanner` can share validated files without making them world-readable
+- **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, cache files, and optional Files workspaces. Workspace owner directories are app-managed, sticky, setgid, and group-scoped so `appuser` and `scanner` can share validated files without making them world-readable
 
 ### Session Files Storage
 
@@ -311,6 +316,8 @@ Files/workspace storage has two coordinated settings:
 - `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
 
 Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
+
+Team Files use the same root as personal Files. Personal directories are named `sess_*`; team directories are named `team_*`. Use `workspace_backend: volume` with a persistent shared mount when team Files need to survive restarts. With `tmpfs`, team Files are useful scratch space inside one running container, but they are wiped on restart.
 
 For short-lived tmpfs storage, keep the default model:
 
@@ -392,7 +399,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - Outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](docs/schedules.md) - Scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - Change-detection watcher baseline, diff, scheduler, and notification behavior
@@ -456,10 +463,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
 │   │   ├── schedules.py        # /schedules* browser scheduled-run CRUD and manual fire routes
-│   │   ├── secrets.py          # /session/secrets* encrypted per-session secret metadata and write routes
+│   │   ├── secrets.py          # /session/secrets* encrypted personal/team secret metadata and write routes
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
+│   │   ├── teams.py            # /session/teams* browser team, invite, member, and recovery routes
 │   │   ├── watchers.py         # /watchers* browser watcher CRUD, fire audit, run-now, and baseline routes
-│   │   └── workspace.py        # /workspace/files* app-managed session file routes
+│   │   └── workspace.py        # /workspace/files* app-managed personal/team file routes
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
 │   │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
@@ -468,6 +476,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── commands.yaml           # Structured command registry for catalog grouping, autocomplete hints, runtime adaptations, and smoke-test examples
 │   │   ├── config.yaml             # Application configuration (see CONFIGURATION.md)
 │   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
+│   │   ├── package_presets.yaml    # Evidence package preset catalog used by the package wizard
 │   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── themes/                 # Built-in theme definitions (one YAML per theme — apricot_sand, charcoal_amber, darklab_obsidian, etc.)
@@ -498,7 +507,21 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0011_watchers.py # Postgres watcher state and fire-audit tables
 │   │   │   ├── v0012_run_output_summary.py # Postgres structured output summary table for fast output filters
 │   │   │   ├── v0013_ai_run_assists.py # Postgres AI assist queue/cache and suggestion validation tables
-│   │   │   └── v0014_ai_assist_progress.py # Postgres in-flight AI assist progress column
+│   │   │   ├── v0014_ai_assist_progress.py # Postgres in-flight AI assist progress column
+│   │   │   ├── v0015_teams.py # Postgres team-mode base tables
+│   │   │   ├── v0016_team_scope_runs.py # Postgres team ownership for runs, snapshots, and recent values
+│   │   │   ├── v0017_team_scope_projects.py # Postgres team ownership for Projects
+│   │   │   ├── v0018_team_scope_automation.py # Postgres team ownership for schedules and watchers
+│   │   │   ├── v0019_team_scope_notifications.py # Postgres team ownership for notification channels and events
+│   │   │   ├── v0020_team_scope_ai_assists.py # Postgres team ownership for AI assist queue/cache rows
+│   │   │   ├── v0021_team_scope_workflows.py # Postgres team ownership for saved workflows
+│   │   │   ├── v0022_project_slug_scope.py # Postgres personal/team Project slug uniqueness
+│   │   │   ├── v0023_team_code_hash_uniqueness.py # Postgres global uniqueness for team invite/recovery codes
+│   │   │   ├── v0024_team_scope_atlas.py # Postgres team-owned Atlas entity/finding deduplication
+│   │   │   ├── v0025_team_scope_workspace_metadata.py # Postgres team-owned workspace-file metadata
+│   │   │   ├── v0026_project_auto_promote_rules.py # Postgres Project auto-promote rules
+│   │   │   ├── v0027_atlas_import_sources.py # Postgres Atlas import draft, batch, and source-link tables
+│   │   │   └── v0028_finding_triage_details.py # Postgres finding remediation and verification table
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -529,10 +552,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
 │   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
+│   │   │   ├── import_parser.py # Atlas import file parsing and normalization helpers
+│   │   │   ├── import_sources.py # Atlas import draft, batch, and provenance storage helpers
+│   │   │   ├── import_workflow.py # Atlas import preview/apply workflow helpers
 │   │   │   ├── intel_bridge.py # Atlas entity intel refresh and snapshot persistence helpers
 │   │   │   ├── lookup.py       # Session entity list/detail queries and Atlas metadata shaping
 │   │   │   ├── materializer.py # Run-output entity materialization into the Atlas tables
-│   │   │   └── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
+│   │   │   ├── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
+│   │   │   └── scope.py        # Shared Atlas owner and source-scope predicates
 │   │   ├── commands/
 │   │   │   ├── __init__.py     # Command service package marker
 │   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar
@@ -546,10 +573,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_project.py # Project workspace built-in command family and project target helpers
 │   │   │   ├── builtins_runtime.py # Runtime/history/status built-in command handlers
 │   │   │   ├── builtins_schedule.py # Scheduled-run built-in command family
-│   │   │   ├── builtins_secrets.py # Encrypted session secret built-in command handlers
+│   │   │   ├── builtins_secrets.py # Encrypted personal/team secret built-in command handlers
 │   │   │   ├── builtins_session.py # Session token status and session variable built-in command handlers
 │   │   │   ├── builtins_shortcuts.py # Keyboard shortcut reference and shortcuts built-in command handler
 │   │   │   ├── builtins_system.py # Small system-style built-in command handlers
+│   │   │   ├── builtins_team.py # Team management built-in command family
 │   │   │   ├── builtins_watch.py # Watcher built-in command family
 │   │   │   ├── builtins_wordlist.py # Wordlist built-in command handler backed by the SecLists catalog service
 │   │   │   ├── builtins_workspace.py # Session file built-in command family and workspace aliases
@@ -563,6 +591,18 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # Diagnostics service package marker
 │   │   │   ├── classifier_drift.py # Recent-output classifier drift sampler for /diag
 │   │   │   └── storage.py      # Shared cached database storage snapshot for /diag and Prometheus
+│   │   ├── diff/
+│   │   │   ├── __init__.py     # Shared diff service package marker
+│   │   │   ├── classifiers/
+│   │   │   │   ├── __init__.py # Shared tool-aware diff classifier registry and priority ordering
+│   │   │   │   ├── common.py   # Shared parser, host, line-index, and bounded-list helpers
+│   │   │   │   ├── findings.py # Structured finding fingerprint diff classifier
+│   │   │   │   ├── hosts.py    # Host and subdomain list diff classifier
+│   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
+│   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
+│   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
+│   │   │   └── models.py       # Shared diff result dataclass and diff-kind constants
+│   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
@@ -623,6 +663,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── active.py       # Active project preference and lookup helpers
 │   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
+│   │   │   ├── auto_promote.py # Project Atlas auto-promote rule matching and apply helpers
 │   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
 │   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes
 │   │   │   ├── crud.py         # Project create, update, delete, and cleanup helpers
@@ -633,10 +674,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
+│   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
 │   │   │   ├── package_rendering.py # Evidence package HTML, Markdown, JSON, and transcript export helpers
 │   │   │   ├── packages.py     # Evidence package payload, manifest, redaction, and archive-name helpers
 │   │   │   ├── preferences.py  # Project-related session preference helpers
 │   │   │   ├── queries.py      # Project list, summary, run, entity, and artifact query helpers
+│   │   │   ├── scope.py        # Project personal/team owner-scope SQL helpers
 │   │   │   ├── slugs.py        # Project slug normalization and allocation helpers
 │   │   │   ├── targets.py      # Project target validation, discovery, and mutation helpers
 │   │   │   ├── utils.py        # Shared project IDs, timestamps, quotas, and text helpers
@@ -672,7 +715,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── secrets/
 │   │   │   ├── __init__.py     # Secrets service package marker
 │   │   │   ├── audit.py        # Structured audit events for secret metadata operations
-│   │   │   ├── storage.py      # Metadata and ciphertext row helpers for encrypted session secrets
+│   │   │   ├── storage.py      # Metadata and ciphertext row helpers for encrypted personal/team secrets
 │   │   │   └── vault.py        # Master-key loading, HKDF derivation, and AES-GCM wrap/unwrap helpers
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
@@ -680,16 +723,23 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── storage/
 │   │   │   ├── __init__.py     # Shared file-backed storage package marker
 │   │   │   └── body_store.py   # Compressed large-body offload helpers for DB text columns
+│   │   ├── teams/
+│   │   │   ├── __init__.py     # Team-mode service package exports
+│   │   │   ├── capabilities.py # Team role-to-capability matrix and enforcement helper
+│   │   │   ├── contracts.py    # Team-mode constants and exception classes
+│   │   │   ├── request_scope.py # Request-local personal/team active-scope resolver
+│   │   │   ├── scope.py        # Personal/team owner-context and query predicate helpers
+│   │   │   └── storage.py      # Team, member, invite, and recovery-code storage helpers
 │   │   ├── watchers/
 │   │   │   ├── __init__.py     # Watcher change-detection service package marker
 │   │   │   ├── classifiers/
-│   │   │   │   ├── __init__.py # Watcher diff classifier registry and priority ordering
-│   │   │   │   ├── common.py   # Shared parser, host, and bounded-list helpers for watcher classifiers
-│   │   │   │   ├── findings.py # Structured finding fingerprint diff classifier
-│   │   │   │   ├── hosts.py    # Host and subdomain list diff classifier
-│   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
-│   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
-│   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
+│   │   │   │   ├── __init__.py # Compatibility exports for the shared diff classifier registry
+│   │   │   │   ├── common.py   # Compatibility exports for shared diff classifier helpers
+│   │   │   │   ├── findings.py # Compatibility wrapper for the shared findings classifier
+│   │   │   │   ├── hosts.py    # Compatibility wrapper for the shared hosts classifier
+│   │   │   │   ├── ports.py    # Compatibility wrapper for the shared ports classifier
+│   │   │   │   ├── textual.py  # Compatibility wrapper for the shared textual classifier
+│   │   │   │   └── tls.py      # Compatibility wrapper for the shared TLS classifier
 │   │   │   ├── diff.py         # Watcher diff wrapper over shared run-comparison helpers
 │   │   │   ├── finalize.py     # Completed watcher-run diff, state transition, and notification hook
 │   │   │   ├── models.py       # Watcher, watcher-fire, and watcher-diff dataclasses and constants
@@ -699,10 +749,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── workflows/
 │   │   │   ├── __init__.py     # Workflow service package marker
 │   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers
-│   │   │   └── user_workflows.py # Per-session user workflow storage, validation, and serialization helpers
+│   │   │   └── user_workflows.py # Personal/team workflow storage, validation, and serialization helpers
 │   │   └── workspace/
 │   │       ├── __init__.py     # Workspace service package marker
-│   │       └── files.py        # App-mediated per-session workspace path, quota, and cleanup helpers
+│   │       └── files.py        # App-mediated personal/team workspace path, quota, and cleanup helpers
 │   ├── static/
 │   │   ├── css/
 │   │   │   ├── core/
@@ -765,6 +815,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   └── suggestions.js # Command autocomplete suggestion resolution, recent values, and value-slot application
 │   │       │   ├── command-registry/
 │   │       │   │   └── command_registry.js # FAQ command helpers plus Command Registry and Command Catalog modal logic
+│   │       │   ├── findings/
+│   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
+│   │       │   │   └── findings_board_modal.js # Top-level Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
 │   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
 │   │       │   │   ├── history_links.js # History run permalink and snapshot link helpers
@@ -783,15 +836,17 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── notification_channels.js # Options modal outbound notification channel list, editor, mute, delete, and test-send helpers
 │   │       │   │   ├── preferences.js # Session preference loading, persistence, and Options modal control syncing
 │   │       │   │   ├── secrets_panel.js # Options modal encrypted secret list, replace, delete, and terminal value prompt helpers
-│   │       │   │   └── session_token_controls.js # Options modal session token generation, migration, and clearing controls
+│   │       │   │   ├── session_token_controls.js # Options modal session token generation, migration, and clearing controls
+│   │       │   │   └── teams_panel.js # Options modal team creation, members, invites, recovery, and scope actions
 │   │       │   ├── projects/
 │   │       │   │   ├── project_active_context.js # Active Project HUD context, refresh, and target discovery helpers
 │   │       │   │   ├── project_artifacts.js # Project Artifacts rows, status badges, preview, and download helpers
 │   │       │   │   ├── project_details.js # Project Details labels, notes autosave, and target section rendering
-│   │       │   │   ├── project_entities.js # Project Entities tab rendering, picker, export, and Atlas handoff helpers
+│   │       │   │   ├── project_entities.js # Project Entities rows, rules, picker, export, and Atlas handoff helpers
 │   │       │   │   ├── project_entity_editor.js # Project metadata editor lifecycle and save flow
 │   │       │   │   ├── project_filters.js # Project workspace filter state, dropdowns, chips, and filtered view helpers
 │   │       │   │   ├── project_findings.js # Project Findings rows, bulk review toolbar, and review controls
+│   │       │   │   ├── project_findings_board.js # Project Findings board columns, cards, and card actions
 │   │       │   │   ├── project_findings_data.js # Project Findings cache, filtered results, and loading helpers
 │   │       │   │   ├── project_list.js # Project list/sidebar ordering, sections, and desktop/mobile row rendering
 │   │       │   │   ├── project_mobile_compare.js # Project mobile run comparison sheet
@@ -837,6 +892,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── tab_drag_reorder.js # Tab pointer/touch drag reordering behavior
 │   │       │   │   ├── tab_exports.js # Tab transcript copy, export, and permalink actions
 │   │       │   │   └── tab_session_state.js # Tab session persistence and restore after reload
+│   │       │   ├── team_scope.js # Active personal/team scope menu, selector, and cross-surface refresh wiring
 │   │       │   ├── terminal/
 │   │       │   │   ├── composer_controller.js # Terminal composer paste, focus, autocomplete input, and keyboard handling
 │   │       │   │   ├── composer_editing.js # Terminal composer caret, selection, and word-boundary helpers
@@ -905,7 +961,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── api.md                 # Headless API and bundled CLI usage guide
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   ├── notifications.md       # Outbound notification channels, payloads, retries, and setup guide
-│   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover helper and validation workflow
+│   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 │   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
@@ -968,6 +1024,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   ├── share.spec.js   # snapshot permalinks and clipboard behavior
     │   │   ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
     │   │   ├── tabs.spec.js    # tab lifecycle, rename, reorder, and new-tab behavior
+    │   │   ├── team-mode.spec.js # team creation, invite redemption, active scope switching, and shared team history
     │   │   ├── theme-audit.spec.js # walks all built-in themes to catch colour leaks and unstyled surfaces
     │   │   ├── timestamps.spec.js # timestamp and line-number toggle behavior
     │   │   ├── ui-capture.desktop.capture.js # Desktop UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
@@ -990,8 +1047,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
     │       ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
     │       ├── button_primitives_runtime.test.js # runtime contract — mounts JS-rendered history/mobile pagination controls and verifies they still use shared button primitives
+    │       ├── command_registry.test.js # Command Registry modal knowledge-section and pipe-helper rendering coverage
     │       ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
     │       ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
+    │       ├── finding_triage_editor.test.js # Finding remediation and verification editor load/save coverage
+    │       ├── grep_output_suggestions.test.js # output-token autocomplete suggestions for safe grep pipe contexts
     │       ├── helpers/
     │       │   ├── app_harness.js # Shared jsdom harness for app/controller tests, including Options/mobile shell globals
     │       │   ├── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
@@ -1011,7 +1071,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── shell_chrome.test.js  # Desktop HUD status/Redis pill behavior
     │       ├── state.test.js       # composer state store accessors and reset behavior
     │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
+    │       ├── tabbar_chrome_collapse.test.js # tab-bar chrome auto-collapse behavior and persisted pinning coverage
     │       ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
+    │       ├── team_scope.test.js  # active personal/team scope menu/selector storage, refresh, and reload edge cases
+    │       ├── teams_panel.test.js # Options Teams role/capability UI and failed mutation coverage
     │       ├── tour_modal.test.js  # desktop visual onboarding tour renderer, navigation, sample-chip, and dismissal coverage
     │       ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
     │       ├── ui_disclosure.test.js # bindDisclosure helper coverage — aria-expanded sync, panel class lifecycle, onToggle emission rules, imperative handle API

@@ -23,11 +23,26 @@
   const savedViewSaveBtn = document.getElementById('atlas-saved-view-save');
   const savedViewUpdateBtn = document.getElementById('atlas-saved-view-update');
   const savedViewDeleteBtn = document.getElementById('atlas-saved-view-delete');
+  const savedViewCreateRuleBtn = document.getElementById('atlas-saved-view-create-rule');
   const exportWrap = document.getElementById('atlas-export-wrap');
   const exportMenuBtn = document.getElementById('atlas-export-menu-btn');
+  const exportMenu = document.getElementById('atlas-export-menu');
   const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
   const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
+  const importBtn = document.getElementById('atlas-import-btn');
+  const importOverlay = document.getElementById('atlas-import-overlay');
+  const importModal = document.getElementById('atlas-import-modal');
+  const importCloseBtn = document.getElementById('atlas-import-close');
+  const importCancelBtn = document.getElementById('atlas-import-cancel');
+  const importFormatSelect = document.getElementById('atlas-import-format');
+  const importNameInput = document.getElementById('atlas-import-name');
+  const importFileInput = document.getElementById('atlas-import-file');
+  const importPreviewBtn = document.getElementById('atlas-import-preview-btn');
+  const importStatus = document.getElementById('atlas-import-status');
+  const importPreviewHost = document.getElementById('atlas-import-preview');
+  const importApplyBtn = document.getElementById('atlas-import-apply');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
+  const findingsBoardBtn = document.getElementById('atlas-findings-board-btn');
   const clearFiltersBtn = document.getElementById('atlas-clear-filters-btn');
   const findingBulkRow = document.getElementById('atlas-finding-bulk-row');
   const selectToggle = document.getElementById('atlas-select-toggle');
@@ -44,6 +59,15 @@
   const paginationSummary = document.getElementById('atlas-pagination-summary');
   const prevBtn = document.getElementById('atlas-prev-btn');
   const nextBtn = document.getElementById('atlas-next-btn');
+  const importAcceptByFormat = {
+    burp_xml: '.xml,application/xml,text/xml',
+    generic_csv: '.csv,text/csv',
+    generic_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
+    nessus_xml: '.nessus,.xml,application/xml,text/xml',
+    nuclei_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
+    zap_json: '.json,application/json',
+    zap_xml: '.xml,application/xml,text/xml',
+  };
 
   function ensureBulkActionLayout() {
     const row = findingBulkRow?.querySelector?.('.atlas-bulk-action-row');
@@ -122,7 +146,19 @@
     addActiveProjectOnSelect: false,
     detail: null,
     detailLoading: false,
+    intelRefreshing: false,
+    intelRefreshingEntityId: '',
+    intelRefreshingLabel: '',
     detailOffsets: { runs: 0, findings: 0 },
+    importFlow: {
+      open: false,
+      previewLoading: false,
+      applyLoading: false,
+      draftId: '',
+      rowSetDigest: '',
+      preview: null,
+      result: null,
+    },
     searchTimer: null,
     refreshSeq: 0,
   };
@@ -169,6 +205,105 @@
     if (typeof global.showToast === 'function') global.showToast(message, tone);
   }
 
+  function activeTeamScopeCan(capability) {
+    return typeof global.activeTeamScopeCan === 'function'
+      ? global.activeTeamScopeCan(capability)
+      : true;
+  }
+
+  function teamScopeDeniedMessage(action) {
+    return typeof global.teamScopeDeniedMessage === 'function'
+      ? global.teamScopeDeniedMessage(action)
+      : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+  }
+
+  function canTriageAtlasRows() {
+    return activeTeamScopeCan('triage_findings');
+  }
+
+  function canDeleteAtlasRows() {
+    return canTriageAtlasRows();
+  }
+
+  function showAtlasPermissionDenied(action = 'delete Atlas rows') {
+    showToastSafe(teamScopeDeniedMessage(action), 'error');
+  }
+
+  async function atlasMutationError(resp, fallback, action = 'delete Atlas rows') {
+    let message = fallback;
+    try {
+      const data = typeof resp.json === 'function' ? await resp.json() : {};
+      if (data && data.error === 'team_forbidden') message = teamScopeDeniedMessage(action);
+      else if (data && typeof data.message === 'string' && data.message.trim()) message = data.message.trim();
+      else if (data && typeof data.error === 'string' && data.error.trim()) message = data.error.trim();
+    } catch (_) {}
+    const err = new Error(message || fallback);
+    err.atlasHandledClientHttpError = Number(resp?.status || 0) >= 400 && Number(resp?.status || 0) < 500;
+    return err;
+  }
+
+  function logImportClientError(message, err) {
+    if (err && err.atlasHandledClientHttpError) return;
+    if (typeof global.logClientError === 'function') global.logClientError(message, err);
+  }
+
+  let intelRefreshOverlay = null;
+
+  function entityLabelForId(entityId) {
+    const id = String(entityId || '');
+    const detailEntity = state.detail?.entity || null;
+    if (id && detailEntity && String(detailEntity.id || '') === id) {
+      return text(detailEntity.canonical_value, detailEntity.value || detailEntity.id);
+    }
+    const listed = (state.entities || []).find(entity => String(entity.id || '') === id);
+    if (listed) return text(listed.canonical_value, listed.value || listed.id);
+    return '';
+  }
+
+  function ensureIntelRefreshOverlay() {
+    if (intelRefreshOverlay || !overlay) return intelRefreshOverlay;
+    const host = document.createElement('div');
+    host.className = 'atlas-intel-refresh-overlay u-hidden';
+    host.setAttribute('role', 'status');
+    host.setAttribute('aria-live', 'polite');
+    host.setAttribute('aria-hidden', 'true');
+    const card = document.createElement('div');
+    card.className = 'atlas-intel-refresh-card';
+    const spinner = document.createElement('div');
+    spinner.className = 'atlas-intel-refresh-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'atlas-intel-refresh-title';
+    title.textContent = 'Refreshing intel';
+    const body = document.createElement('div');
+    body.className = 'atlas-intel-refresh-body';
+    body.dataset.atlasIntelRefreshBody = 'true';
+    body.textContent = 'Querying configured intel providers. This can take a little while.';
+    copy.append(title, body);
+    card.append(spinner, copy);
+    host.appendChild(card);
+    overlay.appendChild(host);
+    intelRefreshOverlay = host;
+    return intelRefreshOverlay;
+  }
+
+  function renderIntelRefreshOverlay() {
+    const host = ensureIntelRefreshOverlay();
+    if (!host) return;
+    surface?.setAttribute('aria-busy', state.intelRefreshing ? 'true' : 'false');
+    host.classList.toggle('u-hidden', !state.intelRefreshing);
+    host.setAttribute('aria-hidden', state.intelRefreshing ? 'false' : 'true');
+    if (!state.intelRefreshing) return;
+    const body = host.querySelector('[data-atlas-intel-refresh-body]');
+    if (body) {
+      const label = String(state.intelRefreshingLabel || '').trim();
+      body.textContent = label
+        ? `Querying configured intel providers for ${label}. This can take a little while.`
+        : 'Querying configured intel providers. This can take a little while.';
+    }
+  }
+
   function broadcastProjectWorkspaceChange(reason, projectId) {
     const payload = {
       reason: String(reason || 'updated'),
@@ -204,6 +339,13 @@
     return `${numeric.toLocaleString()} ${numeric === 1 ? singular : plural}`;
   }
 
+  function node(tag, className = '', content = '') {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (content !== '') el.textContent = String(content);
+    return el;
+  }
+
   const findingStates = [
     ['new', 'New'],
     ['reviewed', 'Reviewed'],
@@ -227,6 +369,8 @@
   function hide({ refocus = true } = {}) {
     if (!overlay) return;
     abortReadRequests();
+    setExportMenuOpen(false);
+    if (state.importFlow.open) setImportModalOpen(false);
     resetSelection({ selectMode: false, render: false });
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
@@ -457,7 +601,11 @@
       runFilterSelect.dataset.populated = '1';
     }
     syncSelectDisplay(findingStatusFilter);
-    syncSelectDisplay(findingBulkStatus);
+    if (findingBulkStatus) {
+      findingBulkStatus.disabled = state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      findingBulkStatus.title = canTriageAtlasRows() ? '' : teamScopeDeniedMessage('triage Atlas findings');
+      syncSelectDisplay(findingBulkStatus);
+    }
     syncSelectDisplay(runFilterSelect);
     syncSelectDisplay(orphanFilter);
     syncSelectDisplay(suppressionFilter);
@@ -493,6 +641,7 @@
     setSelectVisibility(findingBulkStatus, !findingsActive || !state.selectMode);
     findingBulkApplyBtn?.classList.toggle('u-hidden', !findingsActive || !state.selectMode);
     exportWrap?.classList.toggle('u-hidden', findingsActive);
+    if (findingsActive) setExportMenuOpen(false);
     findingBulkRow?.classList.toggle('u-hidden', !state.selectMode && !visibleItems.length);
     if (selectToggle) {
       selectToggle.checked = !!state.selectMode;
@@ -526,15 +675,20 @@
       findingClearSelectionBtn.classList.toggle('u-hidden', !state.selectMode);
       findingClearSelectionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
     }
-    if (findingBulkApplyBtn) findingBulkApplyBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    if (findingBulkApplyBtn) {
+      findingBulkApplyBtn.disabled = !selectedCount || state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      findingBulkApplyBtn.title = canTriageAtlasRows() ? '' : teamScopeDeniedMessage('triage Atlas findings');
+    }
     if (bulkSuppressionBtn) {
       bulkSuppressionBtn.classList.toggle('u-hidden', !state.selectMode);
       bulkSuppressionBtn.textContent = state.suppressionFilter === 'only' ? 'Restore' : 'Suppress';
-      bulkSuppressionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+      bulkSuppressionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight || !canTriageAtlasRows();
+      bulkSuppressionBtn.title = canTriageAtlasRows() ? '' : teamScopeDeniedMessage('suppress Atlas rows');
     }
     if (bulkDeleteBtn) {
       bulkDeleteBtn.classList.toggle('u-hidden', !state.selectMode);
-      bulkDeleteBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+      bulkDeleteBtn.disabled = !selectedCount || state.loading || state.bulkInFlight || !canDeleteAtlasRows();
+      bulkDeleteBtn.title = canDeleteAtlasRows() ? '' : teamScopeDeniedMessage('delete Atlas rows');
     }
   }
 
@@ -658,6 +812,7 @@
     if (savedViewSaveBtn) savedViewSaveBtn.disabled = state.savedViewsLoading;
     if (savedViewUpdateBtn) savedViewUpdateBtn.disabled = !state.selectedSavedViewId || state.savedViewsLoading;
     if (savedViewDeleteBtn) savedViewDeleteBtn.disabled = !state.selectedSavedViewId || state.savedViewsLoading;
+    if (savedViewCreateRuleBtn) savedViewCreateRuleBtn.disabled = state.savedViewsLoading;
   }
 
   function savedViewNameContent(defaultValue = '') {
@@ -832,6 +987,370 @@
     }
   }
 
+  function setExportMenuOpen(open) {
+    if (!exportWrap || !exportMenuBtn) return;
+    exportWrap.classList.toggle('open', !!open);
+    exportMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && exportMenu && typeof global.portalDropdownMenu === 'function') {
+      exportWrap.dataset.portalMenu = 'true';
+      global.portalDropdownMenu(exportWrap, exportMenuBtn, exportMenu);
+    } else if (!open && exportMenu && typeof global.unportalDropdownMenu === 'function') {
+      global.unportalDropdownMenu(exportMenu);
+    }
+  }
+
+  function currentAutoPromoteRuleDraft() {
+    const tab = currentTab();
+    const targetKind = String(tab && tab.type || 'any') || 'any';
+    const query = String(state.query || '').trim();
+    const projectId = String(state.projectId || '').trim();
+    const projectName = String(state.projectName || '').trim();
+    const filters = {
+      source_command_roots: [],
+      source_run_ids: state.runId ? [String(state.runId)] : [],
+      include_suppressed: state.suppressionFilter !== 'hide',
+      first_seen_after_rule_created: false,
+    };
+    return {
+      name: query ? `Atlas view: ${query.slice(0, 48)}` : 'Atlas view rule',
+      project_id: projectId,
+      project_name: projectName,
+      target_entity_kind: targetKind,
+      match_mode: query ? 'contains' : (targetKind === 'domain' ? 'domain_suffix' : 'exact'),
+      pattern: query,
+      filters,
+      atlas_view: currentSavedViewState('Atlas view rule'),
+    };
+  }
+
+  async function createRuleFromCurrentView() {
+    if (typeof global.openProjectAutoPromoteRuleFromAtlas !== 'function') {
+      showToastSafe('Projects are not ready yet', 'error');
+      return;
+    }
+    try {
+      await global.openProjectAutoPromoteRuleFromAtlas(currentAutoPromoteRuleDraft());
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to create auto-promote rule from atlas view', err);
+      showToastSafe(err && err.message ? err.message : 'Failed to create rule from Atlas view', 'error');
+    }
+  }
+
+  function selectedImportFormatLabel() {
+    const option = importFormatSelect?.selectedOptions?.[0] || null;
+    return String(option?.textContent || importFormatSelect?.value || 'Atlas import').trim();
+  }
+
+  function syncImportFileAcceptHint() {
+    if (!importFileInput || !importFormatSelect) return;
+    importFileInput.setAttribute('accept', importAcceptByFormat[importFormatSelect.value] || '');
+  }
+
+  function resetImportFlow() {
+    state.importFlow.previewLoading = false;
+    state.importFlow.applyLoading = false;
+    state.importFlow.draftId = '';
+    state.importFlow.rowSetDigest = '';
+    state.importFlow.preview = null;
+    state.importFlow.result = null;
+    if (importStatus) importStatus.textContent = '';
+    if (importPreviewHost) {
+      importPreviewHost.replaceChildren();
+      importPreviewHost.classList.add('u-hidden');
+    }
+    if (importApplyBtn) importApplyBtn.disabled = true;
+  }
+
+  function setImportModalOpen(open) {
+    if (!importOverlay) return;
+    state.importFlow.open = !!open;
+    importOverlay.classList.toggle('u-hidden', !open);
+    importOverlay.classList.toggle('open', !!open);
+    importOverlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (!open) {
+      resetImportFlow();
+      if (importFileInput) importFileInput.value = '';
+      if (importNameInput) importNameInput.value = '';
+      if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+      return;
+    }
+    if (importNameInput && !importNameInput.value) importNameInput.value = selectedImportFormatLabel();
+    syncImportFileAcceptHint();
+    renderImportPreview();
+    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    window.setTimeout(() => {
+      const focusTarget = importFormatSelect || importModal;
+      focusTarget?.focus?.({ preventScroll: true });
+    }, 0);
+  }
+
+  function openImportModal() {
+    setExportMenuOpen(false);
+    setImportModalOpen(true);
+  }
+
+  function closeImportModal() {
+    setImportModalOpen(false);
+  }
+
+  function importCountGrid(counts = {}) {
+    const grid = document.createElement('div');
+    grid.className = 'atlas-import-count-grid';
+    [
+      ['Rows', counts.rows],
+      ['Entities', counts.entity_valid],
+      ['Findings', counts.finding_valid],
+      ['New', counts.new],
+      ['Updated', counts.updated],
+      ['Warnings', counts.warnings],
+    ].forEach(([label, value]) => {
+      const item = document.createElement('div');
+      item.className = 'atlas-import-count';
+      item.append(
+        node('span', 'atlas-import-count-value', Number(value || 0).toLocaleString()),
+        node('span', 'atlas-import-count-label', label),
+      );
+      grid.appendChild(item);
+    });
+    return grid;
+  }
+
+  function importSampleRows(title, rows, formatter) {
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'atlas-import-sample';
+    sectionEl.appendChild(node('div', 'atlas-import-sample-title', title));
+    const list = document.createElement('div');
+    list.className = 'atlas-import-sample-list nice-scroll';
+    const values = Array.isArray(rows) ? rows : [];
+    if (!values.length) {
+      list.appendChild(node('div', 'atlas-empty-inline', 'No rows'));
+    } else {
+      values.slice(0, 6).forEach((row) => list.appendChild(node('div', 'panel-row atlas-import-sample-row', formatter(row))));
+    }
+    sectionEl.appendChild(list);
+    return sectionEl;
+  }
+
+  function importWarningRows(warnings) {
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'atlas-import-sample';
+    sectionEl.appendChild(node('div', 'atlas-import-sample-title', 'Warnings'));
+    const list = document.createElement('div');
+    list.className = 'atlas-import-warning-list nice-scroll';
+    const values = Array.isArray(warnings) ? warnings : [];
+    if (!values.length) {
+      list.appendChild(node('div', 'atlas-empty-inline', 'No warnings'));
+    } else {
+      values.slice(0, 8).forEach((warning) => {
+        const label = warning && typeof warning === 'object'
+          ? `Row ${warning.row_number || '?'} · ${text(warning.message, warning.code || 'warning')}`
+          : text(warning, 'warning');
+        list.appendChild(node('div', 'panel-row atlas-import-warning-row', label));
+      });
+    }
+    sectionEl.appendChild(list);
+    return sectionEl;
+  }
+
+  function importOptionAvailable(options, key) {
+    const option = options && typeof options === 'object' ? options[key] : null;
+    return !!(option && option.available);
+  }
+
+  function importOptionControl(key, label, note, options, { checked = true, disabled = false } = {}) {
+    const wrap = document.createElement('label');
+    wrap.className = 'form-check atlas-import-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.atlasImportOption = key;
+    checkbox.checked = checked && !disabled;
+    checkbox.disabled = !!disabled;
+    const copy = document.createElement('span');
+    copy.append(node('span', 'atlas-import-option-label', label));
+    if (note) copy.append(node('span', 'atlas-muted atlas-import-option-note', note));
+    wrap.append(checkbox, copy);
+    return wrap;
+  }
+
+  function renderImportPreview() {
+    if (!importPreviewHost) return;
+    importPreviewHost.replaceChildren();
+    const flow = state.importFlow;
+    const preview = flow.preview;
+    const result = flow.result;
+    if (!preview && !result) {
+      importPreviewHost.classList.add('u-hidden');
+      if (importApplyBtn) importApplyBtn.disabled = true;
+      return;
+    }
+    importPreviewHost.classList.remove('u-hidden');
+    if (preview) {
+      const counts = preview.counts || {};
+      importPreviewHost.append(
+        node('div', 'atlas-detail-section-title', 'Preview'),
+        importCountGrid(counts),
+      );
+      const options = preview.apply_options || {};
+      const optionWrap = document.createElement('div');
+      optionWrap.className = 'atlas-import-options';
+      const hasProject = !!String(state.projectId || '').trim();
+      optionWrap.append(
+        importOptionControl('import_entities', 'Import entities', 'Add or update normalized Atlas entities.', options, {
+          checked: importOptionAvailable(options, 'import_entities'),
+          disabled: !importOptionAvailable(options, 'import_entities'),
+        }),
+        importOptionControl('import_findings', 'Import findings', 'Add findings and their import occurrence sources.', options, {
+          checked: importOptionAvailable(options, 'import_findings'),
+          disabled: !importOptionAvailable(options, 'import_findings'),
+        }),
+        importOptionControl('link_to_project', 'Link imported entities to this project', hasProject ? state.projectName || 'Project context' : 'Open Atlas from a project to link rows.', options, {
+          checked: false,
+          disabled: !hasProject || !importOptionAvailable(options, 'link_to_project'),
+        }),
+        importOptionControl('create_project_targets', 'Create project targets', `${Number(counts.project_target_candidates || 0).toLocaleString()} target candidates; creates or reuses Atlas entities`, options, {
+          checked: false,
+          disabled: !hasProject || !importOptionAvailable(options, 'create_project_targets'),
+        }),
+      );
+      importPreviewHost.append(optionWrap);
+      const samples = preview.samples || {};
+      const sampleGrid = document.createElement('div');
+      sampleGrid.className = 'atlas-import-samples';
+      sampleGrid.append(
+        importSampleRows('Entity sample', samples.entities, row => [
+          text(row.kind, 'entity'),
+          text(row.canonical_value, row.value || ''),
+        ].filter(Boolean).join(' · ')),
+        importSampleRows('Finding sample', samples.findings, row => [
+          text(row.severity),
+          text(row.title, row.signature_hash || 'finding'),
+        ].filter(Boolean).join(' · ')),
+        importWarningRows(preview.warnings),
+      );
+      importPreviewHost.append(sampleGrid);
+    }
+    if (result) {
+      const counts = result.counts || {};
+      const resultBox = document.createElement('div');
+      resultBox.className = 'atlas-import-result';
+      resultBox.append(
+        node('div', 'atlas-detail-section-title', 'Applied'),
+        node('div', 'atlas-muted', [
+          countLabel(counts.entities_created, 'entity created', 'entities created'),
+          countLabel(counts.entities_updated, 'entity updated', 'entities updated'),
+          countLabel(counts.findings_created, 'finding created', 'findings created'),
+          countLabel(counts.findings_updated, 'finding updated', 'findings updated'),
+          countLabel(counts.project_links_added, 'project link added', 'project links added'),
+          countLabel(counts.project_links_existing, 'project link already existed', 'project links already existed'),
+          countLabel(counts.project_targets_created, 'project target created', 'project targets created'),
+          countLabel(counts.project_targets_existing, 'project target already existed', 'project targets already existed'),
+        ].join(' · ')),
+      );
+      importPreviewHost.append(resultBox);
+    }
+    syncImportApplyState();
+  }
+
+  function selectedImportOptions() {
+    const options = {};
+    importPreviewHost?.querySelectorAll?.('[data-atlas-import-option]').forEach((checkbox) => {
+      options[checkbox.dataset.atlasImportOption] = !!checkbox.checked && !checkbox.disabled;
+    });
+    return options;
+  }
+
+  function syncImportApplyState() {
+    const options = selectedImportOptions();
+    const hasOption = Object.values(options).some(Boolean);
+    if (importApplyBtn) {
+      importApplyBtn.disabled = !state.importFlow.preview || !state.importFlow.draftId || !hasOption
+        || state.importFlow.previewLoading || state.importFlow.applyLoading;
+      importApplyBtn.textContent = state.importFlow.applyLoading ? 'Applying...' : 'Apply import';
+    }
+    if (importPreviewBtn) {
+      importPreviewBtn.disabled = state.importFlow.previewLoading || state.importFlow.applyLoading;
+      importPreviewBtn.textContent = state.importFlow.previewLoading ? 'Previewing...' : 'Preview';
+    }
+  }
+
+  async function previewImportFile() {
+    if (!importFileInput || !importFormatSelect) return;
+    const file = importFileInput.files && importFileInput.files[0] ? importFileInput.files[0] : null;
+    if (!file) {
+      showToastSafe('Choose a file to import', 'error');
+      return;
+    }
+    state.importFlow.previewLoading = true;
+    state.importFlow.result = null;
+    state.importFlow.preview = null;
+    if (importStatus) importStatus.textContent = 'Parsing file...';
+    renderImportPreview();
+    syncImportApplyState();
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      body.append('format_id', String(importFormatSelect.value || ''));
+      body.append('source_tool', selectedImportFormatLabel());
+      body.append('import_name', String(importNameInput?.value || '').trim() || selectedImportFormatLabel());
+      const resp = await api()('/atlas/imports/preview', { method: 'POST', body });
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to preview import');
+      const data = await resp.json();
+      state.importFlow.draftId = String(data.draft_id || '');
+      state.importFlow.rowSetDigest = String(data.row_set_digest || '');
+      state.importFlow.preview = data;
+      if (importStatus) importStatus.textContent = 'Preview ready';
+      renderImportPreview();
+    } catch (err) {
+      logImportClientError('failed to preview atlas import', err);
+      if (importStatus) importStatus.textContent = '';
+      showToastSafe(err && err.message ? err.message : 'Failed to preview import', 'error');
+    } finally {
+      state.importFlow.previewLoading = false;
+      syncImportApplyState();
+    }
+  }
+
+  async function applyImportPreview() {
+    if (!state.importFlow.preview || !state.importFlow.draftId || !state.importFlow.rowSetDigest) return;
+    const options = selectedImportOptions();
+    if (!Object.values(options).some(Boolean)) {
+      showToastSafe('Choose what to import first', 'error');
+      return;
+    }
+    state.importFlow.applyLoading = true;
+    if (importStatus) importStatus.textContent = 'Applying import...';
+    syncImportApplyState();
+    try {
+      const body = {
+        draft_id: state.importFlow.draftId,
+        row_set_digest: state.importFlow.rowSetDigest,
+        options,
+      };
+      if (state.projectId) body.project_id = state.projectId;
+      const resp = await api()('/atlas/imports/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to apply import');
+      const data = await resp.json();
+      state.importFlow.result = data;
+      state.importFlow.draftId = '';
+      state.importFlow.rowSetDigest = '';
+      if (importStatus) importStatus.textContent = 'Import applied';
+      showToastSafe('Atlas import applied', 'success');
+      if (state.projectId) broadcastProjectWorkspaceChange('atlas_import_applied', state.projectId);
+      await refreshAtlas({ resetOffset: true });
+      renderImportPreview();
+    } catch (err) {
+      logImportClientError('failed to apply atlas import', err);
+      showToastSafe(err && err.message ? err.message : 'Failed to apply import', 'error');
+    } finally {
+      state.importFlow.applyLoading = false;
+      syncImportApplyState();
+    }
+  }
+
   function applySavedView(viewId) {
     const view = state.savedViews.find(item => String(item.id || '') === String(viewId || ''));
     if (!view) {
@@ -906,14 +1425,20 @@
   function createSuppressionIconButton(item, noun, handler) {
     const btn = document.createElement('button');
     const label = suppressionIconLabel(item, noun);
+    const allowed = canTriageAtlasRows();
     btn.type = 'button';
     btn.className = 'btn btn-ghost btn-icon-only btn-compact atlas-row-suppression-action';
-    btn.title = label;
+    btn.title = allowed ? label : teamScopeDeniedMessage(`suppress Atlas ${noun}s`);
     btn.setAttribute('aria-label', label);
+    btn.disabled = !allowed;
     btn.textContent = item && item.suppressed ? '↺' : '⊘';
     btn.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (!canTriageAtlasRows()) {
+        showAtlasPermissionDenied(`suppress Atlas ${noun}s`);
+        return;
+      }
       handler?.();
     });
     return btn;
@@ -952,6 +1477,7 @@
     badges.className = 'atlas-entity-badges';
     if (finding.suppressed) badges.appendChild(badge('suppressed', 'muted'));
     badges.appendChild(badge(findingStatusLabel(finding.review_state || finding.status), 'green'));
+    triageBadges(finding).forEach(item => badges.appendChild(item));
     if (finding.occurrence_count) badges.appendChild(badge(countLabel(finding.occurrence_count, 'hit', 'hits'), 'muted'));
     if (state.selectMode) {
       appendSelectionCheckbox(
@@ -1053,6 +1579,21 @@
     return el;
   }
 
+  function triageBadges(finding) {
+    const result = [];
+    const triage = finding && finding.triage && typeof finding.triage === 'object' ? finding.triage : null;
+    if (!triage) return result;
+    const status = String(triage.verification_status || finding.verification_status || 'not_started');
+    if (status && status !== 'not_started') {
+      const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+      const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+      result.push(badge(label, tone));
+    }
+    if (triage.has_remediation) result.push(badge('remediation', 'muted'));
+    if (triage.has_verification_steps) result.push(badge('verification steps', 'muted'));
+    return result;
+  }
+
   function rowMessage(message) {
     const row = document.createElement('div');
     row.className = 'atlas-empty';
@@ -1086,6 +1627,10 @@
     if (currentTab().id === 'findings') {
       const finding = state.findings.find(item => String(item.id || '') === state.selectedFindingId);
       detailApi.renderFindingDetail?.(detailHost, finding, {
+        canTriageAtlasRows: canTriageAtlasRows(),
+        triageDisabledReason: teamScopeDeniedMessage('triage Atlas findings'),
+        canDeleteAtlasRows: canDeleteAtlasRows(),
+        deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
         onReviewState: (item, reviewState) => updateFindingReviewState(item, reviewState),
         onSeeRun: (item) => openSourceRun({
           id: item.run_id,
@@ -1095,6 +1640,7 @@
         }),
         onOpenEntity: (item) => openEntityFromFinding(item),
         onDeleteFinding: (item) => confirmDeleteFinding(item),
+        onEditTriage: (item) => openFindingTriageEditor(item),
         onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
       });
       return;
@@ -1104,11 +1650,16 @@
       : null;
     detailApi.renderDetail?.(detailHost, state.detail, {
       activeProject,
+      canTriageAtlasRows: canTriageAtlasRows(),
+      triageDisabledReason: teamScopeDeniedMessage('triage Atlas rows'),
+      canDeleteAtlasRows: canDeleteAtlasRows(),
+      deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
       isLinkedToActiveProject: (entity) => {
         const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
         return !!activeId && (Array.isArray(entity.project_links) ? entity.project_links : [])
           .some(link => String(link.project_id || '') === activeId);
       },
+      intelRefreshing: state.intelRefreshing,
       onRefreshIntel: () => refreshIntel(),
       onAddToActiveProject: () => addToActiveProject(),
       onRemoveProjectLink: (link) => removeProjectLink(link),
@@ -1144,6 +1695,7 @@
         if (typeof global.logClientError === 'function') global.logClientError('atlas mobile render failed', err);
       }
     }
+    renderIntelRefreshOverlay();
   }
 
   function renderShellMode() {
@@ -1423,35 +1975,81 @@
     renderDetail();
   }
 
+  async function openFindingTriageEditor(finding) {
+    const findingId = String(finding && finding.id || state.selectedFindingId || '');
+    const current = state.findings.find(item => String(item.id || '') === findingId) || finding;
+    if (!current || !findingId) return;
+    if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+      throw new Error('Finding triage editor is not available.');
+    }
+    await global.DarklabFindingTriageEditor.open(current, {
+      canEdit: canTriageAtlasRows(),
+      onSaved: async (triage) => {
+        const compact = global.DarklabFindingTriageEditor.compactTriage(triage);
+        state.findings = state.findings.map(item => (
+          String(item && item.id || '') === findingId
+            ? { ...item, triage: compact, verification_status: compact.verification_status }
+            : item
+        ));
+        renderList();
+        renderDetail();
+      },
+    });
+  }
+
   async function updateFindingReviewState(finding, reviewState) {
     const findingId = String(finding && finding.id || '');
     if (!findingId || !reviewState) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('triage Atlas findings');
+      renderDetail();
+      return;
+    }
     try {
       const resp = await api()(`/findings/${encodeURIComponent(findingId)}/review`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ review_state: reviewState }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update finding', 'triage Atlas findings');
       showToastSafe('Finding updated', 'success');
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas finding', err);
-      showToastSafe('Failed to update finding', 'error');
+      showToastSafe(err && err.message ? err.message : 'Failed to update finding', 'error');
     }
+  }
+
+  function openFindingsBoardFromAtlas() {
+    if (typeof global.openFindingsBoard !== 'function') return;
+    void global.openFindingsBoard({
+      source: 'atlas',
+      query: state.query,
+      projectId: state.projectId,
+      projectName: state.projectName,
+      runId: state.runId,
+      runLabel: state.runLabel,
+      reviewState: state.findingStatus,
+      orphanFilter: state.orphanFilter,
+      suppressionFilter: state.suppressionFilter,
+    });
   }
 
   async function bulkUpdateFindings(reviewStateOverride = '') {
     const reviewState = String(reviewStateOverride || findingBulkStatus?.value || '').trim();
     const findingIds = [...state.selectedFindingIds];
     if (!findingIds.length || !reviewState) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('triage Atlas findings');
+      return;
+    }
     try {
       const resp = await api()('/atlas/findings/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ finding_ids: findingIds, review_state: reviewState }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update findings', 'triage Atlas findings');
       const data = await resp.json().catch(() => ({}));
       const updated = Number(data?.counts?.updated || 0);
       const notFound = Number(data?.counts?.not_found || 0);
@@ -1463,7 +2061,7 @@
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to bulk update atlas findings', err);
-      showToastSafe('Failed to update findings', 'error');
+      showToastSafe(err && err.message ? err.message : 'Failed to update findings', 'error');
     }
   }
 
@@ -1472,6 +2070,10 @@
     const isFindings = tab.id === 'findings';
     const itemId = String(item && item.id || '');
     if (!itemId) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('suppress Atlas rows');
+      return;
+    }
     const url = isFindings
       ? `/atlas/findings/${encodeURIComponent(itemId)}/suppression`
       : `/atlas/entities/${encodeURIComponent(itemId)}/suppression`;
@@ -1481,12 +2083,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suppressed: !!suppressed }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update Atlas row', 'suppress Atlas rows');
       showToastSafe(suppressed ? 'Atlas row suppressed' : 'Atlas row restored', 'success');
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas suppression', err);
-      showToastSafe('Failed to update Atlas row', 'error');
+      showToastSafe(err && err.message ? err.message : 'Failed to update Atlas row', 'error');
     }
   }
 
@@ -1497,6 +2099,10 @@
     const selected = activeSelectionSet(tab);
     const ids = [...selected];
     if (!ids.length) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('suppress Atlas rows');
+      return;
+    }
     setBulkBusy(true);
     try {
       const url = isFindings ? '/atlas/findings/suppression' : '/atlas/entities/suppression';
@@ -1508,7 +2114,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update selected Atlas rows', 'update Atlas rows');
       const data = await resp.json().catch(() => ({}));
       selected.clear();
       const updated = Number(data?.counts?.updated || 0);
@@ -1551,6 +2157,10 @@
 
   async function bulkDeleteSelectedItems() {
     if (state.bulkInFlight) return;
+    if (!canDeleteAtlasRows()) {
+      showAtlasPermissionDenied('delete Atlas rows');
+      return;
+    }
     const tab = currentTab();
     const isFindings = tab.id === 'findings';
     const selected = activeSelectionSet(tab);
@@ -1593,7 +2203,7 @@
       await refreshAtlas({ resetOffset: state.offset >= state.total - ids.length });
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to bulk delete atlas rows', err);
-      showToastSafe('Failed to delete selected Atlas rows', 'error');
+      showToastSafe(err.message || 'Failed to delete selected Atlas rows', 'error');
     } finally {
       setBulkBusy(false);
     }
@@ -1651,19 +2261,40 @@
   }
 
   async function refreshIntel() {
-    if (!state.selectedId) return;
+    if (!state.selectedId || state.intelRefreshing) return;
+    const entityId = String(state.selectedId || '');
+    state.intelRefreshing = true;
+    state.intelRefreshingEntityId = entityId;
+    state.intelRefreshingLabel = entityLabelForId(entityId);
+    render();
     try {
-      const resp = await api()(`/atlas/entities/${encodeURIComponent(state.selectedId)}/refresh_intel`, {
+      const resp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}/refresh_intel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      showToastSafe('Intel refreshed', 'success');
-      await loadDetail(state.selectedId);
+      const payload = typeof resp.json === 'function' ? await resp.json().catch(() => ({})) : {};
+      const refresh = payload?.refresh || {};
+      const configured = Number(refresh.configured_count || 0);
+      const success = Number(refresh.success_count || 0);
+      if (configured <= 0) {
+        showToastSafe('No intel providers configured', 'warning');
+      } else if (success <= 0) {
+        showToastSafe('No intel results refreshed', 'warning');
+      } else {
+        const noun = success === 1 ? 'provider' : 'providers';
+        showToastSafe(`Intel refreshed from ${success} ${noun}`, 'success');
+      }
+      await loadDetail(entityId);
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to refresh atlas intel', err);
       showToastSafe('Failed to refresh intel', 'error');
+    } finally {
+      state.intelRefreshing = false;
+      state.intelRefreshingEntityId = '';
+      state.intelRefreshingLabel = '';
+      render();
     }
   }
 
@@ -1725,6 +2356,10 @@
   async function confirmDeleteEntity() {
     const entityId = String(state.selectedId || '');
     if (!entityId || typeof global.showConfirm !== 'function') return;
+    if (!canDeleteAtlasRows()) {
+      showAtlasPermissionDenied('delete Atlas rows');
+      return;
+    }
     try {
       const previewResp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}/delete-preview`, { cache: 'no-store' });
       if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
@@ -1754,20 +2389,24 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prune_source_run: prune, prune_curated_source_run: pruneCurated }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to delete Atlas entity');
       showToastSafe(prune ? 'Entity and related Atlas items deleted' : 'Entity deleted', 'success');
       state.selectedId = '';
       state.detail = null;
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas entity', err);
-      showToastSafe('Failed to delete Atlas entity', 'error');
+      showToastSafe(err.message || 'Failed to delete Atlas entity', 'error');
     }
   }
 
   async function confirmDeleteFinding(finding) {
     const findingId = String(finding?.id || state.selectedFindingId || '');
     if (!findingId || typeof global.showConfirm !== 'function') return;
+    if (!canDeleteAtlasRows()) {
+      showAtlasPermissionDenied('delete Atlas rows');
+      return;
+    }
     try {
       const previewResp = await api()(`/atlas/findings/${encodeURIComponent(findingId)}/delete-preview`, { cache: 'no-store' });
       if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
@@ -1793,14 +2432,14 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prune_source_run: prune, prune_curated_source_run: pruneCurated }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to delete Atlas finding');
       showToastSafe(prune ? 'Finding and related Atlas items deleted' : 'Finding deleted', 'success');
       state.selectedFindingId = '';
       state.selectedFindingIds.delete(findingId);
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas finding', err);
-      showToastSafe('Failed to delete Atlas finding', 'error');
+      showToastSafe(err.message || 'Failed to delete Atlas finding', 'error');
     }
   }
 
@@ -2005,6 +2644,8 @@
       }
     });
     refreshBtn?.addEventListener('click', () => refreshAtlas());
+    importBtn?.addEventListener('click', () => openImportModal());
+    findingsBoardBtn?.addEventListener('click', openFindingsBoardFromAtlas);
     clearFiltersBtn?.addEventListener('click', () => clearAtlasFilters());
     prevBtn?.addEventListener('click', () => {
       state.offset = Math.max(0, state.offset - state.limit);
@@ -2080,6 +2721,9 @@
     savedViewDeleteBtn?.addEventListener('click', () => {
       deleteCurrentSavedView();
     });
+    savedViewCreateRuleBtn?.addEventListener('click', () => {
+      createRuleFromCurrentView();
+    });
     selectToggle?.addEventListener('change', () => {
       setSelectMode(!!selectToggle.checked);
     });
@@ -2102,26 +2746,49 @@
     exportMenuBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
       const open = !exportWrap?.classList.contains('open');
-      exportWrap?.classList.toggle('open', open);
-      exportMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      setExportMenuOpen(open);
     });
     exportCsvBtn?.addEventListener('click', () => {
-      exportWrap?.classList.remove('open');
-      exportMenuBtn?.setAttribute('aria-expanded', 'false');
+      setExportMenuOpen(false);
       exportEntities('csv');
     });
     exportJsonlBtn?.addEventListener('click', () => {
-      exportWrap?.classList.remove('open');
-      exportMenuBtn?.setAttribute('aria-expanded', 'false');
+      setExportMenuOpen(false);
       exportEntities('jsonl');
+    });
+    importModal?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      previewImportFile();
+    });
+    importApplyBtn?.addEventListener('click', () => {
+      applyImportPreview();
+    });
+    importCloseBtn?.addEventListener('click', () => closeImportModal());
+    importCancelBtn?.addEventListener('click', () => closeImportModal());
+    importFormatSelect?.addEventListener('change', () => {
+      syncImportFileAcceptHint();
+      if (importNameInput && (!importNameInput.value || state.importFlow.preview)) {
+        importNameInput.value = selectedImportFormatLabel();
+      }
+      resetImportFlow();
+      syncSelectDisplay(importFormatSelect);
+    });
+    importFileInput?.addEventListener('change', () => {
+      resetImportFlow();
+    });
+    importPreviewHost?.addEventListener('change', (event) => {
+      if (event.target?.matches?.('[data-atlas-import-option]')) syncImportApplyState();
+    });
+    syncImportFileAcceptHint();
+    ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
+      importOverlay?.addEventListener(eventName, event => event.stopPropagation(), true);
     });
     if (typeof global.bindOutsideClickClose === 'function' && exportWrap) {
       global.bindOutsideClickClose(exportWrap, {
         triggers: exportMenuBtn,
         isOpen: () => exportWrap.classList.contains('open'),
         onClose: () => {
-          exportWrap.classList.remove('open');
-          exportMenuBtn?.setAttribute('aria-expanded', 'false');
+          setExportMenuOpen(false);
         },
       });
     }
@@ -2134,8 +2801,20 @@
         closeOnBackdrop: true,
       });
     }
+    if (typeof global.bindDismissible === 'function' && importOverlay) {
+      global.bindDismissible(importOverlay, {
+        level: 'modal',
+        isOpen: () => state.importFlow.open,
+        onClose: () => closeImportModal(),
+        closeButtons: [importCloseBtn, importCancelBtn].filter(Boolean),
+        closeOnBackdrop: true,
+      });
+    }
     if (typeof global.bindMobileSheet === 'function' && surface) {
       global.bindMobileSheet(surface, { onClose: () => closeAtlas() });
+    }
+    if (typeof global.bindMobileSheet === 'function' && importModal) {
+      global.bindMobileSheet(importModal, { onClose: () => closeImportModal() });
     }
   }
 
@@ -2167,8 +2846,10 @@
     confirmDeleteEntity,
     confirmDeleteFinding,
     confirmCleanRunAtlas,
+    openFindingTriageEditor,
     updateFindingReviewState,
     updateSuppression,
+    canTriageAtlasRows,
     openEntityFromFinding,
     openSourceRun,
     exportEntities,
@@ -2179,6 +2860,8 @@
     saveCurrentView,
     updateCurrentSavedView,
     deleteCurrentSavedView,
+    currentAutoPromoteRuleDraft,
+    createRuleFromCurrentView,
     setSelectMode,
     selectAllVisibleItems,
     bulkUpdateFindings,

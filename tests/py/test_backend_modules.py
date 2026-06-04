@@ -34,7 +34,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import IO, cast
 
 import pytest
 import yaml
@@ -43,10 +43,14 @@ import services.pty.service as pty_service
 import services.runs.broker as run_broker
 import core.database as database
 import core.database_backend as database_backend
+from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQuotaExceeded
 import services.projects.workspace as project_workspace
+import services.projects.auto_promote as project_auto_promote
+import services.projects.package_presets as package_presets
 import app as shell_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
+import services.commands.registry_loader as registry_loader_module
 import services.commands.builtins as builtin_commands
 import services.session.variables as session_variables
 import services.secrets.storage as secrets_storage
@@ -60,7 +64,8 @@ from services.commands.registry import (
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_container_smoke_test_interactive_commands, load_allow_grouping_flags, load_commands_registry, load_workflows,
     interactive_pty_specs_from_registry,
-    command_catalog_entry, command_catalog_from_registry, command_secret_consumers, is_command_allowed, rewrite_command,
+    command_catalog_entry, command_catalog_from_registry, pipe_catalog_from_registry,
+    command_secret_consumers, is_command_allowed, rewrite_command,
     FAQ_CATEGORY_ORDER,
 )
 from services.history.permalinks import (
@@ -89,6 +94,14 @@ from services.runs.output_store import (
     load_run_output_events_for_run,
 )
 from services.atlas.materializer import materialize_run_entities
+from services.atlas.import_sources import (
+    insert_import_batch,
+    insert_import_draft,
+    upsert_entity_import_link,
+    upsert_finding_import_occurrence,
+)
+from services.atlas.import_parser import ImportParseError, ImportParserLimits, parse_import_file
+from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.workspace.files import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
     cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
@@ -458,9 +471,28 @@ class TestAIAssistContextAndStorage:
 
     def test_summary_run_context_uses_compact_sections(self, monkeypatch, tmp_path):
         from services.ai import context as ai_context
+        from services.ai import summarize
 
         with self._ai_db(monkeypatch, tmp_path) as conn:
             self._insert_run_context_rows(conn)
+            conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, finding_id, remediation, verification_steps, verification_status, "
+                "verification_notes, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "triage_ai",
+                    "tok_ai",
+                    "fnd_ai",
+                    "Patch darklab.sh HTTPS hardening.",
+                    "Re-run nmap -sV darklab.sh.",
+                    "ready_to_verify",
+                    "Internal AI context note",
+                    "2026-05-23T10:00:03+00:00",
+                    "2026-05-23T10:00:03+00:00",
+                ),
+            )
+            conn.commit()
 
         cfg = {
             **app_config.CFG,
@@ -472,11 +504,33 @@ class TestAIAssistContextAndStorage:
             context = ai_context.build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
 
         assert context.input_chars <= 4000
-        assert set(context.context) == {"run", "findings", "warnings_errors", "transcript_tail"}
+        assert set(context.context) == {
+            "run",
+            "findings",
+            "triage_findings",
+            "exploit_backed_findings",
+            "warnings_errors",
+            "transcript_tail",
+        }
         assert "id" not in context.context["run"]
         assert "entities" not in context.context
         assert "output_summary" not in context.context
         assert "full_transcript" not in context.context
+        assert context.context["triage_findings"] == [{
+            "severity": "info",
+            "title": "Open HTTPS port",
+            "line_number": 3,
+            "verification_status": "ready_to_verify",
+            "remediation": "Patch darklab.sh HTTPS hardening.",
+            "verification_steps": "Re-run nmap -sV darklab.sh.",
+        }]
+        assert "Internal AI context note" not in json.dumps(context.context)
+        message_content = summarize.messages(context.context)[-1]["content"]
+        assert "triage_findings:" in message_content
+        assert "verification=ready_to_verify" in message_content
+        assert "Patch darklab.sh HTTPS hardening." in message_content
+        assert "Internal AI context note" not in message_content
+        assert context.context["exploit_backed_findings"] == []
         assert context.context["transcript_tail"][0] == {"line_index": 0, "text": "Starting scan for darklab.sh"}
         debug.assert_called_once()
         assert debug.call_args.args == ("AI_CONTEXT_BUILT",)
@@ -495,9 +549,117 @@ class TestAIAssistContextAndStorage:
             "pre_redaction_bytes": context.pre_redaction_bytes,
             "useful": True,
             "omitted_sections": [],
-            "section_count": 4,
+            "section_count": 6,
             "context_hash": context.context_hash,
         }
+
+    def test_summary_run_context_uses_grouped_nmap_vulners_findings(self, monkeypatch, tmp_path):
+        from services.ai.context import build_run_context
+        from services.projects.findings import record_run_findings
+        from services.runs.output_model import line_event_from_legacy, to_wire
+
+        lines = [
+            "Nmap scan report for 192.168.1.5",
+            "139/tcp   open  netbios-ssn Samba smbd 4",
+            *[
+                f"|     EXPLOIT-{index:04d} 10.0 https://vulners.com/githubexploit/EXPLOIT-{index:04d} *EXPLOIT*"
+                for index in range(1, 31)
+            ],
+        ]
+        classifier = OutputSignalClassifier("nmap -sV --script vulners 192.168.1.5")
+        entries = []
+        events = []
+        for line in lines:
+            metadata = classifier.classify_line(line)
+            entry = {"text": line, **metadata}
+            entries.append(entry)
+            raw_signals = metadata.get("signals")
+            raw_entities = metadata.get("entities")
+            events.append(to_wire(line_event_from_legacy(
+                line,
+                signals=cast("list[object] | None", raw_signals if isinstance(raw_signals, list) else None),
+                line_index=metadata.get("line_index"),
+                command_root=metadata.get("command_root"),
+                target=metadata.get("target"),
+                entities=cast(
+                    "list[dict[str, object]] | None",
+                    raw_entities if isinstance(raw_entities, list) else None,
+                ),
+            )))
+
+        with self._ai_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run-ai-vulners",
+                    "tok_ai",
+                    "external",
+                    "nmap -sV --script vulners 192.168.1.5",
+                    "2026-05-23T10:00:00+00:00",
+                    "2026-05-23T10:00:02+00:00",
+                    0,
+                    json.dumps(events),
+                    len(events),
+                ),
+            )
+            record_run_findings(conn, "tok_ai", "run-ai-vulners", entries)
+            conn.commit()
+
+        cfg = {
+            **app_config.CFG,
+            "ai_max_input_chars": 8000,
+            "ai_allow_full_output": False,
+            "share_redaction_enabled": False,
+        }
+        context = build_run_context("run-ai-vulners", session_id="tok_ai", cfg=cfg, variant="summary")
+
+        assert len(context.context["findings"]) == 2
+        assert context.context["findings"][1]["line"].startswith(
+            "Nmap Vulners: Public exploit references available for samba on 192.168.1.5:139 "
+        )
+        assert "EXPLOIT-0001" in context.context["findings"][1]["line"]
+        exploit_backed = context.context["exploit_backed_findings"]
+        assert exploit_backed == [{
+            "severity": "critical",
+            "target": "192.168.1.5:139",
+            "service": "samba",
+            "cve": "",
+            "title": "Public exploit references available",
+            "cvss_score": 10.0,
+            "exploit_count": 30,
+            "references": [
+                "EXPLOIT-0001 https://vulners.com/githubexploit/EXPLOIT-0001",
+                "EXPLOIT-0002 https://vulners.com/githubexploit/EXPLOIT-0002",
+                "EXPLOIT-0003 https://vulners.com/githubexploit/EXPLOIT-0003",
+                "EXPLOIT-0004 https://vulners.com/githubexploit/EXPLOIT-0004",
+                "EXPLOIT-0005 https://vulners.com/githubexploit/EXPLOIT-0005",
+            ],
+            "line_number": 2,
+        }]
+        from services.ai import summarize
+
+        message_content = summarize.messages(context.context)[-1]["content"]
+        assert "exploit_backed_findings:" in message_content
+        assert "critical 192.168.1.5:139 samba Public exploit references available exploit_count=30" in message_content
+        repaired = summarize.merge_context_findings(
+            {
+                "summary": "No actionable findings.",
+                "key_findings": [],
+                "warnings": [],
+                "next_steps_hint": "No actionable findings need review.",
+            },
+            context.context,
+        )
+        assert repaired["summary"] == "The scan found exploit-backed findings."
+        assert repaired["next_steps_hint"] == "Review exploit-backed findings and prioritize affected services."
+        assert any(
+            finding.startswith("Nmap Vulners: Public exploit references available for samba on 192.168.1.5:139 ")
+            for finding in repaired["key_findings"]
+        )
+        assert any("exploit_count=30" in finding for finding in repaired["key_findings"])
+        assert "vulners.com" not in json.dumps(context.context["transcript_tail"])
 
     def test_next_commands_context_uses_compact_sections_with_entities(self, monkeypatch, tmp_path):
         from services.ai import next_commands
@@ -518,6 +680,8 @@ class TestAIAssistContextAndStorage:
         assert set(context.context) == {
             "run",
             "findings",
+            "triage_findings",
+            "exploit_backed_findings",
             "warnings_errors",
             "entities",
             "project_context",
@@ -526,6 +690,7 @@ class TestAIAssistContextAndStorage:
         }
         assert "id" not in context.context["run"]
         assert "full_transcript" not in context.context
+        assert context.context["triage_findings"] == []
         assert context.context["entities"]["domain"] == ["darklab.sh"]
 
         noisy_context = {
@@ -534,11 +699,19 @@ class TestAIAssistContextAndStorage:
                 {"line": f"{port}/tcp open svc{port}", "line_number": port}
                 for port in range(1, 13)
             ],
+            "triage_findings": [{
+                "severity": "info",
+                "title": "Open service port",
+                "verification_status": "ready_to_verify",
+                "remediation": "Patch service config.",
+                "verification_steps": "Re-run nmap -sV noisy.example.",
+            }],
             "entities": {"domain": ["noisy.example", *[f"host{index}.example" for index in range(8)]]},
             "output_summary": {"signal": {"findings": 12}},
         }
         message_content = next_commands.messages(noisy_context)[-1]["content"]
 
+        assert "Patch service config." in message_content
         assert "10/tcp open svc10; 2 more" in message_content
         assert "11/tcp open svc11" not in message_content
         assert "domains=9 (noisy.example, host0.example, host1.example, host2.example)" in message_content
@@ -579,6 +752,34 @@ class TestAIAssistContextAndStorage:
             "9929/tcp open nping-echo",
             "Not shown: 9986 closed tcp ports",
             "ordinary line 39",
+        ]
+
+    def test_summary_transcript_tail_omits_raw_nmap_vulners_rows(self):
+        from services.ai.context import _transcript_tail
+        from services.runs.output_model import LineEvent, LineSignal
+
+        events = [
+            LineEvent("22/tcp open ssh", line_index=1, command_root="nmap", signals=(LineSignal.findings,)),
+            LineEvent(
+                "|     CVE-2026-35414 8.1 https://vulners.com/cve/CVE-2026-35414",
+                line_index=2,
+                command_root="nmap",
+                signals=(LineSignal.findings,),
+            ),
+            LineEvent(
+                "|     SSV:93139 10.0 https://vulners.com/seebug/SSV:93139 *EXPLOIT*",
+                line_index=3,
+                command_root="nmap",
+                signals=(LineSignal.findings,),
+            ),
+            LineEvent("Nmap done: 1 IP address (1 host up)", line_index=4, command_root="nmap", signals=(LineSignal.summaries,)),
+        ]
+
+        selected = _transcript_tail(events, limit=10)
+
+        assert [event.text for event in selected] == [
+            "22/tcp open ssh",
+            "Nmap done: 1 IP address (1 host up)",
         ]
 
     def test_ai_context_suppression_filters_use_boolean_literals(self):
@@ -1154,6 +1355,8 @@ class TestAIAssistContextAndStorage:
 
         with self._ai_db(monkeypatch, tmp_path) as conn:
             self._insert_run_context_rows(conn)
+            conn.execute("UPDATE runs SET team_id = ? WHERE id = ?", ("team_ai", "run-ai"))
+            conn.commit()
         self._enable_ai_redis(monkeypatch)
 
         cfg = {
@@ -1164,13 +1367,14 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai", session_id="tok_ai", team_id="team_ai", cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         assist, inserted = enqueue_assist(
             "tok_ai",
             "run-ai",
             "summary",
             context,
+            team_id="team_ai",
             cfg=cfg,
             prompt_version=prompt_version,
             prompt_version_source=source,
@@ -1179,8 +1383,9 @@ class TestAIAssistContextAndStorage:
         assert inserted is True
 
         class FakeClient:
-            def __init__(self, _cfg, *, session_token=None, progress_callback=None):
+            def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
                 assert session_token == "tok_ai"
+                assert secret_scope_token == "team_ai"
                 self.model = "llama3.1:8b"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -1236,8 +1441,14 @@ class TestAIAssistContextAndStorage:
         assert json.loads(row["payload"])["warnings"] == ["ignore previous instructions"]
         assert row["duration_ms"] == 42
         provider_log = next(extra for event, extra in logs if event == "AI_ASSIST_PROVIDER_REQUEST")
+        assert provider_log["team_id"] == "team_ai"
+        assert provider_log["session"] == "tok_ai********"
+        assert provider_log["secret_scope"] == "team"
         assert provider_log["read_timeout_seconds"] == 120.0
         completed_log = next(extra for event, extra in logs if event == "AI_ASSIST_COMPLETED")
+        assert completed_log["team_id"] == "team_ai"
+        assert completed_log["session"] == "tok_ai********"
+        assert completed_log["secret_scope"] == "team"
         assert completed_log["provider_prompt_tokens"] == 12
         assert completed_log["provider_prompt_ms"] == 34
         assert completed_log["provider_predicted_tokens"] == 6
@@ -1363,8 +1574,9 @@ class TestAIAssistContextAndStorage:
         class FakeClient:
             calls = []
 
-            def __init__(self, _cfg, *, session_token=None, progress_callback=None):
+            def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
                 assert session_token == "tok_ai"
+                assert secret_scope_token == "tok_ai"
                 self.model = "llama3.1:8b"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -1449,14 +1661,16 @@ class TestAIAssistContextAndStorage:
         warning.assert_called_once()
         assert warning.call_args.args == ("AI_ASSIST_FAILED",)
         assert warning.call_args.kwargs["extra"] == {
-            "assist_id": assist["id"],
-            "run_id": "run-ai",
-            "variant": "summary",
+            "team_id": "",
             "session": "tok_ai********",
+            "secret_scope": "personal",
             "model": "llama3.1:8b",
             "prompt_version": "ai-assist-v1",
             "prompt_version_source": "canonical",
             "context_hash": "stale",
+            "assist_id": assist["id"],
+            "run_id": "run-ai",
+            "variant": "summary",
             "error_code": "ai_context_changed",
             "error_message": "Run context changed after assist was queued",
             "status": None,
@@ -1499,8 +1713,9 @@ class TestAIAssistContextAndStorage:
         heartbeats = []
 
         class FakeClient:
-            def __init__(self, _cfg, *, session_token=None, progress_callback=None):
+            def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
                 assert session_token == "tok_ai"
+                assert secret_scope_token == "tok_ai"
                 self.model = "Llama-3.1-8B-Instruct"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -1985,6 +2200,59 @@ class TestAIAssistContextAndStorage:
         assert nmap_duplicate_payload["suggestions"][0]["rejection_reason"] == "duplicate_source"
         assert nmap_duplicate_audit_rows[0]["target_allowed"] is True
 
+    def test_ai_suggestion_validation_normalizes_bracketed_targets_and_rejects_invalid_nmap_scripts(self, monkeypatch):
+        from services.ai import suggestions as ai_suggestions
+
+        suggestion_rejections = []
+        monkeypatch.setattr(
+            ai_suggestions.app_metrics,
+            "record_ai_suggestion_rejection",
+            lambda reason: suggestion_rejections.append(reason),
+        )
+
+        payload, audit_rows = ai_suggestions.validate_suggestions(
+            {"suggestions": [
+                {
+                    "command": "nmap -sC -p 139,445 --script=smb-protocols [192.168.1.5]",
+                    "reason": "Check SMB protocol support.",
+                    "risk_label": "medium",
+                    "target": "[192.168.1.5]",
+                },
+                {
+                    "command": (
+                        "nmap -sC -p 139,445 "
+                        "--script=smb-vuln-cve2009-1231,smb-vuln-cve-2017-7494 [192.168.1.5]"
+                    ),
+                    "reason": "Reject invented SMB NSE script ids.",
+                    "risk_label": "medium",
+                    "target": "[192.168.1.5]",
+                },
+            ]},
+            context={
+                "run": {
+                    "command": "nmap -sV -p 139,445 192.168.1.5",
+                    "target": "192.168.1.5",
+                },
+                "findings": [
+                    {"line": "139/tcp open netbios-ssn Samba smbd", "line_number": 6},
+                    {"line": "445/tcp open microsoft-ds Samba smbd", "line_number": 7},
+                ],
+            },
+            session_id="tok_ai",
+            project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.5"}],
+            cfg={**app_config.CFG, "share_redaction_enabled": False},
+        )
+
+        assert payload["suggestions"][0]["validation_result"] == "accepted"
+        assert payload["suggestions"][0]["command"] == "nmap -sC -p 139,445 --script=smb-protocols 192.168.1.5"
+        assert payload["suggestions"][0]["target"] == "192.168.1.5"
+        assert audit_rows[0]["target_allowed"] is True
+        assert payload["suggestions"][1]["validation_result"] == "rejected"
+        assert payload["suggestions"][1]["rejection_reason"] == "invalid_script"
+        assert payload["suggestions"][1]["command"].endswith(" 192.168.1.5")
+        assert "[192.168.1.5]" not in payload["suggestions"][1]["command"]
+        assert suggestion_rejections == ["invalid_script"]
+
 
 # ── split_chained_commands ────────────────────────────────────────────────────
 
@@ -2082,6 +2350,21 @@ class TestLoadConfig:
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
         warning.assert_called_once_with(
             "AI_BASE_URL_ALLOWED_CIDR_INVALID",
+            extra={"cidr": "not-a-cidr"},
+        )
+
+    def test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
+            "RESTRICTED_COMMAND_INPUT_CIDRS": "10.0.0.0/8, not-a-cidr, 169.254.169.254/32",
+        }):
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write("restricted_command_input_cidrs:\n  - 192.168.0.0/16\n")
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert cfg["restricted_command_input_cidrs"] == ["10.0.0.0/8", "169.254.169.254/32"]
+        warning.assert_called_once_with(
+            "RESTRICTED_COMMAND_INPUT_CIDR_INVALID",
             extra={"cidr": "not-a-cidr"},
         )
 
@@ -2270,6 +2553,222 @@ class TestLoadConfig:
         assert args == ("WORKSPACE_ROOT_MISMATCH",)
         assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
+
+class TestPackagePresetCatalog:
+    def setup_method(self):
+        package_presets.clear_package_preset_catalog_cache()
+
+    def teardown_method(self):
+        package_presets.clear_package_preset_catalog_cache()
+
+    def test_default_package_presets_match_current_wizard_ids(self):
+        catalog = package_presets.load_package_preset_catalog({
+            "package_presets_file": str(REPO_ROOT / "app" / "conf" / "package_presets.yaml"),
+        })
+
+        presets = {preset["id"]: preset for preset in catalog.presets}
+        assert list(presets) == ["evidence", "summary", "full", "redacted"]
+        assert presets["evidence"]["selection"] == {
+            "runs": "all",
+            "transcripts": "with_findings",
+            "findings": "non_false_positive",
+            "artifacts": "selectable",
+            "targets": "all",
+        }
+        assert presets["summary"]["include_artifacts"] is False
+        full_selection = cast(dict[str, str], presets["full"]["selection"])
+        assert full_selection["findings"] == "all"
+        assert presets["redacted"]["redaction_mode"] == "redacted"
+        assert presets["full"]["name_suffix"] == "full"
+
+    def test_package_preset_loader_loads_custom_catalog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "custom_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            presets:
+              - id: brief
+                label: Brief
+                description: Small handoff package.
+                name_suffix: customer
+                redaction_mode: redacted
+                include_artifacts: false
+                include_private_notes: true
+                labels:
+                  - Customer
+                  - customer
+                notes: Include with customer handoff.
+                selection:
+                  runs: all
+                  transcripts: none
+                  findings: non_false_positive
+                  artifacts: none
+                  targets: all
+            """))
+
+            presets = package_presets.list_package_presets({"package_presets_file": str(path)})
+
+        assert presets == [{
+            "id": "brief",
+            "label": "Brief",
+            "description": "Small handoff package.",
+            "name_suffix": "customer",
+            "redaction_mode": "redacted",
+            "include_artifacts": False,
+            "include_private_notes": True,
+            "labels": ["Customer"],
+            "notes": "Include with customer handoff.",
+            "selection": {
+                "runs": "all",
+                "transcripts": "none",
+                "findings": "non_false_positive",
+                "artifacts": "none",
+                "targets": "all",
+            },
+        }]
+
+    def test_package_preset_loader_hot_reloads_when_file_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "package_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: first
+                label: First
+                selection:
+                  runs: all
+                  transcripts: none
+                  findings: none
+                  artifacts: none
+                  targets: all
+            """))
+            cfg = {"package_presets_file": str(path)}
+
+            assert package_presets.list_package_presets(cfg)[0]["label"] == "First"
+
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: second
+                label: Second preset
+                selection:
+                  runs: all
+                  transcripts: all
+                  findings: all
+                  artifacts: selectable
+                  targets: all
+            """))
+            os.utime(path, ns=(2_000_000_000, 2_000_000_000))
+
+            assert package_presets.list_package_presets(cfg)[0]["label"] == "Second preset"
+
+    def test_package_preset_loader_rejects_duplicate_ids(self):
+        with pytest.raises(ProjectWorkspaceError, match="duplicate package preset id"):
+            package_presets.normalize_package_preset_catalog({
+                "presets": [
+                    {
+                        "id": "evidence",
+                        "selection": {
+                            "runs": "all",
+                            "transcripts": "none",
+                            "findings": "none",
+                            "artifacts": "none",
+                            "targets": "all",
+                        },
+                    },
+                    {
+                        "id": "evidence",
+                        "selection": {
+                            "runs": "all",
+                            "transcripts": "none",
+                            "findings": "none",
+                            "artifacts": "none",
+                            "targets": "all",
+                        },
+                    },
+                ],
+            })
+
+    def test_package_preset_loader_rejects_unknown_policy(self):
+        with pytest.raises(ProjectWorkspaceError, match="findings policy"):
+            package_presets.normalize_package_preset_catalog({
+                "presets": [{
+                    "id": "bad_policy",
+                    "selection": {
+                        "runs": "all",
+                        "transcripts": "none",
+                        "findings": "reviewed",
+                        "artifacts": "none",
+                        "targets": "all",
+                    },
+                }],
+            })
+
+    def test_package_preset_loader_falls_back_to_defaults_for_bad_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "package_presets.yaml"
+            path.write_text(textwrap.dedent("""
+            presets:
+              - id: broken
+                selection: []
+            """))
+
+            with mock.patch.object(package_presets.log, "warning") as warning:
+                catalog = package_presets.load_package_preset_catalog({"package_presets_file": str(path)})
+
+        assert catalog.source_path.endswith("app/conf/package_presets.yaml")
+        assert [preset["id"] for preset in catalog.presets] == ["evidence", "summary", "full", "redacted"]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("PACKAGE_PRESETS_OVERRIDE_INVALID",)
+        assert warning.call_args.kwargs["extra"]["path"] == str(path)
+
+        package_presets.clear_package_preset_catalog_cache()
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(package_presets._config, "APP_CONF_DIR", str(tmp)), \
+                    mock.patch.object(package_presets.log, "warning") as missing_warning:
+                catalog = package_presets.load_package_preset_catalog({"package_presets_file": "package_presets.yaml"})
+
+        assert catalog.source_path.endswith("app/conf/package_presets.yaml")
+        assert [preset["id"] for preset in catalog.presets] == ["evidence", "summary", "full", "redacted"]
+        missing_warning.assert_called_once()
+        assert missing_warning.call_args.kwargs["extra"]["path"] == str(Path(tmp) / "package_presets.yaml")
+
+    def test_package_preset_loader_caps_display_lengths_and_default_labels(self):
+        long_label = "l" * (package_presets.PACKAGE_PRESET_LABEL_MAX_LEN + 10)
+        long_default_label = "d" * (package_presets.MAX_LABEL_LEN + 10)
+        catalog = package_presets.normalize_package_preset_catalog({
+            "presets": [{
+                "id": "lengths",
+                "label": long_label,
+                "labels": [long_default_label],
+                "selection": {
+                    "runs": "all",
+                    "transcripts": "none",
+                    "findings": "none",
+                    "artifacts": "none",
+                    "targets": "all",
+                },
+            }],
+        })
+
+        preset = catalog.presets[0]
+        assert preset["label"] == "l" * package_presets.PACKAGE_PRESET_LABEL_MAX_LEN
+        assert preset["labels"] == ["d" * package_presets.MAX_LABEL_LEN]
+
+    def test_package_preset_loader_rejects_too_many_presets(self):
+        selection = {
+            "runs": "all",
+            "transcripts": "none",
+            "findings": "none",
+            "artifacts": "none",
+            "targets": "all",
+        }
+        raw_presets = [
+            {"id": f"preset_{index}", "selection": selection}
+            for index in range(package_presets.PACKAGE_PRESET_MAX_PRESETS + 1)
+        ]
+
+        with pytest.raises(ProjectWorkspaceError, match="preset cap"):
+            package_presets.normalize_package_preset_catalog({"presets": raw_presets})
 
 
 class TestDatabaseBackend:
@@ -2644,6 +3143,10 @@ class TestPostgresMigrations:
         "ai_suggestion_validations",
         "snapshots",
         "session_tokens",
+        "teams",
+        "team_members",
+        "team_invites",
+        "team_recovery_codes",
         "session_preferences",
         "starred_commands",
         "session_variables",
@@ -2658,14 +3161,20 @@ class TestPostgresMigrations:
         "watcher_fires",
         "projects",
         "project_links",
+        "project_auto_promote_rules",
         "entities",
         "entity_run_links",
         "entity_intel_snapshots",
         "run_file_artifacts",
         "findings",
         "findings_occurrences",
+        "atlas_import_drafts",
+        "atlas_import_batches",
+        "atlas_entity_import_links",
+        "atlas_finding_import_occurrences",
         "entity_labels",
         "entity_notes",
+        "finding_triage_details",
         "evidence_packages",
     )
 
@@ -2730,6 +3239,20 @@ class TestPostgresMigrations:
             "0012",
             "0013",
             "0014",
+            "0015",
+            "0016",
+            "0017",
+            "0018",
+            "0019",
+            "0020",
+            "0021",
+            "0022",
+            "0023",
+            "0024",
+            "0025",
+            "0026",
+            "0027",
+            "0028",
         ]
         for table_name in (
             "runs",
@@ -2739,6 +3262,10 @@ class TestPostgresMigrations:
             "ai_suggestion_validations",
             "snapshots",
             "session_tokens",
+            "teams",
+            "team_members",
+            "team_invites",
+            "team_recovery_codes",
             "session_preferences",
             "starred_commands",
             "session_variables",
@@ -2753,14 +3280,20 @@ class TestPostgresMigrations:
             "watcher_fires",
             "projects",
             "project_links",
+            "project_auto_promote_rules",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
             "run_file_artifacts",
             "findings",
             "findings_occurrences",
+            "atlas_import_drafts",
+            "atlas_import_batches",
+            "atlas_entity_import_links",
+            "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
+            "finding_triage_details",
             "evidence_packages",
         ):
             assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
@@ -2829,6 +3362,8 @@ class TestPostgresMigrations:
         assert "occurrence_count" in postgres_sql
         assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
         assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in postgres_sql
+        assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
+        assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in postgres_sql
 
     def test_postgres_search_migration_adds_trigram_indexes(self):
         from core.migrations import MIGRATIONS
@@ -2950,6 +3485,257 @@ class TestPostgresMigrations:
         prune_retention.assert_called_once_with(fake_app_conn)
 
 
+class TestTeamModeFoundation:
+    def _team_db(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        database._create_schema(conn)
+        database._create_indexes(conn)
+        return conn
+
+    def test_capability_matrix_and_requirement_errors(self):
+        from services.teams.capabilities import Capability, require_capability, role_can
+        from services.teams.contracts import TeamPermissionDenied
+
+        assert role_can("owner", Capability.ARCHIVE_TEAM)
+        assert role_can("admin", Capability.MANAGE_MEMBERS)
+        assert role_can("admin", Capability.MANAGE_SECRETS)
+        assert role_can("admin", Capability.MANAGE_WORKSPACE_FILES)
+        assert role_can("operator", Capability.RUN_COMMANDS)
+        assert role_can("operator", Capability.MANAGE_HISTORY)
+        assert role_can("operator", Capability.MANAGE_AUTOMATION)
+        assert role_can("operator", Capability.MANAGE_WORKSPACE_FILES)
+        assert not role_can("operator", Capability.MANAGE_MEMBERS)
+        assert not role_can("operator", Capability.MANAGE_SECRETS)
+        assert role_can("viewer", Capability.VIEW_TEAM)
+        assert not role_can("viewer", Capability.RUN_COMMANDS)
+        assert not role_can("viewer", Capability.MANAGE_HISTORY)
+        assert not role_can("viewer", Capability.MANAGE_AUTOMATION)
+        assert not role_can("viewer", Capability.MANAGE_WORKSPACE_FILES)
+        assert not role_can("unknown", Capability.VIEW_TEAM)
+        assert not role_can("owner", "not_a_capability")
+
+        with mock.patch("services.teams.capabilities.log.warning") as mock_warning:
+            with pytest.raises(TeamPermissionDenied):
+                require_capability(
+                    "viewer",
+                    Capability.RUN_COMMANDS,
+                    team_id="team_capability",
+                    actor_member_id="tmem_viewer",
+                    route="/runs",
+                    method="POST",
+                    action="run_start",
+                )
+        assert mock_warning.call_args.args[0] == "TEAM_CAPABILITY_DENIED"
+        denied_extra = mock_warning.call_args.kwargs["extra"]
+        assert denied_extra["actor_role"] == "viewer"
+        assert denied_extra["capability"] == "run_commands"
+        assert denied_extra["team_id"] == "team_capability"
+        assert denied_extra["actor_member_id"] == "tmem_viewer"
+        assert denied_extra["route"] == "/runs"
+        assert denied_extra["method"] == "POST"
+        assert denied_extra["action"] == "run_start"
+
+    def test_owner_context_predicates_keep_personal_scope_default(self):
+        from services.teams.scope import (
+            anonymous_owner_context,
+            owner_context_for_scope,
+            personal_owner_context,
+            personal_scope_predicate,
+            shared_owner_predicate,
+            team_owner_context,
+        )
+
+        anonymous = anonymous_owner_context()
+        personal = personal_owner_context("sess_abc")
+        team = team_owner_context("team_abc", actor_member_id="tmem_123", actor_session_id="sess_abc")
+
+        assert anonymous.scope == "personal"
+        assert anonymous.owner_id == "anonymous"
+        assert anonymous.actor_session_id == ""
+        assert personal.scope == "personal"
+        assert personal_scope_predicate(personal) == ("session_id = ?", ("sess_abc",))
+        assert shared_owner_predicate(personal) == (
+            "(team_id IS NULL OR team_id = '') AND session_id = ?",
+            ("sess_abc",),
+        )
+        assert shared_owner_predicate(team) == ("team_id = ?", ("team_abc",))
+        assert owner_context_for_scope("").owner_id == "anonymous"
+        assert owner_context_for_scope("sess_abc") == personal
+        assert owner_context_for_scope(
+            "sess_abc",
+            team_id="team_abc",
+            actor_member_id="tmem_123",
+        ) == team
+
+        with pytest.raises(ValueError):
+            personal_scope_predicate(team)
+
+    def test_request_scope_logs_resolution_and_rejections(self):
+        from flask import request
+        from services.teams import request_scope, storage
+
+        conn = self._team_db()
+        try:
+            team = storage.create_team(conn, name="Scoped Operators", creator_session_token="tok_scope_owner")
+            conn.commit()
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context("/history"):
+                with mock.patch.object(request_scope.log, "debug") as mock_debug:
+                    scope = request_scope.current_request_scope("tok_scope_owner", request)
+            assert scope.is_team is False
+            assert mock_debug.call_args.args[0] == "TEAM_SCOPE_RESOLVED"
+            personal_extra = mock_debug.call_args.kwargs["extra"]
+            assert personal_extra["scope"] == "personal"
+            assert personal_extra["source"] == "none"
+            assert personal_extra["session"].startswith("tok_sco")
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context(
+                f"/api/v1/history?team_id={team['id']}",
+                method="GET",
+                environ_base={"REMOTE_ADDR": "198.51.100.10"},
+            ):
+                with mock.patch.object(request_scope.log, "debug") as mock_debug:
+                    team_scope = request_scope.current_request_scope("tok_scope_owner", request)
+            assert team_scope.is_team is True
+            assert team_scope.team_id == team["id"]
+            team_extra = mock_debug.call_args.kwargs["extra"]
+            assert team_extra["scope"] == "team"
+            assert team_extra["source"] == "query"
+            assert team_extra["team_id"] == team["id"]
+            assert team_extra["actor_role"] == "owner"
+            assert team_extra["route"] == "/api/v1/history"
+            assert team_extra["method"] == "GET"
+            assert team_extra["session"] != "tok_scope_owner"
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context(
+                "/api/v1/history",
+                headers={"X-Team-ID": team["id"]},
+            ):
+                with mock.patch.object(request_scope.log, "warning") as mock_warning:
+                    with pytest.raises(request_scope.RequestScopeError):
+                        request_scope.current_request_scope("tok_scope_other", request)
+            assert mock_warning.call_args.args[0] == "TEAM_SCOPE_REJECTED"
+            rejected_extra = mock_warning.call_args.kwargs["extra"]
+            assert rejected_extra["reason"] == "team_forbidden"
+            assert rejected_extra["source"] == "header"
+            assert rejected_extra["team_id"] == team["id"]
+            assert rejected_extra["session"] != "tok_scope_other"
+        finally:
+            conn.close()
+
+    def test_request_scope_can_resolve_archived_teams_as_read_only_when_requested(self):
+        from flask import request
+        from services.teams import request_scope, storage
+
+        conn = self._team_db()
+        try:
+            team = storage.create_team(conn, name="Archived Files", creator_session_token="tok_archived_owner")
+            storage.update_team_status(conn, team["id"], status="archived")
+            conn.commit()
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+                with pytest.raises(request_scope.RequestScopeError) as blocked:
+                    request_scope.current_request_scope("tok_archived_owner", request)
+            assert blocked.value.code == "team_archived"
+
+            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
+                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+                scope = request_scope.current_request_scope("tok_archived_owner", request, allow_archived=True)
+
+            assert scope.is_team is True
+            assert scope.is_archived is True
+            assert scope.read_only is True
+            assert scope.team_id == team["id"]
+        finally:
+            conn.close()
+
+    def test_team_storage_smoke_creates_member_invite_and_recovery_code(self):
+        from services.teams import storage
+
+        conn = self._team_db()
+        try:
+            team, recovery = storage.create_team_with_recovery_code(
+                conn,
+                name="Darklab Operators",
+                creator_session_token="tok_owner",
+                display_name="Owner",
+            )
+            member = storage.add_team_member(
+                conn,
+                team_id=team["id"],
+                session_token="tok_operator",
+                role="operator",
+                display_name="Operator",
+                invited_by_member_id=team["creator_member_id"],
+            )
+            invite = storage.create_team_invite(
+                conn,
+                team_id=team["id"],
+                code_hash="invite_hash",
+                role="viewer",
+                created_by_member_id=team["creator_member_id"],
+                label="Read-only",
+            )
+
+            assert team["slug"] == "darklab-operators"
+            assert team["created_by_member_id"] == team["creator_member_id"]
+            assert member["role"] == "operator"
+            assert invite["role"] == "viewer"
+            assert recovery["team_id"] == team["id"]
+            assert recovery["code"].startswith("trec_")
+            assert storage.active_owner_count(conn, team["id"]) == 1
+            assert storage.list_teams_for_token(conn, "tok_owner")[0]["id"] == team["id"]
+
+            other_team = storage.create_team(conn, name="Other Operators", creator_session_token="tok_other")
+            with pytest.raises(sqlite3.IntegrityError):
+                storage.create_team_invite(
+                    conn,
+                    team_id=other_team["id"],
+                    code_hash="invite_hash",
+                    role="viewer",
+                    created_by_member_id=other_team["creator_member_id"],
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                storage.create_team_recovery_code(
+                    conn,
+                    team_id=other_team["id"],
+                    code_hash=storage.token_hash(recovery["code"]),
+                    created_by_member_id=other_team["creator_member_id"],
+                )
+        finally:
+            conn.close()
+
+    def test_team_slug_uniqueness_raises_domain_error(self):
+        from services.teams import storage
+        from services.teams.contracts import TeamSlugUnavailable
+
+        conn = self._team_db()
+        try:
+            storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_one")
+            with pytest.raises(TeamSlugUnavailable):
+                storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_two")
+        finally:
+            conn.close()
+
+    def test_team_owner_guard_blocks_last_owner_removal(self):
+        from services.teams import storage
+        from services.teams.contracts import TeamOwnerRequired
+
+        conn = self._team_db()
+        try:
+            team = storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_owner")
+            with pytest.raises(TeamOwnerRequired):
+                storage.soft_remove_team_member(conn, team["creator_member_id"])
+            assert storage.active_owner_count(conn, team["id"]) == 1
+        finally:
+            conn.close()
+
+
 class TestSchedulerFoundation:
     def _scheduler_db(self, monkeypatch, tmp_path):
         db_path = os.path.join(tmp_path, "scheduler.db")
@@ -2972,6 +3758,7 @@ class TestSchedulerFoundation:
         base = {
             "id": "sch_test",
             "session_token": "tok_scheduler",
+            "team_id": "",
             "owner_kind": OWNER_KIND_USER,
             "owner_id": "",
             "kind": SCHEDULE_KIND_COMMAND,
@@ -3074,6 +3861,22 @@ class TestSchedulerFoundation:
                 owner_id="wtr_123",
                 conn=conn,
             )
+            team_schedule = service.create_schedule(
+                "tok_scheduler",
+                team_id="team_scheduler",
+                command_text="echo team",
+                cadence_preset="hourly",
+                owner_kind="watcher",
+                owner_id="wtr_team",
+                conn=conn,
+            )
+            with mock.patch.object(service.log, "debug") as debug_log:
+                refreshed = service.mark_schedule_after_fire(
+                    conn,
+                    team_schedule,
+                    fired_at="2026-05-20T10:00:00+00:00",
+                    run_id="run_team_schedule",
+                )
             conn.commit()
 
             visible = service.list_for_session("tok_scheduler", conn=conn)
@@ -3081,6 +3884,11 @@ class TestSchedulerFoundation:
 
         assert [schedule.id for schedule in visible] == [user_schedule.id]
         assert {schedule.id for schedule in all_rows} == {user_schedule.id, watcher_schedule.id}
+        assert refreshed.last_run_id == "run_team_schedule"
+        after_fire_extra = debug_log.call_args.kwargs["extra"]
+        assert after_fire_extra["team_id"] == "team_scheduler"
+        assert after_fire_extra["session"] == "tok_sche********"
+        assert after_fire_extra["owner_id"] == "wtr_team"
 
     def test_scheduler_recovery_coalesces_recent_missed_fire(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch, recovery, service
@@ -3141,7 +3949,7 @@ class TestSchedulerFoundation:
         from services.scheduler import dispatch, service
 
         fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
-        monkeypatch.setattr(dispatch, "active_runs_for_session", lambda _session: [{"run_id": "run_active"}])
+        monkeypatch.setattr(dispatch, "active_runs_for_session", lambda _session, **_kwargs: [{"run_id": "run_active"}])
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
             conn.execute(
                 "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
@@ -3701,6 +4509,29 @@ class TestWatchersFoundation:
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             visible_schedules = schedule_service.list_for_session("tok_watchers", conn=conn)
             visible_watchers = watcher_service.list_for_session("tok_watchers", conn=conn)
+            team_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                team_id="team_watchers",
+                command_text="nmap -sV team.darklab.sh",
+                baseline_run_id="run_team_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            team_schedule = schedule_service.create_schedule(
+                "tok_watchers",
+                team_id="team_watchers",
+                command_text="echo team schedule",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            with mock.patch.object(watcher_service.log, "info") as info_log:
+                paused = watcher_service.pause_team_watchers_and_schedules(
+                    conn,
+                    "team_watchers",
+                    reason="team_archived",
+                )
+            paused_watcher = watcher_service.get_watcher(team_watcher.id, conn=conn)
+            paused_schedule = schedule_service.get_schedule(team_schedule.id, conn=conn)
 
         assert watcher.baseline_run_id == "run_baseline"
         assert watcher.command_text == "nmap -sV darklab.sh"
@@ -3711,6 +4542,18 @@ class TestWatchersFoundation:
         assert schedule.command_text == watcher.command_text
         assert visible_schedules == []
         assert [item.id for item in visible_watchers] == [watcher.id]
+        assert paused == {"watchers": 1, "schedules": 1}
+        assert paused_watcher is not None
+        assert paused_watcher.state == "paused"
+        assert paused_schedule is not None
+        assert paused_schedule.enabled is False
+        assert info_log.call_args.args == ("TEAM_AUTOMATION_PAUSED",)
+        assert info_log.call_args.kwargs["extra"] == {
+            "team_id": "team_watchers",
+            "reason": "team_archived",
+            "paused_watchers": 1,
+            "paused_schedules": 1,
+        }
 
     def test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
@@ -3928,6 +4771,7 @@ class TestWatchersFoundation:
                 "SELECT status, run_id, reason FROM schedule_fires WHERE schedule_id = ?",
                 (watcher.schedule_id,),
             ).fetchall()
+            schedule_refs = schedule_service.schedule_refs_by_run(conn, ["run_fire"])
 
         assert status == "fired"
         assert refreshed is not None
@@ -3939,6 +4783,9 @@ class TestWatchersFoundation:
         assert [(row["status"], row["run_id"], row["reason"]) for row in schedule_fires] == [
             ("fired", "run_fire", "started watcher run"),
         ]
+        assert schedule_refs["run_fire"]["schedule_id"] == watcher.schedule_id
+        assert schedule_refs["run_fire"]["owner_kind"] == "watcher"
+        assert schedule_refs["run_fire"]["owner_id"] == watcher.id
 
     def test_watcher_full_cycle_captures_first_run_detects_change_notifies_and_accepts_baseline(
         self,
@@ -4745,6 +5592,131 @@ class TestNotificationsPhase0:
         assert exit_code == 0
         assert "Webhook channels require secret values" in text
         assert "Options > Notifications" in text
+
+    def test_team_builtin_creates_invites_joins_and_rotates_recovery(self, monkeypatch, tmp_path):
+        from services.commands import builtins_team
+
+        conn = self._notification_db(monkeypatch, tmp_path)
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            for token in ("tok_team_builtin_owner", "tok_team_builtin_operator"):
+                conn.execute(
+                    "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                    (token, now, ""),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with mock.patch.object(builtins_team.log, "info") as mock_info, \
+             mock.patch.object(builtins_team.log, "warning") as mock_warning:
+            create_lines, create_exit = builtin_commands.execute_builtin_command(
+                "team create Builtin Operators --display-name Owner",
+                "tok_team_builtin_owner",
+            )
+            create_text = "\n".join(str(line.get("text", "")) for line in create_lines)
+            match = re.search(r"\((team_[a-f0-9]+)\)", create_text)
+            assert create_exit == 0
+            assert match
+            team_id = match.group(1)
+            assert "recovery code: trec_" in create_text
+            create_recovery_match = re.search(r"recovery code: (trec_[A-Za-z0-9_-]+)", create_text)
+            assert create_recovery_match
+
+            list_lines, _ = builtin_commands.execute_builtin_command("team list", "tok_team_builtin_owner")
+            list_text = "\n".join(str(line.get("text", "")) for line in list_lines)
+            assert team_id in list_text
+            list_header = next(line for line in list_lines if line.get("cls") == "builtin-table-header")
+            list_row = next(line for line in list_lines if line.get("cls") == "builtin-table-row")
+            assert str(list_header["text"]).index("role") == str(list_row["text"]).index("owner")
+            assert str(list_header["text"]).index("name") == str(list_row["text"]).index("Builtin Operators")
+
+            invite_lines, _ = builtin_commands.execute_builtin_command(
+                "team invite create --role operator --label Shell",
+                "tok_team_builtin_owner",
+                team_id=team_id,
+                team_role="owner",
+            )
+            invite_text = "\n".join(str(line.get("text", "")) for line in invite_lines)
+            code_match = re.search(r"code: (tinv_[A-Za-z0-9_-]+)", invite_text)
+            assert code_match
+
+            join_lines, _ = builtin_commands.execute_builtin_command(
+                f"team join {code_match.group(1)} --display-name Operator",
+                "tok_team_builtin_operator",
+            )
+            assert "joined Builtin Operators" in "\n".join(str(line.get("text", "")) for line in join_lines)
+
+            denied_invite_lines, _ = builtin_commands.execute_builtin_command(
+                "team invite create --role viewer",
+                "tok_team_builtin_operator",
+                team_id=team_id,
+                team_role="operator",
+            )
+            assert "lacks team capability" in "\n".join(str(line.get("text", "")) for line in denied_invite_lines)
+
+            denied_recovery_lines, _ = builtin_commands.execute_builtin_command(
+                "team recovery rotate",
+                "tok_team_builtin_operator",
+                team_id=team_id,
+                team_role="operator",
+            )
+            assert "lacks team capability" in "\n".join(str(line.get("text", "")) for line in denied_recovery_lines)
+
+            members_lines, _ = builtin_commands.execute_builtin_command(
+                "team members",
+                "tok_team_builtin_owner",
+                team_id=team_id,
+                team_role="owner",
+            )
+            members_text = "\n".join(str(line.get("text", "")) for line in members_lines)
+            assert "Operator" in members_text
+            assert "owner" in members_text
+            members_header = next(line for line in members_lines if line.get("cls") == "builtin-table-header")
+            members_owner_row = next(line for line in members_lines if "Owner" in str(line.get("text", "")))
+            assert str(members_header["text"]).index("role") == str(members_owner_row["text"]).index("owner")
+            assert str(members_header["text"]).index("status") == str(members_owner_row["text"]).index("active")
+            assert str(members_header["text"]).index("name") == str(members_owner_row["text"]).index("Owner")
+
+            recovery_lines, _ = builtin_commands.execute_builtin_command(
+                "team recovery rotate",
+                "tok_team_builtin_owner",
+                team_id=team_id,
+                team_role="owner",
+            )
+            recovery_text = "\n".join(str(line.get("text", "")) for line in recovery_lines)
+            assert "recovery code: trec_" in recovery_text
+            rotate_recovery_match = re.search(r"recovery code: (trec_[A-Za-z0-9_-]+)", recovery_text)
+            assert rotate_recovery_match
+
+        team_actions = [
+            call.kwargs["extra"]
+            for call in mock_info.call_args_list
+            if call.args and call.args[0] == "TEAM_ACTION"
+        ]
+        assert [event["action"] for event in team_actions] == [
+            "create",
+            "invite_create",
+            "invite_redeem",
+            "recovery_rotate",
+        ]
+        assert {event["surface"] for event in team_actions} == {"terminal_builtin"}
+        assert team_actions[0]["actor_role"] == "owner"
+        assert team_actions[1]["target_invite_id"].startswith("tinv_")
+        assert team_actions[2]["team_id"] == team_id
+        team_actions_json = json.dumps(team_actions)
+        assert code_match.group(1) not in team_actions_json
+        assert create_recovery_match.group(1) not in team_actions_json
+        assert rotate_recovery_match.group(1) not in team_actions_json
+        rejected = [
+            call.kwargs["extra"]
+            for call in mock_warning.call_args_list
+            if call.args and call.args[0] == "TEAM_ACTION_REJECTED"
+        ]
+        assert rejected[-2]["action"] == "invite_create"
+        assert rejected[-1]["action"] == "recovery_rotate"
+        assert {event["surface"] for event in rejected[-2:]} == {"terminal_builtin"}
+        assert {event["actor_role"] for event in rejected[-2:]} == {"operator"}
 
 
 class TestRunHistorySearchClauses:
@@ -6439,6 +7411,52 @@ class TestSessionWorkspace:
             assert mode & 0o1730 == 0o1730
             assert not mode & 0o004
 
+    def test_owner_workspace_names_separate_personal_and_team_roots(self):
+        from services.teams.scope import personal_owner_context, team_owner_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            personal = personal_owner_context("tok_workspace_owner")
+            team = team_owner_context(
+                "team_workspace_owner",
+                actor_session_id="tok_workspace_owner",
+                actor_member_id="tmem_workspace_owner",
+            )
+
+            personal_path = workspace_module.ensure_owner_workspace(personal, cfg)
+            team_path = workspace_module.ensure_owner_workspace(team, cfg)
+
+            assert personal_path.name == session_workspace_name("tok_workspace_owner")
+            assert team_path.name.startswith("team_")
+            assert personal_path != team_path
+            assert "tok_workspace_owner" not in str(personal_path)
+            assert "team_workspace_owner" not in str(team_path)
+
+    def test_owner_workspace_files_are_isolated_and_keep_session_wrappers_compatible(self):
+        from services.teams.scope import team_owner_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            team = team_owner_context("team_workspace_shared", actor_session_id="tok_member_a")
+
+            write_workspace_text_file("tok_member_a", "targets.txt", "personal\n", cfg)
+            workspace_module.write_owner_workspace_text_file(team, "targets.txt", "team\n", cfg)
+
+            assert read_workspace_text_file("tok_member_a", "targets.txt", cfg) == "personal\n"
+            assert workspace_module.read_owner_workspace_text_file(team, "targets.txt", cfg) == "team\n"
+            assert workspace_usage("tok_member_a", cfg).bytes_used == len("personal\n")
+            assert workspace_module.owner_workspace_usage(team, cfg).bytes_used == len("team\n")
+
+    def test_session_workspace_migration_rejects_team_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_module.migrate_session_workspace("team_from", "tok_to", cfg)
+
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_module.migrate_session_workspace("tok_from", "team_to", cfg)
+
     def test_session_workspace_logs_chmod_failures_without_blocking_creation(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
@@ -6479,6 +7497,25 @@ class TestSessionWorkspace:
 
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
+
+    def test_prepare_workspace_file_for_command_falls_back_for_scanner_owned_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "output.txt", "", cfg)
+            path = resolve_workspace_path("session-1", "output.txt", cfg)
+
+            with mock.patch("services.workspace.files._appuser_gid", return_value=996), \
+                    mock.patch("services.workspace.files.os.chown", side_effect=PermissionError), \
+                    mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
+                    mock.patch("services.workspace.files.subprocess.run") as run:
+                prepare_workspace_file_for_command(path, mode="write")
+
+            commands = [call.args[0] for call in run.call_args_list]
+            assert commands == [
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "660", str(path)],
+            ]
 
     def test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -6668,9 +7705,17 @@ class TestSessionWorkspace:
             outside = Path(tmp) / "outside.txt"
             outside.write_text("outside\n", encoding="utf-8")
             real_resolve = workspace_module.resolve_workspace_path
+            real_owner_resolve = workspace_module.resolve_owner_workspace_path
 
             def swap_final_component(session_id, relative_path, active_cfg=None, *, ensure_parent=False):
                 path = real_resolve(session_id, relative_path, active_cfg, ensure_parent=ensure_parent)
+                if path.exists() or path.is_symlink():
+                    path.unlink()
+                path.symlink_to(outside)
+                return path
+
+            def swap_final_owner_component(owner, relative_path, active_cfg=None, *, ensure_parent=False):
+                path = real_owner_resolve(owner, relative_path, active_cfg, ensure_parent=ensure_parent)
                 if path.exists() or path.is_symlink():
                     path.unlink()
                 path.symlink_to(outside)
@@ -6689,7 +7734,11 @@ class TestSessionWorkspace:
                 if target.exists() or target.is_symlink():
                     target.unlink()
                 target.write_text("inside\n", encoding="utf-8")
-                with mock.patch("services.workspace.files.resolve_workspace_path", side_effect=swap_final_component):
+                with mock.patch("services.workspace.files.resolve_workspace_path", side_effect=swap_final_component), \
+                     mock.patch(
+                         "services.workspace.files.resolve_owner_workspace_path",
+                         side_effect=swap_final_owner_component,
+                     ):
                     with pytest.raises(InvalidWorkspacePath):
                         operation()
                 assert outside.read_text(encoding="utf-8") == "outside\n"
@@ -6717,24 +7766,97 @@ class TestSessionWorkspace:
             except WorkspaceQuotaExceeded:
                 pass
 
-    def test_cleanup_removes_only_expired_session_directories(self):
+    def test_cleanup_removes_only_expired_session_directories(self, monkeypatch, caplog):
+        from services.teams.scope import team_owner_context
+
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
             old_root = ensure_session_workspace("old-session", cfg)
+            blocked_root = ensure_session_workspace("blocked-session", cfg)
             fresh_root = ensure_session_workspace("fresh-session", cfg)
+            team_root = workspace_module.ensure_owner_workspace(team_owner_context("team-cleanup"), cfg)
             unrelated = Path(tmp) / "manual"
             unrelated.mkdir()
             old_ts = 1000
             fresh_ts = 2000
             os.utime(old_root, (old_ts, old_ts))
+            os.utime(blocked_root, (old_ts, old_ts))
             os.utime(fresh_root, (fresh_ts, fresh_ts))
+            os.utime(team_root, (old_ts, old_ts))
+            original_rmtree = workspace_module.shutil.rmtree
+
+            def fake_rmtree(path, *args, **kwargs):
+                if Path(path) == blocked_root:
+                    raise PermissionError("permission denied")
+                return original_rmtree(path, *args, **kwargs)
+
+            monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
+            caplog.set_level("WARNING", logger=workspace_module.log.name)
 
             removed = cleanup_inactive_workspaces(cfg, now=4601)
 
             assert removed == 1
             assert not old_root.exists()
+            assert blocked_root.exists()
             assert fresh_root.exists()
+            assert team_root.exists()
             assert unrelated.exists()
+            assert "WORKSPACE_CLEANUP_SKIP path=" in caplog.text
+            assert str(blocked_root) in caplog.text
+            assert "PermissionError" in caplog.text
+
+    def test_cleanup_repairs_scanner_owned_child_directories_before_remove(self, monkeypatch):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("scanner-output-session", cfg)
+            scanner_child = root / "nuclei"
+            scanner_child.mkdir()
+            (scanner_child / "result.txt").write_text("finding\n", encoding="utf-8")
+            scanner_child.chmod(0o200)
+            os.utime(root, (1000, 1000))
+
+            def fake_is_scanner_owned(path_stat):
+                return stat.S_IMODE(path_stat.st_mode) == 0o200
+
+            monkeypatch.setattr(workspace_module, "_is_scanner_owned", fake_is_scanner_owned)
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not root.exists()
+
+    def test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure(self, monkeypatch):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("stale-output-session", cfg)
+            stale_child = root / "nuclei"
+            stale_child.mkdir()
+            os.utime(root, (1000, 1000))
+            original_rmtree = workspace_module.shutil.rmtree
+            original_iterdir = Path.iterdir
+
+            def fake_rmtree(path, *args, **kwargs):
+                if Path(path) == root and stale_child.exists():
+                    raise PermissionError("permission denied")
+                return original_rmtree(path, *args, **kwargs)
+
+            def fake_iterdir(path):
+                if Path(path) == stale_child:
+                    raise PermissionError("permission denied")
+                return original_iterdir(path)
+
+            monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
+            monkeypatch.setattr(Path, "iterdir", fake_iterdir)
+            monkeypatch.setattr(
+                workspace_module,
+                "_repair_workspace_tree_for_cleanup",
+                mock.Mock(side_effect=PermissionError("permission denied")),
+            )
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not root.exists()
 
     def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -6785,12 +7907,47 @@ class TestEntrypointWorkspaceRepair:
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
 
         assert "chown -R appuser:appuser \"$WORKSPACE_ROOT\"" not in entrypoint
-        assert "chown appuser:appuser \"$WORKSPACE_ROOT\"" in entrypoint
+        assert "repair_workspace_root \"$WORKSPACE_ROOT\" 1" in entrypoint
+        assert "repair_workspace_root /workspaces 0" in entrypoint
+        assert "chown appuser:appuser \"$workspace_root\"" in entrypoint
         assert "-exec chown appuser:appuser {} \\;" in entrypoint
         assert "find \"$WORKSPACE_ROOT\" -mindepth 2 -exec chown scanner:appuser" not in entrypoint
-        assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
-        assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
-        assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
+        assert "for child in \"$session_dir\"/*" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=direct-child-chown path=$child" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=direct-child-chmod path=$child" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" not in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -print0" in entrypoint
+        assert "xargs -0r chown scanner:appuser" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=recursive-chown path=$session_dir" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type d -print0" in entrypoint
+        assert "xargs -0r chmod 3770" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=recursive-dir-chmod path=$session_dir" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type f -print0" in entrypoint
+        assert "xargs -0r chmod 640" in entrypoint
+        assert "WORKSPACE_REPAIR_FAILED stage=recursive-file-chmod path=$session_dir" in entrypoint
+
+    def test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only(self):
+        entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        shell_env = TestAIRuntimeWiring._compose_environment(compose["services"]["shell"])
+
+        assert "RESTRICTED_COMMAND_INPUT_CIDRS" in entrypoint
+        assert "iptables -C OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert "iptables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert "ip6tables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" in entrypoint
+        assert shell_env["RESTRICTED_COMMAND_INPUT_CIDRS"] == "${RESTRICTED_COMMAND_INPUT_CIDRS:-}"
+
+    def test_compose_redis_is_ephemeral_under_read_only_root(self):
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        redis_service = compose["services"]["redis"]
+        redis_command = [str(item) for item in redis_service.get("command", [])]
+
+        assert redis_service.get("read_only") is True
+        assert redis_command[:1] == ["redis-server"]
+        assert redis_command[redis_command.index("--save") + 1] == ""
+        assert redis_command[redis_command.index("--appendonly") + 1] == "no"
+        assert redis_command[redis_command.index("--stop-writes-on-bgsave-error") + 1] == "no"
 
     def test_gunicorn_uses_prometheus_multiprocess_cleanup_hook(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
@@ -7732,7 +8889,7 @@ class TestDerivedCommandRegistry:
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
-                "workspace_quota_mb": 1,
+                "workspace_quota_mb": 50,
                 "workspace_max_file_mb": 1,
                 "workspace_max_files": 40,
                 "workspace_inactivity_ttl_hours": 1,
@@ -7890,7 +9047,7 @@ class TestDerivedCommandRegistry:
                     cfg=cfg,
                 )
                 assert not result.allowed
-                assert "managed tools/amass session directory" in result.reason
+                assert "managed tools/amass workspace directory" in result.reason
 
                 result = commands.validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
@@ -8168,6 +9325,476 @@ class TestDerivedCommandRegistry:
                 assert not is_command_allowed("nc -w 3 -e /bin/sh -z darklab.sh 80")[0]
                 assert is_command_allowed("nmap -sV darklab.sh")[0]
                 assert not is_command_allowed("nmap -Vs darklab.sh")[0]
+
+
+# ── Command knowledge schema (Phase 0) ────────────────────────────────────────
+
+class TestCommandKnowledgeSchema:
+    """Phase 0 locked decisions: field names, caps, merge strategy, lint function."""
+
+    # ── Field set completeness ─────────────────────────────────────────────────
+
+    def test_knowledge_list_fields_are_correct(self):
+        assert registry_loader_module.KNOWLEDGE_LIST_FIELDS == {
+            "notes", "gotchas", "safe_defaults", "common_flags"
+        }
+
+    def test_knowledge_scalar_fields_are_correct(self):
+        assert registry_loader_module.KNOWLEDGE_SCALAR_FIELDS == {"artifact_behavior"}
+
+    def test_knowledge_fields_is_union_of_list_and_scalar(self):
+        assert (
+            registry_loader_module.KNOWLEDGE_FIELDS
+            == registry_loader_module.KNOWLEDGE_LIST_FIELDS | registry_loader_module.KNOWLEDGE_SCALAR_FIELDS
+        )
+
+    def test_knowledge_list_and_scalar_fields_are_disjoint(self):
+        assert not registry_loader_module.KNOWLEDGE_LIST_FIELDS & registry_loader_module.KNOWLEDGE_SCALAR_FIELDS
+
+    # ── Caps ───────────────────────────────────────────────────────────────────
+
+    def test_caps_are_positive_integers(self):
+        assert isinstance(registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS, int)
+        assert isinstance(registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS, int)
+        assert registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS > 0
+        assert registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS > 0
+
+    # ── Known field sets ───────────────────────────────────────────────────────
+
+    def test_knowledge_is_in_known_command_fields(self):
+        # Ensures that once Phase 1 adds the "knowledge" key to entries it
+        # will not trip the lint, even before the normalizer wire-up lands.
+        assert "knowledge" in registry_loader_module._KNOWN_TOP_LEVEL_COMMAND_FIELDS
+
+    def test_known_command_fields_covers_all_normalizer_inputs(self):
+        required = {
+            "root", "description", "category", "policy", "help",
+            "workspace_flags", "autocomplete", "runtime_adaptations",
+            "requires_secrets", "interactive", "allow_grouping_flags",
+            "feature_required", "requires_feature", "feature",
+        }
+        assert required.issubset(registry_loader_module._KNOWN_TOP_LEVEL_COMMAND_FIELDS)
+
+    def test_pipe_helper_known_fields_are_subset_of_command_fields(self):
+        assert (
+            registry_loader_module._KNOWN_TOP_LEVEL_PIPE_HELPER_FIELDS
+            < registry_loader_module._KNOWN_TOP_LEVEL_COMMAND_FIELDS
+        )
+
+    # ── check_unknown_command_fields ───────────────────────────────────────────
+
+    def test_clean_command_entry_returns_empty(self):
+        entry = {
+            "root": "nmap",
+            "category": "Network Reconnaissance",
+            "description": "Fast port scanner.",
+            "policy": {"allow": ["nmap"], "deny": []},
+            "autocomplete": {},
+            "help": {},
+            "workspace_flags": [],
+            "runtime_adaptations": {},
+            "requires_secrets": [],
+            "interactive": None,
+            "allow_grouping_flags": [],
+            "feature_required": None,
+            "knowledge": {},
+        }
+        assert registry_loader_module.check_unknown_command_fields(entry) == []
+
+    def test_unknown_fields_returned_sorted(self):
+        entry = {"root": "ping", "typo_field": "x", "another_unknown": 1}
+        unknown = registry_loader_module.check_unknown_command_fields(entry)
+        assert unknown == ["another_unknown", "typo_field"]
+
+    def test_pipe_helper_entry_clean(self):
+        entry = {"root": "grep", "autocomplete": {}}
+        assert registry_loader_module.check_unknown_command_fields(entry, pipe_helper=True) == []
+
+    def test_pipe_helper_rejects_command_only_fields(self):
+        # "category" is a command field, not valid on a pipe helper.
+        entry = {"root": "grep", "autocomplete": {}, "category": "Filters"}
+        unknown = registry_loader_module.check_unknown_command_fields(entry, pipe_helper=True)
+        assert "category" in unknown
+
+    def test_non_dict_input_returns_empty(self):
+        assert registry_loader_module.check_unknown_command_fields(None) == []  # type: ignore[arg-type]
+        assert registry_loader_module.check_unknown_command_fields("not a dict") == []  # type: ignore[arg-type]
+        assert registry_loader_module.check_unknown_command_fields([]) == []  # type: ignore[arg-type]
+
+
+# ── Command knowledge normalization and projection (Phase 1) ──────────────────
+
+class TestCommandKnowledgeNormalization:
+    """Phase 1: normalize_command_knowledge, catalog projection, and pipe catalog."""
+
+    # ── normalize_command_knowledge ────────────────────────────────────────────
+
+    def test_list_fields_parsed_and_returned(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": ["Web-shell specific note.", "Second note."],
+            "gotchas": ["Watch for noisy status output."],
+        })
+        assert result["notes"] == ["Web-shell specific note.", "Second note."]
+        assert result["gotchas"] == ["Watch for noisy status output."]
+        assert "safe_defaults" not in result
+
+    def test_scalar_field_parsed_and_returned(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "artifact_behavior": "Writes scan results to the managed workspace directory."
+        })
+        assert result["artifact_behavior"] == "Writes scan results to the managed workspace directory."
+
+    def test_items_stripped(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": ["  leading space  ", "\tnewline\t"],
+        })
+        assert result["notes"] == ["leading space", "newline"]
+
+    def test_empty_items_dropped(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": ["", "  ", "valid"],
+        })
+        assert result["notes"] == ["valid"]
+
+    def test_duplicate_items_deduped(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "gotchas": ["Same text.", "Different text.", "Same text."],
+        })
+        assert result["gotchas"] == ["Same text.", "Different text."]
+
+    def test_list_items_truncated_at_cap(self):
+        long_item = "x" * (registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS + 50)
+        result = registry_loader_module.normalize_command_knowledge({"notes": [long_item]})
+        assert len(cast(list[str], result["notes"])[0]) == registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS
+
+    def test_scalar_truncated_at_cap(self):
+        long_value = "y" * (registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS + 50)
+        result = registry_loader_module.normalize_command_knowledge({"artifact_behavior": long_value})
+        assert len(cast(str, result["artifact_behavior"])) == registry_loader_module.KNOWLEDGE_TEXT_MAX_CHARS
+
+    def test_list_capped_at_max_items(self):
+        many = [f"note {i}" for i in range(registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS + 5)]
+        result = registry_loader_module.normalize_command_knowledge({"notes": many})
+        assert len(cast(list, result["notes"])) == registry_loader_module.KNOWLEDGE_LIST_MAX_ITEMS
+
+    def test_unknown_sub_fields_silently_ignored(self):
+        raw = {
+            "notes": ["A valid note."],
+            "future_unknown_field": "some value",
+        }
+        result = registry_loader_module.normalize_command_knowledge(raw)
+        assert "notes" in result
+        assert "future_unknown_field" not in result
+        assert registry_loader_module.check_unknown_command_fields({"root": "nmap", "knowledge": raw}) == [
+            "knowledge.future_unknown_field"
+        ]
+
+    def test_non_dict_raw_knowledge_returns_empty(self):
+        assert registry_loader_module.normalize_command_knowledge(None) == {}
+        assert registry_loader_module.normalize_command_knowledge("string") == {}
+        assert registry_loader_module.normalize_command_knowledge([]) == {}
+
+    def test_empty_dict_returns_empty(self):
+        assert registry_loader_module.normalize_command_knowledge({}) == {}
+
+    def test_all_empty_values_returns_empty(self):
+        result = registry_loader_module.normalize_command_knowledge({
+            "notes": [],
+            "gotchas": ["", "  "],
+            "artifact_behavior": "  ",
+        })
+        assert result == {}
+
+    # ── Registry entry normalization with knowledge field ──────────────────────
+
+    def test_knowledge_present_in_normalized_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                description: Fast port scanner.
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  notes:
+                    - Noisy status output is expected during long scans.
+                  gotchas:
+                    - Use -oN to write output to the managed workspace directory.
+                  artifact_behavior: Writes scan results to the managed workspace directory.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                registry = load_commands_registry()
+        entry = registry["commands"][0]
+        assert "knowledge" in entry
+        assert entry["knowledge"]["notes"] == ["Noisy status output is expected during long scans."]
+        assert entry["knowledge"]["gotchas"] == ["Use -oN to write output to the managed workspace directory."]
+        assert entry["knowledge"]["artifact_behavior"] == "Writes scan results to the managed workspace directory."
+
+    def test_knowledge_absent_when_not_in_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                registry = load_commands_registry()
+        entry = registry["commands"][0]
+        assert "knowledge" not in entry
+
+    # ── feature_required in catalog projection ─────────────────────────────────
+
+    def test_feature_required_projected_onto_catalog_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: aiquery
+                category: AI
+                description: AI-powered query tool.
+                feature_required: ai_enabled
+                policy:
+                  allow:
+                    - aiquery
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        assert len(catalog) == 1
+        assert catalog[0]["feature_required"] == "ai_enabled"
+
+    def test_feature_required_none_when_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        assert catalog[0]["feature_required"] is None
+
+    # ── knowledge in catalog projection ───────────────────────────────────────
+
+    def test_knowledge_projected_onto_catalog_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nuclei
+                category: Network Reconnaissance
+                description: Template-based vulnerability scanner.
+                policy:
+                  allow:
+                    - nuclei
+                knowledge:
+                  gotchas:
+                    - Status lines can be very noisy.
+                  artifact_behavior: Writes findings to the workspace directory.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        knowledge = cast(dict, catalog[0]["knowledge"])
+        assert knowledge["gotchas"] == ["Status lines can be very noisy."]
+        assert knowledge["artifact_behavior"] == "Writes findings to the workspace directory."
+
+    def test_knowledge_empty_dict_when_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                catalog = command_catalog_from_registry()
+        assert catalog[0]["knowledge"] == {}
+
+    # ── .local overlay merge ───────────────────────────────────────────────────
+
+    def test_local_overlay_extends_list_knowledge_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "commands.yaml"
+            local = Path(tmp) / "commands.local.yaml"
+            base.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  notes:
+                    - Base note 1.
+                    - Base note 2.
+                    - Base note 3.
+                    - Base note 4.
+            """))
+            local.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                knowledge:
+                  notes:
+                    - Overlay note 1.
+                    - Overlay note 2.
+                  gotchas:
+                    - Overlay gotcha.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base)):
+                catalog = command_catalog_from_registry()
+        knowledge = cast(dict, catalog[0]["knowledge"])
+        notes = cast(list, knowledge["notes"])
+        assert notes == [
+            "Base note 1.",
+            "Base note 2.",
+            "Base note 3.",
+            "Base note 4.",
+            "Overlay note 1.",
+        ]
+        assert knowledge["gotchas"] == ["Overlay gotcha."]
+
+    def test_local_overlay_dedupes_list_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "commands.yaml"
+            local = Path(tmp) / "commands.local.yaml"
+            base.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  notes:
+                    - Existing note.
+            """))
+            local.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                knowledge:
+                  notes:
+                    - Existing note.
+                    - New note.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base)):
+                catalog = command_catalog_from_registry()
+        notes = cast(list, cast(dict, catalog[0]["knowledge"])["notes"])
+        assert notes.count("Existing note.") == 1
+        assert "New note." in notes
+
+    def test_local_overlay_replaces_scalar_knowledge_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "commands.yaml"
+            local = Path(tmp) / "commands.local.yaml"
+            base.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                category: Network Reconnaissance
+                policy:
+                  allow:
+                    - nmap
+                knowledge:
+                  artifact_behavior: Base artifact behavior.
+            """))
+            local.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: nmap
+                knowledge:
+                  artifact_behavior: Overlay artifact behavior.
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base)):
+                catalog = command_catalog_from_registry()
+        assert cast(dict, catalog[0]["knowledge"])["artifact_behavior"] == "Overlay artifact behavior."
+
+    # ── pipe_catalog_from_registry ─────────────────────────────────────────────
+
+    def test_pipe_catalog_returns_pipe_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands: []
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines by pattern
+                  flags:
+                    - value: -i
+                      description: Ignore case
+                    - value: -v
+                      description: Invert match
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                pipes = pipe_catalog_from_registry()
+        assert len(pipes) == 1
+        assert pipes[0]["root"] == "grep"
+        assert pipes[0]["description"] == "Filter lines by pattern"
+        flags = cast(list, pipes[0]["flags"])
+        assert {"value": "-i", "description": "Ignore case"} in flags
+        assert {"value": "-v", "description": "Invert match"} in flags
+
+    def test_pipe_catalog_real_registry_returns_app_native_helpers(self):
+        pipes = pipe_catalog_from_registry()
+        roots = [p["root"] for p in pipes]
+        assert "grep" in roots
+        assert "head" in roots
+        assert "tail" in roots
+
+    def test_pipe_catalog_entry_has_no_feature_required_when_absent(self):
+        pipes = pipe_catalog_from_registry()
+        for pipe in pipes:
+            assert "feature_required" not in pipe or pipe.get("feature_required")
+
+    def test_pipe_catalog_disabled_entry_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands: []
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines by pattern
+              - root: disabled_helper
+                autocomplete:
+                  pipe:
+                    enabled: false
+                    description: Should not appear
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                pipes = pipe_catalog_from_registry()
+        roots = [p["root"] for p in pipes]
+        assert "grep" in roots
+        assert "disabled_helper" not in roots
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
@@ -9077,6 +10704,34 @@ class TestRunBrokerMemoryStore:
         log_debug.assert_called_once()
         assert log_debug.call_args.args == ("BROKER_STREAM_CLIENT_GONE",)
 
+    def test_stream_run_events_treats_redis_read_timeout_as_idle_heartbeat(self):
+        for timeout_exc in (
+            run_broker.RedisTimeoutError("Timeout reading from socket"),
+            run_broker.RedisConnectionError("Timeout reading from socket"),
+        ):
+            class FakeStore:
+                def __init__(self):
+                    self.waits = 0
+
+                def replay(self, run_id):
+                    assert run_id == "run-1"
+                    return []
+
+                def wait_after(self, run_id, after_id, timeout):
+                    assert run_id == "run-1"
+                    assert after_id == "0-0"
+                    self.waits += 1
+                    if self.waits == 1:
+                        raise timeout_exc
+                    return [run_broker.BrokerEvent("2-0", {"type": "exit", "code": 0})]
+
+            with mock.patch.object(run_broker, "_store", return_value=FakeStore()):
+                events = list(run_broker.stream_run_events("run-1"))
+
+            assert events[0].startswith("event: schema\n")
+            assert events[1] == ": heartbeat\n\n"
+            assert '"type": "exit"' in events[2]
+
     def test_decode_payload_accepts_redis_bytes_fields(self):
         payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})
 
@@ -9543,6 +11198,40 @@ class TestActiveRunMetadata:
         assert fake_redis.get("proc:run-live") == 33333
         assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
 
+    def test_active_runs_for_session_periodically_cleans_unindexed_stale_metadata(self):
+        fake_redis = process._FakeRedisClient()
+        stale = {
+            "run_id": "run-unindexed-stale",
+            "pid": 11111,
+            "session_id": "session-1",
+            "command": "ping darklab.sh",
+            "started": "2026-01-01T00:00:00Z",
+            "process_namespace_id": "container-current",
+        }
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_process_namespace_id", return_value="container-current"),
+            mock.patch.object(process, "_active_run_is_alive", return_value=True),
+            mock.patch.object(process.time, "monotonic", return_value=1000.0),
+            mock.patch.object(process, "_last_active_run_cleanup_monotonic", 0.0),
+        ):
+            fake_redis.set("procmeta:run-unindexed-stale", process.json.dumps(stale))
+            process.active_run_register(
+                "run-live",
+                22222,
+                "session-1",
+                "curl -I darklab.sh",
+                "2026-01-01T00:00:01Z",
+            )
+            process.pid_register("run-live", 22222)
+
+            runs = process.active_runs_for_session("session-1")
+
+        assert [item["run_id"] for item in runs] == ["run-live"]
+        assert fake_redis.get("procmeta:run-unindexed-stale") is None
+        assert fake_redis.get("procmeta:run-live") is not None
+        assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
+
     def test_active_run_resource_usage_reports_cumulative_cpu_and_memory(self):
         class FakeTimes:
             def __init__(self, user, system):
@@ -9686,6 +11375,119 @@ class TestPtyBrokerService:
             {"rows": 33, "cols": 120, "action": "resize"},
         ]
 
+        team_run_id = "pty-run-team-redis"
+        fake.set(
+            pty_service._meta_key(team_run_id),
+            json.dumps({
+                "run_id": team_run_id,
+                "session_id": "creator-session",
+                "team_id": "team-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_team",
+                 return_value=[{"run_id": team_run_id, "run_type": "pty", "team_id": "team-1"}],
+             ), \
+             mock.patch.object(pty_service.log, "debug") as debug_log:
+            assert pty_service.write_pty_input(
+                team_run_id,
+                "member-session",
+                "q",
+                team_id="team-1",
+            ) == (True, "")
+            assert pty_service.resize_pty(
+                team_run_id,
+                "member-session",
+                40,
+                140,
+                team_id="team-1",
+            ) == (True, "", 40, 140)
+
+        queued_events = [call.args[0] for call in debug_log.call_args_list]
+        assert queued_events.count("PTY_CONTROL_QUEUED") == 2
+
+        class QueueFailingRedis(process._FakeRedisClient):
+            def xadd(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise RuntimeError("redis queue failed")
+
+        failing = QueueFailingRedis()
+        failing.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", failing), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ), \
+             mock.patch.object(pty_service.log, "warning") as warning_log:
+            ok, message = pty_service.write_pty_input(run_id, "session-1", "q")
+            resize_ok, resize_message, resize_rows, resize_cols = pty_service.resize_pty(run_id, "session-1", 33, 120)
+
+        warning_events = [call.args[0] for call in warning_log.call_args_list]
+        assert ok is False
+        assert "redis queue failed" in message
+        assert resize_ok is False
+        assert "redis queue failed" in resize_message
+        assert (resize_rows, resize_cols) == (0, 0)
+        assert warning_events.count("PTY_CONTROL_QUEUE_FAILED") == 2
+
+        class MetaFailingRedis(process._FakeRedisClient):
+            fail_sets = False
+
+            def set(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                if self.fail_sets:
+                    raise RuntimeError("redis meta failed")
+                return super().set(*args, **kwargs)
+
+        meta_failing = MetaFailingRedis()
+        meta_failing.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+        meta_failing.fail_sets = True
+
+        with mock.patch.object(pty_service, "redis_client", meta_failing), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ), \
+             mock.patch.object(pty_service.log, "error") as error_log:
+            resize_ok, resize_message, resize_rows, resize_cols = pty_service.resize_pty(run_id, "session-1", 33, 120)
+
+        error_events = [call.args[0] for call in error_log.call_args_list]
+        assert resize_ok is False
+        assert "redis meta failed" in resize_message
+        assert (resize_rows, resize_cols) == (0, 0)
+        assert "PTY_META_SAVE_FAILED" in error_events
+
     def test_pty_stream_replays_redis_output_events_for_any_worker(self):
         fake = process._FakeRedisClient()
         run_id = "pty-run-stream"
@@ -9707,7 +11509,10 @@ class TestPtyBrokerService:
                  pty_service,
                  "active_runs_for_session",
                  return_value=[{"run_id": run_id, "run_type": "pty"}],
-             ):
+             ), \
+             mock.patch.object(pty_service.log, "debug") as debug_log, \
+             mock.patch.object(pty_service.log, "warning") as warning_log:
+            fake.xadd(pty_service._stream_key(run_id), {"payload": "{bad"})
             pty_service.publish_pty_event(run_id, "output", {"text": "live hop"})
             stream = pty_service.stream_pty_events(run_id, "session-1")
             chunk = next(stream)
@@ -9715,8 +11520,45 @@ class TestPtyBrokerService:
             if callable(close_stream):
                 close_stream()
 
+        debug_events = [call.args[0] for call in debug_log.call_args_list]
+        warning_events = [call.args[0] for call in warning_log.call_args_list]
+        assert "PTY_EVENT_PUBLISHED" in debug_events
+        assert "PTY_PAYLOAD_DECODE_FAILED" in warning_events
+        assert "PTY_STREAM_EVENT_SKIPPED" in warning_events
         assert "live hop" in chunk
         assert '"type": "output"' in chunk
+
+    def test_pty_stream_replays_completed_redis_events_before_stale_prune(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-fast-exit"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "telnet --interactive telnet towel.blinkenlights.nl",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service, "active_runs_for_session", return_value=[]):
+            pty_service.publish_pty_event(run_id, "output", {"text": "Server lookup failure"})
+            pty_service.publish_pty_event(run_id, "exit", {"code": 1, "elapsed": 0.1, "interactive": True})
+            stream = pty_service.stream_pty_events(run_id, "session-1")
+            chunks = [next(stream), next(stream)]
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+
+        assert "Server lookup failure" in chunks[0]
+        assert '"type": "output"' in chunks[0]
+        assert '"code": 1' in chunks[1]
+        assert '"type": "exit"' in chunks[1]
+        assert "PTY run is no longer active" not in "".join(chunks)
 
     def test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run(self):
         class FakeProc:
@@ -9733,6 +11575,7 @@ class TestPtyBrokerService:
         run = pty_service.PtyRun(
             run_id="pty-run-snapshot-redis",
             session_id="session-1",
+            team_id="",
             command="mtr --interactive darklab.sh",
             argv=["mtr", "darklab.sh"],
             started="2026-01-01T00:00:00Z",
@@ -9752,11 +11595,14 @@ class TestPtyBrokerService:
                  pty_service,
                  "active_runs_for_session",
                  return_value=[{"run_id": run.run_id, "run_type": "pty"}],
-             ):
+             ), \
+             mock.patch.object(pty_service.log, "debug") as debug_log:
             pty_service._store_pty_meta(run)
             pty_service._store_pty_snapshot(run, force=True)
             ok, message, snapshot = pty_service.pty_run_snapshot(run.run_id, "session-1")
 
+        debug_events = [call.args[0] for call in debug_log.call_args_list]
+        assert "PTY_SNAPSHOT_PUBLISHED" in debug_events
         assert ok is True
         assert message == ""
         assert snapshot is not None
@@ -9914,6 +11760,7 @@ class TestPtyBrokerService:
         run = pty_service.PtyRun(
             run_id="pty-run-snapshot-rate",
             session_id="session-1",
+            team_id="",
             command="ffuf --interactive -u https://darklab.sh/FUZZ -w words.txt",
             argv=["ffuf"],
             started="2026-01-01T00:00:00Z",
@@ -9946,6 +11793,64 @@ class TestPtyBrokerService:
 
         assert stored_snapshot is not None
         assert run.snapshot_pending_bytes == 0
+
+        class FailingRedis(process._FakeRedisClient):
+            def xadd(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise RuntimeError("redis event failed")
+
+            def set(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise RuntimeError("redis snapshot failed")
+
+        class FakeFinishedProc:
+            pid = 4243
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):  # noqa: ARG002
+                return 0
+
+        failing_run = pty_service.PtyRun(
+            run_id="pty-run-cleanup-after-redis-failure",
+            session_id="session-1",
+            team_id="team-1",
+            command="mtr --interactive darklab.sh",
+            argv=["mtr", "darklab.sh"],
+            started="2026-01-01T00:00:00+00:00",
+            master_fd=99,
+            proc=cast(subprocess.Popen, FakeFinishedProc()),
+            rows=24,
+            cols=100,
+            allow_input=True,
+            max_runtime_seconds=900,
+            brokered=True,
+            terminal_capture=cast(pty_service.PtyTerminalCapture, FakeCapture()),
+        )
+        with pty_service._runs_lock:
+            pty_service._runs[failing_run.run_id] = failing_run
+
+        with mock.patch.object(pty_service, "redis_client", FailingRedis()), \
+             mock.patch.object(pty_service.select, "select", return_value=([], [], [])), \
+             mock.patch.object(pty_service.os, "close") as close_fd, \
+             mock.patch.object(pty_service, "pid_pop") as pid_pop, \
+             mock.patch.object(pty_service, "active_run_remove") as active_run_remove, \
+             mock.patch.object(pty_service.log, "error") as error_log, \
+             mock.patch.object(pty_service.log, "info") as info_log:
+            pty_service._reader_loop(failing_run, "127.0.0.1")
+
+        with pty_service._runs_lock:
+            assert failing_run.run_id not in pty_service._runs
+        error_events = [call.args[0] for call in error_log.call_args_list]
+        info_events = [call.args[0] for call in info_log.call_args_list]
+        assert close_fd.call_args_list == [mock.call(99)]
+        pid_pop.assert_called_once_with(failing_run.run_id)
+        active_run_remove.assert_called_once_with(failing_run.run_id)
+        assert "PTY_EVENT_PUBLISH_FAILED" in error_events
+        assert "PTY_SNAPSHOT_SAVE_FAILED" in error_events
+        assert "PTY_RUNTIME_CLEANED" in info_events
+        assert "RUN_END" in info_events
+        assert "PTY_SESSION_ENDED" in info_events
 
     def test_pty_stream_reports_stale_run_before_heartbeating_forever(self):
         fake = process._FakeRedisClient()
@@ -10996,6 +12901,55 @@ class TestOutputSignals:
         assert classify_line("[+] Timeout:                 10s", command=gobuster_command) == []
         assert classify_line("[+] User Agent:              gobuster/3.8.2", command=gobuster_command) == []
         assert classify_line("[+] Negative Status codes:   404", command=gobuster_command) == []
+        from services.runs import comparison as run_comparison
+
+        ffuf_derived = run_comparison.compare_derived_changes(
+            {"command": ffuf_command},
+            {"command": ffuf_command},
+            [{
+                "text": "index.html              [Status: 200, Size: 990209, Words: 99640, Lines: 36208, Duration: 84ms]",
+                "line_index": 0,
+            }],
+            [{
+                "text": "index.html              [Status: 301, Size: 990209, Words: 99640, Lines: 36208, Duration: 84ms]",
+                "line_index": 0,
+            }, {
+                "text": "api                     [Status: 200, Size: 169, Words: 5, Lines: 8, Duration: 42ms]",
+                "line_index": 1,
+            }],
+        )
+        ffuf_group = ffuf_derived["groups"][0]
+        assert ffuf_group["kind"] == "urls"
+        assert ffuf_group["added"][0]["canonical_url"] == "https://tor-stats.darklab.sh/api"
+        assert ffuf_group["changed"][0]["before"]["status_code"] == 200
+        assert ffuf_group["changed"][0]["after"]["status_code"] == 301
+
+        gobuster_derived = run_comparison.compare_derived_changes(
+            {"command": "gobuster dir -u https://tor-stats.darklab.sh -w common.txt"},
+            {"command": "gobuster dir -u https://tor-stats.darklab.sh -w common.txt"},
+            [{"text": "index.html           (Status: 200) [Size: 991254]", "line_index": 0}],
+            [{
+                "text": "static               (Status: 301) [Size: 169] [--> https://tor-stats.darklab.sh/static/]",
+                "line_index": 0,
+            }],
+        )
+        gobuster_group = gobuster_derived["groups"][0]
+        assert gobuster_group["added"][0]["canonical_url"] == "https://tor-stats.darklab.sh/static"
+        assert gobuster_group["added"][0]["redirect_canonical_url"] == "https://tor-stats.darklab.sh/static"
+        assert gobuster_group["removed"][0]["canonical_url"] == "https://tor-stats.darklab.sh/index.html"
+
+        katana_derived = run_comparison.compare_derived_changes(
+            {"command": "katana -u https://p.darklab.sh"},
+            {"command": "katana -u https://p.darklab.sh"},
+            [{"text": "https://p.darklab.sh/js/privatebin.js?2.0.4", "line_index": 0}],
+            [
+                {"text": "https://p.darklab.sh/js/privatebin.js?2.0.4", "line_index": 0},
+                {"text": "https://p.darklab.sh/js/'+t+'", "line_index": 1},
+                {"text": "https://p.darklab.sh/css/app.css", "line_index": 2},
+            ],
+        )
+        assert katana_derived["groups"][0]["added_count"] == 1
+        assert katana_derived["groups"][0]["added"][0]["canonical_url"] == "https://p.darklab.sh/css/app.css"
         assert classify_line(
             "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
             command="wafw00f https://darklab.sh",
@@ -11042,6 +12996,12 @@ class TestOutputSignals:
         ]
 
     def test_classifies_projectdiscovery_and_port_scanner_findings(self):
+        dnsx_classifier = OutputSignalClassifier("dnsx -d darklab.sh -w dns.txt")
+        current_dnsx = dnsx_classifier.classify_line("[INF] Current dnsx version 1.2.3 (latest)")
+        assert current_dnsx["noise_kind"] == "status"
+        assert current_dnsx["noise_reason"] == "projectdiscovery:status"
+        assert "signals" not in current_dnsx
+
         assert classify_line("ip.darklab.sh:443", command="naabu -host ip.darklab.sh -p 80,443") == ["findings"]
         assert classify_line(
             "[INF] Found 2 ports on host ip.darklab.sh (107.178.109.44)",
@@ -11067,12 +13027,21 @@ class TestOutputSignals:
         assert classify_line("[INF] Scan completed in 4m. 21 matches found.", command="nuclei -u https://ip.darklab.sh") == [
             "summaries",
         ]
+        nuclei_classifier = OutputSignalClassifier("nuclei -u https://ip.darklab.sh")
+        nuclei_status = nuclei_classifier.classify_line("[INF] Templates loaded for current scan: 65")
+        nuclei_result = nuclei_classifier.classify_line("[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls12\"]")
+        assert nuclei_status["noise_kind"] == "status"
+        assert nuclei_status["noise_reason"] == "nuclei:status"
+        assert "signals" not in nuclei_status
+        assert "noise_kind" not in nuclei_result
 
     def test_classifies_scanner_progress_lines_as_progress_role(self):
         from blueprints.run import _capture_event_with_signals
 
         masscan_classifier = OutputSignalClassifier("masscan -p 1-1000 192.168.1.3")
         ffuf_classifier = OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt")
+        gobuster_classifier = OutputSignalClassifier("gobuster dir -u https://darklab.sh -w words.txt")
+        openssl_classifier = OutputSignalClassifier("openssl s_client -connect darklab.sh:443")
 
         masscan_progress = masscan_classifier.classify_line(
             "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2"
@@ -11090,16 +13059,34 @@ class TestOutputSignals:
         ffuf_error_progress = ffuf_classifier.classify_line(
             ":: Progress: [18000/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:20] :: Errors: 2 ::"
         )
+        ffuf_config = ffuf_classifier.classify_line(":: URL              : https://darklab.sh/FUZZ")
+        gobuster_config = gobuster_classifier.classify_line("[+] Url:                     https://darklab.sh")
+        openssl_payload = openssl_classifier.classify_line("CONNECTED(00000003)")
 
         assert masscan_progress["role"] == LineRole.progress.value
+        assert masscan_progress["noise_kind"] == "progress"
+        assert masscan_progress["noise_reason"] == "masscan:rate"
         assert masscan_waiting["role"] == LineRole.progress.value
+        assert masscan_waiting["noise_kind"] == "progress"
         assert masscan_finding["signals"] == ["findings"]
         assert ffuf_progress["role"] == LineRole.progress.value
+        assert ffuf_progress["noise_kind"] == "progress"
+        assert ffuf_progress["noise_reason"] == "ffuf:progress"
         assert ffuf_final_progress["role"] == LineRole.progress.value
         assert ffuf_error_progress["role"] == LineRole.progress.value
+        assert ffuf_config["signals"] == ["summaries"]
+        assert gobuster_config["noise_kind"] == "boilerplate"
+        assert gobuster_config["noise_reason"] == "gobuster:config"
+        assert openssl_payload["noise_kind"] == "boilerplate"
+        assert openssl_payload["noise_reason"] == "openssl:payload"
         assert "signals" not in masscan_progress
         assert "signals" not in masscan_waiting
         assert "signals" not in ffuf_progress
+        assert "noise_kind" not in ffuf_config
+        assert "signals" not in gobuster_config
+        assert "signals" not in openssl_payload
+        assert "noise_kind" not in ffuf_final_progress
+        assert "noise_kind" not in ffuf_error_progress
         assert ffuf_final_progress["signals"] == ["summaries"]
         assert ffuf_error_progress["signals"] == ["warnings"]
 
@@ -11131,6 +13118,7 @@ class TestOutputSignals:
         )
 
         assert capture.preview_lines[0]["cls"] == LineRole.progress.value
+        assert capture.preview_lines[0]["noise_kind"] == "progress"
 
     def test_live_output_batcher_coalesces_progress_without_dropping_saved_lines(self):
         import blueprints.run as run_blueprint
@@ -11259,6 +13247,35 @@ class TestOutputSignals:
         for line in nuclei_findings:
             assert classify_line(line, command="nuclei -u https://ip.darklab.sh") == ["findings"]
 
+    def test_classifies_nmap_vulners_exploit_and_cve_rows_as_findings(self):
+        classifier = OutputSignalClassifier("nmap -sV --script vulners 192.168.1.5")
+        classifier.classify_line("Nmap scan report for 192.168.1.5")
+        port = classifier.classify_line("139/tcp   open  netbios-ssn Samba smbd 4")
+
+        exploit = classifier.classify_line(
+            "|     SSV:93139 10.0 https://vulners.com/seebug/SSV:93139 *EXPLOIT*"
+        )
+        classifier.classify_line("22/tcp    open  ssh         OpenSSH 10.0 (protocol 2.0)")
+        cve = classifier.classify_line("|_    CVE-2026-35387 6.5 https://vulners.com/cve/CVE-2026-35387")
+        non_cve_reference = classifier.classify_line("|     CNVD-2025-27985 10.0 https://vulners.com/cnvd/CNVD-2025-27985")
+
+        assert port["target"] == "192.168.1.5"
+        assert exploit["signals"] == ["findings"]
+        assert exploit["target"] == "192.168.1.5:139 samba"
+        exploit_entities = cast("list[dict[str, object]]", exploit.get("entities") or [])
+        assert [
+            (entity["type"], entity["canonical_value"])
+            for entity in exploit_entities
+        ] == [("ip", "192.168.1.5")]
+        assert cve["signals"] == ["findings"]
+        assert cve["target"] == "192.168.1.5:22 ssh"
+        cve_entities = cast("list[dict[str, object]]", cve.get("entities") or [])
+        assert [
+            (entity["type"], entity["canonical_value"])
+            for entity in cve_entities
+        ] == [("ip", "192.168.1.5"), ("cve", "CVE-2026-35387")]
+        assert "signals" not in non_cve_reference
+
     def test_classifies_warning_error_and_summary_lines(self):
         assert classify_line("warning: retrying request", cls="notice", command="curl https://darklab.sh") == ["warnings"]
         assert classify_line("connection timed out", cls="exit-fail", command="nc -zv ip.darklab.sh 80") == ["errors"]
@@ -11355,11 +13372,15 @@ class TestOutputSignals:
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
         nuclei_classifier = OutputSignalClassifier("nuclei -u https://darklab.sh")
-        assert "entities" not in nuclei_classifier.classify_line("\t\tprojectdiscovery.io")
-        assert "entities" not in nuclei_classifier.classify_line("\x1b[36m\t\tprojectdiscovery.io\x1b[0m")
-        assert "entities" not in nuclei_classifier.classify_line(
+        projectdiscovery_banner = nuclei_classifier.classify_line("\t\tprojectdiscovery.io")
+        projectdiscovery_banner_ansi = nuclei_classifier.classify_line("\x1b[36m\t\tprojectdiscovery.io\x1b[0m")
+        interactsh_banner = nuclei_classifier.classify_line(
             "\x1b[34m[INF]\x1b[0m Using Interactsh Server: \x1b[36moast.site\x1b[0m"
         )
+        for line in (projectdiscovery_banner, projectdiscovery_banner_ansi, interactsh_banner):
+            assert "entities" not in line
+            assert line["noise_kind"] == "boilerplate"
+            assert line["noise_reason"] == "projectdiscovery:banner"
         assert "entities" in OutputSignalClassifier("curl https://projectdiscovery.io").classify_line(
             "https://projectdiscovery.io"
         )
@@ -11856,12 +13877,33 @@ class TestRunOutputCapture:
             "text": "second line",
             "entities": [{"type": "domain", "canonical_value": long_value, "value": long_value, "confidence": "medium"}],
         })
+        noise_event = from_wire({
+            "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+            "role": "progress",
+            "noise_kind": "progress",
+            "entities": [
+                {"type": "domain", "canonical_value": "noise.example", "value": "noise.example", "confidence": "medium"},
+            ],
+        })
+        signal_event = from_wire({
+            "text": "summary line stays searchable",
+            "role": "progress",
+            "signals": ["summaries"],
+        })
 
-        search_text = run_blueprint._search_text_from_events([event, capped_event])
+        search_text = run_blueprint._search_text_from_events([event, capped_event, noise_event, signal_event])
 
-        assert search_text.splitlines() == ["line text", "second line", "beta.example", "192.0.2.10"]
+        assert search_text.splitlines() == [
+            "line text",
+            "second line",
+            "summary line stays searchable",
+            "beta.example",
+            "192.0.2.10",
+        ]
         assert long_value not in search_text
         assert "<redacted>" not in search_text
+        assert "0.10-kpps" not in search_text
+        assert "noise.example" not in search_text
 
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("services.commands.registry.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
@@ -12623,30 +14665,61 @@ class TestDatabaseInit:
             project_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('projects')").fetchall()
             }
+            auto_promote_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('project_auto_promote_rules')").fetchall()
+            }
             finding_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('findings')").fetchall()
             }
             occurrence_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('findings_occurrences')").fetchall()
             }
+            import_draft_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_import_drafts')").fetchall()
+            }
+            import_batch_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_import_batches')").fetchall()
+            }
+            entity_import_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_entity_import_links')").fetchall()
+            }
+            finding_import_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_finding_import_occurrences')").fetchall()
+            }
+            label_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('entity_labels')").fetchall()
+            }
+            note_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('entity_notes')").fetchall()
+            }
+            finding_triage_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('finding_triage_details')").fetchall()
+            }
             conn.close()
 
         assert {
             "projects",
             "project_links",
+            "project_auto_promote_rules",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
             "run_file_artifacts",
             "findings",
             "findings_occurrences",
+            "atlas_import_drafts",
+            "atlas_import_batches",
+            "atlas_entity_import_links",
+            "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
+            "finding_triage_details",
             "evidence_packages",
         }.issubset(tables)
         assert "project_targets" not in tables
         assert "finding_targets" not in tables
         assert "notes" not in project_columns
+        assert {"target_entity_kind", "match_mode", "filters_json", "apply_on_run"}.issubset(auto_promote_columns)
         assert "content_sha256" in artifact_columns
         assert {
             "entity_id",
@@ -12658,6 +14731,169 @@ class TestDatabaseInit:
             "status",
         }.issubset(finding_columns)
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
+        assert {"id", "normalized_rows_json", "preview_counts_json", "warning_summary_json"}.issubset(import_draft_columns)
+        assert {"id", "counts_json", "warning_summary_json", "applied_at"}.issubset(import_batch_columns)
+        assert {"entity_id", "batch_id", "source_detail_json", "created_entity"}.issubset(entity_import_columns)
+        assert {"finding_id", "batch_id", "row_number", "source_detail_json"}.issubset(finding_import_columns)
+        assert "team_id" in label_columns
+        assert "team_id" in note_columns
+        assert {
+            "team_id",
+            "finding_id",
+            "remediation",
+            "verification_steps",
+            "verification_status",
+            "verification_notes",
+        }.issubset(finding_triage_columns)
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
+                "VALUES ('finding-triage-1', 'session-triage', 'host:example', 'sig-triage', "
+                "'Finding', '2026-01-01')"
+            )
+            conn.commit()
+            conn.close()
+
+            from services.atlas.cleanup import delete_atlas_findings
+            from services.atlas.recalculation import recalculate_atlas_findings
+            from services.projects import metadata as project_metadata
+
+            with mock.patch("core.database.DB_PATH", db_path), \
+                    mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 5}, clear=False):
+                saved = project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {
+                        "remediation": "Patch Samba.",
+                        "verification_steps": "Re-run the SMB checks.",
+                        "verification_status": "ready_to_verify",
+                        "verification_notes": "Waiting on maintenance window.",
+                    },
+                )
+                assert saved is not None
+                assert saved["verification_status"] == "ready_to_verify"
+                assert saved["remediation"] == "Patch Samba."
+                loaded = project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                )
+                assert loaded is not None
+                assert loaded["verification_steps"] == "Re-run the SMB checks."
+                with database.db_connect() as quota_conn:
+                    quota_conn.execute(
+                        "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
+                        "VALUES ('finding-triage-2', 'session-triage', 'host:other', 'sig-triage-2', "
+                        "'Finding 2', '2026-01-01')"
+                    )
+                    quota_conn.commit()
+                with mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 1}, clear=False):
+                    with pytest.raises(ProjectWorkspaceQuotaExceeded, match="finding triage quota exceeded"):
+                        project_metadata.upsert_finding_triage_details(
+                            "session-triage",
+                            "finding-triage-2",
+                            {"verification_status": "ready_to_verify"},
+                        )
+                updated = project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {
+                        "remediation": "Patch Samba and restart smbd.",
+                        "verification_steps": "Re-run nmap smb-vuln scripts.",
+                        "verification_status": "verified",
+                        "verification_notes": "",
+                    },
+                )
+                assert updated is not None
+                assert updated["id"] == saved["id"]
+                assert updated["verification_status"] == "verified"
+
+                class _MissingFirstTriageSelect:
+                    def __init__(self):
+                        self._used = False
+
+                    def fetchone(self):
+                        self._used = True
+                        return None
+
+                class _RaceConnection:
+                    def __init__(self, conn):
+                        self._conn = conn
+                        self._hid_initial_lookup = False
+
+                    def execute(self, sql, params=()):
+                        if (
+                            not self._hid_initial_lookup
+                            and str(sql).startswith("SELECT id, session_id, team_id, finding_id")
+                            and "FROM finding_triage_details WHERE" in str(sql)
+                            and "AND finding_id = ?" in str(sql)
+                        ):
+                            self._hid_initial_lookup = True
+                            return _MissingFirstTriageSelect()
+                        return self._conn.execute(sql, params)
+
+                with database.db_connect() as race_conn:
+                    raced = project_metadata.upsert_finding_triage_details_on_conn(
+                        _RaceConnection(race_conn),
+                        "session-triage",
+                        "finding-triage-1",
+                        {
+                            "remediation": "Patch Samba after concurrent save.",
+                            "verification_steps": "Re-run the exact SMB proof.",
+                            "verification_status": "needs_retest",
+                            "verification_notes": "Race handled.",
+                        },
+                    )
+                    race_conn.commit()
+                assert raced is not None
+                assert raced["id"] == saved["id"]
+                assert raced["verification_status"] == "needs_retest"
+                assert raced["remediation"] == "Patch Samba after concurrent save."
+
+                with database.db_connect() as triage_conn:
+                    batch = project_metadata._finding_triage_by_id(
+                        triage_conn,
+                        "session-triage",
+                        ["finding-triage-1", "missing"],
+                    )
+                    assert set(batch) == {"finding-triage-1"}
+                    recalculate_atlas_findings(triage_conn, ["finding-triage-1"])
+                    triage_conn.commit()
+                recalculated = project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                )
+                assert recalculated is not None
+                assert recalculated["verification_status"] == "needs_retest"
+                with pytest.raises(ProjectWorkspaceError, match="invalid verification_status"):
+                    project_metadata.upsert_finding_triage_details(
+                        "session-triage",
+                        "finding-triage-1",
+                        {"verification_status": "done"},
+                    )
+                assert project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {"verification_status": "not_started"},
+                ) is None
+                assert project_metadata.get_finding_triage_details("session-triage", "finding-triage-1") is None
+                project_metadata.upsert_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-1",
+                    {"verification_status": "needs_retest"},
+                )
+                with database.db_connect() as cleanup_conn:
+                    assert delete_atlas_findings(cleanup_conn, "session-triage", ["finding-triage-1"]) == 1
+                    cleanup_conn.commit()
+                with database.db_connect() as cleanup_conn:
+                    row = cleanup_conn.execute(
+                        "SELECT COUNT(*) AS count FROM finding_triage_details WHERE finding_id = ?",
+                        ["finding-triage-1"],
+                    ).fetchone()
+                assert int(row["count"] or 0) == 0
 
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -12673,7 +14909,12 @@ class TestDatabaseInit:
                     "session_preferences",
                     "user_workflows",
                     "project_links",
+                    "project_auto_promote_rules",
                     "entity_intel_snapshots",
+                    "atlas_import_drafts",
+                    "atlas_import_batches",
+                    "atlas_entity_import_links",
+                    "atlas_finding_import_occurrences",
                     "evidence_packages",
                 )
             }
@@ -12683,8 +14924,726 @@ class TestDatabaseInit:
         assert column_types["user_workflows"]["inputs"] == "TEXT"
         assert column_types["user_workflows"]["steps"] == "TEXT"
         assert column_types["project_links"]["source_detail"] == "TEXT"
+        assert column_types["project_auto_promote_rules"]["filters_json"] == "TEXT"
         assert column_types["entity_intel_snapshots"]["data_json"] == "TEXT"
+        assert column_types["atlas_import_drafts"]["normalized_rows_json"] == "TEXT"
+        assert column_types["atlas_import_drafts"]["preview_counts_json"] == "TEXT"
+        assert column_types["atlas_import_drafts"]["warning_summary_json"] == "TEXT"
+        assert column_types["atlas_import_batches"]["counts_json"] == "TEXT"
+        assert column_types["atlas_import_batches"]["warning_summary_json"] == "TEXT"
+        assert column_types["atlas_entity_import_links"]["source_detail_json"] == "TEXT"
+        assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
+
+    def test_atlas_import_source_helpers_are_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            insert_import_draft(
+                conn,
+                draft_id="draft-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                expires_at="2026-06-02T00:00:00+00:00",
+                normalized_rows=[{"kind": "finding"}],
+                preview_counts={"valid": 1},
+            )
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+                draft_id="draft-import",
+                counts={"applied": 1},
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', 'entity-sig', ?, ?, 0, ?)",
+                ("entity-import", "atlas-session", now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, subject_key, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, status, title, raw_line, created) "
+                "VALUES (?, ?, ?, 'domain:darklab.sh', 'finding-sig', ?, ?, 0, 'new', ?, ?, ?)",
+                (
+                    "finding-import",
+                    "atlas-session",
+                    "entity-import",
+                    now,
+                    now,
+                    "TLS certificate expires soon",
+                    "TLS certificate expires soon",
+                    now,
+                ),
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=1,
+                row_number=7,
+                source_detail={"plugin_id": "ssl-cert"},
+                created_entity=True,
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at="2026-06-01T00:01:00+00:00",
+                created=now,
+                occurrence_count=3,
+                row_number=8,
+                source_detail={"plugin_id": "ssl-cert"},
+                created_entity=True,
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-import",
+                batch_id="batch-import",
+                row_number=7,
+                observed_at=now,
+                created=now,
+                snippet="initial snippet",
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-import",
+                batch_id="batch-import",
+                row_number=7,
+                observed_at=now,
+                created=now,
+                snippet="updated snippet",
+            )
+            conn.commit()
+            draft_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_drafts").fetchone()["count"]
+            batch_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_batches").fetchone()["count"]
+            entity_link = conn.execute("SELECT * FROM atlas_entity_import_links").fetchone()
+            finding_occurrence = conn.execute("SELECT * FROM atlas_finding_import_occurrences").fetchone()
+            conn.close()
+
+        assert draft_count == 1
+        assert batch_count == 1
+        assert entity_link["occurrence_count"] == 3
+        assert entity_link["row_number"] == 7
+        assert finding_occurrence["snippet"] == "updated snippet"
+
+    def test_import_only_sources_recalculate_and_remain_visible(self):
+        from services.atlas.lookup import (
+            entity_detail,
+            entity_exists_in_scope,
+            finding_detail,
+            finding_exists_in_scope,
+            list_entities,
+            list_findings,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', 'entity-sig', '', '', 0, ?)",
+                ("entity-import", "atlas-session", now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, subject_key, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, status, title, raw_line, created) "
+                "VALUES (?, ?, ?, 'domain:darklab.sh', 'finding-sig', '', '', 0, 'new', ?, ?, ?)",
+                (
+                    "finding-import",
+                    "atlas-session",
+                    "entity-import",
+                    "TLS certificate expires soon",
+                    "TLS certificate expires soon",
+                    now,
+                ),
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=2,
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-import",
+                batch_id="batch-import",
+                row_number=12,
+                observed_at=now,
+                created=now,
+                snippet="TLS certificate expires soon",
+            )
+            recalculate_atlas_entities(conn, ["entity-import"])
+            recalculate_atlas_findings(conn, ["finding-import"])
+            conn.commit()
+            entity_row = conn.execute("SELECT occurrence_count, first_seen_at, last_seen_at FROM entities").fetchone()
+            finding_row = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id, first_seen_at, last_seen_at, line_number "
+                "FROM findings"
+            ).fetchone()
+            entity_visible = entity_exists_in_scope(conn, "atlas-session", "entity-import")
+            finding_visible = finding_exists_in_scope(conn, "atlas-session", "finding-import")
+            listed_entities = list_entities(conn, "atlas-session", limit=10)
+            listed_findings = list_findings(conn, "atlas-session", limit=10)
+            imported_entity_detail = entity_detail(conn, "atlas-session", "entity-import")
+            imported_finding_detail = finding_detail(conn, "atlas-session", "finding-import")
+            conn.close()
+
+        assert entity_row["occurrence_count"] == 2
+        assert entity_row["first_seen_at"] == now
+        assert entity_row["last_seen_at"] == now
+        assert finding_row["occurrence_count"] == 1
+        assert finding_row["run_id"] == ""
+        assert finding_row["first_run_id"] == ""
+        assert finding_row["last_run_id"] == ""
+        assert finding_row["first_seen_at"] == now
+        assert finding_row["last_seen_at"] == now
+        assert finding_row["line_number"] == 12
+        assert entity_visible is True
+        assert finding_visible is True
+        assert listed_entities["total"] == 1
+        assert [row["id"] for row in listed_entities["entities"]] == ["entity-import"]
+        assert listed_findings["total"] == 1
+        assert [row["id"] for row in listed_findings["findings"]] == ["finding-import"]
+        assert listed_findings["findings"][0]["import_sources"][0]["import_name"] == "Nessus staging scan"
+        assert imported_entity_detail is not None
+        assert imported_finding_detail is not None
+        assert imported_entity_detail["import_sources"][0]["source_tool"] == "nessus"
+        assert imported_entity_detail["import_sources"][0]["created_record"] is False
+        assert imported_finding_detail["finding"]["import_sources"][0]["occurrence_count"] == 1
+
+    def test_run_source_cleanup_preserves_import_backed_atlas_records(self):
+        from services.atlas.cleanup import detach_atlas_run_sources
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_search_text) "
+                "VALUES ('run-import-mixed', 'atlas-session', 'nmap darklab.sh', ?, '[]', 'darklab.sh')",
+                (now,),
+            )
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, created) "
+                "VALUES ('entity-mixed', 'atlas-session', 'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
+                (now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES ('entity-mixed', 'run-import-mixed', ?, ?, 1)",
+                (now, now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, first_run_id, last_run_id, "
+                "first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+                "VALUES ('finding-mixed', 'atlas-session', 'run-import-mixed', 'entity-mixed', "
+                "'domain:darklab.sh', 'finding-sig', 'run-import-mixed', 'run-import-mixed', "
+                "?, ?, 1, 'new', 'TLS certificate expires soon', 'TLS certificate expires soon', ?)",
+                (now, now, now),
+            )
+            conn.execute(
+                "UPDATE findings_occurrences SET line_number = 4, snippet = 'TLS certificate expires soon' "
+                "WHERE finding_id = 'finding-mixed' AND run_id = 'run-import-mixed'"
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-mixed",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=2,
+            )
+            upsert_finding_import_occurrence(
+                conn,
+                finding_id="finding-mixed",
+                batch_id="batch-import",
+                row_number=12,
+                observed_at=now,
+                created=now,
+                snippet="TLS certificate expires soon",
+            )
+
+            result = detach_atlas_run_sources(conn, "atlas-session", ["run-import-mixed"])
+            entity_row = conn.execute(
+                "SELECT occurrence_count, first_seen_at, last_seen_at FROM entities WHERE id = 'entity-mixed'"
+            ).fetchone()
+            finding_row = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id, line_number "
+                "FROM findings WHERE id = 'finding-mixed'"
+            ).fetchone()
+            entity_run_link_count = conn.execute("SELECT COUNT(*) AS count FROM entity_run_links").fetchone()["count"]
+            finding_run_link_count = conn.execute("SELECT COUNT(*) AS count FROM findings_occurrences").fetchone()["count"]
+            entity_import_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
+            ).fetchone()["count"]
+            finding_import_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
+            ).fetchone()["count"]
+            conn.close()
+
+        assert result["deleted_entities"] == 0
+        assert result["deleted_findings"] == 0
+        assert result["detached_entities"] == 1
+        assert result["detached_findings"] == 1
+        assert entity_row["occurrence_count"] == 2
+        assert entity_row["first_seen_at"] == now
+        assert entity_row["last_seen_at"] == now
+        assert finding_row["occurrence_count"] == 1
+        assert finding_row["run_id"] == ""
+        assert finding_row["first_run_id"] == ""
+        assert finding_row["last_run_id"] == ""
+        assert finding_row["line_number"] == 12
+        assert entity_run_link_count == 0
+        assert finding_run_link_count == 0
+        assert entity_import_link_count == 1
+        assert finding_import_link_count == 1
+
+    def test_delete_atlas_entities_removes_import_links(self):
+        from services.atlas.cleanup import delete_atlas_entities
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-06-01T00:00:00+00:00"
+            insert_import_batch(
+                conn,
+                batch_id="batch-import",
+                session_id="atlas-session",
+                source_tool="nessus",
+                import_name="Nessus staging scan",
+                created=now,
+                applied_at=now,
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, created) "
+                "VALUES ('entity-import', 'atlas-session', 'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
+                (now, now, now),
+            )
+            upsert_entity_import_link(
+                conn,
+                entity_id="entity-import",
+                batch_id="batch-import",
+                observed_at=now,
+                created=now,
+                occurrence_count=1,
+            )
+
+            result = delete_atlas_entities(conn, "atlas-session", ["entity-import"])
+            entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+            import_link_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_entity_import_links").fetchone()["count"]
+            conn.close()
+
+        assert result == {"entities": 1, "findings": 0}
+        assert entity_count == 0
+        assert import_link_count == 0
+
+    def test_atlas_import_parser_normalizes_generic_csv(self):
+        payload = "\n".join((
+            "row_type,entity_kind,entity_value,title,severity,description,evidence,references",
+            "entity,domain,DarkLab.SH,,,,,",
+            "finding,url,https://darklab.sh/login,Missing CSP,Medium,Header missing,No CSP,https://owasp.org",
+        ))
+
+        result = parse_import_file(payload, format_id="generic_csv")
+
+        assert result.row_count == 2
+        assert result.entities[0].canonical_value == "darklab.sh"
+        assert result.findings[0].severity == "medium"
+        assert result.findings[0].affected_entity is not None
+        assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
+        assert result.findings[0].references == ["https://owasp.org"]
+
+    def test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows(self):
+        payload = "\n".join((
+            '{"row_type":"entity","entity_kind":"ip","entity_value":"192.0.2.10"}',
+            "{not-json",
+            '{"row_type":"entity","entity_kind":"banana","entity_value":"darklab.sh"}',
+        ))
+
+        result = parse_import_file(payload, format_id="generic_jsonl")
+
+        assert result.row_count == 3
+        assert [entity.canonical_value for entity in result.entities] == ["192.0.2.10"]
+        assert result.skipped_count == 2
+        assert [warning.code for warning in result.warnings] == ["invalid_json", "invalid_entity_kind"]
+
+    def test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity(self):
+        payload = "\n".join((
+            json.dumps({"row_type": "entity", "entity_kind": "url", "entity_value": "HTTPS://DarkLab.SH/Login"}),
+            json.dumps({"row_type": "entity", "entity_kind": "host", "entity_value": "192.0.2.10"}),
+            json.dumps({"row_type": "entity", "entity_kind": "cve", "entity_value": "cve-2026-12345"}),
+            json.dumps({"row_type": "entity", "entity_kind": "hash", "entity_value": "a" * 64}),
+            json.dumps({
+                "row_type": "finding",
+                "subject": "third-party-app",
+                "title": "Unmapped external finding",
+                "severity": "urgent",
+                "evidence": "Tool reported a finding without a normalized entity.",
+            }),
+        ))
+
+        result = parse_import_file(payload, format_id="generic_jsonl")
+
+        assert [(entity.kind, entity.canonical_value) for entity in result.entities] == [
+            ("url", "https://darklab.sh/Login"),
+            ("ip", "192.0.2.10"),
+            ("cve", "CVE-2026-12345"),
+            ("hash", f"sha256:{'a' * 64}"),
+        ]
+        assert result.findings[0].affected_entity is None
+        assert result.findings[0].subject_key == "third-party-app"
+        assert result.findings[0].severity == ""
+
+    def test_atlas_import_parser_keeps_duplicate_generic_rows_stable_for_later_dedupe(self):
+        from services.intel.canonical import entity_signature
+        from services.projects.findings import _finding_signature, _normalize_finding_signal_key
+
+        payload = "\n".join((
+            "row_type,entity_kind,entity_value,title,severity,evidence,external_id",
+            "finding,domain,dup.darklab.sh,Duplicate finding,high,Same evidence,dup-1",
+            "finding,domain,DUP.darklab.sh,Duplicate finding,high,Same evidence,dup-1",
+        ))
+
+        result = parse_import_file(payload, format_id="generic_csv")
+        expected_subject = entity_signature("domain", "dup.darklab.sh")
+        expected_signature = _finding_signature(
+            "generic",
+            "finding",
+            "high",
+            _normalize_finding_signal_key("Duplicate finding\nSame evidence"),
+            expected_subject,
+        )
+
+        assert result.row_count == 2
+        assert [entity.canonical_value for entity in result.entities] == ["dup.darklab.sh", "dup.darklab.sh"]
+        assert [finding.subject_key for finding in result.findings] == [expected_subject, expected_subject]
+        assert [finding.signature_hash for finding in result.findings] == [
+            expected_signature,
+            expected_signature,
+        ]
+        assert [finding.row_number for finding in result.findings] == [1, 2]
+
+    def test_atlas_import_parser_normalizes_nuclei_jsonl(self):
+        payload = "\n".join((
+            json.dumps({
+                "template-id": "ssl/expired-cert",
+                "matched-at": "https://darklab.sh",
+                "info": {
+                    "name": "Expired TLS certificate",
+                    "severity": "high",
+                    "description": "Certificate is expired",
+                    "reference": ["https://example.com/ref"],
+                },
+                "matcher-name": "notAfter",
+            }),
+            json.dumps({
+                "template-id": "network/ssh-auth-methods",
+                "host": "192.168.1.5:6080/vnc.html",
+                "info": {"name": "SSH Auth Methods - Detection", "severity": "info"},
+            }),
+        ))
+
+        result = parse_import_file(payload + "\n", format_id="nuclei_jsonl")
+
+        assert result.row_count == 2
+        assert result.entities[0].kind == "url"
+        assert result.entities[0].canonical_value == "https://darklab.sh"
+        assert result.entities[1].kind == "ip"
+        assert result.entities[1].canonical_value == "192.168.1.5"
+        assert result.findings[0].external_id == "ssl/expired-cert"
+        assert result.findings[0].severity == "high"
+        assert result.findings[0].source_detail["template_id"] == "ssl/expired-cert"
+        assert result.warnings == []
+
+    def test_atlas_import_parser_streams_nessus_xml_and_extracts_cves(self):
+        payload = """
+        <NessusClientData_v2>
+          <Report name="example">
+            <ReportHost name="graph.darklab.sh">
+              <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
+                          pluginName="Example vulnerable service" severity="3">
+                <description>Service is vulnerable.</description>
+                <solution>Upgrade the affected HTTPS service.</solution>
+                <plugin_output>Banner evidence</plugin_output>
+                <cve>CVE-2026-12345</cve>
+                <see_also>https://example.com/advisory</see_also>
+              </ReportItem>
+            </ReportHost>
+            <ReportHost name="192.0.2.10">
+              <ReportItem port="22" protocol="tcp" svc_name="ssh" pluginID="5678"
+                          pluginName="SSH service detected" severity="0">
+                <description>SSH is reachable.</description>
+              </ReportItem>
+            </ReportHost>
+          </Report>
+        </NessusClientData_v2>
+        """
+
+        result = parse_import_file(payload, format_id="nessus_xml")
+
+        assert result.row_count == 2
+        assert {(entity.kind, entity.canonical_value) for entity in result.entities} == {
+            ("domain", "graph.darklab.sh"),
+            ("ip", "192.0.2.10"),
+            ("cve", "CVE-2026-12345"),
+        }
+        assert result.findings[0].severity == "high"
+        assert result.findings[0].affected_entity is not None
+        assert result.findings[0].affected_entity.canonical_value == "graph.darklab.sh"
+        assert result.findings[0].remediation == "Upgrade the affected HTTPS service."
+        assert result.findings[0].source_detail["plugin_id"] == "1234"
+
+    def test_atlas_import_parser_normalizes_zap_json_and_xml_reports(self):
+        json_payload = json.dumps({
+            "site": [{
+                "alerts": [{
+                    "pluginid": "10038",
+                    "alert": "Content Security Policy Header Not Set",
+                    "riskdesc": "Medium (High)",
+                    "desc": "CSP header is missing",
+                    "solution": "Configure a Content-Security-Policy header.",
+                    "reference": "https://www.zaproxy.org/docs/alerts/10038/",
+                    "instances": [{"uri": "https://darklab.sh/login", "param": "q"}],
+                }],
+            }],
+        })
+        json_riskcode_payload = json.dumps({
+            "site": [{
+                "alerts": [{
+                    "pluginid": "10039",
+                    "alert": "Riskcode-only high alert",
+                    "riskcode": "3",
+                    "instances": [{"uri": "https://darklab.sh/riskcode"}],
+                }],
+            }],
+        })
+        xml_payload = """
+        <OWASPZAPReport>
+          <site>
+            <alerts>
+              <alertitem>
+                <pluginid>10020</pluginid>
+                <alert>X-Frame-Options Header Not Set</alert>
+                <riskdesc>Low (Medium)</riskdesc>
+                <desc>Header is missing</desc>
+                <solution>Set X-Frame-Options or frame-ancestors.</solution>
+                <instances>
+                  <instance>
+                    <uri>https://darklab.sh/admin</uri>
+                    <param>X-Frame-Options</param>
+                    <evidence>Missing header</evidence>
+                  </instance>
+                </instances>
+              </alertitem>
+            </alerts>
+          </site>
+        </OWASPZAPReport>
+        """
+        xml_riskcode_payload = """
+        <OWASPZAPReport>
+          <site>
+            <alerts>
+              <alertitem>
+                <pluginid>10040</pluginid>
+                <alert>XML riskcode-only high alert</alert>
+                <riskcode>3</riskcode>
+                <instances>
+                  <instance>
+                    <uri>https://darklab.sh/xml-riskcode</uri>
+                  </instance>
+                </instances>
+              </alertitem>
+            </alerts>
+          </site>
+        </OWASPZAPReport>
+        """
+
+        json_result = parse_import_file(json_payload, format_id="zap_json")
+        json_riskcode_result = parse_import_file(json_riskcode_payload, format_id="zap_json")
+        xml_result = parse_import_file(xml_payload, format_id="zap_xml")
+        xml_riskcode_result = parse_import_file(xml_riskcode_payload, format_id="zap_xml")
+
+        assert json_result.findings[0].severity == "medium"
+        assert json_riskcode_result.findings[0].severity == "high"
+        assert json_result.findings[0].affected_entity is not None
+        assert json_result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
+        assert json_result.findings[0].remediation == "Configure a Content-Security-Policy header."
+        assert xml_result.findings[0].severity == "low"
+        assert xml_riskcode_result.findings[0].severity == "high"
+        assert xml_result.findings[0].affected_entity is not None
+        assert xml_result.findings[0].affected_entity.canonical_value == "https://darklab.sh/admin"
+        assert xml_result.findings[0].remediation == "Set X-Frame-Options or frame-ancestors."
+        assert xml_result.findings[0].evidence == "Missing header"
+        assert xml_result.findings[0].source_detail["param"] == "X-Frame-Options"
+
+    def test_atlas_import_parser_normalizes_burp_xml_report(self):
+        payload = """
+        <issues burpVersion="2026.1">
+          <issue>
+            <serialNumber>42</serialNumber>
+            <type>5242880</type>
+            <name>SQL injection</name>
+            <host>https://darklab.sh</host>
+            <path>/search?q=test</path>
+            <severity>High</severity>
+            <confidence>Firm</confidence>
+            <issueDetail>Parameter q appears injectable.</issueDetail>
+            <remediationDetail>Use parameterized queries.</remediationDetail>
+            <requestresponse>
+              <request method="GET" base64="false">GET /search?q=test HTTP/1.1
+Host: darklab.sh</request>
+              <response base64="false">HTTP/1.1 500 Internal Server Error
+SQL syntax error near q</response>
+            </requestresponse>
+          </issue>
+        </issues>
+        """
+
+        result = parse_import_file(payload, format_id="burp_xml")
+
+        assert result.row_count == 1
+        assert result.findings[0].severity == "high"
+        assert result.findings[0].external_id == "42"
+        assert result.findings[0].affected_entity is not None
+        assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/search?q=test"
+        assert result.findings[0].remediation == "Use parameterized queries."
+        assert "GET /search?q=test" in result.findings[0].evidence
+        assert "SQL syntax error near q" in result.findings[0].evidence
+
+    @pytest.mark.parametrize("payload", [
+        """<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+        <issues><issue><name>&xxe;</name></issue></issues>
+        """,
+        """<!DOCTYPE foo [ <!ENTITY ext SYSTEM "http://127.0.0.1:9/private"> ]>
+        <issues><issue><name>&ext;</name></issue></issues>
+        """,
+        """<!DOCTYPE lolz [
+        <!ENTITY lol "lol">
+        <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+        ]><issues><issue><name>&lol1;</name></issue></issues>
+        """,
+    ])
+    def test_atlas_import_parser_rejects_unsafe_xml_dtds(self, payload):
+
+        with pytest.raises(ImportParseError, match="unsafe"):
+            parse_import_file(payload, format_id="burp_xml")
+
+    def test_atlas_import_parser_enforces_row_and_element_limits(self):
+        csv_payload = "\n".join((
+            "row_type,entity_kind,entity_value",
+            "entity,domain,one.darklab.sh",
+            "entity,domain,two.darklab.sh",
+        ))
+        xml_payload = "<issues><issue><name>One</name></issue></issues>"
+
+        with pytest.raises(ImportParseError, match="row limit"):
+            parse_import_file(csv_payload, format_id="generic_csv", limits=ImportParserLimits(max_rows=1))
+        with pytest.raises(ImportParseError, match="XML element limit"):
+            parse_import_file(xml_payload, format_id="burp_xml", limits=ImportParserLimits(max_xml_elements=1))
+
+    def test_atlas_import_parser_enforces_upload_and_warning_limits(self):
+        warning_payload = "\n".join((
+            '{"row_type":"entity","entity_kind":"banana","entity_value":"one.example"}',
+            '{"row_type":"entity","entity_kind":"banana","entity_value":"two.example"}',
+        ))
+
+        with mock.patch("services.atlas.import_parser.log.debug") as mock_debug, \
+                mock.patch("services.atlas.import_parser.log.warning") as mock_warning:
+            result = parse_import_file(
+                warning_payload,
+                format_id="generic_jsonl",
+                limits=ImportParserLimits(max_warnings=1),
+            )
+
+        assert result.skipped_count == 2
+        assert len(result.warnings) == 1
+        assert result.warnings[0].code == "invalid_entity_kind"
+        assert result.suppressed_warning_count == 1
+        debug_events = [call.args[0] for call in mock_debug.call_args_list]
+        assert debug_events == ["ATLAS_IMPORT_PARSE_STARTED", "ATLAS_IMPORT_PARSE_COMPLETED"]
+        started_extra = mock_debug.call_args_list[0].kwargs["extra"]
+        completed_extra = mock_debug.call_args_list[1].kwargs["extra"]
+        assert started_extra["format_id"] == "generic_jsonl"
+        assert started_extra["upload_bytes"] == len(warning_payload.encode("utf-8"))
+        assert started_extra["max_warnings"] == 1
+        assert completed_extra["rows"] == 2
+        assert completed_extra["warning_count"] == 1
+        assert completed_extra["suppressed_warning_count"] == 1
+        assert completed_extra["warning_codes"] == {"invalid_entity_kind": 1}
+        truncated_extra = next(
+            call.kwargs["extra"]
+            for call in mock_warning.call_args_list
+            if call.args[0] == "ATLAS_IMPORT_WARNINGS_TRUNCATED"
+        )
+        assert truncated_extra["format_id"] == "generic_jsonl"
+        assert truncated_extra["skipped"] == 2
+        assert truncated_extra["warning_count"] == 1
+        assert truncated_extra["suppressed_warning_count"] == 1
+        assert truncated_extra["max_warnings"] == 1
+        assert truncated_extra["warning_codes"] == {"invalid_entity_kind": 1}
+        assert result.to_dict()["suppressed_warning_count"] == 1
+
+        class RecordingSource:
+            def __init__(self):
+                self.read_sizes = []
+
+            def read(self, size=-1):
+                self.read_sizes.append(size)
+                return b"x" * size
+
+        source = RecordingSource()
+        with pytest.raises(ImportParseError, match="byte limit"):
+            parse_import_file(b"x" * 5, format_id="generic_csv", limits=ImportParserLimits(max_upload_bytes=4))
+        with pytest.raises(ImportParseError, match="byte limit"):
+            parse_import_file(cast(IO[bytes], source), format_id="generic_csv", limits=ImportParserLimits(max_upload_bytes=4))
+        assert source.read_sizes == [5]
 
     def test_materializes_run_entities_from_output_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -12766,6 +15725,161 @@ class TestDatabaseInit:
         assert recorded == []
         assert entity_count == 0
         assert link_count == 0
+
+    def test_materializer_deduplicates_team_entities_across_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            for run_id, session_id in (
+                ("run-atlas-team-owner", "tok_team_owner"),
+                ("run-atlas-team-operator", "tok_team_operator"),
+            ):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, team_id, command, started, output_preview) "
+                    "VALUES (?, ?, 'team_atlas', ?, ?, ?)",
+                    (run_id, session_id, "host darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+                )
+                materialize_run_entities(
+                    conn,
+                    session_id,
+                    run_id,
+                    [{"entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}]}],
+                    team_id="team_atlas",
+                    seen_at="2026-05-14T00:00:01+00:00",
+                )
+            conn.commit()
+            entity_rows = conn.execute(
+                "SELECT session_id, team_id, type, canonical_value, occurrence_count FROM entities"
+            ).fetchall()
+            link_rows = conn.execute("SELECT entity_id, run_id FROM entity_run_links ORDER BY run_id").fetchall()
+            conn.close()
+
+        assert len(entity_rows) == 1
+        assert entity_rows[0]["session_id"] == "tok_team_owner"
+        assert entity_rows[0]["team_id"] == "team_atlas"
+        assert entity_rows[0]["type"] == "domain"
+        assert entity_rows[0]["canonical_value"] == "darklab.sh"
+        assert entity_rows[0]["occurrence_count"] == 2
+        assert len({row["entity_id"] for row in link_rows}) == 1
+        assert [row["run_id"] for row in link_rows] == ["run-atlas-team-operator", "run-atlas-team-owner"]
+
+    def test_record_run_findings_deduplicates_team_findings_across_members(self):
+        from services.projects.findings import record_run_findings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            entries = [
+                {
+                    "text": "[medium] darklab.sh missing security headers",
+                    "line_index": 1,
+                    "signals": ["findings"],
+                    "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                }
+            ]
+            for run_id, session_id in (
+                ("run-finding-team-owner", "tok_team_owner"),
+                ("run-finding-team-operator", "tok_team_operator"),
+            ):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, team_id, run_kind, command, started, finished, exit_code) "
+                    "VALUES (?, ?, 'team_findings', 'external', 'httpx darklab.sh', ?, ?, 0)",
+                    (
+                        run_id,
+                        session_id,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:01+00:00",
+                    ),
+                )
+                record_run_findings(conn, session_id, run_id, entries, team_id="team_findings")
+            conn.commit()
+            finding_rows = conn.execute(
+                "SELECT session_id, team_id, entity_id, signature_hash, occurrence_count FROM findings"
+            ).fetchall()
+            occurrence_rows = conn.execute(
+                "SELECT finding_id, run_id FROM findings_occurrences ORDER BY run_id"
+            ).fetchall()
+            entity_rows = conn.execute("SELECT id, team_id, canonical_value FROM entities").fetchall()
+            conn.close()
+
+        assert len(entity_rows) == 1
+        assert entity_rows[0]["team_id"] == "team_findings"
+        assert entity_rows[0]["canonical_value"] == "darklab.sh"
+        assert len(finding_rows) == 1
+        assert finding_rows[0]["session_id"] == "tok_team_owner"
+        assert finding_rows[0]["team_id"] == "team_findings"
+        assert finding_rows[0]["entity_id"] == entity_rows[0]["id"]
+        assert finding_rows[0]["occurrence_count"] == 2
+        assert len({row["finding_id"] for row in occurrence_rows}) == 1
+        assert [row["run_id"] for row in occurrence_rows] == [
+            "run-finding-team-operator",
+            "run-finding-team-owner",
+        ]
+
+    def test_record_run_findings_maps_nmap_vulners_scores_to_severity(self):
+        from services.projects.findings import record_run_findings
+
+        vuln_lines = [
+            ("|     SSV:93139 10.0 https://vulners.com/seebug/SSV:93139 *EXPLOIT*", "critical"),
+            ("|     CVE-2022-32744 8.8 https://vulners.com/cve/CVE-2022-32744", "high"),
+            ("|     CVE-2023-5568 6.5 https://vulners.com/cve/CVE-2023-5568", "medium"),
+            ("|     B7EACB4F-A5CF-5C5A-809F-E03CCE2AB150 3.6 "
+             "https://vulners.com/githubexploit/B7EACB4F-A5CF-5C5A-809F-E03CCE2AB150 *EXPLOIT*", "low"),
+            ("|_    PACKETSTORM:180957 0.0 https://vulners.com/packetstorm/PACKETSTORM:180957 *EXPLOIT*", "info"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+                "VALUES ('run-nmap-vulners', 'sess-nmap-vulners', 'external', "
+                "'nmap -sV --script vulners 192.168.1.5', ?, ?, 0)",
+                ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
+            )
+            classifier = OutputSignalClassifier("nmap -sV --script vulners 192.168.1.5")
+            entries = []
+            for line in (
+                "Nmap scan report for 192.168.1.5",
+                "139/tcp   open  netbios-ssn Samba smbd 4",
+                *(text for text, _severity in vuln_lines),
+            ):
+                metadata = classifier.classify_line(line)
+                signals = metadata.get("signals")
+                if isinstance(signals, list) and "findings" in signals and "vulners.com/" in line:
+                    entries.append({"text": line, **metadata})
+            recorded = record_run_findings(conn, "sess-nmap-vulners", "run-nmap-vulners", entries)
+            conn.commit()
+            rows = conn.execute(
+                "SELECT entity_id, subject_key, raw_line, severity FROM findings ORDER BY line_number"
+            ).fetchall()
+            entity_rows = conn.execute("SELECT id, type, canonical_value FROM entities ORDER BY canonical_value").fetchall()
+            conn.close()
+
+        assert len(recorded) == 3
+        assert len(rows) == 3
+        public_exploit = rows[0]["raw_line"]
+        assert public_exploit.startswith(
+            "Nmap Vulners: Public exploit references available for samba on 192.168.1.5:139 "
+            "(max CVSS score 10, severity critical); references: "
+        )
+        assert "SSV:93139 https://vulners.com/seebug/SSV:93139" in public_exploit
+        assert "B7EACB4F-A5CF-5C5A-809F-E03CCE2AB150" in public_exploit
+        assert "PACKETSTORM:180957 https://vulners.com/packetstorm/PACKETSTORM:180957" in public_exploit
+        assert rows[0]["severity"] == "critical"
+        assert [(row["raw_line"], row["severity"]) for row in rows[1:]] == [
+            vuln_lines[1],
+            vuln_lines[2],
+        ]
+        assert {(row["type"], row["canonical_value"]) for row in entity_rows} == {("ip", "192.168.1.5")}
+        assert {row["entity_id"] for row in rows} == {entity_rows[0]["id"]}
+        assert {row["subject_key"] for row in rows} == {"nmap-service:192.168.1.5:139 samba"}
 
     def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -12900,6 +16014,7 @@ class TestDatabaseInit:
         assert database.validate_project_link_source("active_project") == "active_project"
         assert database.validate_project_link_source("auto_command") == "auto_command"
         assert database.validate_project_link_source("auto_input_file") == "auto_input_file"
+        assert database.validate_project_link_source("auto_promote_rule") == "auto_promote_rule"
 
         with pytest.raises(ValueError):
             database.validate_project_entity_type("note")
@@ -12912,6 +16027,739 @@ class TestDatabaseInit:
         with pytest.raises(project_workspace.ProjectWorkspaceError) as exc:
             project_workspace._normalize_target_payload(payload)
         assert "target labels and notes use entity metadata routes" in str(exc.value)
+
+    def _auto_promote_test_conn(self, tmp):
+        db_path = self._fresh_db(tmp)
+        self._create_tables(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _insert_auto_promote_project(self, conn, project_id="prj-auto-promote", session_id="auto-session"):
+        slug = project_id.replace("_", "-")
+        conn.execute(
+            "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+            "VALUES (?, ?, 'Auto Promote', ?, '', 'active', ?, ?)",
+            (project_id, session_id, slug, "2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+        )
+
+    def _insert_auto_promote_entity(self, conn, entity_id, entity_type, canonical_value, session_id="auto-session"):
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                entity_id,
+                session_id,
+                entity_type,
+                canonical_value,
+                f"sig-{entity_id}",
+                "2026-05-31 00:00:00",
+                "2026-05-31 00:00:00",
+                "2026-05-31 00:00:00",
+            ),
+        )
+
+    def test_auto_promote_rule_apply_reuses_project_link_idempotency(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-alpha", "domain", "alpha.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-beta", "domain", "beta.example.com")
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Alpha domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "exact",
+                    "pattern": "Alpha.Example.Com.",
+                    "apply_on_run": True,
+                },
+            )
+
+            with (
+                mock.patch.object(project_auto_promote.log, "debug") as debug_log,
+                mock.patch.object(project_auto_promote.log, "warning") as warning_log,
+            ):
+                first = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                second = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            rows = conn.execute(
+                "SELECT entity_id, source, source_detail FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' ORDER BY entity_id"
+            ).fetchall()
+            conn.close()
+
+        assert first["linked_count"] == 1
+        assert second["linked_count"] == 0
+        assert [(row["entity_id"], row["source"]) for row in rows] == [
+            ("ent-auto-alpha", "auto_promote_rule")
+        ]
+        debug_events = {call.args[0]: call.kwargs["extra"] for call in debug_log.call_args_list}
+        assert "PROJECT_AUTO_PROMOTE_MATCH_SCAN" in debug_events
+        assert "PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY" in debug_events
+        link_summary = debug_events["PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY"]
+        assert link_summary["target_entity_kind"] == "domain"
+        assert link_summary["match_mode"] == "exact"
+        assert link_summary["linked_count"] == 0
+        assert warning_log.call_count == 0
+        serialized_extras = json.dumps([call.kwargs["extra"] for call in debug_log.call_args_list])
+        assert "Alpha domains" not in serialized_extras
+        assert "alpha.example.com" not in serialized_extras
+        detail = json.loads(rows[0]["source_detail"])
+        assert detail["rule_id"] == rule["id"]
+        assert detail["rule_name"] == "Alpha domains"
+
+    def test_auto_promote_create_obeys_project_rule_quota(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            payload = {
+                "name": "Alpha domains",
+                "target_entity_kind": "domain",
+                "match_mode": "contains",
+                "pattern": "example",
+            }
+            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
+                first = project_auto_promote.create_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
+                with pytest.raises(ProjectWorkspaceQuotaExceeded) as exc:
+                    project_auto_promote.create_rule_on_conn(
+                        conn,
+                        "auto-session",
+                        "prj-auto-promote",
+                        {**payload, "name": "Beta domains"},
+                    )
+            conn.close()
+
+        assert first["id"]
+        assert "project auto-promote rule quota exceeded" in str(exc.value)
+
+    def test_auto_promote_rule_promotes_pending_auto_discovered_project_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-graph", "domain", "graph.darklab.sh")
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, created) "
+                "VALUES ('pl-auto-graph', 'prj-auto-promote', 'atlas_entity', 'ent-auto-graph', "
+                "'auto_command', 0.7, 'pending', '{}', ?)",
+                ("2026-05-31 00:00:00",),
+            )
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Darklab domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "domain_suffix",
+                    "pattern": "darklab.sh",
+                    "apply_on_run": True,
+                },
+            )
+
+            preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            first = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            second = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            row = conn.execute(
+                "SELECT source, confidence, review_state, source_detail FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' AND entity_id = 'ent-auto-graph'"
+            ).fetchone()
+            conn.close()
+
+        assert preview["new_link_count"] == 0
+        assert preview["promotable_count"] == 1
+        assert preview["already_linked_count"] == 0
+        assert first["linked_count"] == 1
+        assert first["promoted_count"] == 1
+        assert second["linked_count"] == 0
+        assert second["promoted_count"] == 0
+        assert second["already_linked_count"] == 1
+        assert row["source"] == "auto_promote_rule"
+        assert row["confidence"] == 1.0
+        assert row["review_state"] == "confirmed"
+        assert json.loads(row["source_detail"])["rule_name"] == "Darklab domains"
+
+    def test_auto_promote_rule_preview_filters_by_source_command_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-nmap", "domain", "nmap.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-nuclei", "domain", "nuclei.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-suppressed", "domain", "suppressed.example.com")
+            conn.execute("UPDATE entities SET suppressed = 1 WHERE id = 'ent-auto-suppressed'")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES "
+                "('run-auto-nmap', 'auto-session', 'nmap nmap.example.com', ?, '[]'), "
+                "('run-auto-nuclei', 'auto-session', 'nuclei -u https://nuclei.example.com', ?, '[]'), "
+                "('run-auto-suppressed', 'auto-session', 'nmap suppressed.example.com', ?, '[]')",
+                ("2026-05-31 00:00:00", "2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES "
+                "('ent-auto-nmap', 'run-auto-nmap', ?, ?, 1), "
+                "('ent-auto-nuclei', 'run-auto-nuclei', ?, ?, 1), "
+                "('ent-auto-suppressed', 'run-auto-suppressed', ?, ?, 1)",
+                (
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                ),
+            )
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Nmap examples",
+                    "target_entity_kind": "any",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                    "filters": {"source_command_roots": ["nmap"]},
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-nmap"]
+        assert preview["skipped_suppressed_count"] == 1
+
+    def test_auto_promote_rule_preview_filters_by_source_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-first-run", "domain", "first.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-second-run", "domain", "second.example.com")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES "
+                "('run-auto-first', 'auto-session', 'nmap first.example.com', ?, '[]'), "
+                "('run-auto-second', 'auto-session', 'nuclei -u https://second.example.com', ?, '[]')",
+                ("2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES "
+                "('ent-auto-first-run', 'run-auto-first', ?, ?, 1), "
+                "('ent-auto-second-run', 'run-auto-second', ?, ?, 1)",
+                (
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                ),
+            )
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Specific run examples",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                    "filters": {"source_run_ids": ["run-auto-second"]},
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-second-run"]
+
+    def test_auto_promote_apply_skips_suppressed_count_rescan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-apply", "domain", "apply.example.com")
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Apply domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "apply.example",
+                },
+            )
+            original_candidate_rows = project_auto_promote._candidate_rows
+            with mock.patch.object(
+                project_auto_promote,
+                "_candidate_rows",
+                side_effect=original_candidate_rows,
+            ) as candidate_rows:
+                preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            conn.close()
+
+        assert preview["skipped_suppressed_count"] == 0
+        assert result["linked_count"] == 1
+        assert result["skipped_suppressed_count"] == 0
+        assert candidate_rows.call_count == 3
+
+    def test_auto_promote_contains_treats_sql_wildcards_literally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-percent", "url", "https://example.test/a%b")
+            self._insert_auto_promote_entity(conn, "ent-auto-percent-miss", "url", "https://example.test/axxb")
+            self._insert_auto_promote_entity(conn, "ent-auto-underscore", "url", "https://example.test/a_b")
+            self._insert_auto_promote_entity(conn, "ent-auto-underscore-miss", "url", "https://example.test/axb")
+            percent_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Literal percent",
+                    "target_entity_kind": "url",
+                    "match_mode": "contains",
+                    "pattern": "a%b",
+                },
+            )
+            underscore_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Literal underscore",
+                    "target_entity_kind": "url",
+                    "match_mode": "contains",
+                    "pattern": "a_b",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in percent_preview["matches"]] == ["ent-auto-percent"]
+        assert [item["id"] for item in underscore_preview["matches"]] == ["ent-auto-underscore"]
+
+    def test_auto_promote_exact_any_matches_canonical_entity_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-domain", "domain", "alpha.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-url", "url", "https://darklab.sh/admin")
+            domain_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any exact domain",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
+                    "pattern": "Alpha.Example.Com.",
+                },
+            )
+            url_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any exact URL",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
+                    "pattern": "HTTPS://DarkLab.SH/admin/",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in domain_preview["matches"]] == ["ent-auto-domain"]
+        assert [item["id"] for item in url_preview["matches"]] == ["ent-auto-url"]
+
+    def test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-domain-darklab", "domain", "graph.darklab.sh")
+            self._insert_auto_promote_entity(conn, "ent-auto-url-darklab", "url", "https://api.darklab.sh/admin")
+            self._insert_auto_promote_entity(conn, "ent-auto-url-other", "url", "https://example.test/admin")
+            self._insert_auto_promote_entity(conn, "ent-auto-ip-match", "ip", "192.0.2.55")
+            self._insert_auto_promote_entity(conn, "ent-auto-ip-miss", "ip", "198.51.100.55")
+            url_suffix_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "URL darklab hosts",
+                    "target_entity_kind": "url",
+                    "match_mode": "domain_suffix",
+                    "pattern": "darklab.sh",
+                },
+            )
+            any_suffix_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any darklab hosts",
+                    "target_entity_kind": "any",
+                    "match_mode": "domain_suffix",
+                    "pattern": "darklab.sh",
+                },
+            )
+            any_cidr_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any documentation IPs",
+                    "target_entity_kind": "any",
+                    "match_mode": "cidr",
+                    "pattern": "192.0.2.0/24",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in url_suffix_preview["matches"]] == ["ent-auto-url-darklab"]
+        assert {item["id"] for item in any_suffix_preview["matches"]} == {
+            "ent-auto-domain-darklab",
+            "ent-auto-url-darklab",
+        }
+        assert [item["id"] for item in any_cidr_preview["matches"]] == ["ent-auto-ip-match"]
+
+    def test_auto_promote_first_seen_after_rule_created_uses_preview_timestamp_for_drafts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-before", "domain", "before.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-after", "domain", "after.example.com")
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-before'",
+                ("2026-05-30 23:59:00",),
+            )
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-after'",
+                ("2026-05-31 00:01:00",),
+            )
+            payload = {
+                "name": "Fresh examples",
+                "target_entity_kind": "domain",
+                "match_mode": "contains",
+                "pattern": "example",
+                "filters": {"first_seen_after_rule_created": True},
+            }
+            with mock.patch.object(project_auto_promote, "_now", return_value="2026-05-31 00:00:00"):
+                draft_preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
+            existing_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {**payload, "created": "2026-05-30 23:00:00"},
+            )
+            conn.close()
+
+        assert draft_preview["rule"]["created"] == "2026-05-31 00:00:00"
+        assert [item["id"] for item in draft_preview["matches"]] == ["ent-auto-after"]
+        assert {item["id"] for item in existing_preview["matches"]} == {
+            "ent-auto-before",
+            "ent-auto-after",
+        }
+
+    def test_auto_promote_first_seen_after_rule_created_uses_stored_rule_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-stored-before", "domain", "stored-before.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-stored-after", "domain", "stored-after.example.com")
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-stored-before'",
+                ("2026-05-30 23:59:00",),
+            )
+            conn.execute(
+                "UPDATE entities SET first_seen_at = ? WHERE id = 'ent-auto-stored-after'",
+                ("2026-05-31 00:01:00",),
+            )
+            with mock.patch.object(project_auto_promote, "_now", return_value="2026-05-31 00:00:00"):
+                rule = project_auto_promote.create_rule_on_conn(
+                    conn,
+                    "auto-session",
+                    "prj-auto-promote",
+                    {
+                        "name": "Stored fresh examples",
+                        "target_entity_kind": "domain",
+                        "match_mode": "contains",
+                        "pattern": "example",
+                        "filters": {"first_seen_after_rule_created": True},
+                    },
+                )
+            preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            conn.close()
+
+        assert rule["created"] == "2026-05-31 00:00:00"
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-stored-after"]
+
+    def test_auto_promote_rule_validation_rejects_unsafe_or_broad_rules(self):
+        invalid_payloads = [
+            {
+                "name": "Regex",
+                "target_entity_kind": "domain",
+                "match_mode": "regex",
+                "pattern": "(.+)+",
+            },
+            {
+                "name": "Wrong CIDR",
+                "target_entity_kind": "domain",
+                "match_mode": "cidr",
+                "pattern": "192.0.2.0/24",
+            },
+            {
+                "name": "Wrong domain suffix",
+                "target_entity_kind": "ip",
+                "match_mode": "domain_suffix",
+                "pattern": "darklab.sh",
+            },
+            {
+                "name": "Too broad",
+                "target_entity_kind": "any",
+                "match_mode": "wildcard",
+                "pattern": "*a*",
+            },
+        ]
+
+        for payload in invalid_payloads:
+            with pytest.raises(project_workspace.ProjectWorkspaceError):
+                project_auto_promote.normalize_rule_payload(payload)
+
+    def test_auto_promote_rule_matches_ipv6_cidr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-v6-match", "ip", "2001:db8::1")
+            self._insert_auto_promote_entity(conn, "ent-auto-v6-miss", "ip", "2001:db9::1")
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "IPv6 lab",
+                    "target_entity_kind": "ip",
+                    "match_mode": "cidr",
+                    "pattern": "2001:db8::/32",
+                },
+            )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-v6-match"]
+
+    def test_auto_promote_non_sql_match_reports_candidate_scan_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-scan-one", "domain", "one.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-scan-two", "domain", "two.example.com")
+            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
+                preview = project_auto_promote.preview_rule_on_conn(
+                    conn,
+                    "auto-session",
+                    "prj-auto-promote",
+                    {
+                        "name": "Example suffix",
+                        "target_entity_kind": "domain",
+                        "match_mode": "domain_suffix",
+                        "pattern": "example.com",
+                    },
+                    limit=1,
+                )
+            conn.close()
+
+        assert [item["id"] for item in preview["matches"]] == ["ent-auto-scan-one"]
+        assert preview["candidate_scan_truncated"] is True
+        assert preview["candidate_scan_limited_count"] == 1
+        assert preview["candidate_scan_count"] == 1
+        assert preview["candidate_scan_limit"] == 1
+        assert preview["matched_count"] == 1
+        assert preview["shown_match_count"] == 1
+        assert preview["matched_in_scan_count"] == 1
+        assert preview["match_count_is_capped"] is True
+        assert preview["total_matches"] is None
+        assert preview["total_matches_known"] is False
+        assert preview["truncated"] is True
+
+    def test_auto_promote_run_apply_uses_match_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-cap-one", "domain", "one.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-cap-two", "domain", "two.example.com")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES ('run-auto-cap', 'auto-session', 'nmap example.com', ?, '[]')",
+                ("2026-05-31 00:00:00",),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES "
+                "('ent-auto-cap-one', 'run-auto-cap', ?, ?, 1), "
+                "('ent-auto-cap-two', 'run-auto-cap', ?, ?, 1)",
+                (
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                    "2026-05-31 00:00:00",
+                ),
+            )
+            project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Example domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                    "apply_on_run": True,
+                },
+            )
+            with (
+                mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
+                mock.patch.object(project_auto_promote.log, "warning") as warning_log,
+            ):
+                summary = project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-cap")
+            linked_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' AND entity_type = 'atlas_entity'"
+            ).fetchone()["count"]
+            conn.close()
+
+        assert summary["rules_evaluated"] == 1
+        assert summary["linked_count"] == 1
+        assert summary["matched_count"] == 1
+        assert summary["match_cap_limited_count"] == 1
+        assert linked_count == 1
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED"]["run_id"] == "run-auto-cap"
+        assert warning_events["PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED"]["match_cap_limited_count"] == 1
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn, project_id="prj-auto-promote-error")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES ('run-auto-error', 'auto-session', 'nmap error.example', ?, '[]')",
+                ("2026-05-31 00:00:00",),
+            )
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote-error",
+                {
+                    "name": "Error domains",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "error",
+                    "apply_on_run": True,
+                },
+            )
+            with (
+                mock.patch.object(project_auto_promote, "apply_rule_on_conn", side_effect=RuntimeError("boom")),
+                mock.patch.object(project_auto_promote.log, "error") as error_log,
+                pytest.raises(RuntimeError),
+            ):
+                project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-error")
+            conn.close()
+
+        assert error_log.call_args.args[0] == "PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR"
+        error_extra = error_log.call_args.kwargs["extra"]
+        assert error_extra["project_id"] == "prj-auto-promote-error"
+        assert error_extra["rule_id"] == rule["id"]
+        assert error_extra["run_id"] == "run-auto-error"
+        assert error_extra["target_entity_kind"] == "domain"
+        assert error_extra["match_mode"] == "contains"
+
+    def test_auto_promote_apply_quota_exhaustion_still_promotes_pending_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            self._insert_auto_promote_project(conn)
+            self._insert_auto_promote_entity(conn, "ent-auto-quota-pending", "domain", "pending.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-quota-new", "domain", "new.example.com")
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, created) "
+                "VALUES ('pl-auto-quota-pending', 'prj-auto-promote', 'atlas_entity', 'ent-auto-quota-pending', "
+                "'auto_command', 0.7, 'pending', '{}', ?)",
+                ("2026-05-31 00:00:00",),
+            )
+            rule = project_auto_promote.create_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Quota examples",
+                    "target_entity_kind": "domain",
+                    "match_mode": "contains",
+                    "pattern": "example",
+                },
+            )
+            with mock.patch.dict(shell_app.CFG, {"max_project_entities_per_project": 1}, clear=False):
+                result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            rows = conn.execute(
+                "SELECT entity_id, source, review_state FROM project_links "
+                "WHERE project_id = 'prj-auto-promote' ORDER BY entity_id"
+            ).fetchall()
+            conn.close()
+
+        assert result["linked_count"] == 1
+        assert result["promoted_count"] == 1
+        assert result["new_link_count"] == 1
+        assert result["quota_limited_count"] == 1
+        assert [(row["entity_id"], row["source"], row["review_state"]) for row in rows] == [
+            ("ent-auto-quota-pending", "auto_promote_rule", "confirmed")
+        ]
+
+    def test_auto_promote_run_rule_cap_limits_across_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = self._auto_promote_test_conn(tmp)
+            for project_id in ("prj-auto-one", "prj-auto-two", "prj-auto-three"):
+                self._insert_auto_promote_project(conn, project_id=project_id)
+            self._insert_auto_promote_entity(conn, "ent-auto-rule-cap", "domain", "rulecap.example.com")
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES ('run-auto-rule-cap', 'auto-session', 'nmap rulecap.example.com', ?, '[]')",
+                ("2026-05-31 00:00:00",),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES ('ent-auto-rule-cap', 'run-auto-rule-cap', ?, ?, 1)",
+                ("2026-05-31 00:00:00", "2026-05-31 00:00:00"),
+            )
+            for project_id in ("prj-auto-one", "prj-auto-two", "prj-auto-three"):
+                project_auto_promote.create_rule_on_conn(
+                    conn,
+                    "auto-session",
+                    project_id,
+                    {
+                        "name": f"{project_id} examples",
+                        "target_entity_kind": "domain",
+                        "match_mode": "contains",
+                        "pattern": "rulecap",
+                        "apply_on_run": True,
+                    },
+                )
+            with mock.patch.object(project_auto_promote.log, "warning") as warning_log:
+                summary = project_auto_promote.apply_run_rules_on_conn(
+                    conn,
+                    "auto-session",
+                    "run-auto-rule-cap",
+                    rule_limit=2,
+                )
+            linked_projects = {
+                row["project_id"]
+                for row in conn.execute(
+                    "SELECT project_id FROM project_links WHERE entity_id = 'ent-auto-rule-cap'"
+                ).fetchall()
+            }
+            conn.close()
+
+        assert summary["rules_evaluated"] == 2
+        assert summary["projects_evaluated"] == 2
+        assert summary["rule_cap_limited_count"] == 1
+        assert summary["linked_count"] == 2
+        assert len(linked_projects) == 2
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED"]["candidate_rule_count"] == 3
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED"]["rule_limit"] == 2
 
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -12942,6 +16790,9 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             project_indexes = {row[1] for row in conn.execute("PRAGMA index_list('projects')").fetchall()}
             link_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_links')").fetchall()}
+            auto_promote_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('project_auto_promote_rules')").fetchall()
+            }
             artifact_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('run_file_artifacts')").fetchall()
             }
@@ -12952,16 +16803,37 @@ class TestDatabaseInit:
             entity_run_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('entity_run_links')").fetchall()
             }
+            import_draft_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_import_drafts')").fetchall()
+            }
+            import_batch_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_import_batches')").fetchall()
+            }
+            entity_import_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_entity_import_links')").fetchall()
+            }
+            finding_import_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_finding_import_occurrences')").fetchall()
+            }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
+            finding_triage_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('finding_triage_details')").fetchall()
+            }
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
             conn.close()
 
         assert "idx_projects_session_status_updated" in project_indexes
+        assert "idx_projects_personal_slug_unique" in project_indexes
+        assert "idx_projects_team_status_updated" in project_indexes
+        assert "idx_projects_team_slug_unique" in project_indexes
         assert "idx_project_links_project_entity_created" in link_indexes
         assert "idx_project_links_entity_lookup" in link_indexes
+        assert "idx_project_auto_promote_rules_project_updated" in auto_promote_indexes
+        assert "idx_project_auto_promote_rules_run_scan" in auto_promote_indexes
         assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
-        assert "idx_findings_session_signature" in finding_indexes
+        assert "idx_findings_personal_signature" in finding_indexes
+        assert "idx_findings_team_signature" in finding_indexes
         assert "idx_findings_session_status" in finding_indexes
         assert "idx_findings_session_entity_seen" in finding_indexes
         assert "idx_findings_session_run_seen" in finding_indexes
@@ -12969,14 +16841,214 @@ class TestDatabaseInit:
         assert "idx_findings_session_last_run_seen" in finding_indexes
         assert "idx_findings_session_tool_seen" in finding_indexes
         assert "idx_findings_session_severity_seen" in finding_indexes
+        assert "idx_findings_team_status" in finding_indexes
+        assert "idx_findings_team_entity_seen" in finding_indexes
+        assert "idx_findings_team_run_seen" in finding_indexes
         assert "idx_findings_occurrences_run" in occurrence_indexes
         assert "idx_findings_occurrences_finding_seen" in occurrence_indexes
         assert "idx_entity_run_links_run" in entity_run_indexes
         assert "idx_entity_run_links_entity_seen" in entity_run_indexes
+        assert "idx_atlas_import_drafts_scope_created" in import_draft_indexes
+        assert "idx_atlas_import_drafts_expires" in import_draft_indexes
+        assert "idx_atlas_import_batches_scope_applied" in import_batch_indexes
+        assert "idx_atlas_entity_import_links_batch" in entity_import_indexes
+        assert "idx_atlas_entity_import_links_entity_seen" in entity_import_indexes
+        assert "idx_atlas_finding_import_occurrences_batch" in finding_import_indexes
+        assert "idx_atlas_finding_import_occurrences_finding_seen" in finding_import_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
+        assert "idx_entity_labels_personal_unique" in label_indexes
+        assert "idx_entity_labels_team_unique" in label_indexes
         assert "idx_entity_notes_entity_updated" in note_indexes
+        assert "idx_entity_notes_personal_unique" in note_indexes
+        assert "idx_entity_notes_team_unique" in note_indexes
+        assert "idx_finding_triage_details_finding_updated" in finding_triage_indexes
+        assert "idx_finding_triage_details_personal_unique" in finding_triage_indexes
+        assert "idx_finding_triage_details_team_unique" in finding_triage_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
+
+    def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE entity_labels (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created TEXT NOT NULL,
+                UNIQUE (session_id, entity_type, entity_id, label)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE entity_notes (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                body TEXT NOT NULL,
+                created TEXT NOT NULL,
+                updated TEXT NOT NULL,
+                UNIQUE (session_id, entity_type, entity_id)
+            )
+        """)
+        conn.execute(
+            "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, created) "
+            "VALUES ('lbl-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'important', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+            "VALUES ('note-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'personal', 'now', 'now')"
+        )
+
+        database._migrate_workspace_metadata_team_scope(conn)
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_labels_personal_unique "
+            "ON entity_labels (session_id, entity_type, entity_id, label) "
+            "WHERE team_id IS NULL OR team_id = ''"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_labels_team_unique "
+            "ON entity_labels (team_id, entity_type, entity_id, label) "
+            "WHERE team_id != ''"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_notes_personal_unique "
+            "ON entity_notes (session_id, entity_type, entity_id) "
+            "WHERE team_id IS NULL OR team_id = ''"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_entity_notes_team_unique "
+            "ON entity_notes (team_id, entity_type, entity_id) "
+            "WHERE team_id != ''"
+        )
+        conn.execute(
+            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
+            "VALUES ('lbl-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'important', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
+            "VALUES ('lbl-team-b', 'tok_owner', 'team_b', 'workspace_file', 'targets.txt', 'important', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+            "VALUES ('note-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'team', 'now', 'now')"
+        )
+
+        labels = conn.execute(
+            "SELECT id, team_id FROM entity_labels ORDER BY id"
+        ).fetchall()
+        notes = conn.execute(
+            "SELECT id, team_id FROM entity_notes ORDER BY id"
+        ).fetchall()
+        conn.close()
+
+        assert {row["id"]: row["team_id"] for row in labels} == {
+            "lbl-personal": "",
+            "lbl-team-a": "team_a",
+            "lbl-team-b": "team_b",
+        }
+        assert {row["id"]: row["team_id"] for row in notes} == {
+            "note-personal": "",
+            "note-team-a": "team_a",
+        }
+
+    def test_project_slug_migration_separates_personal_and_team_scopes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    color TEXT NOT NULL DEFAULT '',
+                    created TEXT NOT NULL,
+                    updated TEXT NOT NULL,
+                    UNIQUE (session_id, slug)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "VALUES ('prj-personal', 'tok_owner', 'Case', 'case', 'now', 'now')"
+            )
+            conn.execute("""
+                CREATE TABLE team_invites (
+                    id TEXT PRIMARY KEY,
+                    team_id TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    label TEXT NOT NULL DEFAULT '',
+                    created_by_member_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL DEFAULT '',
+                    max_uses INTEGER NOT NULL DEFAULT 1,
+                    use_count INTEGER NOT NULL DEFAULT 0,
+                    revoked_at TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    UNIQUE (team_id, code_hash),
+                    CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE team_recovery_codes (
+                    id TEXT PRIMARY KEY,
+                    team_id TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    created_by_member_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    rotated_at TEXT NOT NULL DEFAULT '',
+                    revoked_at TEXT NOT NULL DEFAULT '',
+                    used_at TEXT NOT NULL DEFAULT '',
+                    UNIQUE (team_id, code_hash)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO team_invites "
+                "(id, team_id, code_hash, role, created_by_member_id, created_at) "
+                "VALUES ('invite-one', 'team_one', 'invite_hash', 'operator', 'member-one', 'now')"
+            )
+            conn.execute(
+                "INSERT INTO team_recovery_codes "
+                "(id, team_id, code_hash, created_by_member_id, created_at) "
+                "VALUES ('recovery-one', 'team_one', 'recovery_hash', 'member-one', 'now')"
+            )
+            conn.commit()
+            conn.close()
+
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+                "VALUES ('prj-team', 'tok_owner', 'team_1', 'Case', 'case', 'now', 'now')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+                    "VALUES ('prj-personal-dupe', 'tok_owner', '', 'Case', 'case', 'now', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+                    "VALUES ('prj-team-dupe', 'tok_other', 'team_1', 'Case', 'case', 'now', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO team_invites "
+                    "(id, team_id, code_hash, role, created_by_member_id, created_at) "
+                    "VALUES ('invite-two', 'team_two', 'invite_hash', 'operator', 'member-two', 'now')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO team_recovery_codes "
+                    "(id, team_id, code_hash, created_by_member_id, created_at) "
+                    "VALUES ('recovery-two', 'team_two', 'recovery_hash', 'member-two', 'now')"
+                )
+            conn.close()
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
@@ -13457,6 +17529,7 @@ class TestBuiltinStats:
                     lines = builtin_commands._run_builtin_stats("tok_statsdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
+        class_by_text = {str(line["text"]): str(line.get("cls") or "") for line in lines}
         assert re.search(r"session\s+tok_stat••••", text)
         assert "tok_statsdemo" not in text
         assert re.search(r"runs\s+7", text)
@@ -13466,6 +17539,8 @@ class TestBuiltinStats:
         assert re.search(r"success rate\s+80% \(4 ok / 1 failed\)", text)
         assert re.search(r"average duration\s+21\.[78]s", text)
         assert "  command      runs         ok       avg" in text
+        assert class_by_text["  command      runs         ok       avg"] == "builtin-table-header"
+        assert class_by_text["  nmap       2 runs     50% ok     15.0s"] == "builtin-table-row"
         assert "  nmap       2 runs     50% ok     15.0s" in text
         assert "  dig         1 run    100% ok      2.0s" in text
         assert "  curl        1 run     n/a ok       n/a" in text

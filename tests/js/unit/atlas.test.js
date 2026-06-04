@@ -40,6 +40,14 @@ function jsonResponse(data) {
   }
 }
 
+function errorResponse(status, data) {
+  return {
+    ok: false,
+    status,
+    json: () => Promise.resolve(data),
+  }
+}
+
 function deferred() {
   let resolve
   let reject
@@ -71,13 +79,23 @@ function setupAtlasDom() {
         <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden"></select>
         <select id="atlas-orphan-filter" class="form-select form-control-compact"></select>
         <select id="atlas-suppression-filter" class="form-select form-control-compact"></select>
-        <select id="atlas-saved-view-select" class="form-select form-control-compact"></select>
+        <div class="atlas-saved-view-select-cell">
+          <select id="atlas-saved-view-select" class="form-select form-control-compact atlas-saved-view-select"></select>
+        </div>
         <button id="atlas-saved-view-save" type="button">save</button>
         <button id="atlas-saved-view-update" type="button">update</button>
         <button id="atlas-saved-view-delete" type="button">delete</button>
-        <button id="atlas-export-csv-btn" type="button">csv</button>
-        <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
+        <button id="atlas-saved-view-create-rule" type="button">create rule</button>
+        <div id="atlas-export-wrap" class="atlas-export-wrap save-menu-wrap save-menu-down">
+          <button id="atlas-export-menu-btn" type="button" aria-expanded="false">export</button>
+          <div id="atlas-export-menu" class="atlas-export-menu save-menu dropdown-surface">
+            <button id="atlas-export-csv-btn" type="button">csv</button>
+            <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
+          </div>
+        </div>
+        <button id="atlas-import-btn" type="button">import</button>
         <button id="atlas-refresh-btn" type="button">refresh</button>
+        <button id="atlas-findings-board-btn" type="button">board</button>
         <button id="atlas-clear-filters-btn" type="button">clear filters</button>
         <div class="atlas-shell">
           <div id="atlas-finding-bulk-row" class="u-hidden">
@@ -104,6 +122,43 @@ function setupAtlasDom() {
           </div>
           <aside id="atlas-detail"></aside>
         </div>
+        <div id="atlas-import-overlay" class="modal-overlay mobile-sheet-overlay atlas-import-overlay u-hidden" aria-hidden="true">
+          <form id="atlas-import-modal" class="modal-card mobile-sheet-surface atlas-import-modal" tabindex="-1">
+            <button id="atlas-import-close" type="button">close import</button>
+            <select id="atlas-import-format">
+              <option value="nuclei_jsonl">Nuclei JSONL</option>
+              <option value="nessus_xml">Nessus XML</option>
+            </select>
+            <input id="atlas-import-name" />
+            <input id="atlas-import-file" type="file" />
+            <button id="atlas-import-preview-btn" type="submit">preview</button>
+            <span id="atlas-import-status"></span>
+            <section id="atlas-import-preview" class="u-hidden"></section>
+            <button id="atlas-import-cancel" type="button">cancel</button>
+            <button id="atlas-import-apply" type="button">apply</button>
+          </form>
+        </div>
+        <div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
+          <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal">
+            <button type="button" id="finding-triage-close"></button>
+            <div id="finding-triage-subtitle"></div>
+            <div id="finding-triage-message" class="u-hidden"></div>
+            <form id="finding-triage-form">
+              <textarea id="finding-triage-remediation"></textarea>
+              <textarea id="finding-triage-verification-steps"></textarea>
+              <select id="finding-triage-status" class="form-select form-control-compact">
+                <option value="not_started">Not started</option>
+                <option value="ready_to_verify">Ready to verify</option>
+                <option value="verified">Verified</option>
+                <option value="needs_retest">Needs retest</option>
+                <option value="not_applicable">Not applicable</option>
+              </select>
+              <textarea id="finding-triage-verification-notes"></textarea>
+              <button type="button" id="finding-triage-cancel"></button>
+              <button type="submit" id="finding-triage-save"></button>
+            </form>
+          </div>
+        </div>
       </section>
     </div>
   `
@@ -112,10 +167,15 @@ function setupAtlasDom() {
 function loadAtlas({
   activeProject = null,
   apiFetchImpl = null,
+  apiFetchInterceptor = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
+  openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
   useRealSelectEnhancer = false,
+  activeTeamScopeCanImpl = () => true,
+  teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
 } = {}) {
   const showToast = vi.fn()
+  const logClientError = vi.fn()
   const syncAppSelect = vi.fn()
   const enhanceAppSelects = vi.fn()
   const downloadBlobAsAttachment = vi.fn()
@@ -123,6 +183,10 @@ function loadAtlas({
   const projectEvents = []
   const apiFetch = apiFetchImpl || vi.fn((url, options = {}) => {
     const target = String(url)
+    if (typeof apiFetchInterceptor === 'function') {
+      const intercepted = apiFetchInterceptor(url, options)
+      if (intercepted) return intercepted
+    }
     if (target === '/atlas' || target.startsWith('/atlas?')) {
       return Promise.resolve(jsonResponse({
         total: 1,
@@ -157,6 +221,20 @@ function loadAtlas({
     if (target === '/findings/fnd_1/review' && options.method === 'PUT') {
       return Promise.resolve(jsonResponse({ ok: true, finding: { ...FINDING, review_state: 'reviewed', status: 'reviewed' } }))
     }
+    if (target === '/findings/fnd_1/triage' && !options.method) {
+      return Promise.resolve(jsonResponse({
+        triage: {
+          remediation: 'Retest the exposed service.',
+          verification_steps: '',
+          verification_status: 'not_started',
+          verification_notes: '',
+        },
+      }))
+    }
+    if (target === '/findings/fnd_1/triage' && options.method === 'PUT') {
+      const payload = JSON.parse(options.body)
+      return Promise.resolve(jsonResponse({ ok: true, triage: payload }))
+    }
     if (target === '/atlas/findings/review' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true, counts: { updated: 1, not_found: 0 }, results: [] }))
     }
@@ -185,9 +263,60 @@ function loadAtlas({
         blob: () => Promise.resolve(new Blob(['id,type\nent_ip,ip\n'], { type: 'text/csv' })),
       })
     }
+    if (target === '/atlas/imports/preview' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        draft_id: 'impd_1',
+        row_set_digest: 'digest_1',
+        counts: {
+          rows: 2,
+          entity_valid: 1,
+          finding_valid: 1,
+          new: 2,
+          updated: 0,
+          warnings: 1,
+          project_target_candidates: 1,
+        },
+        samples: {
+          entities: [{ kind: 'domain', canonical_value: 'example.com' }],
+          findings: [{ severity: 'high', title: 'Missing security header' }],
+        },
+        warnings: [{ row_number: 2, code: 'missing_field', message: 'Skipped empty value' }],
+        apply_options: {
+          import_entities: { available: true, requires: ['mutate_projects'] },
+          import_findings: { available: true, requires: ['triage_findings'] },
+          link_to_project: { available: true, requires: ['mutate_projects'] },
+          create_project_targets: { available: true, requires: ['mutate_projects'] },
+        },
+      }))
+    }
+    if (target === '/atlas/imports/apply' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        batch_id: 'impb_1',
+        counts: {
+          entities_created: 1,
+          entities_updated: 0,
+          findings_created: 1,
+          findings_updated: 0,
+          project_links_added: 1,
+          project_links_existing: 0,
+          project_targets_created: 1,
+          project_targets_existing: 0,
+        },
+      }))
+    }
     if (target === '/atlas/entities/ent_ip') {
       return Promise.resolve(jsonResponse({
         entity: ENTITY,
+        import_sources: [{
+          batch_id: 'impb_1',
+          source_tool: 'Nuclei JSONL',
+          import_name: 'Nuclei JSONL',
+          occurrence_count: 1,
+          created_record: true,
+          last_observed_at: '2026-05-15T00:03:00Z',
+        }],
         intel_snapshots: [{
           provider: 'Shodan',
           status: 'ok',
@@ -248,6 +377,12 @@ function loadAtlas({
         },
       }))
     }
+    if (target === '/atlas/entities/ent_ip/refresh_intel' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        refresh: { configured_count: 1, success_count: 1 },
+      }))
+    }
     if (target === '/atlas/entities/ent_ip/project_links' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true }))
     }
@@ -258,6 +393,7 @@ function loadAtlas({
     ...fromDomScripts(
       [
         'app/static/js/ui/ui_entity_metadata.js',
+        'app/static/js/features/findings/finding_triage_editor.js',
         'app/static/js/features/atlas/atlas_tabs.js',
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
@@ -269,6 +405,7 @@ function loadAtlas({
         apiFetch,
         fetch: apiFetch,
         showToast,
+        logClientError,
         showConfirm: showConfirmImpl,
         syncAppSelect,
         enhanceAppSelects,
@@ -285,11 +422,15 @@ function loadAtlas({
           return true
         },
         refocusComposerAfterAction: vi.fn(),
+        openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
         downloadBlobAsAttachment,
+        activeTeamScopeCan: activeTeamScopeCanImpl,
+        teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
       },
       `{
         apiFetch,
         showToast,
+        logClientError,
         downloadBlobAsAttachment,
         openAtlas: window.openAtlas,
         closeAtlas: window.closeAtlas,
@@ -299,6 +440,7 @@ function loadAtlas({
       `
         window.apiFetch = apiFetch;
         window.showToast = showToast;
+        window.logClientError = logClientError;
         window.showConfirm = showConfirm;
         if (!useRealSelectEnhancer) {
           window.syncAppSelect = syncAppSelect;
@@ -308,18 +450,36 @@ function loadAtlas({
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
+        window.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
+        window.activeTeamScopeCan = activeTeamScopeCan;
+        window.teamScopeDeniedMessage = teamScopeDeniedMessage;
       `,
     ),
     apiFetch,
     showConfirm: showConfirmImpl,
     showToast,
+    logClientError,
+    openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
     syncAppSelect,
     enhanceAppSelects,
     downloadBlobAsAttachment,
     projectEvents,
     storage,
   }
+}
+
+function setAtlasImportFile(contents = '{"template-id":"ssl/header"}\n', name = 'nuclei.jsonl', type = 'application/jsonl') {
+  const fileInput = document.getElementById('atlas-import-file')
+  Object.defineProperty(fileInput, 'files', {
+    value: [new File([contents], name, { type })],
+    configurable: true,
+  })
+  return fileInput
+}
+
+function submitAtlasImportPreview() {
+  document.getElementById('atlas-import-modal')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
 }
 
 describe('Atlas overlay', () => {
@@ -374,15 +534,37 @@ describe('Atlas overlay', () => {
       if (input) input.value = 'High signal'
       return Promise.resolve('save')
     })
-    const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
+    const openProjectAutoPromoteRuleFromAtlas = vi.fn(() => Promise.resolve(true))
+    const { openAtlas } = loadAtlas({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+      openProjectAutoPromoteRuleFromAtlasImpl: openProjectAutoPromoteRuleFromAtlas,
+    })
 
     await openAtlas({ source: 'test', projectId: 'prj_keep', projectName: 'Keep Scope' })
-    window.DarklabAtlasOverlay.state.query = 'ssl'
+    window.DarklabAtlasOverlay.state.activeTab = 'ip'
+    window.DarklabAtlasOverlay.state.query = '107.178'
     window.DarklabAtlasOverlay.state.findingStatus = 'important'
     window.DarklabAtlasOverlay.state.orphanFilter = 'only'
     window.DarklabAtlasOverlay.state.suppressionFilter = 'only'
     window.DarklabAtlasOverlay.state.runId = 'run1'
     window.DarklabAtlasOverlay.state.runLabel = 'nmap 107.178.109.44'
+    document.getElementById('atlas-saved-view-create-rule').click()
+
+    await vi.waitFor(() => expect(openProjectAutoPromoteRuleFromAtlas).toHaveBeenCalled())
+    expect(openProjectAutoPromoteRuleFromAtlas).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Atlas view: 107.178',
+      project_id: 'prj_keep',
+      project_name: 'Keep Scope',
+      target_entity_kind: 'ip',
+      match_mode: 'contains',
+      pattern: '107.178',
+      filters: expect.objectContaining({
+        source_run_ids: ['run1'],
+        include_suppressed: true,
+      }),
+    }))
+    window.DarklabAtlasOverlay.state.activeTab = 'findings'
     document.getElementById('atlas-saved-view-save').click()
 
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/atlas/views', expect.objectContaining({ method: 'POST' })))
@@ -391,7 +573,7 @@ describe('Atlas overlay', () => {
       name: 'High signal',
       tab: 'findings',
       filters: {
-        query: 'ssl',
+        query: '107.178',
         orphan_filter: 'only',
         suppression_filter: 'only',
         finding_status: 'important',
@@ -405,7 +587,7 @@ describe('Atlas overlay', () => {
     select.value = 'atv_1111111111111111'
     select.dispatchEvent(new Event('change', { bubbles: true }))
 
-    await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('ssl'))
+    await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('107.178'))
     expect(window.DarklabAtlasOverlay.state.activeTab).toBe('findings')
     expect(document.querySelector('[data-atlas-tab="findings"]')?.classList.contains('is-active')).toBe(true)
     expect(window.DarklabAtlasOverlay.state.findingStatus).toBe('important')
@@ -455,6 +637,11 @@ describe('Atlas overlay', () => {
     expect(filter.nextElementSibling?.classList.contains('app-select')).toBe(true)
     expect(filter.nextElementSibling?.textContent).toContain('All findings')
     expect(filter.nextElementSibling?.querySelectorAll('.dropdown-item')).toHaveLength(6)
+    const savedViewCell = document.querySelector('.atlas-saved-view-select-cell')
+    const savedViewSelect = document.getElementById('atlas-saved-view-select')
+    expect(savedViewSelect.parentElement).toBe(savedViewCell)
+    expect(savedViewSelect.nextElementSibling?.classList.contains('app-select')).toBe(true)
+    expect(savedViewCell.querySelector('.app-select-trigger')?.textContent).toContain('Saved views')
 
     const review = document.querySelector('#atlas-detail .atlas-finding-review')
     expect(review).not.toBeNull()
@@ -465,7 +652,7 @@ describe('Atlas overlay', () => {
   })
 
   it('opens as a first-class surface and renders entity detail', async () => {
-    const { openAtlas, isAtlasOverlayOpen, apiFetch } = loadAtlas()
+    const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast } = loadAtlas()
 
     await openAtlas({ source: 'test', tab: 'ip' })
 
@@ -486,6 +673,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Intel summary')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Open ports')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('80, 443')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Created by Nuclei JSONL import')
     expect(document.querySelectorAll('.atlas-intel-highlight-provider')).toHaveLength(2)
     expect(document.querySelector('.atlas-intel-highlight-provider')?.textContent).toContain('CVE-2026-0001')
     const intelToggle = document.querySelector('.atlas-intel-card-toggle')
@@ -504,6 +692,15 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('entity')
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.textContent).toBe('Actions')
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.textContent).toContain('Suppress entity')
+    document.querySelector('#atlas-detail .atlas-detail-actions button')?.click()
+    const refreshOverlay = document.querySelector('.atlas-intel-refresh-overlay')
+    expect(refreshOverlay?.classList.contains('u-hidden')).toBe(false)
+    expect(refreshOverlay?.textContent).toContain('Refreshing intel')
+    expect(refreshOverlay?.textContent).toContain('107.178.109.44')
+    expect(document.querySelector('#atlas-detail .atlas-detail-actions button')?.textContent).toBe('Refreshing...')
+    expect(document.querySelector('#atlas-detail .atlas-detail-actions button')?.disabled).toBe(true)
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Intel refreshed from 1 provider', 'success'))
+    expect(refreshOverlay?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-finding-status-filter')?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-finding-bulk-row')?.classList.contains('u-hidden')).toBe(false)
     expect(apiFetch).toHaveBeenCalledWith(
@@ -511,6 +708,229 @@ describe('Atlas overlay', () => {
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', expect.objectContaining({ cache: 'no-store' }))
+  })
+
+  it('previews and applies an Atlas import from a project-scoped Atlas surface', async () => {
+    const { openAtlas, apiFetch, showToast, projectEvents } = loadAtlas()
+
+    await openAtlas({ source: 'test', tab: 'findings', projectId: 'proj_1', projectName: 'Evidence' })
+    document.getElementById('atlas-import-btn')?.click()
+
+    const fileInput = document.getElementById('atlas-import-file')
+    const formatSelect = document.getElementById('atlas-import-format')
+    expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
+    formatSelect.value = 'nessus_xml'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('.nessus')
+    formatSelect.value = 'nuclei_jsonl'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
+    Object.defineProperty(fileInput, 'files', {
+      value: [new File(['{"template-id":"ssl/header"}\n'], 'nuclei.jsonl', { type: 'application/jsonl' })],
+      configurable: true,
+    })
+    document.getElementById('atlas-import-modal')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/imports/preview',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const previewCall = apiFetch.mock.calls.find(([url]) => url === '/atlas/imports/preview')
+    expect(previewCall?.[1].body.get('format_id')).toBe('nuclei_jsonl')
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+    })
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Skipped empty value')
+    expect(document.querySelector('.atlas-import-warning-row')?.textContent).toContain('Row 2')
+    expect(document.querySelector('[data-atlas-import-option="import_entities"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="import_findings"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="link_to_project"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.checked).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.closest('label')?.textContent)
+      .toContain('creates or reuses Atlas entities')
+    const importOptionLabel = document.querySelector('[data-atlas-import-option="import_entities"]')?.closest('label')
+    expect(importOptionLabel?.classList.contains('form-check')).toBe(true)
+    expect(importOptionLabel?.classList.contains('control-row')).toBe(false)
+
+    document.querySelector('[data-atlas-import-option="link_to_project"]').checked = true
+    document.getElementById('atlas-import-apply')?.click()
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/imports/apply',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const applyCall = apiFetch.mock.calls.find(([url]) => url === '/atlas/imports/apply')
+    const applyBody = JSON.parse(applyCall?.[1].body)
+    expect(applyBody).toMatchObject({
+      draft_id: 'impd_1',
+      row_set_digest: 'digest_1',
+      project_id: 'proj_1',
+      options: {
+        import_entities: true,
+        import_findings: true,
+        link_to_project: true,
+      },
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 entity created')
+    })
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project link added')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
+    expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
+    expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
+  })
+
+  it('requires a file before previewing an Atlas import', async () => {
+    const { openAtlas, apiFetch, showToast } = loadAtlas()
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    submitAtlasImportPreview()
+
+    expect(showToast).toHaveBeenCalledWith('Choose a file to import', 'error')
+    expect(apiFetch.mock.calls.some(([url]) => url === '/atlas/imports/preview')).toBe(false)
+    expect(document.getElementById('atlas-import-apply')?.disabled).toBe(true)
+  })
+
+  it('disables unavailable Atlas import apply options after preview', async () => {
+    const { openAtlas } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          return Promise.resolve(jsonResponse({
+            ok: true,
+            draft_id: 'impd_disabled',
+            row_set_digest: 'digest_disabled',
+            counts: { rows: 1, entity_valid: 0, finding_valid: 0, new: 0, updated: 0, warnings: 0 },
+            samples: { entities: [], findings: [] },
+            warnings: [],
+            apply_options: {
+              import_entities: { available: false, requires: ['mutate_projects'] },
+              import_findings: { available: false, requires: ['triage_findings'] },
+              link_to_project: { available: false, requires: ['mutate_projects'] },
+              create_project_targets: { available: false, requires: ['mutate_projects'] },
+            },
+          }))
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings', projectId: 'proj_1', projectName: 'Evidence' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile()
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-status')?.textContent).toContain('Preview ready')
+    })
+    ;['import_entities', 'import_findings', 'link_to_project', 'create_project_targets'].forEach((key) => {
+      const checkbox = document.querySelector(`[data-atlas-import-option="${key}"]`)
+      expect(checkbox?.disabled).toBe(true)
+      expect(checkbox?.checked).toBe(false)
+    })
+    expect(document.getElementById('atlas-import-apply')?.disabled).toBe(true)
+  })
+
+  it('can retry an Atlas import preview after a handled preview rejection', async () => {
+    let previewAttempts = 0
+    const { openAtlas, showToast } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          previewAttempts += 1
+          if (previewAttempts === 1) {
+            return Promise.resolve(errorResponse(400, { message: 'Unsupported import format' }))
+          }
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile('not jsonl', 'bad.txt', 'text/plain')
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Unsupported import format', 'error'))
+    expect(document.getElementById('atlas-import-status')?.textContent).toBe('')
+
+    setAtlasImportFile()
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+    })
+    expect(previewAttempts).toBe(2)
+    expect(document.getElementById('atlas-import-status')?.textContent).toContain('Preview ready')
+  })
+
+  it('does not log expected Atlas import preview rejections as client errors', async () => {
+    const { openAtlas, logClientError, showToast } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          return Promise.resolve(errorResponse(400, { message: 'Unsupported import format' }))
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile('not jsonl', 'bad.txt', 'text/plain')
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Unsupported import format', 'error'))
+    expect(logClientError).not.toHaveBeenCalled()
+  })
+
+  it('logs Atlas import preview runtime failures as client errors', async () => {
+    const networkError = new Error('network down')
+    const { openAtlas, logClientError, showToast } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/imports/preview' && options.method === 'POST') {
+          return Promise.reject(networkError)
+        }
+        return undefined
+      },
+    })
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-import-btn')?.click()
+    setAtlasImportFile()
+    submitAtlasImportPreview()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('network down', 'error'))
+    expect(logClientError).toHaveBeenCalledWith('failed to preview atlas import', networkError)
+  })
+
+  it('does not log expected Atlas import apply rejections as client errors', async () => {
+    for (const [status, message] of [
+      [403, 'You need permission to import Atlas findings'],
+      [409, 'Import preview expired'],
+    ]) {
+      setupAtlasDom()
+      const { openAtlas, logClientError, showToast } = loadAtlas({
+        apiFetchInterceptor: (url, options = {}) => {
+          if (String(url) === '/atlas/imports/apply' && options.method === 'POST') {
+            return Promise.resolve(errorResponse(status, { message }))
+          }
+          return undefined
+        },
+      })
+
+      await openAtlas({ source: 'test', tab: 'findings' })
+      document.getElementById('atlas-import-btn')?.click()
+      setAtlasImportFile()
+      submitAtlasImportPreview()
+      await vi.waitFor(() => {
+        expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+      })
+
+      document.getElementById('atlas-import-apply')?.click()
+
+      await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith(message, 'error'))
+      expect(logClientError).not.toHaveBeenCalled()
+    }
   })
 
   it('cycles Atlas tabs forward and backward for modal keyboard shortcuts', async () => {
@@ -675,6 +1095,62 @@ describe('Atlas overlay', () => {
     expect(curatedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
     expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
     expect(curatedContent.textContent).toContain('1 curated entity and 1 curated finding will be kept unless this is checked.')
+  })
+
+  it('disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('delete'))
+    const { openAtlas, apiFetch, showToast } = loadAtlas({
+      showConfirmImpl: showConfirm,
+      activeTeamScopeCanImpl: capability => capability !== 'triage_findings',
+    })
+
+    await openAtlas({ source: 'test', tab: 'ip' })
+    document.querySelector('.atlas-entity-row')?.click()
+    await flushPromises()
+    document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const detailButtons = [...document.querySelectorAll('#atlas-detail .atlas-detail-action-menu-list button')]
+    const suppressButton = detailButtons.find(button => button.textContent === 'Suppress entity')
+    const deleteButton = detailButtons.find(button => button.textContent === 'Delete entity')
+
+    expect(document.querySelector('.atlas-row-suppression-action')?.disabled).toBe(true)
+    expect(suppressButton?.disabled).toBe(true)
+    expect(deleteButton?.disabled).toBe(true)
+    suppressButton?.click()
+    deleteButton?.click()
+    await Promise.resolve()
+
+    expect(showConfirm).not.toHaveBeenCalled()
+    document.getElementById('atlas-select-toggle').checked = true
+    document.getElementById('atlas-select-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    document.querySelector('.atlas-entity-row')?.click()
+    expect(document.getElementById('atlas-bulk-delete')?.disabled).toBe(true)
+    document.getElementById('atlas-bulk-delete')?.click()
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), expect.anything())
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    await flushPromises()
+    const triageButton = [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
+      .find(button => button.textContent === 'Triage')
+    expect(triageButton?.disabled).toBe(false)
+    triageButton?.click()
+    await flushPromises()
+
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('finding-triage-remediation').value).toBe('Retest the exposed service.')
+    expect(document.getElementById('finding-triage-remediation').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-status').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-save').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-message').textContent).toContain('read these details')
+
+    const putCallsBefore = apiFetch.mock.calls
+      .filter(([url, options]) => url === '/findings/fnd_1/triage' && options?.method === 'PUT').length
+    document.getElementById('finding-triage-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    const putCallsAfter = apiFetch.mock.calls
+      .filter(([url, options]) => url === '/findings/fnd_1/triage' && options?.method === 'PUT').length
+    expect(putCallsAfter).toBe(putCallsBefore)
   })
 
   it('applies the project filter when opened from a project', async () => {
@@ -1142,9 +1618,14 @@ describe('Atlas overlay', () => {
     const search = document.getElementById('atlas-search')
     search.value = '107.178'
     search.dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('atlas-export-menu-btn')?.click()
+    expect(document.getElementById('atlas-export-menu')?.parentElement).toBe(document.body)
+    expect(document.getElementById('atlas-export-menu-btn')?.getAttribute('aria-expanded')).toBe('true')
     document.getElementById('atlas-export-csv-btn')?.click()
 
     await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
+    expect(document.getElementById('atlas-export-menu')?.parentElement).toBe(document.getElementById('atlas-export-wrap'))
+    expect(document.getElementById('atlas-export-menu-btn')?.getAttribute('aria-expanded')).toBe('false')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),

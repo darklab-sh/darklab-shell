@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tomllib
 import urllib.error
@@ -23,6 +24,7 @@ class DarklabConfig:
     api_url: str
     token: str
     timeout: float = 30.0
+    team: str = ""
 
 
 def load_config(args: Any) -> DarklabConfig:
@@ -39,12 +41,18 @@ def load_config(args: Any) -> DarklabConfig:
         or file_config.get("token")
         or ""
     )
+    team = (
+        getattr(args, "team", None)
+        or os.environ.get("DARKLAB_TEAM")
+        or file_config.get("team")
+        or ""
+    )
     timeout_value = getattr(args, "timeout", None) or os.environ.get("DARKLAB_TIMEOUT") or file_config.get("timeout") or 30
     try:
         timeout = float(timeout_value)
     except (TypeError, ValueError):
         timeout = 30.0
-    return DarklabConfig(api_url=_normalize_api_url(api_url), token=str(token), timeout=max(1.0, timeout))
+    return DarklabConfig(api_url=_normalize_api_url(api_url), token=str(token), timeout=max(1.0, timeout), team=str(team))
 
 
 def _normalize_api_url(value: object) -> str:
@@ -67,8 +75,114 @@ def _load_config_file() -> dict[str, Any]:
         raise DarklabCliError(f"invalid CLI config TOML: {exc}") from exc
     if not isinstance(payload, dict):
         return {}
-    supported = {"api_url", "token", "timeout"}
+    supported = {"api_url", "token", "timeout", "team"}
     return {key: value for key, value in payload.items() if key in supported}
+
+
+def config_file_path() -> Path:
+    return Path.home() / ".config" / "darklab" / "config.toml"
+
+
+def _secure_config_file(path: Path) -> None:
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        raise DarklabCliError(f"failed to secure CLI config permissions: {exc}") from exc
+
+
+_TOP_LEVEL_ASSIGNMENT_RE = re.compile(r"^(\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*=")
+
+
+def _line_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return "\r\n"
+    if line.endswith("\n"):
+        return "\n"
+    return "\n"
+
+
+def _inline_comment_suffix(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    for index, char in enumerate(line.rstrip("\r\n")):
+        if escaped:
+            escaped = False
+            continue
+        if in_double and char == "\\":
+            escaped = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if char == "#" and not in_single and not in_double:
+            prefix = " " if index > 0 and not line[index - 1].isspace() else ""
+            return prefix + line[index:].rstrip("\r\n")
+    return ""
+
+
+def _render_config_assignment(key: str, value: str, *, comment: str = "", newline: str = "\n") -> str:
+    if key == "timeout":
+        rendered = f"{float(value)!r}"
+    else:
+        rendered = json.dumps(str(value))
+    return f"{key} = {rendered}{comment}{newline}"
+
+
+def _update_config_text(text: str, key: str, value: str) -> str:
+    lines = text.splitlines(keepends=True)
+    output: list[str] = []
+    in_table = False
+    updated = False
+    first_table_index: int | None = None
+
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("["):
+            in_table = True
+            if first_table_index is None:
+                first_table_index = len(output)
+        match = _TOP_LEVEL_ASSIGNMENT_RE.match(line) if not in_table else None
+        if match and match.group(2) == key:
+            updated = True
+            if value:
+                output.append(
+                    _render_config_assignment(
+                        key,
+                        value,
+                        comment=_inline_comment_suffix(line),
+                        newline=_line_ending(line),
+                    )
+                )
+            continue
+        output.append(line)
+
+    if not updated and value:
+        insertion = _render_config_assignment(key, value)
+        if first_table_index is None:
+            if output and not output[-1].endswith(("\n", "\r\n")):
+                output[-1] += "\n"
+            output.append(insertion)
+        else:
+            output.insert(first_table_index, insertion)
+    return "".join(output)
+
+
+def save_config_value(key: str, value: str) -> None:
+    if key not in {"api_url", "token", "timeout", "team"}:
+        raise DarklabCliError(f"unsupported config key: {key}")
+    _load_config_file()
+    path = config_file_path()
+    try:
+        current_text = path.read_text(encoding="utf-8")
+    except OSError:
+        current_text = ""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_update_config_text(current_text, key, value), encoding="utf-8")
+    _secure_config_file(path)
 
 
 class DarklabClient:
@@ -89,6 +203,8 @@ class DarklabClient:
         headers = {"Accept": "application/json"}
         if self.config.token:
             headers["Authorization"] = f"Bearer {self.config.token}"
+        if self.config.team:
+            headers["X-Team-ID"] = self.config.team
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"

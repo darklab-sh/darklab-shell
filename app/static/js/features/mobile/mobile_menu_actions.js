@@ -42,6 +42,7 @@ function dispatchMobileMenuAction(action, btn = null) {
     refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
+  if (action === 'scope' && typeof openTeamScopeSelector === 'function') openTeamScopeSelector();
   if (action === 'projects' && typeof openProjectWorkspace === 'function') void openProjectWorkspace();
   if (action === 'atlas' && typeof openAtlas === 'function') void openAtlas({ source: 'mobile-menu' });
   if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
@@ -52,6 +53,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'workflows') openWorkflows();
   if (action === 'schedules' && typeof openSchedulesModal === 'function') void openSchedulesModal();
   if (action === 'watchers' && typeof openWatchersModal === 'function') void openWatchersModal();
+  if (action === 'findings-board' && typeof openFindingsBoard === 'function') void openFindingsBoard({ source: 'mobile-menu' });
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';

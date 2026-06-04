@@ -12,6 +12,7 @@
     'pref_project_auto_link_external_runs',
     'pref_project_auto_link_run_entities',
     'pref_run_notify',
+    'pref_command_outcome_summaries',
     'pref_hud_clock',
     'pref_prompt_username',
     'pref_compare_view_mode',
@@ -25,7 +26,7 @@
   const HUD_CLOCK_MODES = Object.freeze(['utc', 'local']);
   const COMPARE_VIEW_MODES = Object.freeze(['auto', 'side_by_side', 'unified', 'changes_only', 'findings_only']);
   const COMPARE_CONTEXT_MODES = Object.freeze(['3', '10', 'all']);
-  const OPTIONS_MODAL_TABS = Object.freeze(['preferences', 'secrets', 'notifications']);
+  const OPTIONS_MODAL_TABS = Object.freeze(['preferences', 'secrets', 'teams', 'notifications']);
 
   function _coerceMode(value, modes, fallback) {
     return modes.includes(value) ? value : fallback;
@@ -49,6 +50,10 @@
 
   function coerceRunNotifyMode(value) {
     return value === 'on' ? 'on' : 'off';
+  }
+
+  function coerceCommandOutcomeSummariesMode(value) {
+    return value === 'off' ? 'off' : 'on';
   }
 
   function coerceConstellationFullDayMode(value) {
@@ -95,6 +100,7 @@
       pref_project_auto_link_external_runs: 'on',
       pref_project_auto_link_run_entities: 'on',
       pref_run_notify: 'off',
+      pref_command_outcome_summaries: 'on',
       pref_hud_clock: 'utc',
       pref_prompt_username: '',
       pref_compare_view_mode: 'auto',
@@ -121,6 +127,7 @@
     prefs.pref_project_auto_link_external_runs = source.pref_project_auto_link_external_runs === 'off' ? 'off' : 'on';
     prefs.pref_project_auto_link_run_entities = source.pref_project_auto_link_run_entities === 'off' ? 'off' : 'on';
     prefs.pref_run_notify = coerceRunNotifyMode(source.pref_run_notify);
+    prefs.pref_command_outcome_summaries = coerceCommandOutcomeSummariesMode(source.pref_command_outcome_summaries);
     prefs.pref_hud_clock = coerceHudClockMode(source.pref_hud_clock);
     prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);
     prefs.pref_compare_view_mode = coerceCompareViewMode(source.pref_compare_view_mode);
@@ -148,6 +155,7 @@
     coerceWelcomeIntroMode,
     coerceShareRedactionDefaultMode,
     coerceRunNotifyMode,
+    coerceCommandOutcomeSummariesMode,
     coerceConstellationFullDayMode,
     coerceHudClockMode,
     coerceCompareViewMode,

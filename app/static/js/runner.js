@@ -92,9 +92,13 @@ function _isRunStillActive(runId) {
   return _fetchActiveRun(runId).then(Boolean);
 }
 
-function _fetchActiveRun(runId) {
+function _activeRunsUrl({ includeScheduled = false } = {}) {
+  return includeScheduled ? '/history/active?include_scheduled=1' : '/history/active';
+}
+
+function _fetchActiveRun(runId, { includeScheduled = false } = {}) {
   if (!runId || typeof apiFetch !== 'function') return Promise.resolve(null);
-  return apiFetch('/history/active')
+  return apiFetch(_activeRunsUrl({ includeScheduled }))
     .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
     .then(data => {
       const normalized = String(runId || '');
@@ -139,7 +143,9 @@ function _markStalledAndInactive(tabId) {
 function _handleStreamEndedWithoutExit(tabId) {
   _clearStalledTimeout(tabId);
   const runId = _tabRunGeneration(tabId);
-  return _fetchActiveRun(runId).then(activeRun => {
+  const existingTab = getTab(tabId);
+  const includeScheduled = !!(existingTab && existingTab.scheduledRun);
+  return _fetchActiveRun(runId, { includeScheduled }).then(activeRun => {
     const t = getTab(tabId);
     if (!t || t.killed) return;
     if (activeRun) {
@@ -270,6 +276,7 @@ function _activeReconnectTabs() {
 
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
+  if (run.scheduled) return false;
   if (_isActiveRunDetachedForRestore(run.run_id)) return false;
   if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
@@ -335,6 +342,8 @@ function _reattachActiveRunToTab(
   const runId = String(run.run_id || '');
   t.runId = runId;
   t.historyRunId = runId;
+  t.scheduledRun = !!run.scheduled;
+  t.scheduleId = String(run.schedule_id || '');
   t.reconnectedRun = true;
   t.attachMode = mode;
   t.killed = false;
@@ -443,6 +452,8 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   }
   t.runId = run.run_id;
   t.historyRunId = run.run_id;
+  t.scheduledRun = !!run.scheduled;
+  t.scheduleId = String(run.schedule_id || '');
   t.lastEventId = '';
   t.attachMode = mode;
   t.reconnectedRun = true;
@@ -752,6 +763,7 @@ async function _readRunErrorMessage(res) {
   try {
     if (contentType.includes('application/json') && typeof res.json === 'function') {
       const data = await res.json();
+      if (data && typeof data.message === 'string' && data.message.trim()) return data.message.trim();
       if (data && typeof data.error === 'string' && data.error.trim()) return data.error.trim();
     } else if (typeof res.text === 'function') {
       const text = (await res.text()).trim();
@@ -761,6 +773,30 @@ async function _readRunErrorMessage(res) {
     _logRunnerError('failed to parse run error response', err);
   }
   return '';
+}
+
+function _runActiveTeamScopeCan(capability) {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan(capability) : true;
+}
+
+function _runTeamScopeDeniedMessage(action) {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage(action)
+    : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+}
+
+function _runStartDeniedMessage() {
+  return _runTeamScopeDeniedMessage('run commands in team scope');
+}
+
+function _workspaceTerminalCanWrite(action = 'change Files') {
+  if (typeof workspaceCanWrite === 'function') return workspaceCanWrite(action, { toast: false });
+  return true;
+}
+
+function _workspaceTerminalDeniedMessage(action = 'change Files') {
+  if (typeof teamScopeDeniedMessage === 'function') return teamScopeDeniedMessage(action);
+  return `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
 }
 
 function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
@@ -1062,6 +1098,22 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     if (msg.project_linked && notifyProjectChange) {
       notifyProjectChange('run-linked', msg.project_id || '');
     }
+    if (msg.project_entities_linked && notifyProjectChange) {
+      notifyProjectChange('entities-linked', msg.project_id || '');
+    }
+    if (msg.project_auto_promoted) {
+      if (notifyProjectChange) {
+        notifyProjectChange('auto-promoted', msg.project_id || '');
+      }
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-auto-promoted', {
+          project_id: msg.project_id || '',
+          project_ids: Array.isArray(msg.project_ids) ? msg.project_ids : [],
+          count: Number(msg.entity_count || msg.count || 0) || 0,
+          promoted_count: Number(msg.promoted_count || 0) || 0,
+        });
+      }
+    }
     if (msg.project_targets_discovered) {
       const rawCount = Number(msg.target_count || msg.count || 0);
       const count = Number.isFinite(rawCount) ? rawCount : 0;
@@ -1144,6 +1196,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     if (msg.code === 0) {
       if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
+      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
       if (tabId === activeTabId) setStatus('ok');
       setTabStatus(tabId, 'ok');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
@@ -1152,6 +1205,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     } else {
       appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
+      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
@@ -1622,12 +1676,12 @@ function _finalizeClientSideCommandStatus(tabId, statusValue) {
   if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: exitCode });
 }
 
-function _persistClientSideRun(command, lineItems, statusValue) {
-  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, activeTabId);
+function _persistClientSideRun(command, lineItems, statusValue, tabId = activeTabId) {
+  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, tabId);
 }
 
-function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
-  _persistClientSideRun(command, lineItems, statusValue);
+function _persistSessionTokenRun(command, lineItems, statusValue = 'ok', tabId = activeTabId) {
+  _persistClientSideRun(command, lineItems, statusValue, tabId);
 }
 
 function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentValueCount = 0) {
@@ -2557,6 +2611,9 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'file' });
       outputLines = await _workspaceReadLines(target);
     } else if (root === 'mkdir' || (root === 'file' && ['add-dir', 'mkdir'].includes(action))) {
+      if (!_workspaceTerminalCanWrite('create folders in Files')) {
+        throw new Error(_workspaceTerminalDeniedMessage('create folders in Files'));
+      }
       const rawTarget = root === 'mkdir' ? parts[1] : parts[2];
       if (!rawTarget || (root === 'mkdir' ? parts.length !== 2 : parts.length !== 3)) {
         throw new Error(root === 'mkdir' ? 'Usage: mkdir <folder>' : 'Usage: file add-dir <folder>');
@@ -2615,6 +2672,11 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   const parsedDelete = _workspaceDeleteCommand(cmd);
   let target = parsedDelete && !parsedDelete.invalid ? parsedDelete.target : '';
   appendCommandEcho(cmd);
+  if (!_workspaceTerminalCanWrite('delete Files')) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage('delete Files')}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   if (!target) {
     appendLine(_workspaceDeleteUsageForCommand(parsedDelete), 'exit-fail', tabId);
     setStatus('fail');
@@ -2707,6 +2769,11 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
 async function _handleWorkspaceMoveCommand(cmd, tabId) {
   const parsed = _workspaceMoveCommand(cmd);
   appendCommandEcho(cmd);
+  if (!_workspaceTerminalCanWrite('move Files')) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage('move Files')}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   if (!parsed || parsed.invalid || !parsed.source || !parsed.destination) {
     appendLine(parsed?.usage || 'Usage: file move <source> <destination>', 'exit-fail', tabId);
     setStatus('fail');
@@ -2753,6 +2820,12 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
 async function _handleWorkspaceEditorCommand(cmd, tabId) {
   const parsed = _workspaceEditorCommand(cmd);
   appendCommandEcho(cmd);
+  const writeAction = parsed && parsed.action === 'edit' ? 'edit Files' : 'create Files';
+  if (!_workspaceTerminalCanWrite(writeAction)) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage(writeAction)}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   if (!parsed || parsed.invalid || (parsed.action === 'edit' && !parsed.target)) {
     const action = parsed?.action || 'add';
     const operand = action === 'add' ? '[file]' : '<file>';
@@ -2772,7 +2845,8 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
           ? _resolveExistingWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId), kind: 'file' })
           : _resolveWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId) }))
       : '';
-    await openWorkspaceEditorFromCommand(parsed.action, target);
+    const opened = await openWorkspaceEditorFromCommand(parsed.action, target);
+    if (opened === false) throw new Error(_workspaceTerminalDeniedMessage(writeAction));
     const targetLabel = target ? ` ${target}` : '';
     appendLine(`file: opened${targetLabel} in the file editor`, '', tabId);
     _recordSuccessfulLocalCommand(cmd);
@@ -2824,6 +2898,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   const originalAppendCommandEcho = appendCommandEcho;
   const originalRecordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
   const originalPersistSessionTokenRun = _persistSessionTokenRun;
+  const originalPersistClientSideRun = _persistClientSideRun;
   const originalSetStatus = setStatus;
   let finalStatus = 'idle';
   const tab = typeof getTab === 'function' ? getTab(tabId) : null;
@@ -2835,18 +2910,30 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
   appendCommandEcho(cmd, tabId);
   try {
-    appendCommandEcho = () => {};
     _recordSuccessfulLocalCommand = () => {};
     _persistSessionTokenRun = () => {};
+    _persistClientSideRun = () => {};
     setStatus = (statusValue) => {
-      finalStatus = statusValue;
+      if (typeof activeTabId === 'undefined' || activeTabId === tabId) {
+        finalStatus = statusValue;
+      }
       originalSetStatus(statusValue);
     };
-    appendLine = (text, cls = '', lineTabId = tabId, metadata = null) => {
+    appendCommandEcho = (echoCommand, echoTabId = null) => {
+      const targetTabId = echoTabId || (typeof activeTabId !== 'undefined' ? activeTabId : tabId);
+      if (targetTabId === tabId) return;
+      originalAppendCommandEcho(echoCommand, echoTabId);
+    };
+    appendLine = (text, cls = '', lineTabId = null, metadata = null) => {
+      const targetTabId = lineTabId || (typeof activeTabId !== 'undefined' ? activeTabId : tabId);
+      if (targetTabId !== tabId) {
+        originalAppendLine(text, cls, lineTabId, metadata);
+        return;
+      }
       capturedLines.push({
         text: String(text ?? ''),
         cls: String(cls || ''),
-        tabId: lineTabId,
+        tabId: targetTabId,
         metadata,
       });
     };
@@ -2857,6 +2944,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     appendCommandEcho = originalAppendCommandEcho;
     _recordSuccessfulLocalCommand = originalRecordSuccessfulLocalCommand;
     _persistSessionTokenRun = originalPersistSessionTokenRun;
+    _persistClientSideRun = originalPersistClientSideRun;
     setStatus = originalSetStatus;
   }
 
@@ -2872,7 +2960,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   if (!_pendingTerminalConfirm) {
     _finalizeClientSideCommandStatus(tabId, finalStatus);
     if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, outputLines, finalStatus);
+    _persistClientSideRun(cmd, outputLines, finalStatus, tabId);
   } else if (typeof setTabStatus === 'function') {
     setTabStatus(tabId, finalStatus === 'fail' ? 'fail' : 'idle');
   }
@@ -3076,6 +3164,14 @@ function submitCommand(rawCmd) {
     return true;
   }
 
+  if (!_runActiveTeamScopeCan('run_commands')) {
+    appendCommandEcho(cmd);
+    appendLine(`[denied] ${_runStartDeniedMessage()}`, 'denied', activeTabId);
+    setStatus('fail');
+    setTabStatus(activeTabId, 'fail');
+    return true;
+  }
+
   // Re-lookup the active tab after the potential createTab() call above, which
   // may have changed activeTabId to point at the newly created tab.
   const _runTab = getActiveTab();
@@ -3095,6 +3191,7 @@ function submitCommand(rawCmd) {
     _runTab.fullOutputLoaded = false;
     _runTab.historyRunId = null;
     _runTab.reconnectedRun = false;
+    _runTab.commandOutcomeSummary = null;
     _runTab.lastEventId = '';
     _runTab.attachMode = '';
     _runTab.followOutput = true;
@@ -3115,7 +3212,10 @@ function submitCommand(rawCmd) {
   }).then(res => {
     if (res.status === 403) {
       return res.json().then(data => {
-        appendLine('[denied] ' + (data.error || 'Command not allowed.'), 'denied', tabId);
+        const message = data && data.error === 'team_forbidden'
+          ? _runStartDeniedMessage()
+          : (data.error || data.message || 'Command not allowed.');
+        appendLine('[denied] ' + message, 'denied', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
         stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });

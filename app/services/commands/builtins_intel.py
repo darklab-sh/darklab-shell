@@ -12,7 +12,7 @@ from services.intel.lookup import IntelLookupResult, ProviderLookup, lookup_enti
 from services.intel.registry import provider_label
 
 
-def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, object]], int]:
+def run_builtin_intel(command: str, session_id: str, *, team_id: str = "") -> tuple[list[dict[str, object]], int]:
     parts = split_command_argv(command)
     if len(parts) <= 1 or parts[1].lower() in {"help", "-h", "--help"}:
         return _intel_usage(), 0
@@ -33,7 +33,7 @@ def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, obj
             return [output_line(private_error)], 1
 
     try:
-        result = lookup_entity(entity_type, raw_value, session_id=session_id)
+        result = lookup_entity(entity_type, raw_value, session_id=team_id or session_id)
     except CanonicalizationError as exc:
         message = "Hash must be hex MD5/SHA1/SHA256" if entity_type == "hash" else str(exc)
         return [output_line(f"intel: {message}")], 1

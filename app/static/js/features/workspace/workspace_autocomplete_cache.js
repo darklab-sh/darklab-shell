@@ -3,10 +3,23 @@ async function refreshWorkspaceFileCache() {
   try {
     const resp = await apiFetch('/workspace/files');
     const data = await _workspaceJson(resp);
-    _workspaceLoaded = true;
-    _workspaceDirs = Array.isArray(data.directories) ? data.directories : [];
-    _workspaceFiles = Array.isArray(data.files) ? data.files : [];
-    if (workspaceOverlay && workspaceOverlay.classList.contains('open')) renderWorkspaceFiles(data);
+    const nextOwner = typeof _workspaceOwnerFromPayload === 'function' ? _workspaceOwnerFromPayload(data) : {};
+    const previousScopeKey = typeof _workspaceActiveScopeKeyFromOwner === 'function'
+      ? _workspaceActiveScopeKeyFromOwner(_workspaceOwner)
+      : 'personal';
+    const nextScopeKey = typeof _workspaceActiveScopeKeyFromOwner === 'function'
+      ? _workspaceActiveScopeKeyFromOwner(nextOwner)
+      : previousScopeKey;
+    if (previousScopeKey !== nextScopeKey && typeof _workspaceResetForScopeChange === 'function') {
+      _workspaceResetForScopeChange();
+    }
+    if (typeof renderWorkspaceFiles === 'function') {
+      renderWorkspaceFiles(data);
+    } else {
+      _workspaceLoaded = true;
+      _workspaceDirs = Array.isArray(data.directories) ? data.directories : [];
+      _workspaceFiles = Array.isArray(data.files) ? data.files : [];
+    }
     return _workspaceFiles;
   } catch (_) {
     return _workspaceFiles;
@@ -19,7 +32,7 @@ function getWorkspaceAutocompleteFileHints() {
     const path = String(file.path || '').trim();
     return {
       value: path,
-      description: `session file · ${_formatWorkspaceBytes(file.size)}`,
+      description: `${_workspaceOwner && _workspaceOwner.scope === 'team' ? 'team' : 'personal'} file · ${_formatWorkspaceBytes(file.size)}`,
     };
   }).filter(item => item.value);
 }
@@ -30,7 +43,7 @@ function getWorkspaceAutocompleteDirectoryHints() {
     const path = String(directory.path || '').trim();
     return {
       value: path,
-      description: 'session folder',
+      description: `${_workspaceOwner && _workspaceOwner.scope === 'team' ? 'team' : 'personal'} folder`,
     };
   }).filter(item => item.value);
 }

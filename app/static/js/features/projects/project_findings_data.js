@@ -1,6 +1,120 @@
 (function projectFindingsDataModule(global) {
   'use strict';
 
+  const BOARD_WORKFLOW_STATES = Object.freeze(['new', 'reviewed', 'false_positive', 'needs_followup']);
+  const BOARD_WORKFLOW_STATE_SET = new Set(BOARD_WORKFLOW_STATES);
+  const BOARD_STATE_LABELS = Object.freeze({
+    new: 'New',
+    reviewed: 'Reviewed',
+    false_positive: 'False positive',
+    needs_followup: 'Follow-up',
+  });
+  const BOARD_DEFAULT_STATE = 'new';
+  const BOARD_IMPORTANT_STATE = 'important';
+  const BOARD_IMPORTANT_COLUMN = 'reviewed';
+  const BOARD_COLUMN_LIMIT = 50;
+
+  function normalizedBoardLimit(value) {
+    const limit = Math.floor(Number(value || BOARD_COLUMN_LIMIT));
+    return Number.isFinite(limit) && limit > 0 ? limit : BOARD_COLUMN_LIMIT;
+  }
+
+  function boardWorkflowState(value) {
+    const reviewState = typeof value === 'object' && value !== null
+      ? value.review_state
+      : value;
+    const normalized = String(reviewState || BOARD_DEFAULT_STATE);
+    if (normalized === BOARD_IMPORTANT_STATE) return BOARD_IMPORTANT_COLUMN;
+    return BOARD_WORKFLOW_STATE_SET.has(normalized) ? normalized : BOARD_DEFAULT_STATE;
+  }
+
+  function boardTargetIds(finding = {}) {
+    const ids = new Set();
+    if (finding.target_id) ids.add(String(finding.target_id));
+    if (Array.isArray(finding.target_ids)) {
+      finding.target_ids.forEach((targetId) => {
+        if (targetId) ids.add(String(targetId));
+      });
+    }
+    return [...ids];
+  }
+
+  function boardLabels(finding = {}) {
+    return Array.isArray(finding.labels)
+      ? finding.labels.map(label => String(label || '')).filter(Boolean)
+      : [];
+  }
+
+  function boardCardFromFinding(finding = {}, order = 0) {
+    const source = finding && typeof finding === 'object' ? finding : {};
+    const reviewState = String(source.review_state || BOARD_DEFAULT_STATE);
+    const title = String(source.title || source.raw_line || '');
+    const lineNumber = Number(source.line_number);
+    return {
+      id: String(source.id || ''),
+      finding: source,
+      order: Number(order || 0),
+      review_state: reviewState,
+      workflow_state: boardWorkflowState(reviewState),
+      important: reviewState === BOARD_IMPORTANT_STATE,
+      title,
+      raw_line: String(source.raw_line || ''),
+      severity: String(source.severity || ''),
+      scope: String(source.scope || ''),
+      run_id: String(source.run_id || ''),
+      run_command: String(source.run_command || ''),
+      line_number: Number.isInteger(lineNumber) ? lineNumber : null,
+      target_id: String(source.target_id || ''),
+      target_ids: boardTargetIds(source),
+      labels: boardLabels(source),
+      note: String(source.note || ''),
+      source_run_exists: source.source_run_exists !== false,
+      orphan_source: source.source_run_exists === false,
+    };
+  }
+
+  function emptyBoardColumns() {
+    return BOARD_WORKFLOW_STATES.map(state => ({
+      state,
+      label: BOARD_STATE_LABELS[state],
+      cards: [],
+      total: 0,
+      truncated: false,
+    }));
+  }
+
+  function boardColumnsFromFindings(findingsList = [], options = {}) {
+    const limit = normalizedBoardLimit(options.limit);
+    const rows = Array.isArray(findingsList) ? findingsList : [];
+    const columns = emptyBoardColumns();
+    const byState = new Map(columns.map(column => [column.state, column]));
+    const counts = BOARD_WORKFLOW_STATES.reduce((acc, state) => {
+      acc[state] = 0;
+      return acc;
+    }, {});
+
+    rows.forEach((finding, index) => {
+      const card = boardCardFromFinding(finding, index);
+      const state = card.workflow_state;
+      const column = byState.get(state) || byState.get(BOARD_DEFAULT_STATE);
+      column.total += 1;
+      counts[column.state] += 1;
+      if (column.cards.length < limit) {
+        column.cards.push(card);
+      } else {
+        column.truncated = true;
+      }
+    });
+
+    return {
+      columns,
+      counts,
+      total: rows.length,
+      limit,
+      truncated: columns.some(column => column.truncated),
+    };
+  }
+
   function createProjectFindingsDataController(context) {
     const ctx = context || {};
     let findings = new Map();
@@ -93,6 +207,20 @@
 
     function hasFilteredKey(key = '') {
       return filteredFindings.has(String(key || ''));
+    }
+
+    function boardItems(projectId = '', summary = ctx.projectSummary?.(projectId)) {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return [];
+      if (typeof ctx.filteredProjectFindings === 'function') {
+        const filtered = ctx.filteredProjectFindings(normalized, summary);
+        if (Array.isArray(filtered)) return filtered;
+      }
+      return items(normalized);
+    }
+
+    function board(projectId = '', summary = ctx.projectSummary?.(projectId), options = {}) {
+      return boardColumnsFromFindings(boardItems(projectId, summary), options);
     }
 
     function collapsedGroupLabels(projectId = '') {
@@ -195,6 +323,24 @@
           if (String(finding && finding.id || '') !== normalizedFindingId) return finding;
           return { ...finding, review_state: reviewState };
         }));
+      });
+    }
+
+    function updateCachedFinding(projectId, findingId, updates) {
+      const normalized = String(projectId || '');
+      const normalizedFindingId = String(findingId || '');
+      const updatePayload = updates && typeof updates === 'object' ? updates : {};
+      const current = findings.get(normalized);
+      if (!normalized || !normalizedFindingId || !Array.isArray(current)) return;
+      const updateRow = finding => (
+        String(finding && finding.id || '') === normalizedFindingId
+          ? { ...finding, ...updatePayload }
+          : finding
+      );
+      findings.set(normalized, current.map(updateRow));
+      filteredFindings.forEach((items, key) => {
+        if (!String(key).startsWith(`${normalized}::`)) return;
+        filteredFindings.set(key, items.map(updateRow));
       });
     }
 
@@ -385,6 +531,10 @@
     }
 
     return {
+      board,
+      boardColumnsFromFindings,
+      boardItems,
+      boardWorkflowState,
       filteredItems,
       hasFilteredKey,
       invalidate,
@@ -396,11 +546,17 @@
       page,
       setPageOffset,
       setCachedReviewState,
+      updateCachedFinding,
       loadFiltered,
     };
   }
 
   global.DarklabProjectFindingsData = {
+    BOARD_COLUMN_LIMIT,
+    BOARD_WORKFLOW_STATES,
+    boardCardFromFinding,
+    boardColumnsFromFindings,
+    boardWorkflowState,
     createProjectFindingsDataController,
   };
 })(globalThis);

@@ -1382,13 +1382,35 @@ function _buildPipeCommandAutocomplete(ctx, registry) {
   return autocompleteCore.filterItems(items, ctx.currentToken);
 }
 
+// Append output-token suggestions after the pipe stage's own context items,
+// de-duplicating on insert value so a flag or hint is never repeated.
+function _mergePipeItems(primary, extra) {
+  if (!Array.isArray(extra) || !extra.length) return primary;
+  const seen = new Set(primary.map((item) => autocompleteCore.itemInsertValue(item).toLowerCase()));
+  const merged = primary.slice();
+  extra.forEach((item) => {
+    const key = autocompleteCore.itemInsertValue(item).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  });
+  return merged;
+}
+
 function _buildPipeAutocomplete(ctx) {
   const registry = _getAutocompleteRegistry();
   if (!ctx.commandRoot) return _buildPipeCommandAutocomplete(ctx, registry);
 
   const spec = registry[ctx.commandRoot];
   if (!spec || !spec.pipe_command) return [];
-  return _buildContextAutocomplete(ctx);
+  const contextItems = _buildContextAutocomplete(ctx);
+  // Only grep takes a free-text pattern, so it is the only pipe helper that
+  // benefits from output-derived token suggestions.
+  if (ctx.commandRoot === 'grep' && typeof getGrepOutputSuggestions === 'function') {
+    const outputItems = getGrepOutputSuggestions(ctx, autocompleteCore.buildItem, autocompleteCore.filterItems);
+    return _mergePipeItems(contextItems, outputItems);
+  }
+  return contextItems;
 }
 
 function _buildFlatAutocomplete(value) {

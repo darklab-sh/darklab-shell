@@ -80,6 +80,9 @@ function _getNeighborTabIdAfterClose(idx, closingId) {
 }
 
 function updateTabScrollButtons() {
+  // Recompute chrome collapse first so the scroll-button math below reflects the
+  // width the tab strip actually has after any collapse/expand.
+  updateTabbarChromeFit();
   const leftBtn = tabsScrollLeftBtn;
   const rightBtn = tabsScrollRightBtn;
   if (!leftBtn || !rightBtn || !tabsBar) return;
@@ -99,6 +102,98 @@ function updateTabScrollButtons() {
   rightBtn.setAttribute('aria-hidden', 'false');
   leftBtn.disabled = tabsBar.scrollLeft <= 1;
   rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
+}
+
+// ── Tab-bar chrome auto-collapse ────────────────────────────────────────────
+// When the tab strip runs low on room, the right-hand chrome (search, findings
+// badge, summarize, line numbers, timestamps) auto-collapses to just the
+// findings badge plus a toggle, so tabs reclaim the width. The findings badge
+// (#search-signal-summary) is not a .chrome-collapsible, so it stays visible.
+const PREF_TABBAR_CHROME = 'pref_tabbar_chrome'; // 'auto' (default) | 'expanded' (user-pinned open)
+const _TABBAR_CHROME_FIT_BUFFER = 12;
+let _tabbarChromeFullWidth = 0; // cached width of the chrome while fully expanded
+
+function _readTabbarChromePref() {
+  const value = typeof getPreference === 'function' ? getPreference(PREF_TABBAR_CHROME) : '';
+  return value === 'expanded' ? 'expanded' : 'auto';
+}
+
+// Intrinsic width of the tab content, independent of how much room is currently
+// available — summing children avoids scrollWidth inflating to fill slack space.
+function _tabsIntrinsicWidth() {
+  if (!tabsBar || !tabsBar.children) return 0;
+  let total = 0;
+  let count = 0;
+  for (const child of tabsBar.children) {
+    if (child && typeof child.offsetWidth === 'number') {
+      total += child.offsetWidth;
+      count += 1;
+    }
+  }
+  if (count > 1 && typeof window.getComputedStyle === 'function') {
+    const style = window.getComputedStyle(tabsBar);
+    const gap = parseFloat(style.columnGap || style.gap || '0') || 0;
+    total += gap * (count - 1);
+  }
+  return total;
+}
+
+// Pure decision: collapse only when the tabs cannot fit alongside the full
+// chrome. State-independent (uses intrinsic widths), so it never oscillates.
+function _decideTabbarChromeCollapsed({ pref, tabsWidth, chromeFullWidth, barWidth, buffer = _TABBAR_CHROME_FIT_BUFFER }) {
+  if (pref === 'expanded') return false;
+  if (!(barWidth > 0) || !(chromeFullWidth > 0)) return false;
+  return (tabsWidth + chromeFullWidth) > (barWidth - buffer);
+}
+
+function _applyTabbarChromeState(barEl, collapsed, pref) {
+  if (!barEl) return;
+  barEl.classList.toggle('chrome-collapsed', collapsed);
+  if (typeof tabbarChromeToggle === 'undefined' || !tabbarChromeToggle) return;
+  // The toggle is only actionable when collapsed (expand) or pinned open
+  // (release to auto); otherwise there is plenty of room and nothing to toggle.
+  const showToggle = collapsed || pref === 'expanded';
+  tabbarChromeToggle.classList.toggle('u-hidden', !showToggle);
+  // Glyph points the way the controls will travel: » collapses them away, «
+  // pulls them back into view.
+  tabbarChromeToggle.textContent = collapsed ? '«' : '»';
+  tabbarChromeToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  tabbarChromeToggle.title = collapsed
+    ? 'Show search and display controls'
+    : 'Collapse toolbar to make room for tabs';
+}
+
+function updateTabbarChromeFit() {
+  if (typeof tabbarChrome === 'undefined' || !tabbarChrome) return;
+  const barEl = tabbarChrome.closest('.terminal-bar');
+  if (!barEl) return;
+  const pref = _readTabbarChromePref();
+  const currentlyCollapsed = barEl.classList.contains('chrome-collapsed');
+  // Cache the full chrome width whenever it is expanded so we can decide against
+  // it later even while collapsed (when the controls are display:none).
+  if (!currentlyCollapsed) {
+    const width = tabbarChrome.scrollWidth;
+    if (width > 0) _tabbarChromeFullWidth = width;
+  }
+  const collapsed = _decideTabbarChromeCollapsed({
+    pref,
+    tabsWidth: _tabsIntrinsicWidth(),
+    chromeFullWidth: _tabbarChromeFullWidth,
+    barWidth: barEl.clientWidth,
+  });
+  _applyTabbarChromeState(barEl, collapsed, pref);
+}
+
+function _toggleTabbarChrome() {
+  if (typeof tabbarChrome === 'undefined' || !tabbarChrome) return;
+  const barEl = tabbarChrome.closest('.terminal-bar');
+  const pref = _readTabbarChromePref();
+  const currentlyCollapsed = !!(barEl && barEl.classList.contains('chrome-collapsed'));
+  // Pinned open → release to auto. Auto+collapsed → pin open. Auto+open → no-op.
+  const next = pref === 'expanded' ? 'auto' : (currentlyCollapsed ? 'expanded' : 'auto');
+  if (typeof setPreferenceCookie === 'function') setPreferenceCookie(PREF_TABBAR_CHROME, next);
+  updateTabbarChromeFit();
+  if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ defer: true });
 }
 
 function ensureActiveTabVisible(tabId) {
@@ -123,6 +218,17 @@ function setupTabScrollControls() {
   rightBtn.addEventListener('click', () => scrollTabsBar(1));
   tabsBar.addEventListener('scroll', updateTabScrollButtons, { passive: true });
   window.addEventListener('resize', updateTabScrollButtons);
+  if (typeof tabbarChromeToggle !== 'undefined' && tabbarChromeToggle) {
+    tabbarChromeToggle.addEventListener('click', _toggleTabbarChrome);
+  }
+  // Observe the bar's own width so rail drag-resize (which never fires
+  // window.resize) and other layout shifts keep the chrome fit in sync.
+  const barEl = (typeof tabbarChrome !== 'undefined' && tabbarChrome)
+    ? tabbarChrome.closest('.terminal-bar')
+    : null;
+  if (barEl && typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => updateTabScrollButtons()).observe(barEl);
+  }
   _tabsScrollControlsBound = true;
   updateTabScrollButtons();
 }
@@ -248,7 +354,29 @@ function _createTabActionButton(id, action, label, { hidden = false, danger = fa
   btn.dataset.tab = id;
   if (hidden) btn.hidden = true;
   btn.textContent = label;
+  if (action === 'permalink') _updateTabShareSnapshotActionButton(btn);
   return btn;
+}
+
+function _canCreateTabShareSnapshot() {
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
+function _tabShareSnapshotDeniedTitle() {
+  return typeof teamScopeDeniedMessage === 'function'
+    ? teamScopeDeniedMessage('create team history snapshots')
+    : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+}
+
+function _updateTabShareSnapshotActionButton(btn) {
+  if (!btn) return;
+  const allowed = _canCreateTabShareSnapshot();
+  btn.disabled = !allowed;
+  btn.title = allowed ? 'Share tab as permalink' : _tabShareSnapshotDeniedTitle();
+}
+
+function refreshShareSnapshotActions() {
+  document.querySelectorAll('[data-action="permalink"][data-tab]').forEach(_updateTabShareSnapshotActionButton);
 }
 
 function _getOutputFollowButton(id) {
@@ -482,6 +610,7 @@ function createTab(label) {
     runStart: null,
     currentRunStartIndex: null,
     exitCode: null,
+    commandOutcomeSummary: null,
     rawLines: [],
     previewTruncated: false,
     fullOutputAvailable: false,
@@ -652,6 +781,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
     t.rawLines = [];
+    t.commandOutcomeSummary = null;
     if (typeof _resetTabOutputSignalCounts === 'function') _resetTabOutputSignalCounts(t);
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;
@@ -747,3 +877,10 @@ function startTabRename(id, labelEl) {
     ensureActiveTabVisible(id);
   });
 }
+
+document.addEventListener('app:scope-changed', () => {
+  refreshShareSnapshotActions();
+});
+document.addEventListener('app:scope-capabilities-changed', () => {
+  refreshShareSnapshotActions();
+});

@@ -625,7 +625,7 @@ test.describe('desktop chrome keyboard shortcuts', () => {
   })
 
   test('Alt+M toggles the Status Monitor from the composer', async ({ page }) => {
-    await page.route('**/history/active', route => route.fulfill({
+    await page.route('**/history/active**', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
@@ -647,13 +647,32 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('Alt+Shift+F toggles the Files modal from the composer', async ({ page }) => {
+  test('Alt+Shift modal shortcuts move focus off the composer and keep Escape scoped to the modal', async ({ page }) => {
     await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
     await expect(page.locator('#workspace-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')
     await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
     await expect(page.locator('#workspace-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')
+
+    await dispatchMacOptionKey(page, '#cmd', { key: 'Í', code: 'KeyS', altKey: true, shiftKey: true })
+    await expect(page.locator('#schedules-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#schedules-modal')).toBeFocused()
+    await expect(page.locator('#schedules-modal')).toHaveCSS('outline-style', 'none')
+    await page.keyboard.type('not terminal text')
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#schedules-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('#cmd').focus()
+    await dispatchMacOptionKey(page, '#cmd', { key: '„', code: 'KeyW', altKey: true, shiftKey: true })
+    await expect(page.locator('#watchers-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#watchers-modal')).toBeFocused()
+    await expect(page.locator('#watchers-modal')).toHaveCSS('outline-style', 'none')
+    await page.keyboard.type('not terminal text')
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#watchers-overlay')).not.toHaveClass(/\bopen\b/)
   })
 
   test('Alt+\\ toggles the rail collapsed state from the composer', async ({ page }) => {

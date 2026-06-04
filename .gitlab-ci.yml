@@ -5,8 +5,8 @@ default:
 variables:
   CI_DEFAULT_IMAGE: "python:3.14.5-slim"
   CI_PYTHON_E2E_IMAGE: "python:3.14.5"
-  CI_NODE_IMAGE: "node:26.1.0-slim"
-  CI_DOCKER_IMAGE: "docker:29.4.3"
+  CI_NODE_IMAGE: "node:26.2.0-slim"
+  CI_DOCKER_IMAGE: "docker:29.5.2"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -51,7 +51,7 @@ test-py-pytest:
 test-py-postgres:
   stage: test
   services:
-    - name: postgres:17-alpine
+    - name: postgres:18-alpine
       alias: postgres
   variables:
     POSTGRES_DB: darklab_shell

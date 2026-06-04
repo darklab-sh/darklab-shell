@@ -654,6 +654,42 @@
     flex: 0 0 auto;
   }
 
+  /* Collapsed chrome: hide the controls, keep the findings badge + toggle so the
+     tab strip reclaims the width. The badge (#search-signal-summary) is not a
+     .chrome-collapsible, so it stays visible when there are signals.
+     !important is required because the controls (#search-toggle-btn, #ln-btn, …)
+     set display via ID selectors, which a class-only rule cannot override. */
+  .terminal-bar.tabbar.chrome-collapsed .chrome-collapsible {
+    display: none !important;
+  }
+
+  /* Collapsed: keep the search button as a magnifier-only opener (drop its
+     label, keep the ⌕ glyph from ::before) and strip its button border so it
+     reads as a bare icon. Specificity (id + classes + pseudo) outranks the base
+     #search-toggle-btn rules. */
+  .terminal-bar.tabbar.chrome-collapsed #search-toggle-btn::after {
+    display: none;
+  }
+
+  .terminal-bar.tabbar.chrome-collapsed #search-toggle-btn,
+  .terminal-bar.tabbar.chrome-collapsed #search-toggle-btn:hover {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  #tabbar-chrome-toggle {
+    flex: 0 0 auto;
+    min-width: 22px;
+    margin-right: 2px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--muted);
+  }
+
+  #tabbar-chrome-toggle:hover:not(:disabled) {
+    color: var(--text);
+  }
+
   /* ---- Terminal body container — strip the outer frame ---- */
   .main-col > .terminal-wrap {
     background: var(--bg);
@@ -714,11 +750,6 @@
   .hud-cell.hud-action-cell:focus-visible {
     box-shadow: inset 0 0 0 1px var(--border-bright);
   }
-  .hud.hud-running [data-hud-chip="transport"],
-  .hud.hud-running [data-hud-chip="mode"] {
-    display: none;
-  }
-
   .hud-label {
     color: var(--muted);
     font-size: 9px;
@@ -743,6 +774,104 @@
   .hud-project-context .hud-value {
     display: block;
     max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hud-project-menu {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    min-width: 260px;
+    max-width: min(360px, calc(100vw - 16px));
+    padding: 6px;
+    border-radius: 3px 3px 0 0;
+    z-index: 460;
+  }
+
+  .hud-project-menu.u-hidden {
+    display: none;
+  }
+
+  .hud-project-menu .dropdown-item {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hud-project-search {
+    background: var(--theme-dropdown-bg);
+    border: 1px solid var(--theme-dropdown-border);
+    border-radius: 3px;
+    color: var(--text);
+    font: inherit;
+    margin: 2px 2px 6px;
+    min-height: 30px;
+    padding: 6px 8px;
+    width: calc(100% - 4px);
+  }
+
+  .hud-project-search:focus-visible {
+    border-color: var(--border-bright);
+    outline: none;
+  }
+
+  .hud-project-menu-section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  .hud-project-menu-divider {
+    border-top: 1px solid var(--theme-dropdown-border);
+    margin: 6px 2px;
+  }
+
+  .hud-project-menu-note {
+    color: var(--text-muted);
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+
+  .hud-project-menu .dropdown-item[disabled] {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .hud-scope-trigger {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    justify-content: flex-start;
+    max-width: 150px;
+    min-height: 20px;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    text-align: left;
+  }
+
+  .hud-scope-trigger:hover,
+  .hud-scope-trigger:focus-visible {
+    color: var(--green);
+    outline: none;
+  }
+
+  .hud-scope-trigger.is-loading span {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .hud-scope-trigger.is-error span {
+    color: var(--red);
+  }
+
+  .hud-scope-trigger span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

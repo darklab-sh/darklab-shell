@@ -89,7 +89,14 @@
     const lineText = String(lineEvent.text || '');
     const lineKind = String(lineEvent.kind || 'info');
     const lineRole = String(lineEvent.role || 'body');
+    const clsValue = String(cls || lineEvent.cls || lineEvent.legacy_cls || '');
     const stripped = lineText.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+    if (clsValue.split(/\s+/).includes('command-outcome-summary-title')) {
+      return [{ text: stripped, color: colors.blue, fontStyle: 'bold' }];
+    }
+    if (clsValue.split(/\s+/).includes('command-outcome-summary')) {
+      return [{ text: stripped, color: colors.text, fontStyle: 'normal' }];
+    }
     if (lineRole === 'exit-ok') return [{ text: stripped, color: colors.green, fontStyle: 'normal' }];
     if (lineRole === 'exit-fail') return [{ text: stripped, color: colors.red, fontStyle: 'normal' }];
     if (lineRole === 'denied') return [{ text: stripped, color: colors.amber, fontStyle: 'normal' }];

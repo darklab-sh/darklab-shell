@@ -23,6 +23,7 @@ def emit_secret_event(
     *,
     name: str = "",
     consumer_envs: Iterable[str] | None = None,
+    level: int = logging.INFO,
     **extra: Any,
 ) -> None:
     payload: dict[str, Any] = {
@@ -33,4 +34,7 @@ def emit_secret_event(
     if consumer_envs is not None:
         payload["consumer_envs"] = list(consumer_envs)
     payload.update({_safe_extra_key(str(key)): value for key, value in extra.items()})
-    log.info(event, extra=payload)
+    if level >= logging.WARNING:
+        log.warning(event, extra=payload)
+    else:
+        log.info(event, extra=payload)

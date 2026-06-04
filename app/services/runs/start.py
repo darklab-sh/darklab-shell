@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from services.teams.scope import OwnerContext, owner_context_for_scope
+
 
 class RunPreparationError(Exception):
     def __init__(self, message: str, *, status_code: int = 403):
@@ -68,10 +70,13 @@ def start_brokered_run(
     handlers: RunStartHandlers,
     owner_client_id: str = "",
     owner_tab_id: str = "",
+    team_id: str = "",
+    team_role: str = "",
     workspace_cwd: str = "",
     link_project_id: str = "",
     thread_name_prefix: str = "run-broker",
 ) -> BrokeredRunStartResult:
+    owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
     if handlers.resolves_exact_special_builtin_command(original_command):
         if link_project_id:
             raise RunStartRejected(
@@ -79,18 +84,20 @@ def start_brokered_run(
                 "Project links only support external command runs.",
                 status_code=409,
             )
-        events, exit_code = handlers.execute_builtin_command(
-            original_command,
-            session_id,
-            tab_id=owner_tab_id,
-        )
+        builtin_kwargs: dict[str, Any] = {"tab_id": owner_tab_id, "owner_context": owner_context}
+        if team_id:
+            builtin_kwargs.update({"team_id": team_id, "team_role": team_role})
+        events, exit_code = handlers.execute_builtin_command(original_command, session_id, **builtin_kwargs)
+        synthetic_kwargs: dict[str, str] = {"owner_tab_id": owner_tab_id}
+        if team_id:
+            synthetic_kwargs["team_id"] = team_id
         run_id = handlers.brokered_synthetic_run(
             handlers.history_safe_command_for_storage(original_command),
             session_id,
             client_ip,
             events,
             exit_code,
-            owner_tab_id=owner_tab_id,
+            **synthetic_kwargs,
         )
         return BrokeredRunStartResult(
             run_id=run_id,
@@ -107,11 +114,13 @@ def start_brokered_run(
                 "Project links only support external command runs.",
                 status_code=409,
             )
-        events, exit_code = handlers.execute_builtin_command(
-            prepared_input.execution_command,
-            session_id,
-            tab_id=owner_tab_id,
-        )
+        builtin_kwargs = {"tab_id": owner_tab_id, "owner_context": owner_context}
+        if team_id:
+            builtin_kwargs.update({"team_id": team_id, "team_role": team_role})
+        events, exit_code = handlers.execute_builtin_command(prepared_input.execution_command, session_id, **builtin_kwargs)
+        synthetic_kwargs = {"owner_tab_id": owner_tab_id}
+        if team_id:
+            synthetic_kwargs["team_id"] = team_id
         run_id = handlers.brokered_synthetic_run(
             handlers.history_safe_command_for_storage(original_command),
             session_id,
@@ -122,7 +131,7 @@ def start_brokered_run(
                 prepared_input.postfilter,
             ),
             exit_code,
-            owner_tab_id=owner_tab_id,
+            **synthetic_kwargs,
         )
         return BrokeredRunStartResult(
             run_id=run_id,
@@ -131,13 +140,24 @@ def start_brokered_run(
             exit_code=exit_code,
         )
 
-    prepared_real = handlers.prepare_real_command(
-        original_command,
-        prepared_input.execution_command,
-        session_id,
-        client_ip,
-        workspace_cwd,
-    )
+    if team_id:
+        prepared_real = handlers.prepare_real_command(
+            original_command,
+            prepared_input.execution_command,
+            session_id,
+            client_ip,
+            workspace_cwd,
+            team_id=team_id,
+            owner_context=owner_context,
+        )
+    else:
+        prepared_real = handlers.prepare_real_command(
+            original_command,
+            prepared_input.execution_command,
+            session_id,
+            client_ip,
+            workspace_cwd,
+        )
     if prepared_real.missing_runtime:
         if link_project_id:
             raise RunStartRejected(
@@ -145,14 +165,16 @@ def start_brokered_run(
                 "Project links only support completed external command runs.",
                 status_code=409,
             )
+        synthetic_kwargs = {"cmd_type": "missing", "owner_tab_id": owner_tab_id}
+        if team_id:
+            synthetic_kwargs["team_id"] = team_id
         run_id = handlers.brokered_synthetic_run(
             original_command,
             session_id,
             client_ip,
             [{"type": "output", "text": handlers.runtime_missing_command_message(prepared_real.missing_runtime)}],
             127,
-            cmd_type="missing",
-            owner_tab_id=owner_tab_id,
+            **synthetic_kwargs,
         )
         return BrokeredRunStartResult(
             run_id=run_id,
@@ -161,11 +183,14 @@ def start_brokered_run(
             exit_code=127,
         )
 
-    start_kwargs: dict[str, str] = {}
+    start_kwargs: dict[str, Any] = {}
     if owner_client_id:
         start_kwargs["owner_client_id"] = owner_client_id
     if owner_tab_id:
         start_kwargs["owner_tab_id"] = owner_tab_id
+    if team_id:
+        start_kwargs["team_id"] = team_id
+        start_kwargs["owner_context"] = owner_context
     started = handlers.start_real_command_process(
         original_command,
         session_id,
@@ -184,6 +209,7 @@ def start_brokered_run(
             "run_id": started.run_id,
             "proc": started.proc,
             "session_id": session_id,
+            "team_id": team_id,
             "client_ip": client_ip,
             "original_command": original_command,
             "run_started": started.run_started,

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, openRailAction } from './helpers.js'
+import { ensurePromptReady, openRailAction, runCommand } from './helpers.js'
 
 // Assertions for the shared interaction contract exercised against real
 // mounted UI rather than helper fixtures. Each helper has its own unit
@@ -23,6 +23,41 @@ async function openOverlay(page, openFn, overlayId = null) {
   if (overlayId) {
     await expect(page.locator(overlayId)).toHaveAttribute('data-interaction-ready', '1')
   }
+}
+
+async function createProjectForSwitcher(page, name, { active = false } = {}) {
+  return page.evaluate(async ({ projectName, makeActive }) => {
+    const createdResp = await apiFetch('/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: projectName }),
+    })
+    if (!createdResp.ok) throw new Error(`Failed to create project: ${createdResp.status}`)
+    const project = (await createdResp.json()).project
+    if (!project?.id) throw new Error('Created project response did not include an id')
+    if (makeActive) {
+      const activeResp = await apiFetch('/projects/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: project.id }),
+      })
+      if (!activeResp.ok) throw new Error(`Failed to set active project: ${activeResp.status}`)
+      if (typeof refreshActiveProjectContext === 'function') await refreshActiveProjectContext()
+    }
+    return project
+  }, { projectName: name, makeActive: active })
+}
+
+async function projectRunLinkIds(page, projectId) {
+  return page.evaluate(async ({ id }) => {
+    const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/links`, { cache: 'no-store' })
+    if (!resp.ok) throw new Error(`Failed to load project links: ${resp.status}`)
+    const data = await resp.json()
+    return (Array.isArray(data.links) ? data.links : [])
+      .filter(link => link?.entity_type === 'run')
+      .map(link => String(link.entity_id || ''))
+      .sort()
+  }, { id: projectId })
 }
 
 test.describe('UI interaction contract — scrim overlays', () => {
@@ -390,5 +425,32 @@ test.describe('UI interaction contract — ambient outside-click', () => {
       document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
     await expect(wrap).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('active project HUD switcher keeps keyboard input scoped and captures the next run', async ({ page }) => {
+    const suffix = Date.now()
+    const oldProject = await createProjectForSwitcher(page, `HUD Old ${suffix}`, { active: true })
+    const newProject = await createProjectForSwitcher(page, `HUD Next ${suffix}`)
+    await expect(page.locator('#hud-project')).toHaveText(oldProject.name)
+
+    const trigger = page.locator('#hud-project-cell')
+    const menu = page.locator('#hud-project-menu')
+    await trigger.click()
+    await expect(menu).toBeVisible()
+    await expect(menu.locator('[aria-checked="true"]')).toContainText(oldProject.name)
+
+    await page.keyboard.type('HUD Next')
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(menu.locator('.hud-project-search')).toHaveValue('HUD Next')
+    const newProjectItem = menu.locator('[data-action="select-project"]').filter({ hasText: newProject.name })
+    await expect(newProjectItem).toBeVisible()
+
+    await newProjectItem.click()
+    await expect(menu).toBeHidden()
+    await expect(page.locator('#hud-project')).toHaveText(newProject.name)
+
+    await runCommand(page, 'ping -h')
+    await expect.poll(() => projectRunLinkIds(page, newProject.id)).toHaveLength(1)
+    await expect.poll(() => projectRunLinkIds(page, oldProject.id)).toEqual([])
   })
 })

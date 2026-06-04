@@ -27,6 +27,7 @@ from core.database_backend import (
     connect_postgres_sqlite_compat,
     connect_sqlite,
     postgres_advisory_lock_id,
+    quote_sqlite_identifier,
     sqlite_table_columns,
     sqlite_table_exists,
 )
@@ -62,6 +63,7 @@ PROJECT_LINK_SOURCES = frozenset({
     "auto_input_file",
     "manual",
     "active_project",
+    "auto_promote_rule",
     "package_flow",
     "migration",
 })
@@ -119,6 +121,7 @@ def _create_schema(conn):
         CREATE TABLE IF NOT EXISTS runs (
             id         TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id    TEXT NOT NULL DEFAULT '',
             run_kind   TEXT NOT NULL DEFAULT 'external',
             owner_tab_id TEXT NOT NULL DEFAULT '',
             command    TEXT NOT NULL,
@@ -159,6 +162,7 @@ def _create_schema(conn):
         CREATE TABLE IF NOT EXISTS snapshots (
             id         TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            team_id    TEXT NOT NULL DEFAULT '',
             label      TEXT NOT NULL,
             created    TEXT NOT NULL,
             content    TEXT NOT NULL
@@ -171,6 +175,7 @@ def _create_schema(conn):
             last_seen_at TEXT
         )
     """)
+    _create_team_schema(conn)
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS session_preferences (
             session_id  TEXT PRIMARY KEY,
@@ -198,6 +203,7 @@ def _create_schema(conn):
         CREATE TABLE IF NOT EXISTS user_workflows (
             id          TEXT PRIMARY KEY,
             session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
             title       TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             inputs      {_json_column_sql("[]")},
@@ -209,11 +215,12 @@ def _create_schema(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS recent_values (
             session_id TEXT NOT NULL,
+            team_id    TEXT NOT NULL DEFAULT '',
             kind       TEXT NOT NULL,
             value      TEXT NOT NULL,
             last_used  TEXT NOT NULL,
             use_count  INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (session_id, kind, value)
+            PRIMARY KEY (session_id, team_id, kind, value)
         )
     """)
     _create_secrets_schema(conn)
@@ -222,6 +229,76 @@ def _create_schema(conn):
     _create_watcher_schema(conn)
     _create_ai_assist_schema(conn)
     _create_project_workspace_schema(conn)
+
+
+def _create_team_schema(conn):
+    """Create dormant team-mode foundation tables."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS teams (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            settings_json {_json_column_sql("{}")},
+            created_by_member_id TEXT NOT NULL DEFAULT '',
+            created_by_session_token_hash TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            archived_at TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (slug),
+            CHECK (status IN ('active', 'archived', 'deleted'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS team_members (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            session_token TEXT,
+            session_token_hash TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            invited_by_member_id TEXT NOT NULL DEFAULT '',
+            joined_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL DEFAULT '',
+            removed_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (team_id, session_token_hash),
+            FOREIGN KEY (session_token) REFERENCES session_tokens(token) ON DELETE SET NULL,
+            CHECK (role IN ('owner', 'admin', 'operator', 'viewer')),
+            CHECK (status IN ('active', 'removed'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS team_invites (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_by_member_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL DEFAULT '',
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            revoked_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE (code_hash),
+            CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS team_recovery_codes (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            created_by_member_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            rotated_at TEXT NOT NULL DEFAULT '',
+            revoked_at TEXT NOT NULL DEFAULT '',
+            used_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (code_hash)
+        )
+    """)
 
 
 def _create_secrets_schema(conn):
@@ -246,6 +323,7 @@ def _create_notification_schema(conn):
         CREATE TABLE IF NOT EXISTS notification_channels (
             id            TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
+            team_id       TEXT NOT NULL DEFAULT '',
             kind          TEXT NOT NULL,
             label         TEXT NOT NULL DEFAULT '',
             secrets_json  {_json_column_sql("{}")},
@@ -261,6 +339,7 @@ def _create_notification_schema(conn):
         CREATE TABLE IF NOT EXISTS notification_events (
             id              TEXT PRIMARY KEY,
             session_token   TEXT NOT NULL,
+            team_id         TEXT NOT NULL DEFAULT '',
             channel_id      TEXT NOT NULL,
             trigger         TEXT NOT NULL,
             payload_json    {_json_column_sql("{}")},
@@ -295,6 +374,7 @@ def _create_ai_assist_schema(conn):
             id                       TEXT PRIMARY KEY,
             run_id                   TEXT NOT NULL,
             session_id               TEXT NOT NULL,
+            team_id                  TEXT NOT NULL DEFAULT '',
             variant                  TEXT NOT NULL,
             prompt_version           TEXT NOT NULL DEFAULT '',
             prompt_version_source    TEXT NOT NULL DEFAULT 'canonical',
@@ -348,6 +428,7 @@ def _create_schedule_schema(conn):
         CREATE TABLE IF NOT EXISTS schedules (
             id                   TEXT PRIMARY KEY,
             session_token        TEXT NOT NULL,
+            team_id              TEXT NOT NULL DEFAULT '',
             owner_kind           TEXT NOT NULL DEFAULT 'user',
             owner_id             TEXT NOT NULL DEFAULT '',
             kind                 TEXT NOT NULL DEFAULT 'command',
@@ -376,6 +457,7 @@ def _create_schedule_schema(conn):
         CREATE TABLE IF NOT EXISTS schedule_fires (
             id           TEXT PRIMARY KEY,
             schedule_id  TEXT NOT NULL,
+            team_id      TEXT NOT NULL DEFAULT '',
             owner_kind   TEXT NOT NULL,
             owner_id     TEXT NOT NULL DEFAULT '',
             fired_at     TEXT NOT NULL,
@@ -394,6 +476,7 @@ def _create_watcher_schema(conn):
         CREATE TABLE IF NOT EXISTS watchers (
             id                      TEXT PRIMARY KEY,
             session_token           TEXT NOT NULL,
+            team_id                 TEXT NOT NULL DEFAULT '',
             label                   TEXT NOT NULL DEFAULT '',
             command_text            TEXT NOT NULL,
             schedule_id             TEXT NOT NULL UNIQUE,
@@ -416,6 +499,7 @@ def _create_watcher_schema(conn):
         CREATE TABLE IF NOT EXISTS watcher_fires (
             id                          TEXT PRIMARY KEY,
             watcher_id                  TEXT NOT NULL,
+            team_id                     TEXT NOT NULL DEFAULT '',
             baseline_run_id             TEXT NOT NULL,
             run_id                      TEXT NOT NULL,
             diff_summary_json           {_json_column_sql("{}")},
@@ -436,14 +520,14 @@ def _create_project_workspace_schema(conn):
         CREATE TABLE IF NOT EXISTS projects (
             id          TEXT PRIMARY KEY,
             session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
             name        TEXT NOT NULL,
             slug        TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             status      TEXT NOT NULL DEFAULT 'active',
             color       TEXT NOT NULL DEFAULT '',
             created     TEXT NOT NULL,
-            updated     TEXT NOT NULL,
-            UNIQUE (session_id, slug)
+            updated     TEXT NOT NULL
         )
     """)
     conn.execute(f"""
@@ -461,10 +545,34 @@ def _create_project_workspace_schema(conn):
             UNIQUE (project_id, entity_type, entity_id)
         )
     """)
+    # Keep this SQLite fresh-create shape aligned with the Postgres baseline and
+    # v0026 incremental migration. SQLite intentionally uses INTEGER booleans
+    # and the configured JSON text column, while Postgres uses BOOLEAN/JSONB.
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS project_auto_promote_rules (
+            id                 TEXT PRIMARY KEY,
+            project_id         TEXT NOT NULL,
+            name               TEXT NOT NULL,
+            enabled            INTEGER NOT NULL DEFAULT 1,
+            target_entity_kind TEXT NOT NULL DEFAULT 'any',
+            match_mode         TEXT NOT NULL,
+            pattern            TEXT NOT NULL,
+            filters_json       {_json_column_sql("{}")},
+            apply_on_run       INTEGER NOT NULL DEFAULT 0,
+            created_by_session_id TEXT NOT NULL DEFAULT '',
+            created_by_member_id  TEXT NOT NULL DEFAULT '',
+            created            TEXT NOT NULL,
+            updated            TEXT NOT NULL,
+            last_applied_at    TEXT NOT NULL DEFAULT '',
+            match_count        INTEGER NOT NULL DEFAULT 0,
+            linked_count       INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entities (
             id               TEXT PRIMARY KEY,
             session_id       TEXT NOT NULL,
+            team_id          TEXT NOT NULL DEFAULT '',
             type             TEXT NOT NULL,
             canonical_value  TEXT NOT NULL,
             signature_hash   TEXT NOT NULL,
@@ -474,8 +582,7 @@ def _create_project_workspace_schema(conn):
             suppressed       INTEGER NOT NULL DEFAULT 0,
             suppressed_reason TEXT NOT NULL DEFAULT '',
             suppressed_at    TEXT NOT NULL DEFAULT '',
-            created          TEXT NOT NULL,
-            UNIQUE (session_id, type, signature_hash)
+            created          TEXT NOT NULL
         )
     """)
     conn.execute("""
@@ -522,6 +629,7 @@ def _create_project_workspace_schema(conn):
         CREATE TABLE IF NOT EXISTS findings (
             id                TEXT PRIMARY KEY,
             session_id        TEXT NOT NULL,
+            team_id           TEXT NOT NULL DEFAULT '',
             run_id            TEXT NOT NULL DEFAULT '',
             target_id         TEXT NOT NULL DEFAULT '',
             scope             TEXT NOT NULL DEFAULT 'finding',
@@ -559,28 +667,115 @@ def _create_project_workspace_schema(conn):
             PRIMARY KEY (finding_id, run_id, line_number)
         )
     """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS atlas_import_drafts (
+            id                     TEXT PRIMARY KEY,
+            session_id             TEXT NOT NULL,
+            team_id                TEXT NOT NULL DEFAULT '',
+            actor_session_id       TEXT NOT NULL DEFAULT '',
+            actor_member_id        TEXT NOT NULL DEFAULT '',
+            source_tool            TEXT NOT NULL,
+            format_id              TEXT NOT NULL DEFAULT '',
+            import_name            TEXT NOT NULL,
+            filename               TEXT NOT NULL DEFAULT '',
+            original_file_sha256   TEXT NOT NULL DEFAULT '',
+            normalized_rows_sha256 TEXT NOT NULL DEFAULT '',
+            normalized_rows_json   {_json_column_sql("[]")},
+            preview_counts_json    {_json_column_sql("{}")},
+            warning_summary_json   {_json_column_sql("[]")},
+            created                TEXT NOT NULL,
+            expires_at             TEXT NOT NULL,
+            status                 TEXT NOT NULL DEFAULT 'previewed'
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS atlas_import_batches (
+            id                     TEXT PRIMARY KEY,
+            draft_id               TEXT NOT NULL DEFAULT '',
+            session_id             TEXT NOT NULL,
+            team_id                TEXT NOT NULL DEFAULT '',
+            actor_session_id       TEXT NOT NULL DEFAULT '',
+            actor_member_id        TEXT NOT NULL DEFAULT '',
+            source_tool            TEXT NOT NULL,
+            format_id              TEXT NOT NULL DEFAULT '',
+            import_name            TEXT NOT NULL,
+            filename               TEXT NOT NULL DEFAULT '',
+            original_file_sha256   TEXT NOT NULL DEFAULT '',
+            normalized_rows_sha256 TEXT NOT NULL DEFAULT '',
+            counts_json            {_json_column_sql("{}")},
+            warning_summary_json   {_json_column_sql("[]")},
+            created                TEXT NOT NULL,
+            applied_at             TEXT NOT NULL,
+            status                 TEXT NOT NULL DEFAULT 'applied'
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS atlas_entity_import_links (
+            entity_id              TEXT NOT NULL,
+            batch_id               TEXT NOT NULL,
+            first_observed_at      TEXT NOT NULL,
+            last_observed_at       TEXT NOT NULL,
+            occurrence_count       INTEGER NOT NULL DEFAULT 0,
+            row_number             INTEGER NOT NULL DEFAULT 0,
+            external_id            TEXT NOT NULL DEFAULT '',
+            source_detail_json     {_json_column_sql("{}")},
+            created_entity         INTEGER NOT NULL DEFAULT 0,
+            created                TEXT NOT NULL,
+            updated                TEXT NOT NULL,
+            PRIMARY KEY (entity_id, batch_id)
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS atlas_finding_import_occurrences (
+            finding_id             TEXT NOT NULL,
+            batch_id               TEXT NOT NULL,
+            row_number             INTEGER NOT NULL DEFAULT 0,
+            snippet                TEXT NOT NULL DEFAULT '',
+            evidence               TEXT NOT NULL DEFAULT '',
+            observed_at            TEXT NOT NULL,
+            external_id            TEXT NOT NULL DEFAULT '',
+            source_detail_json     {_json_column_sql("{}")},
+            created                TEXT NOT NULL,
+            updated                TEXT NOT NULL,
+            PRIMARY KEY (finding_id, batch_id, row_number)
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entity_labels (
             id          TEXT PRIMARY KEY,
             session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
             entity_type TEXT NOT NULL,
             entity_id   TEXT NOT NULL,
             label       TEXT NOT NULL,
             source      TEXT NOT NULL DEFAULT 'manual',
-            created     TEXT NOT NULL,
-            UNIQUE (session_id, entity_type, entity_id, label)
+            created     TEXT NOT NULL
         )
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entity_notes (
             id           TEXT PRIMARY KEY,
             session_id   TEXT NOT NULL,
+            team_id      TEXT NOT NULL DEFAULT '',
             entity_type  TEXT NOT NULL,
             entity_id    TEXT NOT NULL,
             body         TEXT NOT NULL,
             created      TEXT NOT NULL,
-            updated      TEXT NOT NULL,
-            UNIQUE (session_id, entity_type, entity_id)
+            updated      TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS finding_triage_details (
+            id                  TEXT PRIMARY KEY,
+            session_id          TEXT NOT NULL,
+            team_id             TEXT NOT NULL DEFAULT '',
+            finding_id          TEXT NOT NULL,
+            remediation         TEXT NOT NULL DEFAULT '',
+            verification_steps  TEXT NOT NULL DEFAULT '',
+            verification_status TEXT NOT NULL DEFAULT 'not_started',
+            verification_notes  TEXT NOT NULL DEFAULT '',
+            created             TEXT NOT NULL,
+            updated             TEXT NOT NULL
         )
     """)
     conn.execute(f"""
@@ -615,6 +810,10 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS idx_runs_session_kind_started "
         "ON runs (session_id, run_kind, started DESC)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runs_team_started "
+        "ON runs (team_id, started DESC)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_run_output_summary_lookup "
@@ -625,6 +824,27 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session_created "
         "ON snapshots (session_id, created DESC)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_team_created "
+        "ON snapshots (team_id, created DESC)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_teams_status_updated ON teams (status, updated_at DESC)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_team_members_team_status_role "
+        "ON team_members (team_id, status, role)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_team_members_session_token_hash "
+        "ON team_members (session_token_hash)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_team_invites_team_active "
+        "ON team_invites (team_id, revoked_at, expires_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_team_recovery_codes_team_active "
+        "ON team_recovery_codes (team_id, revoked_at, used_at)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session_variables_session ON session_variables (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_workflows_session ON user_workflows (session_id)")
@@ -633,8 +853,16 @@ def _create_indexes(conn):
         "ON user_workflows (session_id, updated DESC, created DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_workflows_team_updated_created "
+        "ON user_workflows (team_id, updated DESC, created DESC)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_recent_values_session_kind_last_used "
         "ON recent_values (session_id, kind, last_used DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recent_values_team_kind_last_used "
+        "ON recent_values (team_id, kind, last_used DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_secrets_session_updated "
@@ -645,8 +873,16 @@ def _create_indexes(conn):
         "ON notification_channels (session_token, kind, updated DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_channels_team_kind_updated "
+        "ON notification_channels (team_id, kind, updated DESC)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_channels_session_muted "
         "ON notification_channels (session_token, muted)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_channels_team_muted "
+        "ON notification_channels (team_id, muted)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_events_status_next_attempt "
@@ -655,6 +891,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_events_session_created "
         "ON notification_events (session_token, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_events_team_created "
+        "ON notification_events (team_id, created DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_events_channel_created "
@@ -667,6 +907,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_session_run_variant "
         "ON ai_run_assists (session_id, run_id, variant, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_team_run_variant "
+        "ON ai_run_assists (team_id, run_id, variant, created_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_status_created "
@@ -689,6 +933,10 @@ def _create_indexes(conn):
         "ON schedules (session_token, owner_kind, updated DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedules_team_updated "
+        "ON schedules (team_id, owner_kind, updated DESC)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedules_owner "
         "ON schedules (owner_kind, owner_id)"
     )
@@ -697,8 +945,16 @@ def _create_indexes(conn):
         "ON schedule_fires (schedule_id, fired_at DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_fires_team_schedule "
+        "ON schedule_fires (team_id, schedule_id, fired_at DESC)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watchers_session_updated "
         "ON watchers (session_token, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchers_team_updated "
+        "ON watchers (team_id, updated DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watchers_schedule "
@@ -713,12 +969,28 @@ def _create_indexes(conn):
         "ON watcher_fires (watcher_id, created DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watcher_fires_team_watcher "
+        "ON watcher_fires (team_id, watcher_id, created DESC)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watcher_fires_run "
         "ON watcher_fires (run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated "
         "ON projects (session_id, status, updated DESC)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_slug_unique "
+        "ON projects (session_id, slug) WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_projects_team_status_updated "
+        "ON projects (team_id, status, updated DESC)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_team_slug_unique "
+        "ON projects (team_id, slug) WHERE team_id != ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_project_links_project_entity_created "
@@ -729,16 +1001,40 @@ def _create_indexes(conn):
         "ON project_links (entity_type, entity_id)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_project_updated "
+        "ON project_auto_promote_rules (project_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_run_scan "
+        "ON project_auto_promote_rules (project_id, enabled, apply_on_run)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen "
-        "ON entities (session_id, type, last_seen_at DESC)"
+        "ON entities (session_id, type, last_seen_at DESC) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_suppressed "
-        "ON entities (session_id, suppressed)"
+        "ON entities (session_id, suppressed) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_value "
-        "ON entities (session_id, canonical_value)"
+        "ON entities (session_id, canonical_value) WHERE team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_personal_signature "
+        "ON entities (session_id, type, signature_hash) WHERE team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_team_signature "
+        "ON entities (team_id, type, signature_hash) WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_team_type_last_seen "
+        "ON entities (team_id, type, last_seen_at DESC) WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_team_value "
+        "ON entities (team_id, canonical_value) WHERE team_id != ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_run_links_run "
@@ -762,41 +1058,58 @@ def _create_indexes(conn):
     conn.execute("DROP INDEX IF EXISTS idx_finding_targets_finding")
     conn.execute("DROP INDEX IF EXISTS idx_finding_targets_target_created")
     conn.execute("DROP INDEX IF EXISTS idx_finding_targets_run")
+    conn.execute("DROP INDEX IF EXISTS idx_findings_session_signature")
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_session_signature "
-        "ON findings (session_id, signature_hash) WHERE signature_hash != ''"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_personal_signature "
+        "ON findings (session_id, signature_hash) WHERE team_id = '' AND signature_hash != ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_team_signature "
+        "ON findings (team_id, signature_hash) WHERE team_id != '' AND signature_hash != ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_status "
-        "ON findings (session_id, status)"
+        "ON findings (session_id, status) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_suppressed "
-        "ON findings (session_id, suppressed)"
+        "ON findings (session_id, suppressed) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_entity_seen "
-        "ON findings (session_id, entity_id, last_seen_at DESC)"
+        "ON findings (session_id, entity_id, last_seen_at DESC) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_run_seen "
-        "ON findings (session_id, run_id, last_seen_at DESC)"
+        "ON findings (session_id, run_id, last_seen_at DESC) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_first_run_seen "
-        "ON findings (session_id, first_run_id, last_seen_at DESC)"
+        "ON findings (session_id, first_run_id, last_seen_at DESC) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_last_run_seen "
-        "ON findings (session_id, last_run_id, last_seen_at DESC)"
+        "ON findings (session_id, last_run_id, last_seen_at DESC) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_tool_seen "
-        "ON findings (session_id, tool_root, last_seen_at DESC)"
+        "ON findings (session_id, tool_root, last_seen_at DESC) WHERE team_id = ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_severity_seen "
-        "ON findings (session_id, severity, last_seen_at DESC)"
+        "ON findings (session_id, severity, last_seen_at DESC) WHERE team_id = ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_team_status "
+        "ON findings (team_id, status) WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_team_entity_seen "
+        "ON findings (team_id, entity_id, last_seen_at DESC) WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_team_run_seen "
+        "ON findings (team_id, run_id, last_seen_at DESC) WHERE team_id != ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_run "
@@ -805,6 +1118,34 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_finding_seen "
         "ON findings_occurrences (finding_id, seen_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_import_drafts_scope_created "
+        "ON atlas_import_drafts (team_id, session_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_import_drafts_expires "
+        "ON atlas_import_drafts (expires_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_import_batches_scope_applied "
+        "ON atlas_import_batches (team_id, session_id, applied_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_entity_import_links_batch "
+        "ON atlas_entity_import_links (batch_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_entity_import_links_entity_seen "
+        "ON atlas_entity_import_links (entity_id, last_observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_finding_import_occurrences_batch "
+        "ON atlas_finding_import_occurrences (batch_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_atlas_finding_import_occurrences_finding_seen "
+        "ON atlas_finding_import_occurrences (finding_id, observed_at DESC)"
     )
     conn.execute("DROP TRIGGER IF EXISTS findings_legacy_ai")
     conn.execute("DROP TRIGGER IF EXISTS findings_ad")
@@ -844,6 +1185,7 @@ def _create_indexes(conn):
         CREATE TRIGGER findings_ad AFTER DELETE ON findings
         BEGIN
             DELETE FROM findings_occurrences WHERE finding_id = OLD.id;
+            DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id;
         END
     """)
     conn.execute(
@@ -851,8 +1193,42 @@ def _create_indexes(conn):
         "ON entity_labels (entity_type, entity_id, created)"
     )
     conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_labels_personal_unique "
+        "ON entity_labels (session_id, entity_type, entity_id, label) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_labels_team_unique "
+        "ON entity_labels (team_id, entity_type, entity_id, label) "
+        "WHERE team_id != ''"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_notes_entity_updated "
         "ON entity_notes (entity_type, entity_id, updated)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_personal_unique "
+        "ON entity_notes (session_id, entity_type, entity_id) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_notes_team_unique "
+        "ON entity_notes (team_id, entity_type, entity_id) "
+        "WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_triage_details_finding_updated "
+        "ON finding_triage_details (finding_id, updated)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_finding_triage_details_personal_unique "
+        "ON finding_triage_details (session_id, finding_id) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_finding_triage_details_team_unique "
+        "ON finding_triage_details (team_id, finding_id) "
+        "WHERE team_id != ''"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated "
@@ -1023,6 +1399,280 @@ def _drop_legacy_project_entity_tables(conn):
             pass
 
 
+def _migrate_recent_values_team_scope(conn) -> None:
+    """Rebuild recent_values so personal and team scopes can keep separate recents."""
+    if not sqlite_table_exists(conn, "recent_values"):
+        return
+    columns = sqlite_table_columns(conn, "recent_values")
+    if "team_id" in columns:
+        return
+    conn.execute("ALTER TABLE recent_values RENAME TO recent_values_legacy_scope")
+    conn.execute("""
+        CREATE TABLE recent_values (
+            session_id TEXT NOT NULL,
+            team_id    TEXT NOT NULL DEFAULT '',
+            kind       TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            last_used  TEXT NOT NULL,
+            use_count  INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (session_id, team_id, kind, value)
+        )
+    """)
+    conn.execute("""
+        INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count)
+        SELECT session_id, '', kind, value, last_used, use_count
+          FROM recent_values_legacy_scope
+    """)
+    conn.execute("DROP TABLE recent_values_legacy_scope")
+
+
+def _migrate_project_slug_scope(conn) -> None:
+    """Rebuild projects so personal and team slugs use separate unique indexes."""
+    if not sqlite_table_exists(conn, "projects"):
+        return
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'"
+    ).fetchone()
+    create_sql = str(row[0] or "") if row else ""
+    if "UNIQUE (session_id, slug)" not in create_sql:
+        return
+
+    conn.execute("ALTER TABLE projects RENAME TO projects_legacy_slug_scope")
+    conn.execute("""
+        CREATE TABLE projects (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
+            name        TEXT NOT NULL,
+            slug        TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status      TEXT NOT NULL DEFAULT 'active',
+            color       TEXT NOT NULL DEFAULT '',
+            created     TEXT NOT NULL,
+            updated     TEXT NOT NULL
+        )
+    """)
+    legacy_columns = sqlite_table_columns(conn, "projects_legacy_slug_scope")
+
+    def column_expr(name: str, default: str) -> str:
+        return name if name in legacy_columns else default
+
+    project_copy_sql = """
+        INSERT INTO projects (
+            id, session_id, team_id, name, slug, description, status, color, created, updated
+        )
+        SELECT
+            id,
+            session_id,
+            COALESCE({team_id_column}, ''),
+            name,
+            slug,
+            COALESCE({description_column}, ''),
+            COALESCE({status_column}, 'active'),
+            COALESCE({color_column}, ''),
+            created,
+            updated
+        FROM projects_legacy_slug_scope
+    """.format(  # nosec
+        team_id_column=column_expr("team_id", "''"),
+        description_column=column_expr("description", "''"),
+        status_column=column_expr("status", "'active'"),
+        color_column=column_expr("color", "''"),
+    )
+    conn.execute(project_copy_sql)
+    conn.execute("DROP TABLE projects_legacy_slug_scope")
+
+
+def _migrate_atlas_team_scope(conn) -> None:
+    """Rebuild Atlas owner keys so team rows can deduplicate across members."""
+    if sqlite_table_exists(conn, "entities"):
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entities'"
+        ).fetchone()
+        create_sql = str(row[0] or "") if row else ""
+        entity_columns = sqlite_table_columns(conn, "entities")
+        if "team_id" not in entity_columns or "UNIQUE (session_id, type, signature_hash)" in create_sql:
+            conn.execute("ALTER TABLE entities RENAME TO entities_legacy_team_scope")
+            conn.execute("""
+                CREATE TABLE entities (
+                    id               TEXT PRIMARY KEY,
+                    session_id       TEXT NOT NULL,
+                    team_id          TEXT NOT NULL DEFAULT '',
+                    type             TEXT NOT NULL,
+                    canonical_value  TEXT NOT NULL,
+                    signature_hash   TEXT NOT NULL,
+                    first_seen_at    TEXT NOT NULL,
+                    last_seen_at     TEXT NOT NULL,
+                    occurrence_count INTEGER NOT NULL DEFAULT 0,
+                    suppressed       INTEGER NOT NULL DEFAULT 0,
+                    suppressed_reason TEXT NOT NULL DEFAULT '',
+                    suppressed_at    TEXT NOT NULL DEFAULT '',
+                    created          TEXT NOT NULL
+                )
+            """)
+            legacy_columns = sqlite_table_columns(conn, "entities_legacy_team_scope")
+
+            def entity_column_expr(name: str, default: str) -> str:
+                return name if name in legacy_columns else default
+
+            entity_insert_sql = f"""
+                INSERT INTO entities (
+                    id, session_id, team_id, type, canonical_value, signature_hash,
+                    first_seen_at, last_seen_at, occurrence_count, suppressed,
+                    suppressed_reason, suppressed_at, created
+                )
+                SELECT
+                    id,
+                    session_id,
+                    COALESCE({entity_column_expr("team_id", "''")}, ''),
+                    type,
+                    canonical_value,
+                    signature_hash,
+                    first_seen_at,
+                    last_seen_at,
+                    COALESCE({entity_column_expr("occurrence_count", "0")}, 0),
+                    COALESCE({entity_column_expr("suppressed", "0")}, 0),
+                    COALESCE({entity_column_expr("suppressed_reason", "''")}, ''),
+                    COALESCE({entity_column_expr("suppressed_at", "''")}, ''),
+                    created
+                FROM entities_legacy_team_scope
+                """  # nosec
+            conn.execute(entity_insert_sql)
+            conn.execute("DROP TABLE entities_legacy_team_scope")
+
+    if sqlite_table_exists(conn, "findings") and "team_id" not in sqlite_table_columns(conn, "findings"):
+        conn.execute("ALTER TABLE findings ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_workspace_metadata_team_scope(conn) -> None:
+    """Rebuild workspace metadata owner keys for personal and team scopes."""
+
+    def rebuild_table(table_name: str, create_sql: str, insert_sql: str) -> None:
+        if not sqlite_table_exists(conn, table_name):
+            return
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        create_table_sql = str(row[0] or "") if row else ""
+        columns = sqlite_table_columns(conn, table_name)
+        if "team_id" in columns and "UNIQUE (session_id, entity_type, entity_id" not in create_table_sql:
+            return
+        legacy_name = f"{table_name}_legacy_team_scope"
+        conn.execute(f"ALTER TABLE {quote_sqlite_identifier(table_name)} RENAME TO {quote_sqlite_identifier(legacy_name)}")
+        conn.execute(create_sql)
+        conn.execute(insert_sql)
+        conn.execute(f"DROP TABLE {quote_sqlite_identifier(legacy_name)}")
+
+    rebuild_table(
+        "entity_labels",
+        """
+        CREATE TABLE entity_labels (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            team_id     TEXT NOT NULL DEFAULT '',
+            entity_type TEXT NOT NULL,
+            entity_id   TEXT NOT NULL,
+            label       TEXT NOT NULL,
+            source      TEXT NOT NULL DEFAULT 'manual',
+            created     TEXT NOT NULL
+        )
+        """,
+        """
+        INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, source, created)
+        SELECT id, session_id, '', entity_type, entity_id, label, source, created
+          FROM entity_labels_legacy_team_scope
+        """,
+    )
+    rebuild_table(
+        "entity_notes",
+        """
+        CREATE TABLE entity_notes (
+            id           TEXT PRIMARY KEY,
+            session_id   TEXT NOT NULL,
+            team_id      TEXT NOT NULL DEFAULT '',
+            entity_type  TEXT NOT NULL,
+            entity_id    TEXT NOT NULL,
+            body         TEXT NOT NULL,
+            created      TEXT NOT NULL,
+            updated      TEXT NOT NULL
+        )
+        """,
+        """
+        INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated)
+        SELECT id, session_id, '', entity_type, entity_id, body, created, updated
+          FROM entity_notes_legacy_team_scope
+        """,
+    )
+
+
+def _migrate_team_code_hash_uniqueness(conn) -> None:
+    """Rebuild team code tables so opaque codes are globally unique."""
+
+    def rebuild_table(table_name: str, create_sql: str) -> None:
+        if not sqlite_table_exists(conn, table_name):
+            return
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        existing_sql = str(row[0] or "") if row else ""
+        if "UNIQUE (team_id, code_hash)" not in existing_sql:
+            return
+        legacy_name = f"{table_name}_legacy_team_code_scope"
+        conn.execute(f"ALTER TABLE {quote_sqlite_identifier(table_name)} RENAME TO {quote_sqlite_identifier(legacy_name)}")
+        conn.execute(create_sql)
+        columns = list(sqlite_table_columns(conn, legacy_name))
+        column_sql = ", ".join(quote_sqlite_identifier(column) for column in columns)
+        copy_sql = (  # nosec
+            "INSERT INTO {table_name} ({column_sql}) "
+            "SELECT {column_sql} FROM {legacy_name}"
+        ).format(
+            table_name=quote_sqlite_identifier(table_name),
+            column_sql=column_sql,
+            legacy_name=quote_sqlite_identifier(legacy_name),
+        )
+        conn.execute(copy_sql)
+        conn.execute(f"DROP TABLE {quote_sqlite_identifier(legacy_name)}")
+
+    rebuild_table(
+        "team_invites",
+        """
+        CREATE TABLE team_invites (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_by_member_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL DEFAULT '',
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            revoked_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE (code_hash),
+            CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
+        )
+        """,
+    )
+    rebuild_table(
+        "team_recovery_codes",
+        """
+        CREATE TABLE team_recovery_codes (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            created_by_member_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            rotated_at TEXT NOT NULL DEFAULT '',
+            revoked_at TEXT NOT NULL DEFAULT '',
+            used_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (code_hash)
+        )
+        """,
+    )
+
+
 def _migrate_schema(conn):
     """Apply one-time schema migrations for databases from older versions."""
     try:
@@ -1030,6 +1680,7 @@ def _migrate_schema(conn):
     except SQLiteOperationalError:
         pass  # Column already exists
     for stmt in (
+        "ALTER TABLE runs ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'external'",
         "ALTER TABLE runs ADD COLUMN owner_tab_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE runs ADD COLUMN output_preview TEXT",
@@ -1089,6 +1740,15 @@ def _migrate_schema(conn):
         pass
 
     try:
+        _create_team_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        _migrate_team_code_hash_uniqueness(conn)
+    except SQLiteOperationalError:
+        pass
+
+    try:
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS session_preferences (
                 session_id  TEXT PRIMARY KEY,
@@ -1129,6 +1789,7 @@ def _migrate_schema(conn):
             CREATE TABLE IF NOT EXISTS user_workflows (
                 id          TEXT PRIMARY KEY,
                 session_id  TEXT NOT NULL,
+                team_id     TEXT NOT NULL DEFAULT '',
                 title       TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 inputs      {_json_column_sql("[]")},
@@ -1141,14 +1802,30 @@ def _migrate_schema(conn):
         pass
 
     try:
+        conn.execute("ALTER TABLE user_workflows ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
+    except SQLiteOperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE snapshots ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
+    except SQLiteOperationalError:
+        pass
+
+    try:
+        _migrate_recent_values_team_scope(conn)
+    except SQLiteOperationalError:
+        pass
+
+    try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS recent_values (
                 session_id TEXT NOT NULL,
+                team_id    TEXT NOT NULL DEFAULT '',
                 kind       TEXT NOT NULL,
                 value      TEXT NOT NULL,
                 last_used  TEXT NOT NULL,
                 use_count  INTEGER NOT NULL DEFAULT 1,
-                PRIMARY KEY (session_id, kind, value)
+                PRIMARY KEY (session_id, team_id, kind, value)
             )
         """)
     except SQLiteOperationalError:
@@ -1159,7 +1836,7 @@ def _migrate_schema(conn):
                 "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
                 "SELECT session_id, 'domain', domain, last_used, use_count FROM recent_domains "
                 "WHERE 1 "
-                "ON CONFLICT(session_id, kind, value) DO UPDATE SET "
+                "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
                 "last_used = CASE "
                 "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
                 "  ELSE recent_values.last_used "
@@ -1178,8 +1855,20 @@ def _migrate_schema(conn):
         _create_notification_schema(conn)
     except SQLiteOperationalError:
         pass
+    for stmt in (
+        "ALTER TABLE notification_channels ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE notification_events ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+    ):
+        try:
+            conn.execute(stmt)
+        except SQLiteOperationalError:
+            pass
     try:
         _create_ai_assist_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE ai_run_assists ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
     except SQLiteOperationalError:
         pass
     try:
@@ -1187,19 +1876,49 @@ def _migrate_schema(conn):
     except SQLiteOperationalError:
         pass
 
+    try:
+        _create_schedule_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        _create_watcher_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    for stmt in (
+        "ALTER TABLE schedules ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE schedule_fires ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watchers ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+    ):
+        try:
+            conn.execute(stmt)
+        except SQLiteOperationalError:
+            pass
+
     _drop_legacy_project_entity_tables(conn)
+    try:
+        _migrate_atlas_team_scope(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        _migrate_workspace_metadata_team_scope(conn)
+    except SQLiteOperationalError:
+        pass
     try:
         _create_project_workspace_schema(conn)
     except SQLiteOperationalError:
         pass
     for stmt in (
+        "ALTER TABLE projects ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE project_links ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0",
         "ALTER TABLE project_links ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'",
         f"ALTER TABLE project_links ADD COLUMN source_detail {_json_column_sql('{}')}",
         "ALTER TABLE project_links ADD COLUMN updated TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE entities ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE entities ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE entities ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE entities ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE findings ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE findings ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE findings ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE findings ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''",
@@ -1208,6 +1927,10 @@ def _migrate_schema(conn):
             conn.execute(stmt)
         except SQLiteOperationalError:
             pass
+    try:
+        _migrate_project_slug_scope(conn)
+    except SQLiteOperationalError:
+        pass
     try:
         conn.execute("ALTER TABLE run_file_artifacts ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''")
     except SQLiteOperationalError:

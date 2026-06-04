@@ -24,7 +24,7 @@ describe('workspace UI helpers', () => {
       limits: { quota_bytes: 1024, max_files: 10 },
     })
 
-    expect(document.getElementById('workspace-summary').textContent).toBe('1 / 10 files · 11 B / 1 KB')
+    expect(document.getElementById('workspace-summary').textContent).toBe('Personal · 1 / 10 files · 11 B / 1 KB')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('targets.txt')
     expect(document.querySelector('.workspace-file-details').textContent)
       .toContain('1 artifact · 1 run · Signal Case')
@@ -37,6 +37,74 @@ describe('workspace UI helpers', () => {
       'Download',
       'Delete',
     ])
+  })
+
+  it('renders team viewer and archived Files as read-only while keeping preview and download available', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({})))
+    const { renderWorkspaceFiles, handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      owner: {
+        scope: 'team',
+        team_id: 'team_readonly',
+        label: 'Team Alpha',
+        read_only: true,
+        read_only_reason: "Team viewers can view Files but can't change them.",
+      },
+      directories: [{ path: 'reports' }],
+      files: [{ path: 'targets.txt', size: 11 }],
+      usage: { bytes_used: 11, file_count: 1 },
+      limits: { quota_bytes: 1024, max_files: 10 },
+    })
+
+    expect(document.getElementById('workspace-summary').textContent)
+      .toBe('Team Alpha · 1 / 10 files · 11 B / 1 KB · read-only')
+    expect(document.getElementById('workspace-new-btn').disabled).toBe(true)
+    expect(document.getElementById('workspace-new-folder-btn').disabled).toBe(true)
+    expect(document.querySelector('.workspace-folder-row').draggable).toBe(false)
+    expect(document.querySelector('.workspace-file-row[data-path="targets.txt"]').draggable).toBe(false)
+    expect(document.querySelector('[data-workspace-action="view"]').disabled).toBe(false)
+    expect(document.querySelector('[data-workspace-action="download"]').disabled).toBe(false)
+    expect(document.querySelector('[data-workspace-action="edit"]').disabled).toBe(true)
+    expect(document.querySelector('[data-workspace-action="move"]').disabled).toBe(true)
+    expect(document.querySelector('[data-workspace-action="delete"]').disabled).toBe(true)
+
+    await handleWorkspaceFileAction('delete', 'targets.txt')
+    await flushWorkspacePromises()
+
+    expect(globals.showConfirm).not.toHaveBeenCalled()
+    expect(apiFetch).not.toHaveBeenCalledWith('/workspace/files?path=targets.txt', expect.anything())
+    expect(globals.showToast).toHaveBeenCalledWith("Team viewers can view Files but can't change them.", 'error')
+  })
+
+  it('closes stale editors and reloads Files when the active scope changes', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({
+      owner: {
+        scope: 'team',
+        team_id: 'team_reload',
+        label: 'Team Reload',
+        read_only: false,
+      },
+      directories: [],
+      files: [{ path: 'team.txt', size: 9 }],
+      usage: { bytes_used: 9, file_count: 1 },
+      limits: { quota_bytes: 1024, max_files: 10 },
+    })))
+    const { globals, showWorkspaceEditor } = setupWorkspace(apiFetch)
+    const scopeHandler = globals.window.addEventListener.mock.calls
+      .find(([eventName]) => eventName === 'app:scope-changed')?.[1]
+
+    showWorkspaceEditor('personal.txt', 'personal\n')
+    expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(false)
+
+    scopeHandler()
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(document.getElementById('workspace-summary').textContent)
+      .toBe('Team Reload · 1 / 10 files · 9 B / 1 KB')
+    expect(document.querySelector('.workspace-file-name').textContent).toBe('team.txt')
   })
 
   it('renders nested workspace paths as navigable folders with breadcrumbs', () => {
@@ -290,7 +358,7 @@ describe('workspace UI helpers', () => {
     renderWorkspaceFiles({ files: [], usage: { bytes_used: 0, file_count: 0 }, limits: { max_files: 10 } })
 
     expect(document.querySelector('.workspace-empty').textContent)
-      .toBe('No session files yet. Create a text file or save command output to use with file-enabled commands.')
+      .toBe('No workspace files yet. Create a text file or save command output to use with file-enabled commands.')
   })
 
   it('saves new files relative to the currently selected folder', async () => {
@@ -617,7 +685,7 @@ describe('workspace UI helpers', () => {
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/workspace/files/read'))).toBe(false)
     expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('workspace-viewer').classList.contains('u-hidden')).toBe(true)
-    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds workspace max file size', 'error')
   })
 
   it('toasts and does not open the editor for oversized edit actions', async () => {
@@ -637,13 +705,13 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(true)
-    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds workspace max file size', 'error')
   })
 
   it('closes the loading viewer when a read is rejected after opening', async () => {
     const apiFetch = vi.fn((url) => {
       if (String(url).startsWith('/workspace/files/read')) {
-        return Promise.resolve(responseJson({ error: 'file exceeds session max file size' }, 413))
+        return Promise.resolve(responseJson({ error: 'file exceeds workspace max file size' }, 413))
       }
       return Promise.resolve(responseJson({}))
     })
@@ -654,7 +722,7 @@ describe('workspace UI helpers', () => {
 
     expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('workspace-viewer').classList.contains('u-hidden')).toBe(true)
-    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds workspace max file size', 'error')
   })
 
   it('refreshes the currently viewed file when the files list is refreshed', async () => {
@@ -682,7 +750,7 @@ describe('workspace UI helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
     expect(document.getElementById('workspace-viewer-title').textContent).toBe('targets.txt')
     expect(document.getElementById('workspace-viewer-text').textContent).toContain('updated target')
-    expect(document.getElementById('workspace-summary').textContent).toBe('1 / 10 files · 18 B / 1 KB')
+    expect(document.getElementById('workspace-summary').textContent).toBe('Personal · 1 / 10 files · 18 B / 1 KB')
   })
 
   it('refreshes the viewer directly and keeps following when scrolled to the bottom', async () => {
@@ -789,8 +857,11 @@ describe('workspace UI helpers', () => {
       if (String(url).startsWith('/workspace/files/read')) {
         return Promise.resolve(responseJson({ path: 'amass-viz/amass.html', text: '<html></html>' }))
       }
-      if (String(url).startsWith('/workspace/files/download')) {
-        return Promise.resolve(new Response(new Blob(['html']), { status: 200 }))
+      if (url === '/workspace/files/download-ticket' && opts?.method === 'POST') {
+        return Promise.resolve(responseJson({
+          ok: true,
+          url: '/workspace/files/download?ticket=workspace-ticket',
+        }))
       }
       if (String(url).startsWith('/workspace/files?path=amass-viz%2Famass.html') && opts?.method === 'DELETE') {
         return Promise.resolve(responseJson({
@@ -831,7 +902,11 @@ describe('workspace UI helpers', () => {
     document.querySelector('[data-workspace-viewer-action="download"]').click()
     await flushWorkspacePromises()
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/download?path=amass-viz%2Famass.html')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/download-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'amass-viz/amass.html' }),
+    })
     expect(clicked).toHaveBeenCalled()
 
     showWorkspaceViewer('amass-viz/amass.html', '<html></html>')
@@ -1121,8 +1196,8 @@ describe('workspace UI helpers', () => {
     })
 
     expect(getWorkspaceAutocompleteFileHints()).toEqual([
-      { value: 'targets.txt', description: 'session file · 11 B' },
-      { value: 'ffuf.json', description: 'session file · 2 KB' },
+      { value: 'targets.txt', description: 'personal file · 11 B' },
+      { value: 'ffuf.json', description: 'personal file · 2 KB' },
     ])
   })
 
@@ -1206,7 +1281,7 @@ describe('workspace UI helpers', () => {
       const input = opts.content.querySelector('input')
       input.value = 'reports'
       expect(opts.defaultFocus).toBe(input)
-      expect(opts.body.text).toBe('Create a session folder?')
+      expect(opts.body.text).toBe('Create a workspace folder?')
       return (await opts.actions.find(action => action.id === 'create').onActivate()) ? 'create' : null
     })
     const originalPrompt = window.prompt

@@ -76,13 +76,20 @@ def baseline_mode_from_watcher_create(data: Mapping[str, Any]) -> str:
     return "existing_run" if str(data.get("baseline_run_id") or "").strip() else "first_run"
 
 
-def baseline_run_for_session(run_id: str, session_id: str, *, conn) -> dict[str, Any]:
+def baseline_run_for_owner(run_id: str, session_id: str, *, team_id: str = "", conn) -> dict[str, Any]:
     baseline_id = str(run_id or "").strip()
     if not baseline_id:
         raise RouteBaselineRunNotFound("baseline run not found")
+    normalized_team_id = str(team_id or "").strip()
+    if normalized_team_id:
+        owner_sql = "team_id = ?"
+        owner_params = (normalized_team_id,)
+    else:
+        owner_sql = "(team_id IS NULL OR team_id = '') AND session_id = ?"
+        owner_params = (session_id,)
     row = conn.execute(
-        "SELECT id, session_id, command, finished FROM runs WHERE id = ? AND session_id = ?",
-        (baseline_id, session_id),
+        f"SELECT id, session_id, team_id, command, finished FROM runs WHERE id = ? AND {owner_sql}",  # nosec B608
+        (baseline_id, *owner_params),
     ).fetchone()
     if row is None:
         raise RouteBaselineRunNotFound("baseline run not found")
@@ -92,16 +99,21 @@ def baseline_run_for_session(run_id: str, session_id: str, *, conn) -> dict[str,
     return dict(row)
 
 
+def baseline_run_for_session(run_id: str, session_id: str, *, conn) -> dict[str, Any]:
+    return baseline_run_for_owner(run_id, session_id, team_id="", conn=conn)
+
+
 def normalize_watcher_create_payload(
     data: Mapping[str, Any],
     session_id: str,
     *,
+    team_id: str = "",
     conn,
     command_validator=validate_schedule_command,
 ) -> dict[str, Any]:
     baseline: dict[str, Any] = {}
     if baseline_mode_from_watcher_create(data) == "existing_run":
-        baseline = baseline_run_for_session(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
+        baseline = baseline_run_for_owner(str(data.get("baseline_run_id") or ""), session_id, team_id=team_id, conn=conn)
     command_text = str(data.get("command") or data.get("command_text") or baseline.get("command") or "")
     command = command_validator(
         command_text,

@@ -12,6 +12,7 @@ import config as _config
 from core.database import DB_BACKEND
 from core.database_backend import dialect_for_backend
 from core.redaction import apply_redaction_rules
+from services.projects.package_presets import known_package_preset_ids
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
     MAX_ENTITY_NOTE_BODY_LEN,
@@ -108,12 +109,16 @@ def normalize_evidence_package_payload(data):
             labels.append(label)
         if len(labels) > 20:
             raise ProjectWorkspaceError("label quota exceeded for this entity")
+    preset = _trim_text(data.get("preset"), 32).lower() or "custom"
+    if preset != "custom" and preset not in known_package_preset_ids(_config.CFG):
+        raise ProjectWorkspaceError("package preset is not configured")
+
     return {
         "name": name,
         "description": _trim_text(data.get("description"), MAX_PACKAGE_DESCRIPTION_LEN),
         "redaction_mode": redaction_mode,
         "include_artifacts": include_artifacts,
-        "preset": _trim_text(data.get("preset"), 32).lower() or "custom",
+        "preset": preset,
         "package_format_version": 1,
         "include_private_notes": bool(data.get("include_private_notes")),
         "selection": selection if isinstance(selection, dict) else None,
@@ -373,11 +378,18 @@ def package_manifest_without_private_notes(manifest):
         items = clean.get(key)
         if not isinstance(items, list):
             continue
-        clean[key] = [
-            {item_key: item_value for item_key, item_value in item.items() if item_key != "note"}
-            if isinstance(item, dict) else item
-            for item in items
-        ]
+        cleaned_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                cleaned_items.append(item)
+                continue
+            next_item = {item_key: item_value for item_key, item_value in item.items() if item_key != "note"}
+            if key == "findings" and isinstance(next_item.get("triage"), dict):
+                triage = dict(next_item["triage"])
+                triage.pop("verification_notes", None)
+                next_item["triage"] = triage
+            cleaned_items.append(next_item)
+        clean[key] = cleaned_items
     return clean
 
 

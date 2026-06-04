@@ -1,6 +1,6 @@
 # External Command Integrations
 
-This document explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and session workspace model.
+This document explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and personal/team Files workspace model.
 
 The goal is not to document every flag a tool supports. The goal is to make app-owned behavior visible: command rewrites, environment overrides, workspace file handling, permission assumptions, and validation rules.
 
@@ -11,7 +11,7 @@ The goal is not to document every flag a tool supports. The goal is to make app-
 - Preserve the command the user typed in history and UI wherever possible.
 - Rewrite only when the default tool behavior is broken, unsafe, misleading, or inaccessible in the web shell runtime.
 - Keep rewrites safe to apply more than once so users can provide the explicit flag themselves without duplicate options.
-- Prefer session workspace paths for user-visible inputs and outputs.
+- Prefer active Files workspace paths for user-visible inputs and outputs.
 - Keep useful session-owned files out of `/tmp/.config` when users should be able to inspect them later.
 - Treat external-tool adaptation as part of the command trust boundary; all filesystem path expansion must happen through command validation and workspace helpers.
 
@@ -23,7 +23,7 @@ User-submitted external commands run as the `scanner` user with the shared `appu
 
 The scanner wrapper sets `HOME=/tmp` so tools that insist on a writable home can use the container tmpfs instead of the read-only application filesystem. That default is useful for caches and temporary tool state, but command-specific integrations may override narrower environment variables when a tool's useful state needs to be session-scoped.
 
-Session workspace files are app-managed. Users can name relative files such as `targets.txt` or `amass`, and command validation rewrites those values to the active hashed session workspace path before subprocess launch.
+Files are app-managed. Users can name relative files such as `targets.txt` or `amass`, and command validation rewrites those values to the active hashed personal or team workspace path before subprocess launch.
 
 Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The registry supports injected flags, managed workspace directories, environment variables derived from managed workspace paths, and encrypted secret requirements. Python handles the common plumbing; the command registry handles the tool-specific rules.
 
@@ -35,14 +35,14 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | ---- | -------------- | --- |
 | `mtr` | Adds `--report-wide` when no report mode flag is present, unless the run is started through the Interactive PTY trigger. | Plain shell runs need clean line-oriented output for streaming and saved history; `mtr --interactive <host>` uses the PTY path for the live redraw view when the feature is enabled. |
 | `nmap` | Adds `-sT` when no scan mode is explicit. | TCP connect scans work reliably as the unprivileged `scanner` user; raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked. |
-| `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled, and declares workspace paths for response stores, Markdown/SARIF/JSON/JSONL exports, trace/error logs, resume files, and selected config/secret inputs. | Template storage must be writable under the read-only container filesystem, while useful per-session evidence and logs should be visible in Files without exposing template caches as session artifacts. |
-| `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful session artifacts; provider configs can contain API keys and remain session-owned rather than share/export artifacts. |
-| `dnsx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list input, wordlists, and normal outputs. | DNSX shares the ProjectDiscovery config path conventions and should keep generated state under the session-owned tool folder. |
-| `httpx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list/raw-request inputs, normal outputs, response/screenshot store directories, and config files. | Response stores and screenshots are high-value session evidence, while config state should remain visible only to the active session owner. |
-| `wget` | When Files are enabled, adds `-P <current workspace folder>` when no directory-prefix flag is present, and declares `-P` / `--directory-prefix` as workspace directory flags. | Default downloads land in the user's Files area instead of failing against the read-only container root, while explicit download folders still stay under the session workspace. |
-| `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
-| `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain session-visible. |
-| `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the session workspace, and launches with `XDG_CONFIG_HOME=<session workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-session database path instead of falling back to `$HOME/.config/amass`. |
+| `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled, and declares workspace paths for response stores, Markdown/SARIF/JSON/JSONL exports, trace/error logs, resume files, and selected config/secret inputs. | Template storage must be writable under the read-only container filesystem, while useful evidence and logs should be visible in Files without exposing template caches as artifacts. |
+| `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful artifacts; provider configs can contain API keys and remain owner-scoped rather than share/export artifacts. |
+| `dnsx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list input, wordlists, and normal outputs. | DNSX shares the ProjectDiscovery config path conventions and should keep generated state under the active owner folder. |
+| `httpx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list/raw-request inputs, normal outputs, response/screenshot store directories, and config files. | Response stores and screenshots are high-value evidence, while config state should remain visible only to the active personal/team owner. |
+| `wget` | When Files are enabled, adds `-P <current workspace folder>` when no directory-prefix flag is present, and declares `-P` / `--directory-prefix` as workspace directory flags. | Default downloads land in the user's Files area instead of failing against the read-only container root, while explicit download folders still stay under the active workspace. |
+| `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
+| `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain visible to the active owner. |
+| `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the active workspace, and launches with `XDG_CONFIG_HOME=<active workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-owner database path instead of falling back to `$HOME/.config/amass`. |
 | `ipinfo` | Injects optional `IPINFO_TOKEN` from the encrypted secrets vault and blocks config-writing/token-on-command-line flows such as `init`, `config`, `completion install`, and inline token flags. | Users can run the official IPinfo CLI for provider-native IP/ASN output without storing tokens in shell history or letting the CLI write persistent config inside the container. |
 | `urlscan-cli` | Injects `URLSCAN_API_KEY` from the encrypted secrets vault and blocks key/config/completion setup, inline key flags, and stdin-driven scan/result forms. | Users can submit URLs, fetch scan results, and search urlscan.io without writing keys to a local keyring/config file or putting tokens into command history. |
 | `chaos` | Injects `PDCP_API_KEY` from the encrypted secrets vault and blocks inline key flags, updater flows, list-file input, and direct output-file writes. | Users can query ProjectDiscovery Chaos for domain subdomains while keeping the provider key in the app vault and avoiding unmanaged file reads/writes. |
@@ -55,9 +55,9 @@ Workspace-aware flags are declared in `app/conf/commands.yaml` under each comman
 
 Validation behavior:
 
-- Relative workspace values are resolved under the active session workspace.
+- Relative workspace values are resolved under the active personal/team workspace.
 - Absolute paths are not rewritten and still pass through the normal deny rules.
-- Read flags require the session file to exist.
+- Read flags require the Files entry to exist in the active workspace.
 - Write and read/write flags prepare the destination path before subprocess launch.
 - Directory flags can create and prepare managed session directories.
 
@@ -89,7 +89,7 @@ runtime_adaptations:
       managed_directory_flag: -dir
 ```
 
-`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values stay safely quoted when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites from duplicating flags and prevent help/version commands from being changed. `requires_workspace: true` skips the injection unless Files are enabled and a session workspace is available. Injected tokens may use `{session_workspace}` to point at the current session's hashed workspace directory. `notice` prints a short terminal message when a rewrite needs user-facing explanation.
+`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values stay safely quoted when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites from duplicating flags and prevent help/version commands from being changed. `requires_workspace: true` skips the injection unless Files are enabled and an active workspace is available. Injected tokens may use `{session_workspace}` to point at the active personal/team hashed workspace directory. `notice` prints a short terminal message when a rewrite needs user-facing explanation.
 
 `managed_workspace_directory` is evaluated by workspace-aware validation. When it applies, the declared directory is injected if absent, rewritten through the same workspace directory helper as user-provided directory flags, and optionally rejects alternate user values so tool state does not split across multiple databases.
 
@@ -117,7 +117,7 @@ The Options Secrets picker reads this command-registry metadata so users see the
 
 `urlscan-cli` and `chaos` declare required CLI secrets. `urlscan-cli` receives `URLSCAN_API_KEY`; `chaos` receives `PDCP_API_KEY`. Their setup and inline-key flags are blocked so the vault stays the only supported key path.
 
-Run output is also filtered before it is captured or streamed: absolute paths under the current session workspace are displayed as user-facing workspace paths. For example:
+Run output is also filtered before it is captured or streamed: absolute paths under the active personal/team workspace are displayed as user-facing workspace paths. For example:
 
 ```text
 Creating resume file: /workspaces/sess_<hash>/tools/katana/resume-abcd.cfg
@@ -286,20 +286,21 @@ That makes Amass' default config path and explicit `-dir` converge on:
 
 ```text
 /workspaces/sess_<hash>/tools/amass
+/workspaces/team_<hash>/tools/amass
 ```
 
 Expected validation signals:
 
-- `asset.db`, `asset.db-shm`, and `asset.db-wal` grow under the session workspace.
+- `asset.db`, `asset.db-shm`, and `asset.db-wal` grow under the active personal/team workspace.
 - `/tmp/.config/amass` is not created for app-launched Amass database commands.
-- `amass subs -d <domain> -names` reads findings produced by prior `amass enum` runs in the same browser session.
+- `amass subs -d <domain> -names` reads findings produced by prior `amass enum` runs in the same active workspace.
 - `amass track` and `amass viz` read the same managed database used by `enum` and `subs`.
-- A different session token gets a different workspace directory and does not see the previous session's Amass database.
+- A different personal scope or team gets a different workspace directory and does not see the previous owner's Amass database.
 
 Additional workspace output handling:
 
-- `amass subs -o <file>` writes a session file.
-- `amass viz -o <directory>` writes visualization artifacts under a session directory.
+- `amass subs -o <file>` writes a Files entry in the active workspace.
+- `amass viz -o <directory>` writes visualization artifacts under an active workspace directory.
 
 ### Manual Smoke
 
@@ -337,8 +338,8 @@ Those raw-socket features are not reliable for the app's unprivileged `scanner` 
 
 Workspace integration is separate from the scan-mode rewrite:
 
-- `-iL` and script-args file flags can read session files.
-- output flags such as `-oN`, `-oX`, `-oG`, `-oA`, and `-oS` can write session files.
+- `-iL` and script-args file flags can read active workspace files.
+- output flags such as `-oN`, `-oX`, `-oG`, `-oA`, and `-oS` can write active workspace files.
 
 ---
 
@@ -356,8 +357,8 @@ when neither `-scan-type` nor `-st` is present. This makes naabu use TCP connect
 
 Workspace integration covers list input and output files:
 
-- `-l`, `--list`, and `-list` can read session files.
-- `-o` and `--output` can write session files.
+- `-l`, `--list`, and `-list` can read active workspace files.
+- `-o` and `--output` can write active workspace files.
 
 ---
 

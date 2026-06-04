@@ -108,6 +108,18 @@ const PROJECT_FINDINGS_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings.js'),
   'utf8',
 )
+const PROJECT_FINDINGS_BOARD_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_board.js'),
+  'utf8',
+)
+const FINDING_TRIAGE_EDITOR_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/findings/finding_triage_editor.js'),
+  'utf8',
+)
+const FINDINGS_BOARD_MODAL_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/findings/findings_board_modal.js'),
+  'utf8',
+)
 const PROJECT_ARTIFACTS_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_artifacts.js'),
   'utf8',
@@ -158,10 +170,12 @@ function loadShellChrome({
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   showToast = vi.fn(),
+  logClientError = vi.fn(),
   appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
   bindMobileSheet = null,
+  bindOutsideClickClose = () => {},
   bindPressable = (el, options = {}) => {
     if (el?.dataset) el.dataset.pressableBound = '1'
     if (typeof options.onActivate === 'function') {
@@ -175,6 +189,9 @@ function loadShellChrome({
   applyProjectAutoLinkExternalRunsPreference = (mode) => { preferences.pref_project_auto_link_external_runs = mode },
   getProjectAutoLinkRunEntitiesPreference = () => preferences.pref_project_auto_link_run_entities || 'on',
   applyProjectAutoLinkRunEntitiesPreference = (mode) => { preferences.pref_project_auto_link_run_entities = mode },
+  activeTeamScopeCan = () => true,
+  teamScopeDeniedMessage = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
+  downloadUrlAsAttachmentImpl = null,
 } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
@@ -197,6 +214,7 @@ function loadShellChrome({
         <button id="rail-more-btn" class="rail-nav-item nav-item" data-action="rail-more" type="button" aria-expanded="false" aria-controls="rail-more-menu"></button>
         <div id="rail-more-menu" class="u-hidden">
           <button class="rail-nav-item nav-item" data-action="status-monitor" type="button"></button>
+          <button class="rail-nav-item nav-item" data-action="findings-board" type="button"></button>
         </div>
         <button class="rail-nav-item nav-item" data-action="projects" type="button"><span class="rail-nav-glyph">◇</span></button>
       </nav>
@@ -298,6 +316,37 @@ function loadShellChrome({
         </div>
       </div>
     </div>
+    <div id="findings-board-overlay" class="u-hidden" aria-hidden="true">
+      <div id="findings-board-modal">
+        <span id="findings-board-title"></span>
+        <div id="findings-board-subtitle"></div>
+        <button id="findings-board-refresh-btn" type="button"></button>
+        <button class="findings-board-close" type="button"></button>
+        <div id="findings-board-message" class="u-hidden"></div>
+        <div id="findings-board-body"></div>
+      </div>
+    </div>
+    <div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
+      <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal">
+        <button type="button" id="finding-triage-close"></button>
+        <div id="finding-triage-subtitle"></div>
+        <div id="finding-triage-message" class="u-hidden"></div>
+        <form id="finding-triage-form">
+          <textarea id="finding-triage-remediation"></textarea>
+          <textarea id="finding-triage-verification-steps"></textarea>
+          <select id="finding-triage-status" class="form-select form-control-compact">
+            <option value="not_started">Not started</option>
+            <option value="ready_to_verify">Ready to verify</option>
+            <option value="verified">Verified</option>
+            <option value="needs_retest">Needs retest</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+          <textarea id="finding-triage-verification-notes"></textarea>
+          <button type="button" id="finding-triage-cancel"></button>
+          <button type="submit" id="finding-triage-save"></button>
+        </form>
+      </div>
+    </div>
   `
 
   const intervalCallbacks = []
@@ -323,6 +372,8 @@ function loadShellChrome({
     bindMobileSheet,
     enhanceAppSelects,
     syncAppSelect,
+    activeTeamScopeCan,
+    teamScopeDeniedMessage,
   }
   const downloadBlobAsAttachment = (blob, filename) => {
     const url = URL.createObjectURL(blob)
@@ -341,6 +392,15 @@ function loadShellChrome({
     window.setTimeout(revoke, 2000)
     window.addEventListener('pagehide', revoke, { once: true })
   }
+  const downloadUrlAsAttachment = downloadUrlAsAttachmentImpl || vi.fn((url, options = {}) => {
+    const anchor = document.createElement('a')
+    anchor.href = String(url || '')
+    if (options?.filename) anchor.download = String(options.filename)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  })
   global.APP_CONFIG = appConfig
 
   new Function(
@@ -350,6 +410,7 @@ function loadShellChrome({
     'performance',
     'fetch',
     'apiFetch',
+    'logClientError',
     'localStorage',
     'setInterval',
     'clearInterval',
@@ -382,13 +443,18 @@ function loadShellChrome({
     'getProjectAutoLinkRunEntitiesPreference',
     'applyProjectAutoLinkRunEntitiesPreference',
     'downloadBlobAsAttachment',
+    'downloadUrlAsAttachment',
     `
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
       window.bindPressable = bindPressable;
+      window.bindDisclosure = bindDisclosure;
+      global.bindDisclosure = bindDisclosure;
       window.bindDismissible = global.bindDismissible;
       window.bindMobileSheet = global.bindMobileSheet;
       window.enhanceAppSelects = global.enhanceAppSelects;
+      window.activeTeamScopeCan = global.activeTeamScopeCan;
+      window.teamScopeDeniedMessage = global.teamScopeDeniedMessage;
       ${ENTITY_METADATA_SRC}
       ${UI_ACTION_SHEET_SRC}
       ${ATLAS_ENTITY_ROW_SRC}
@@ -409,6 +475,8 @@ function loadShellChrome({
       ${PROJECT_WORKSPACE_RENDERER_SRC}
       ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
       ${PROJECT_NESTED_SHEETS_SRC}
+      ${FINDING_TRIAGE_EDITOR_SRC}
+      global.DarklabFindingTriageEditor = window.DarklabFindingTriageEditor;
       ${PROJECT_WORKSPACE_EVENTS_SRC}
       ${PROJECT_TARGETS_SRC}
       ${PROJECT_RUNS_SRC}
@@ -419,6 +487,8 @@ function loadShellChrome({
       ${PROJECT_FILTERS_SRC}
       ${PROJECT_ENTITIES_SRC}
       ${PROJECT_FINDINGS_SRC}
+      ${PROJECT_FINDINGS_BOARD_SRC}
+      ${FINDINGS_BOARD_MODAL_SRC}
       ${PROJECT_ARTIFACTS_SRC}
       ${PROJECT_PACKAGES_SRC}
       ${SHELL_CHROME_SRC}
@@ -436,6 +506,7 @@ function loadShellChrome({
       ok: true,
       json: () => Promise.resolve({ project: null, projects: [], counts: {} }),
     }),
+    logClientError,
     window.localStorage,
     (fn) => {
       intervalCallbacks.push(fn)
@@ -444,17 +515,28 @@ function loadShellChrome({
     () => {},
     name => preferences[name] || '',
     (name, value) => { preferences[name] = String(value) },
-    (el, options) => {
+    (el, options = {}) => {
       let open = !!options.initialOpen
-      el.setAttribute('aria-expanded', open ? 'true' : 'false')
-      el.addEventListener('click', () => {
-        open = !open
+      const panel = options.panel || null
+      const openClass = Object.prototype.hasOwnProperty.call(options, 'openClass') ? options.openClass : 'open'
+      const hiddenClass = options.hiddenClass || null
+      const sync = () => {
         el.setAttribute('aria-expanded', open ? 'true' : 'false')
+        if (panel?.classList) {
+          if (openClass) panel.classList.toggle(openClass, open)
+          if (hiddenClass) panel.classList.toggle(hiddenClass, !open)
+        }
+      }
+      sync()
+      if (el.dataset) el.dataset.disclosureBound = '1'
+      bindPressable(el, { onActivate: () => {
+        open = !open
+        sync()
         options.onToggle?.(open)
-      })
+      } })
     },
     bindPressable,
-    () => {},
+    bindOutsideClickClose,
     () => {},
     () => 'tab-1',
     () => null,
@@ -479,6 +561,7 @@ function loadShellChrome({
     getProjectAutoLinkRunEntitiesPreference,
     applyProjectAutoLinkRunEntitiesPreference,
     downloadBlobAsAttachment,
+    downloadUrlAsAttachment,
   )
 
   return {
@@ -495,9 +578,12 @@ function loadShellChrome({
     showWorkspaceViewer,
     showConfirm,
     showToast,
+    logClientError,
     bindDismissible,
     bindMobileSheet,
+    projectFindingsData: global.DarklabProjectFindingsData,
     openProjectWorkspace: global.openProjectWorkspace,
+    openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
     syncAppSelect,
@@ -505,9 +591,43 @@ function loadShellChrome({
 }
 
 describe('shell chrome rail sections', () => {
-  it('opens Status Monitor from the desktop rail nav item', () => {
+  it('opens Status Monitor and Findings Board from the desktop rail nav item', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
-    const shell = loadShellChrome({ openStatusMonitor })
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/atlas/findings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [{
+              id: 'finding-rail',
+              title: 'Rail finding',
+              raw_line: '443/tcp open https',
+              review_state: 'new',
+              run_id: 'run-rail',
+              run_command: 'nmap rail.example',
+            }],
+            total: 1,
+            has_more: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const bindDismissible = vi.fn((_el, options) => {
+      const keyHandler = (event) => {
+        if (event.key === 'Escape' && options.isOpen()) {
+          event.preventDefault()
+          options.onClose()
+        }
+      }
+      document.addEventListener('keydown', keyHandler)
+      return {
+        dispose: vi.fn(() => {
+          document.removeEventListener('keydown', keyHandler)
+        }),
+      }
+    })
+    const shell = loadShellChrome({ apiFetch, openStatusMonitor, bindDismissible })
     const nav = document.getElementById('rail-nav')
     const rail = document.getElementById('rail')
     const trigger = document.getElementById('rail-more-btn')
@@ -535,6 +655,21 @@ describe('shell chrome rail sections', () => {
 
     expect(shell.openStatusMonitor).toHaveBeenCalledWith({ source: 'rail' })
     expect(nav.querySelector('#rail-more-menu').classList.contains('u-hidden')).toBe(true)
+
+    trigger.click()
+    nav.querySelector('[data-action="findings-board"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(true)
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('findings-board-overlay'),
+      expect.objectContaining({ level: 'modal' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith(expect.stringMatching(/^\/atlas\/findings\?/), { cache: 'no-store' })
+    expect(document.getElementById('findings-board-body').textContent).toContain('Rail finding')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await tick()
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
   })
 
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {
@@ -869,6 +1004,273 @@ describe('shell chrome project workspace', () => {
     expect(projectListFetches).toBe(projectListFetchesBeforeDelete)
   })
 
+  it('renders Project auto-promote rules with preview, save, apply, and source detail chips', async () => {
+    const projects = [{ id: 'project-1', name: 'Rules Project', status: 'active' }]
+    const rules = [{
+      id: 'rule-1',
+      name: 'Owned domains',
+      enabled: true,
+      apply_on_run: true,
+      target_entity_kind: 'domain',
+      match_mode: 'domain_suffix',
+      pattern: 'darklab.sh',
+      filters: {},
+      last_applied_at: '2026-05-31T00:00:00Z',
+      linked_count: 1,
+    }]
+    const entityPage = {
+      entities: [{
+        id: 'ent-1',
+        type: 'domain',
+        canonical_value: 'darklab.sh',
+        occurrence_count: 2,
+        run_count: 1,
+        source: 'auto_promote_rule',
+        source_detail: { rule_name: 'Owned domains' },
+      }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+      counts_by_type: { domain: 1 },
+    }
+    const previewPayload = {
+      matched_count: 2,
+      shown_match_count: 2,
+      matched_in_scan_count: 2,
+      match_count_is_capped: true,
+      total_matches: null,
+      total_matches_known: false,
+      new_link_count: 1,
+      already_linked_count: 1,
+      skipped_suppressed_count: 0,
+      quota_limited_count: 0,
+      candidate_scan_truncated: true,
+      candidate_scan_limited_count: 1,
+      candidate_scan_count: 5000,
+      candidate_scan_limit: 5000,
+      truncated: true,
+      matches: [],
+    }
+    let autoPromoteFailure = null
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (
+        autoPromoteFailure
+        && String(url).includes(autoPromoteFailure.path)
+        && (!autoPromoteFailure.method || options.method === autoPromoteFailure.method)
+      ) {
+        return Promise.reject(autoPromoteFailure.error)
+      }
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project: projects[0] }) })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: projects[0],
+            counts: { runs: 0, entities: 1, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            entity_counts: { domain: 1 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/entities?')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(entityPage) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ rules }) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules/preview') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, preview: previewPayload }) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules' && options.method === 'POST') {
+        const payload = JSON.parse(options.body)
+        rules.push({ ...payload, id: 'rule-2', filters: payload.filters || {}, linked_count: 0, created: '2026-05-31T01:00:00Z' })
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, rule: rules.at(-1) }) })
+      }
+      if (url === '/projects/project-1/auto-promote-rules/rule-2/apply') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, result: previewPayload }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn(() => Promise.resolve('apply'))
+    const shell = loadShellChrome({ apiFetch, showConfirm })
+
+    await shell.openProjectAutoPromoteRuleFromAtlas({
+      project_id: 'project-1',
+      name: 'Atlas view: /admin/',
+      target_entity_kind: 'url',
+      match_mode: 'contains',
+      pattern: '/admin/',
+      filters: {
+        source_command_roots: [],
+        source_run_ids: ['run-1'],
+        include_suppressed: true,
+        first_seen_after_rule_created: false,
+      },
+    })
+    await tick()
+    document.querySelector('[data-project-tab="entities"]').click()
+    await tick()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Auto-promoted: Owned domains')
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules', { cache: 'no-store' })
+    let field = name => [...document.querySelectorAll(`[data-project-auto-promote-field="${name}"]`)].at(-1)
+    const projectAction = action => [...document.querySelectorAll(`[data-project-action="${action}"]`)].at(-1)
+    expect(field('name').value).toBe('Atlas view: /admin/')
+    expect(field('target_entity_kind').value).toBe('url')
+    expect(field('match_mode').value).toBe('contains')
+    expect(field('pattern').value).toBe('/admin/')
+    expect(field('source_run_ids').value).toBe('run-1')
+    expect(field('include_suppressed').checked).toBe(true)
+
+    projectAction('cancel-project-auto-promote-rule').click()
+    await tick()
+
+    projectAction('new-project-auto-promote-rule').click()
+    await tick()
+    field = name => [...document.querySelectorAll(`[data-project-auto-promote-field="${name}"]`)].at(-1)
+    expect(projectAction('toggle-project-auto-promote-rules')?.getAttribute('aria-expanded')).toBe('true')
+    expect(projectAction('toggle-project-auto-promote-rules')?.getAttribute('aria-controls')).toBeTruthy()
+    const editorForm = [...document.querySelectorAll('.project-auto-promote-editor')].at(-1)
+    const submitEvent = new Event('submit', { bubbles: true, cancelable: true })
+    expect(editorForm.dispatchEvent(submitEvent)).toBe(false)
+    expect(submitEvent.defaultPrevented).toBe(true)
+    let filterTrigger = [...document.querySelectorAll('.project-auto-promote-filters-trigger')].at(-1)
+    expect(document.querySelector('.project-auto-promote-filters summary')).toBeNull()
+    expect(filterTrigger?.dataset.disclosureBound).toBe('1')
+    expect(filterTrigger?.dataset.pressableBound).toBe('1')
+    expect(filterTrigger?.getAttribute('aria-expanded')).toBe('false')
+    expect([...document.querySelectorAll('.project-auto-promote-filters-panel')].at(-1).hidden).toBe(true)
+    filterTrigger.click()
+    await tick()
+    filterTrigger = [...document.querySelectorAll('.project-auto-promote-filters-trigger')].at(-1)
+    expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
+    expect([...document.querySelectorAll('.project-auto-promote-filters-panel')].at(-1).hidden).toBe(false)
+    field('source_command_roots').value = 'nmap'
+    field('source_command_roots').dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+    filterTrigger = [...document.querySelectorAll('.project-auto-promote-filters-trigger')].at(-1)
+    expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
+    expect(field('source_command_roots').value).toBe('nmap')
+    const optionValues = name => [...field(name).options].map(option => option.value)
+    expect(optionValues('match_mode')).toContain('domain_suffix')
+    expect(optionValues('match_mode')).not.toContain('cidr')
+    field('target_entity_kind').value = 'ip'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(optionValues('match_mode')).toContain('cidr')
+    expect(optionValues('match_mode')).not.toContain('domain_suffix')
+    expect(field('match_mode').value).toBe('exact')
+    field('target_entity_kind').value = 'any'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(optionValues('match_mode')).toEqual(expect.arrayContaining(['domain_suffix', 'cidr']))
+    field('target_entity_kind').value = 'hash'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(optionValues('match_mode')).not.toEqual(expect.arrayContaining(['domain_suffix']))
+    expect(optionValues('match_mode')).not.toEqual(expect.arrayContaining(['cidr']))
+    field('target_entity_kind').value = 'domain'
+    field('target_entity_kind').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    field('match_mode').value = 'domain_suffix'
+    field('match_mode').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    field('name').value = 'New domains'
+    field('name').dispatchEvent(new Event('input', { bubbles: true }))
+    field('pattern').value = 'example.com'
+    field('pattern').dispatchEvent(new Event('input', { bubbles: true }))
+    field('apply_on_run').checked = true
+    field('apply_on_run').dispatchEvent(new Event('change', { bubbles: true }))
+    field('applyAfterSave').checked = true
+    field('applyAfterSave').dispatchEvent(new Event('change', { bubbles: true }))
+    shell.showToast.mockClear()
+    projectAction('save-project-auto-promote-rule').click()
+    await tick()
+    expect(shell.showToast).toHaveBeenCalledWith('Preview the rule before saving.', 'error')
+    projectAction('preview-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+    expect([...document.querySelectorAll('.project-auto-promote-preview')].at(-1).textContent).toContain('2 shown')
+    expect([...document.querySelectorAll('.project-auto-promote-preview')].at(-1).textContent).toContain('scanned first 5,000 candidates')
+    field('name').value = 'Renamed domains'
+    field('name').dispatchEvent(new Event('input', { bubbles: true }))
+    field('apply_on_run').checked = false
+    field('apply_on_run').dispatchEvent(new Event('change', { bubbles: true }))
+    shell.showToast.mockClear()
+    projectAction('save-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules/preview', expect.objectContaining({
+      method: 'POST',
+    }))
+    const previewCalls = apiFetch.mock.calls.filter(([url]) => url === '/projects/project-1/auto-promote-rules/preview')
+    expect(previewCalls).toHaveLength(2)
+    expect(JSON.parse(previewCalls[1][1].body).created).toBe('2026-05-31T01:00:00Z')
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules/rule-2/apply', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      actions: expect.arrayContaining([expect.objectContaining({ id: 'apply' })]),
+    }))
+    expect(shell.showToast).toHaveBeenCalledWith(expect.stringContaining('Auto-promote rule saved and applied'), 'success')
+    expect([...document.querySelectorAll('.project-auto-promote-panel')].at(-1)?.textContent).toContain('Renamed domains')
+
+    const failWith = (path, method = '', message = 'network failed') => {
+      autoPromoteFailure = { path, method, error: new Error(message) }
+      shell.logClientError.mockClear()
+      shell.showToast.mockClear()
+      return autoPromoteFailure.error
+    }
+    const expectSafeAutoPromoteLog = (message, error) => {
+      expect(shell.logClientError).toHaveBeenCalledWith(message, error)
+      const context = shell.logClientError.mock.calls.at(-1)[0]
+      expect(context).not.toContain('darklab.sh')
+      expect(context).not.toContain('Owned domains')
+      expect(context).not.toContain('Renamed domains')
+    }
+
+    let failure = failWith('/auto-promote-rules/preview', 'POST')
+    projectAction('preview-stored-project-auto-promote-rule').click()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule stored preview failed project_id=project-1 rule_id=rule-2', failure)
+
+    failure = failWith('/auto-promote-rules/rule-2/apply', 'POST')
+    projectAction('apply-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule apply failed project_id=project-1 rule_id=rule-2', failure)
+
+    failure = failWith('/auto-promote-rules/rule-2', 'DELETE')
+    showConfirm.mockResolvedValueOnce('delete')
+    projectAction('delete-project-auto-promote-rule').click()
+    await tick()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule delete failed project_id=project-1 rule_id=rule-2', failure)
+
+    autoPromoteFailure = null
+    projectAction('edit-project-auto-promote-rule').click()
+    await tick()
+    projectAction('preview-project-auto-promote-rule').click()
+    await tick()
+    failure = failWith('/auto-promote-rules/rule-2', 'PUT')
+    projectAction('save-project-auto-promote-rule').click()
+    await tick()
+    expectSafeAutoPromoteLog('project auto-promote rule save failed project_id=project-1 rule_id=rule-2', failure)
+  })
+
   it('renders the mobile project list with active-first rows and collapsed archived projects', async () => {
     document.body.classList.add('mobile-terminal-mode')
     const inertDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'inert')
@@ -1073,6 +1475,16 @@ describe('shell chrome project workspace', () => {
   it('drills into mobile project detail tabs and returns to the list', async () => {
     document.body.classList.add('mobile-terminal-mode')
     const projects = [{ id: 'project-1', name: 'darklab.sh', status: 'active' }]
+    const rules = [{
+      id: 'rule-1',
+      name: 'Owned domains',
+      enabled: true,
+      apply_on_run: true,
+      target_entity_kind: 'domain',
+      match_mode: 'domain_suffix',
+      pattern: 'darklab.sh',
+      filters: {},
+    }]
     const apiFetch = vi.fn((url) => {
       if (url === '/projects/active') {
         return Promise.resolve({
@@ -1088,13 +1500,34 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project: projects[0],
-            counts: { runs: 1001, findings: 5, artifacts: 9, packages: 2, targets: 1, notes: 0 },
+            counts: { runs: 1001, findings: 5, entities: 1, artifacts: 9, packages: 2, targets: 1, notes: 0 },
+            entity_counts: { domain: 1 },
             runs: [],
             targets: [],
             artifacts: [],
             packages: [],
           }),
         })
+      }
+      if (String(url).startsWith('/projects/project-1/entities?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            entities: [{
+              id: 'ent-1',
+              type: 'domain',
+              canonical_value: 'darklab.sh',
+              occurrence_count: 2,
+            }],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            counts_by_type: { domain: 1 },
+          }),
+        })
+      }
+      if (url === '/projects/project-1/auto-promote-rules') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ rules }) })
       }
       if (String(url).startsWith('/projects/project-1/targets?')) {
         return Promise.resolve({
@@ -1135,6 +1568,17 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(document.getElementById('project-mobile-detail-body').textContent).toContain('No evidence packages yet')
       expect(document.getElementById('project-mobile-detail-body').querySelector('[data-project-action="package-wizard-open"]')).not.toBeNull()
+
+      document.querySelector('[data-project-mobile-detail-tab="entities"]').click()
+      await tick()
+      await tick()
+      const detailBody = document.getElementById('project-mobile-detail-body')
+      expect(detailBody.querySelector('[data-project-action="toggle-project-auto-promote-rules"]')).not.toBeNull()
+      detailBody.querySelector('[data-project-action="toggle-project-auto-promote-rules"]').click()
+      await tick()
+      await tick()
+      expect(detailBody.querySelector('.project-auto-promote-panel')?.textContent).toContain('Owned domains')
+      expect(detailBody.querySelector('.project-auto-promote-panel')?.textContent).toContain('New rule')
 
       document.querySelector('[data-project-mobile-action="back-to-list"]').click()
       await tick()
@@ -1251,6 +1695,26 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
+      if (url === '/findings/finding-high/triage') {
+        if (options.method === 'PUT') {
+          const payload = JSON.parse(options.body || '{}')
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ triage: payload }),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            triage: {
+              remediation: '',
+              verification_steps: '',
+              verification_status: 'not_started',
+              verification_notes: '',
+            },
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
@@ -1318,6 +1782,9 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('443 open')
       expect(detailBody.textContent).toContain('443/tcp open https')
       expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
+      expect(detailBody.querySelector('[data-project-action="open-findings-board"]')).toBeNull()
+      expect(detailBody.querySelector('[data-project-finding-view-mode="board"]')).toBeNull()
+      expect(detailBody.querySelector('.project-finding-board')).toBeNull()
       detailBody.querySelector('.project-mobile-row-menu-trigger').click()
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
@@ -1397,6 +1864,60 @@ describe('shell chrome project workspace', () => {
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
     }
+  })
+
+  it('opens read-only triage for visible filtered Project findings in view-only team scope', async () => {
+    const finding = {
+      id: 'finding-filtered-mobile',
+      title: 'Filtered mobile finding',
+      review_state: 'new',
+      triage: {
+        remediation: 'Review the exposed endpoint.',
+        verification_status: 'not_started',
+      },
+    }
+    const editor = {
+      compactTriage: vi.fn(triage => triage),
+      open: vi.fn(() => Promise.resolve()),
+    }
+    const sandbox = {
+      activeTeamScopeCan: capability => capability !== 'triage_findings',
+      DarklabFindingTriageEditor: editor,
+      teamScopeDeniedMessage: action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
+    }
+    const projectEvents = new Function(
+      'globalThis',
+      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn globalThis.DarklabProjectWorkspaceEvents;`,
+    )(sandbox)
+    const setProjectWorkspaceMessage = vi.fn()
+    const controller = projectEvents.createProjectWorkspaceEventsController({
+      filteredProjectFindings: () => [finding],
+      mobileView: () => 'detail',
+      projectFindingItems: () => [],
+      projectSummary: () => ({ project: { id: 'project-1', name: 'Project' } }),
+      renderProjectExplorer: vi.fn(),
+      renderProjectMobileDetail: vi.fn(),
+      selectedProjectId: () => 'project-1',
+      setProjectWorkspaceMessage,
+      updateCachedProjectFinding: vi.fn(),
+      workspaceTab: () => 'findings',
+    })
+    const button = document.createElement('button')
+    button.dataset.projectAction = 'edit-finding-triage'
+    button.dataset.projectId = 'project-1'
+    button.dataset.findingId = 'finding-filtered-mobile'
+
+    await controller.handleActionButton(button)
+
+    expect(setProjectWorkspaceMessage).toHaveBeenCalledWith('')
+    expect(editor.open).toHaveBeenCalledWith(finding, expect.objectContaining({
+      canEdit: false,
+      onSaved: expect.any(Function),
+    }))
+    expect(setProjectWorkspaceMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('Finding is missing'),
+      expect.anything(),
+    )
   })
 
   it('opens the mobile project compare stepper and runs a baseline label comparison', async () => {
@@ -1479,18 +2000,50 @@ describe('shell chrome project workspace', () => {
     }
   })
 
-  it('opens projects from the active project HUD chip', async () => {
-    const apiFetch = vi.fn((url) => {
+  it('opens the active project HUD switcher and keeps Projects as a menu action', async () => {
+    let scope = 'personal'
+    let canCreateProjects = false
+    const projectsByScope = {
+      personal: [
+        { id: 'project-1', name: 'darklab.sh', status: 'active' },
+        { id: 'project-2', name: 'api.darklab.sh', status: 'active' },
+      ],
+      team: [
+        { id: 'team-project-1', name: 'team.darklab.sh', status: 'active' },
+      ],
+    }
+    const activeProjectByScope = {
+      personal: projectsByScope.personal[0],
+      team: null,
+    }
+    const projects = [
+      activeProjectByScope.personal,
+      { id: 'project-2', name: 'api.darklab.sh', status: 'active' },
+    ]
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
+        if (options.method === 'POST') {
+          const body = JSON.parse(options.body)
+          activeProjectByScope[scope] = projectsByScope[scope].find(project => project.id === body.project_id) || null
+        } else if (options.method === 'DELETE') {
+          activeProjectByScope[scope] = null
+        }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh', status: 'active' } }),
+          json: () => Promise.resolve({ project: activeProjectByScope[scope] }),
+        })
+      }
+      if (String(url).startsWith('/projects?mode=switcher')) {
+        const scopedProjects = projectsByScope[scope]
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: scopedProjects, total: scopedProjects.length, limit: 8, query: '' }),
         })
       }
       if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+          json: () => Promise.resolve({ projects }),
         })
       }
       if (url === '/projects/project-1/summary') {
@@ -1508,14 +2061,132 @@ describe('shell chrome project workspace', () => {
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    loadShellChrome({ apiFetch })
+    const bindOutsideClickClose = vi.fn((panel, options) => {
+      const handler = (event) => {
+        if (!options.isOpen()) return
+        const target = event.target
+        if (panel?.contains?.(target)) return
+        if (options.triggers?.contains?.(target)) return
+        options.onClose()
+      }
+      document.addEventListener('click', handler, !!options.capture)
+      return { dispose: vi.fn() }
+    })
+    loadShellChrome({
+      apiFetch,
+      bindOutsideClickClose,
+      activeTeamScopeCan: capability => capability !== 'mutate_projects' || canCreateProjects,
+    })
 
     await tick()
     document.getElementById('hud-project-cell').click()
     await tick()
+
+    const menu = document.getElementById('hud-project-menu')
+    expect(menu).not.toBeNull()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('hud-project-cell').getAttribute('aria-expanded')).toBe('true')
+    expect(menu.querySelector('.hud-project-search')).toBe(document.activeElement)
+    expect(menu.querySelector('[data-action="select-project"]')?.textContent).toContain('darklab.sh')
+    expect(menu.querySelector('[data-action="create-project"]').disabled).toBe(true)
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+    expect(bindOutsideClickClose).toHaveBeenCalledWith(menu, expect.objectContaining({ capture: true }))
+
+    document.getElementById('hud-project-cell').click()
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+
+    const terminalSurface = document.createElement('div')
+    terminalSurface.addEventListener('click', event => event.stopPropagation())
+    document.body.appendChild(terminalSurface)
+    terminalSurface.click()
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+
+    canCreateProjects = true
+    document.dispatchEvent(new CustomEvent('app:scope-capabilities-changed'))
+    expect(menu.querySelector('[data-action="create-project"]').disabled).toBe(false)
+
+    const leakedKeydown = vi.fn()
+    document.addEventListener('keydown', leakedKeydown)
+    menu.querySelector('.hud-project-search')
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    expect(leakedKeydown).not.toHaveBeenCalled()
+    menu.querySelector('.hud-project-search')
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(menu.querySelector('[data-action="open-projects"]')).toBe(document.activeElement)
+    expect(leakedKeydown).not.toHaveBeenCalled()
+    document.removeEventListener('keydown', leakedKeydown)
+
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hud-project-cell')).toBe(document.activeElement)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+
+    Array.from(menu.querySelectorAll('[data-action="select-project"]'))
+      .find(btn => btn.textContent.includes('api.darklab.sh'))
+      .click()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: 'project-2' }),
+    })
+    expect(document.getElementById('hud-project').textContent).toBe('api.darklab.sh')
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+
+    scope = 'team'
+    document.dispatchEvent(new CustomEvent('app:scope-changed', { detail: { team_id: 'team-1', label: 'Darklab Team' } }))
+    await tick()
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hud-project').textContent).toBe('No project')
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    expect(menu.textContent).toContain('team.darklab.sh')
+    expect(menu.textContent).not.toContain('api.darklab.sh')
+
+    scope = 'personal'
+    document.dispatchEvent(new CustomEvent('app:scope-changed', { detail: { team_id: '', label: 'Personal' } }))
+    await tick()
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    menu.querySelector('[data-action="clear-active-project"]').click()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/active', { method: 'DELETE' })
+    expect(document.getElementById('hud-project').textContent).toBe('No project')
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+    menu.querySelector('[data-action="open-projects"]').click()
+    await tick()
     await tick()
 
     expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(true)
+    expect(menu.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hud-project-cell').getAttribute('aria-expanded')).toBe('false')
     expect(apiFetch).toHaveBeenCalledWith(
       expect.stringContaining('/projects?include_archived=1'),
       { cache: 'no-store' },
@@ -1538,6 +2209,8 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
 
+    expect(document.getElementById('hud-project-cell').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('hud-project').textContent).toBe('No project')
     expect(document.getElementById('project-workspace-body').textContent).toContain('No projects yet')
     expect(document.getElementById('project-explorer-body').textContent).toContain('Create or select a project')
     expect(document.getElementById('project-notes-form').classList.contains('u-hidden')).toBe(true)
@@ -2248,6 +2921,31 @@ describe('shell chrome project workspace', () => {
   it('hides project artifacts and raw package artifact inclusion when Files are disabled', async () => {
     const project = { id: 'project-1', name: 'darklab.sh', status: 'active' }
     const apiFetch = vi.fn((url) => {
+      if (url === '/projects/package-presets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            presets: [{
+              id: 'files_bundle',
+              label: 'Files Bundle',
+              description: 'Preset that requests artifacts when Files are enabled.',
+              name_suffix: 'files',
+              redaction_mode: 'raw',
+              include_artifacts: true,
+              include_private_notes: false,
+              labels: [],
+              notes: '',
+              selection: {
+                runs: 'all',
+                transcripts: 'none',
+                findings: 'none',
+                artifacts: 'selectable',
+                targets: 'none',
+              },
+            }],
+          }),
+        })
+      }
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
@@ -2299,6 +2997,8 @@ describe('shell chrome project workspace', () => {
     await tick()
     document.querySelector('[data-project-action="package-wizard-open"]').click()
     await tick()
+    await tick()
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Files Bundle')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     document.querySelector('[data-project-action="package-wizard-next"]').click()
@@ -2479,6 +3179,105 @@ describe('shell chrome project workspace', () => {
       resolvePackageDownloadBlob = resolve
     })
     const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/package-presets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            presets: [
+              {
+                id: 'evidence',
+                label: 'Evidence',
+                description: 'Reviewed findings, related transcripts, targets, and selected raw artifacts.',
+                name_suffix: 'evidence',
+                redaction_mode: 'raw',
+                include_artifacts: true,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'with_findings',
+                  findings: 'non_false_positive',
+                  artifacts: 'selectable',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'summary',
+                label: 'Summary',
+                description: 'Findings, targets, and metadata without transcript HTML or raw artifacts.',
+                name_suffix: 'summary',
+                redaction_mode: 'raw',
+                include_artifacts: false,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'none',
+                  findings: 'non_false_positive',
+                  artifacts: 'none',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'full',
+                label: 'Full Archive',
+                description: 'All linked runs, findings, targets, and available raw artifacts.',
+                name_suffix: 'full',
+                redaction_mode: 'raw',
+                include_artifacts: true,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'all',
+                  findings: 'all',
+                  artifacts: 'selectable',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'redacted',
+                label: 'Redacted',
+                description: 'Metadata, findings, targets, and transcripts with sensitive fields redacted.',
+                name_suffix: 'redacted',
+                redaction_mode: 'redacted',
+                include_artifacts: true,
+                include_private_notes: false,
+                labels: [],
+                notes: '',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'with_findings',
+                  findings: 'non_false_positive',
+                  artifacts: 'selectable',
+                  targets: 'all',
+                },
+              },
+              {
+                id: 'customer_handoff',
+                label: 'Customer Handoff',
+                description: 'Client-ready summary with default labels and private notes included.',
+                name_suffix: 'customer',
+                redaction_mode: 'redacted',
+                include_artifacts: false,
+                include_private_notes: true,
+                labels: ['client'],
+                notes: 'Share after review.',
+                selection: {
+                  runs: 'all',
+                  transcripts: 'none',
+                  findings: 'non_false_positive',
+                  artifacts: 'none',
+                  targets: 'all',
+                },
+              },
+            ],
+          }),
+        })
+      }
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
@@ -2795,10 +3594,13 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/artifacts/artifact-1/download') {
+      if (url === '/projects/project-1/artifacts/artifact-1/download-ticket' && options.method === 'POST') {
         return Promise.resolve({
           ok: true,
-          blob: () => Promise.resolve(new Blob(['{"template":"ok"}\n'], { type: 'application/json' })),
+          json: () => Promise.resolve({
+            ok: true,
+            url: '/projects/project-1/artifacts/artifact-1/download?ticket=artifact-ticket',
+          }),
         })
       }
       if (url === '/projects/project-1/packages/pkg-1') {
@@ -2833,10 +3635,16 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download') {
+      if (
+        url === '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download-ticket'
+        && options.method === 'POST'
+      ) {
         return Promise.resolve({
           ok: true,
-          blob: () => packageDownloadBlob,
+          json: () => packageDownloadBlob.then(() => ({
+            ok: true,
+            url: '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download?ticket=package-ticket',
+          })),
         })
       }
       if (url === '/projects/project-1/packages' && options.method === 'POST') {
@@ -2899,6 +3707,7 @@ describe('shell chrome project workspace', () => {
       return originalSetTimeout(callback, delay, ...args)
     })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const downloadUrlAsAttachment = vi.fn()
     const shell = loadShellChrome({
       apiFetch,
       restoreHistoryRunIntoTab,
@@ -2907,6 +3716,7 @@ describe('shell chrome project workspace', () => {
       fetchAndRenderHistoryComparison,
       bindDismissible,
       bindMobileSheet,
+      downloadUrlAsAttachmentImpl: downloadUrlAsAttachment,
     })
 
     document.dispatchEvent(new CustomEvent('app:project-target-discovered', { detail: { project_id: 'project-1', count: 2 } }))
@@ -3115,6 +3925,46 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
     expect(document.getElementById('project-explorer-body').textContent).toContain('retest')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('old-label')
+
+    const findingTriageButton = document.querySelector(
+      '#project-explorer-body [data-project-action="edit-finding-triage"][data-finding-id="finding-1"]',
+    )
+    const findingActionGroup = findingTriageButton?.closest('.project-finding-row-button-group')
+    expect(window.DarklabFindingTriageEditor?.open).toEqual(expect.any(Function))
+    expect(findingTriageButton).not.toBeNull()
+    expect(findingActionGroup?.querySelector('[data-project-action="edit-finding-metadata"]')).not.toBeNull()
+    expect(findingTriageButton.disabled).toBe(false)
+    expect(findingTriageButton.dataset.projectId).toBe('project-1')
+    const triageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
+    findingTriageButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    expect(document.getElementById('project-workspace-message').textContent).not.toContain('Finding is missing')
+    expect(triageOpenSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'finding-1' }), expect.objectContaining({
+      canEdit: true,
+      onSaved: expect.any(Function),
+    }))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+    document.getElementById('finding-triage-remediation').value = 'Patch the affected service.'
+    document.getElementById('finding-triage-status').value = 'ready_to_verify'
+    document.getElementById('finding-triage-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/triage', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        remediation: 'Patch the affected service.',
+        verification_steps: '',
+        verification_status: 'ready_to_verify',
+        verification_notes: '',
+      }),
+    }))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Ready to verify')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('remediation')
 
     const sharedFilterMenu = document.querySelector('.project-shared-filter-menu')
     expect(sharedFilterMenu?.tagName).toBe('DIV')
@@ -3403,14 +4253,14 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith(
-      '/projects/project-1/artifacts/artifact-1/download',
-      { cache: 'no-store' },
+      '/projects/project-1/artifacts/artifact-1/download-ticket',
+      { method: 'POST', cache: 'no-store' },
     )
-    expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
-    expect(delayedRevokes).toHaveLength(1)
-    delayedRevokes[0]()
-    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-1')
-    globalThis.URL.revokeObjectURL.mockClear()
+    expect(downloadUrlAsAttachment).toHaveBeenCalledWith(
+      '/projects/project-1/artifacts/artifact-1/download?ticket=artifact-ticket',
+      { filename: 'nuclei.json' },
+    )
+    expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
     expect(document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-2"]').disabled)
       .toBe(true)
     globalThis.URL.createObjectURL.mockClear()
@@ -3475,8 +4325,8 @@ describe('shell chrome project workspace', () => {
       { method: 'POST', cache: 'no-store' },
     )
     expect(apiFetch).toHaveBeenCalledWith(
-      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download',
-      { cache: 'no-store' },
+      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download-ticket',
+      { method: 'POST', cache: 'no-store' },
     )
     expect(packageDownloadButton.disabled).toBe(true)
     expect(packageDownloadButton.classList.contains('is-preparing')).toBe(true)
@@ -3489,15 +4339,17 @@ describe('shell chrome project workspace', () => {
     resolvePackageDownloadBlob(new Blob(['package zip'], { type: 'application/zip' }))
     await tick()
     await tick()
-    expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+    expect(downloadUrlAsAttachment).toHaveBeenCalledWith(
+      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download?ticket=package-ticket',
+      { filename: 'darklab-evidence.zip' },
+    )
+    expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
     expect(packageDownloadButton.disabled).toBe(false)
     expect(packageDownloadButton.classList.contains('is-preparing')).toBe(false)
     expect(packageDownloadButton.getAttribute('aria-busy')).toBeNull()
     expect(packageDownloadButton.textContent).toBe('Download')
     expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()
-    expect(delayedRevokes).toHaveLength(2)
-    delayedRevokes[1]()
-    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-2')
+    expect(delayedRevokes).toHaveLength(0)
     globalThis.URL.revokeObjectURL.mockClear()
     window.dispatchEvent(new Event('pagehide'))
     expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()
@@ -3555,6 +4407,26 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-package-wizard-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preset')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Evidence')
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/package-presets', { cache: 'no-store' })
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Customer Handoff')
+    const customPreset = document.querySelector('input[name="project-package-preset"][value="customer_handoff"]')
+    customPreset.checked = true
+    customPreset.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('[data-project-package-field="labels"]').value).toBe('client')
+    expect(document.querySelector('[data-project-package-field="notes"]').value).toBe('Share after review.')
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-package-private-notes]').checked).toBe(true)
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-package-field="redaction_mode"]').value).toBe('redacted')
+    expect(document.querySelector('[data-project-package-include-artifacts]').checked).toBe(false)
+    document.querySelector('[data-project-action="package-wizard-back"]').click()
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-back"]').click()
+    await tick()
     const fullPreset = document.querySelector('input[name="project-package-preset"][value="full"]')
     fullPreset.checked = true
     fullPreset.dispatchEvent(new Event('change', { bubbles: true }))
@@ -3697,6 +4569,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1'])
     expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
     expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('note')
 
     document.querySelector('[data-project-tab="runs"]').click()
     await tick()
@@ -3922,6 +4795,11 @@ describe('shell chrome project workspace', () => {
         severity: 'critical',
         review_state: 'important',
         target_id: 'target-web',
+        triage: {
+          verification_status: 'verified',
+          has_remediation: true,
+          has_verification_steps: true,
+        },
       },
     ]
     const apiFetch = vi.fn((url) => {
@@ -3969,6 +4847,75 @@ describe('shell chrome project workspace', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
     const shell = loadShellChrome({ apiFetch })
+    const projectFindingsData = shell.projectFindingsData
+    const board = projectFindingsData.boardColumnsFromFindings([
+      ...projectFindings,
+      {
+        id: 'finding-unknown',
+        title: 'Unknown review state',
+        review_state: 'triaged_elsewhere',
+        target_ids: ['target-api', 'target-api'],
+        labels: ['needs-owner'],
+        note: 'check manually',
+        source_run_exists: false,
+      },
+      { id: 'finding-extra-new', title: 'Another new issue', review_state: 'new' },
+    ], { limit: 1 })
+    const uncappedBoard = projectFindingsData.boardColumnsFromFindings([
+      ...projectFindings,
+      {
+        id: 'finding-unknown',
+        title: 'Unknown review state',
+        review_state: 'triaged_elsewhere',
+        target_ids: ['target-api', 'target-api'],
+        labels: ['needs-owner'],
+        note: 'check manually',
+        source_run_exists: false,
+      },
+    ], { limit: 10 })
+    const newColumn = board.columns.find(column => column.state === 'new')
+    const reviewedColumn = board.columns.find(column => column.state === 'reviewed')
+    const falsePositiveColumn = board.columns.find(column => column.state === 'false_positive')
+    const followUpColumn = board.columns.find(column => column.state === 'needs_followup')
+
+    expect(board.columns.map(column => column.state)).toEqual(['new', 'reviewed', 'false_positive', 'needs_followup'])
+    expect(board.counts).toMatchObject({ new: 3, reviewed: 2, false_positive: 0, needs_followup: 0 })
+    expect(board.total).toBe(5)
+    expect(board.truncated).toBe(true)
+    expect(newColumn).toMatchObject({ label: 'New', total: 3, truncated: true })
+    expect(newColumn.cards[0]).toMatchObject({
+      id: 'finding-high',
+      workflow_state: 'new',
+      review_state: 'new',
+      important: false,
+      target_ids: ['target-api'],
+    })
+    expect(reviewedColumn).toMatchObject({ label: 'Reviewed', total: 2, truncated: true })
+    expect(reviewedColumn.cards[0]).toMatchObject({
+      id: 'finding-low',
+      workflow_state: 'reviewed',
+      review_state: 'reviewed',
+      important: false,
+    })
+    expect(uncappedBoard.columns.find(column => column.state === 'reviewed').cards.at(-1)).toMatchObject({
+      id: 'finding-info',
+      workflow_state: 'reviewed',
+      review_state: 'important',
+      important: true,
+    })
+    expect(uncappedBoard.columns.find(column => column.state === 'new').cards.at(-1)).toMatchObject({
+      id: 'finding-unknown',
+      workflow_state: 'new',
+      review_state: 'triaged_elsewhere',
+      labels: ['needs-owner'],
+      note: 'check manually',
+      orphan_source: true,
+      target_ids: ['target-api'],
+    })
+    expect(projectFindingsData.boardWorkflowState({ review_state: 'important' })).toBe('reviewed')
+    expect(projectFindingsData.boardWorkflowState('triaged_elsewhere')).toBe('new')
+    expect(falsePositiveColumn).toMatchObject({ cards: [], total: 0, truncated: false })
+    expect(followUpColumn).toMatchObject({ cards: [], total: 0, truncated: false })
 
     await shell.openProjectWorkspace()
     document.querySelector('[data-project-tab="findings"]').click()
@@ -3979,6 +4926,7 @@ describe('shell chrome project workspace', () => {
 
     expect(titles()).toEqual(['Low issue', 'High issue', 'Critical issue'])
     expect(document.querySelector('.project-explorer-group-count')).toBeNull()
+    expect(document.querySelector('.project-finding-view-button[aria-pressed="true"]')?.textContent).toBe('List')
 
     let sortControl = document.querySelector('[data-project-finding-sort]')
     await tick()
@@ -4002,6 +4950,298 @@ describe('shell chrome project workspace', () => {
     sortControl.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
     expect(titles()).toEqual(['High issue', 'Critical issue', 'Low issue'])
+
+    document.querySelector('[data-project-finding-view-mode="board"]').click()
+    await tick()
+    expect(document.querySelector('.project-finding-view-button[aria-pressed="true"]')?.textContent).toBe('Board')
+    expect(document.querySelector('.project-finding-board')).not.toBeNull()
+    expect(Array.from(document.querySelectorAll('.project-finding-board-column-header h3')).map(node => node.textContent))
+      .toEqual(['New', 'Reviewed', 'False positive', 'Follow-up'])
+    expect(Array.from(document.querySelectorAll('.project-finding-board-card-title')).map(node => node.textContent))
+      .toEqual(['High issue', 'Critical issue', 'Low issue'])
+    const importantBadge = Array.from(document.querySelectorAll('.project-finding-board-card-badges .badge'))
+      .find(node => node.textContent === 'important')
+    expect(importantBadge?.classList.contains('badge-tone-amber')).toBe(true)
+    const criticalSeverityBadge = Array.from(document.querySelectorAll('.project-finding-board-card-badges .badge'))
+      .find(node => node.textContent === 'critical')
+    expect(criticalSeverityBadge?.classList.contains('badge-tone-red')).toBe(true)
+    const inlineBoardChips = Array.from(document.querySelectorAll('.project-finding-board-card-chips .badge'))
+      .map(node => node.textContent)
+    expect(inlineBoardChips).toEqual(expect.arrayContaining(['Verified', 'remediation', 'verification steps']))
+    expect(document.querySelector('.project-finding-bulk-toolbar')).toBeNull()
+
+    document.querySelector('[data-project-finding-view-mode="list"]').click()
+    await tick()
+    expect(document.querySelector('.project-finding-board')).toBeNull()
+    expect(document.querySelector('.project-finding-bulk-toolbar')).not.toBeNull()
+
+    document.querySelector('[data-project-action="open-findings-board"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('findings-board-subtitle').textContent).toContain('Project: Sort Project')
+    expect(document.getElementById('findings-board-body').textContent).toContain('Critical issue')
+    const boardTriageButton = document.querySelector(
+      '#findings-board-body [data-findings-board-action="edit-triage"][data-finding-id="finding-high"]',
+    )
+    expect(boardTriageButton).not.toBeNull()
+    expect(boardTriageButton.textContent).toBe('Triage')
+    const boardTriageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
+    boardTriageButton.click()
+    await tick()
+    await tick()
+    expect(boardTriageOpenSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'finding-high' }), expect.objectContaining({
+      canEdit: true,
+      onSaved: expect.any(Function),
+    }))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+    document.getElementById('finding-triage-remediation').value = 'Patch the exposed service.'
+    document.getElementById('finding-triage-status').value = 'ready_to_verify'
+    document.getElementById('finding-triage-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-high/triage', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        remediation: 'Patch the exposed service.',
+        verification_steps: '',
+        verification_status: 'ready_to_verify',
+        verification_notes: '',
+      }),
+    }))
+    expect(document.getElementById('findings-board-message').textContent).toBe('Finding triage saved.')
+    const globalBoardChips = Array.from(document.querySelectorAll('#findings-board-body .project-finding-board-card-chips .badge'))
+      .map(node => node.textContent)
+    expect(globalBoardChips).toEqual(expect.arrayContaining(['Ready to verify', 'remediation']))
+    const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
+    boardReview.value = 'false_positive'
+    boardReview.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-high/review', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ review_state: 'false_positive' }),
+    }))
+
+    shell.restoreHistoryRunIntoTab.mockClear()
+    document.querySelector('#findings-board-body [data-findings-board-action="open-run"]').click()
+    await tick()
+    expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+      {
+        id: 'run-old',
+        command: 'nuclei old.example',
+        full_output_available: true,
+      },
+      {
+        hidePanelOnSuccess: false,
+        highlightLineIndex: 20,
+      },
+    )
+    expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('locks finding review dropdowns and board dragging for view-only team members', async () => {
+    const projectFindings = [
+      {
+        id: 'finding-high',
+        run_id: 'run-new',
+        run_command: 'httpx new.example',
+        title: 'High issue',
+        raw_line: 'high',
+        line_number: 5,
+        severity: 'high',
+        review_state: 'new',
+      },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'Sort Project' } }),
+        })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'Sort Project', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: { id: 'project-1', name: 'Sort Project', status: 'active' },
+            counts: { runs: 1, findings: 1, entities: 1, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            entity_counts: { ip: 1 },
+            runs: [{ id: 'run-new', command: 'httpx new.example', started: '2026-05-07T01:00:00Z' }],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/findings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: projectFindings,
+            total: projectFindings.length,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            group_counts: {},
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/entities')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            entities: [{
+              id: 'entity-ip',
+              type: 'ip',
+              canonical_value: '198.51.100.10',
+              source_run_ids: ['run-new'],
+            }],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            counts_by_type: { ip: 1 },
+          }),
+        })
+      }
+      if (url === '/projects/project-1/auto-promote-rules') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            rules: [{
+              id: 'rule-view',
+              name: 'View-only rule',
+              enabled: true,
+              apply_on_run: true,
+              target_entity_kind: 'ip',
+              match_mode: 'exact',
+              pattern: '198.51.100.10',
+              filters: {},
+            }],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/auto-promote-rules/preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            preview: {
+              matched_count: 1,
+              total_matches: 1,
+              new_link_count: 0,
+              already_linked_count: 1,
+              skipped_suppressed_count: 0,
+              quota_limited_count: 0,
+              matches: [],
+            },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: projectFindings, total: 1 }) })
+    })
+    const showConfirm = vi.fn(() => Promise.resolve('apply'))
+    const shell = loadShellChrome({
+      apiFetch,
+      activeTeamScopeCan: capability => !['mutate_projects', 'triage_findings'].includes(capability),
+      showConfirm,
+    })
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="entities"]').click()
+    await tick()
+    await tick()
+
+    const entitySelectToggle = document.querySelector('[data-project-action="toggle-project-entity-select"]')
+    expect(entitySelectToggle?.disabled).toBe(true)
+    entitySelectToggle.disabled = false
+    entitySelectToggle.click()
+    await tick()
+    expect(document.querySelector('[data-project-entity-select]')).toBeNull()
+
+    const rulesToggle = document.querySelector('[data-project-action="toggle-project-auto-promote-rules"]')
+    expect(rulesToggle?.getAttribute('aria-expanded')).toBe('false')
+    rulesToggle.click()
+    await tick()
+    await tick()
+    expect(document.querySelector('[data-project-action="toggle-project-auto-promote-rules"]')?.getAttribute('aria-expanded')).toBe('true')
+    const rulePanel = document.querySelector('.project-auto-promote-panel')
+    expect(rulePanel?.textContent).toContain('View-only rule')
+    expect(rulePanel.querySelector('.badge-tone-green')?.textContent).toBe('enabled')
+    const newRule = rulePanel.querySelector('[data-project-action="new-project-auto-promote-rule"]')
+    const rulePreview = rulePanel.querySelector('[data-project-action="preview-stored-project-auto-promote-rule"]')
+    const ruleEdit = rulePanel.querySelector('[data-project-action="edit-project-auto-promote-rule"]')
+    const ruleApply = rulePanel.querySelector('[data-project-action="apply-project-auto-promote-rule"]')
+    const ruleDelete = rulePanel.querySelector('[data-project-action="delete-project-auto-promote-rule"]')
+    expect(newRule.disabled).toBe(true)
+    expect(rulePreview.disabled).toBe(false)
+    expect(ruleEdit.disabled).toBe(true)
+    expect(ruleApply.disabled).toBe(true)
+    expect(ruleDelete.disabled).toBe(true)
+    shell.showToast.mockClear()
+    apiFetch.mockClear()
+    rulePreview.click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/auto-promote-rules/preview', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Auto-promote preview: 1 match · 0 new · 1 linked.',
+      'success',
+    )
+    ruleApply.disabled = false
+    shell.showToast.mockClear()
+    ruleApply.click()
+    await tick()
+    expect(showConfirm).not.toHaveBeenCalled()
+    expect(shell.showToast).toHaveBeenCalledWith(
+      "View-only team members can't change team projects. Switch to Personal or ask for operator access.",
+      'error',
+    )
+
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+
+    const findingSelectToggle = document.querySelector('[data-project-action="toggle-project-finding-select"]')
+    expect(findingSelectToggle?.disabled).toBe(true)
+    findingSelectToggle.disabled = false
+    findingSelectToggle.click()
+    await tick()
+    expect(document.querySelector('[data-project-finding-select]')).toBeNull()
+
+    const listReview = document.querySelector('[data-project-review-state]')
+    expect(listReview?.disabled).toBe(true)
+
+    document.querySelector('[data-project-action="open-findings-board"]').click()
+    await tick()
+    await tick()
+
+    const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
+    const boardCard = document.querySelector('#findings-board-body [data-finding-id]')
+    const boardTriage = document.querySelector('#findings-board-body [data-findings-board-action="edit-triage"]')
+    expect(boardReview?.disabled).toBe(true)
+    expect(boardCard?.draggable).toBe(false)
+    expect(boardTriage?.disabled).toBe(false)
+
+    boardReview.value = 'false_positive'
+    boardReview.dispatchEvent(new Event('change', { bubbles: true }))
+    boardCard.dispatchEvent(new Event('dragstart', { bubbles: true, cancelable: true }))
+    await tick()
+
+    expect(apiFetch).not.toHaveBeenCalledWith('/findings/finding-high/review', expect.anything())
+    expect(document.getElementById('findings-board-message').textContent)
+      .toContain("View-only team members can't triage team findings")
   })
 
   it('refreshes an open Projects modal after a cross-tab project broadcast', async () => {

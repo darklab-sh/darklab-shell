@@ -31,15 +31,35 @@
         .filter(Boolean);
     }
 
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
+    function findingsBoardAvailable() {
+      if (typeof ctx.findingsBoardAvailable === 'function') return !!ctx.findingsBoardAvailable();
+      return !(document.body && document.body.classList.contains('mobile-terminal-mode'));
+    }
+
     function reviewControl(finding, projectId) {
       const control = document.createElement('select');
       const reviewState = String(finding.review_state || 'new');
+      const allowed = activeTeamScopeCan('triage_findings');
       control.className = `form-select form-control-compact project-finding-review review-${reviewState}`;
       control.dataset.projectReviewState = '1';
       control.dataset.projectId = String(projectId || '');
       control.dataset.findingId = String(finding.id || '');
       control.dataset.previousReviewState = reviewState;
       control.setAttribute('aria-label', 'Finding review state');
+      control.disabled = !allowed;
+      if (!allowed) control.title = teamScopeDeniedMessage('triage team findings');
       (ctx.findingReviewStates || []).forEach(({ value, label }) => {
         const option = document.createElement('option');
         option.value = value;
@@ -54,9 +74,14 @@
       const wrap = document.createElement('div');
       wrap.className = 'project-finding-row-actions';
       if (finding && finding.id) {
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'project-finding-row-button-group';
+        const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
+        triage.dataset.findingId = String(finding.id || '');
         const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
         edit.dataset.findingId = String(finding.id || '');
-        wrap.appendChild(edit);
+        buttonGroup.append(triage, edit);
+        wrap.appendChild(buttonGroup);
         wrap.appendChild(reviewControl(finding, projectId));
       }
       return wrap;
@@ -76,6 +101,10 @@
       const toolbar = document.createElement('div');
       toolbar.className = 'project-finding-bulk-toolbar';
       const selectToggle = ctx.makeProjectButton(ctx.findingSelectMode() ? 'Done' : 'Select', 'toggle-project-finding-select', projectId);
+      if (!ctx.findingSelectMode() && !activeTeamScopeCan('triage_findings')) {
+        selectToggle.disabled = true;
+        selectToggle.title = teamScopeDeniedMessage('triage team findings');
+      }
       toolbar.appendChild(selectToggle);
       if (ctx.findingSelectMode()) {
         const count = document.createElement('span');
@@ -99,14 +128,47 @@
           const option = document.createElement('option');
           option.value = value;
           option.textContent = label;
-          apply.appendChild(option);
-        });
-        apply.disabled = !selectedFindingIds.size;
+        apply.appendChild(option);
+      });
+        apply.disabled = !selectedFindingIds.size || !activeTeamScopeCan('triage_findings');
+        if (!activeTeamScopeCan('triage_findings')) apply.title = teamScopeDeniedMessage('triage team findings');
         const del = ctx.makeProjectButton('Delete', 'bulk-delete-project-findings', projectId, 'destructive');
         del.disabled = !selectedFindingIds.size;
         toolbar.append(count, selectAll, clear, apply, del);
       }
       return toolbar;
+    }
+
+    function renderViewToggle(projectId) {
+      const boardAllowed = findingsBoardAvailable();
+      const current = boardAllowed ? ctx.findingViewMode() : 'list';
+      const tools = document.createElement('div');
+      tools.className = 'project-finding-view-tools';
+      const wrap = document.createElement('div');
+      wrap.className = 'project-finding-view-toggle';
+      wrap.setAttribute('aria-label', 'Findings view');
+      const viewOptions = [
+        { value: 'list', label: 'List' },
+        ...(boardAllowed ? [{ value: 'board', label: 'Board' }] : []),
+      ];
+      viewOptions.forEach(({ value, label }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `toggle-btn project-finding-view-button${current === value ? ' is-active' : ''}`;
+        btn.dataset.projectFindingViewMode = value;
+        btn.dataset.projectId = projectId;
+        btn.setAttribute('aria-pressed', current === value ? 'true' : 'false');
+        btn.textContent = label;
+        ctx.bindProjectRuntimePressable(btn);
+        wrap.appendChild(btn);
+      });
+      tools.appendChild(wrap);
+      if (boardAllowed) {
+        const open = ctx.makeProjectButton('Open board', 'open-findings-board', projectId);
+        open.classList.add('project-finding-board-open');
+        tools.appendChild(open);
+      }
+      return tools;
     }
 
     function renderPagination(projectId, summary, findings, position = 'bottom') {
@@ -195,8 +257,16 @@
       const findings = ctx.filteredProjectFindings(projectId, summary);
       const pagination = initialPagination;
       const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
+      const viewMode = findingsBoardAvailable() ? ctx.findingViewMode() : 'list';
       pruneSelection(findings);
-      container.appendChild(renderBulkToolbar(projectId, findings));
+      container.appendChild(renderViewToggle(projectId));
+      if (viewMode === 'board' && ctx.findingSelectMode()) {
+        ctx.selectedFindingIds().clear();
+        ctx.setFindingSelectMode(false);
+      }
+      if (viewMode !== 'board') {
+        container.appendChild(renderBulkToolbar(projectId, findings));
+      }
       if (!allFindings.length && total === 0) {
         container.appendChild(ctx.emptyProjectPanel('No persisted findings for linked runs or linked entities yet.'));
         return;
@@ -212,9 +282,13 @@
       }
       const topPager = renderPagination(projectId, summary, findings, 'top');
       if (topPager) container.appendChild(topPager);
-      findings.forEach((finding) => {
-        container.appendChild(renderFindingRow(projectId, summary, finding));
-      });
+      if (viewMode === 'board') {
+        ctx.renderProjectFindingBoard(container, projectId, summary, ctx.projectFindingBoard(projectId, summary));
+      } else {
+        findings.forEach((finding) => {
+          container.appendChild(renderFindingRow(projectId, summary, finding));
+        });
+      }
       const pager = renderPagination(projectId, summary, findings, 'bottom');
       if (pager) container.appendChild(pager);
     }

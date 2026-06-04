@@ -234,7 +234,10 @@ function _syncOutputLinePrefixMetadata(out, tab = null) {
   const targetTab = tab || _tabForOutput(out);
   if (targetTab) targetTab._outputLineCounter = maxLineNumber;
   if (out.style) {
-    const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
+    const prefixWidth = Math.max(
+      _prefixWidthForOutput(out),
+      ...prefixStrings.map(s => String(s || '').length),
+    );
     out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
   }
 }
@@ -379,13 +382,10 @@ function _isWelcomeLine(line) {
 
 function _isSyntheticSummaryLine(line) {
   if (!line || !line.classList) return false;
-  return [
-    'builtin-signal-summary-header',
-    'builtin-signal-summary-section',
-    'builtin-signal-summary-row',
-    'builtin-signal-summary-note',
-    'builtin-signal-summary-sep',
-  ].some(cls => line.classList.contains(cls));
+  const isSyntheticClass = typeof _outputCore.isSyntheticSummaryClassName === 'function'
+    ? _outputCore.isSyntheticSummaryClassName
+    : _outputCore.isSignalSummaryClassName;
+  return [...line.classList].some(cls => isSyntheticClass(cls));
 }
 
 function _isPrefixExcludedLine(line) {
@@ -487,6 +487,8 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
   if (!metadata || typeof metadata !== 'object') return;
   if (typeof metadata.kind === 'string' && metadata.kind) rawLine.kind = metadata.kind;
   if (typeof metadata.role === 'string' && metadata.role) rawLine.role = metadata.role;
+  if (typeof metadata.noise_kind === 'string' && metadata.noise_kind) rawLine.noise_kind = metadata.noise_kind;
+  if (typeof metadata.noise_reason === 'string' && metadata.noise_reason) rawLine.noise_reason = metadata.noise_reason;
   const signals = _normalizeOutputSignals(metadata.signals);
   if (signals.length) {
     rawLine.signals = signals;
@@ -680,7 +682,7 @@ function _showOutputEntityMenu(token, x, y) {
     _outputEntityMenuButton('Open in Atlas', 'open-atlas'),
     _outputEntityMenuButton('Edit labels/notes', 'edit-metadata'),
     _outputEntityMenuButton('Add to active project', 'promote'),
-    _outputEntityMenuButton('Lookup intel', 'lookup-intel'),
+    _outputEntityMenuButton('Refresh intel', 'lookup-intel'),
     _outputEntityMenuButton('Copy value', 'copy-value'),
     _outputEntityMenuButton('See in run', 'see-run'),
   );
@@ -964,7 +966,10 @@ function _mergeLineEventMetadata(payload, metadata = null) {
   ];
   sources.forEach(source => {
     if (!source || typeof source !== 'object') return;
-    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'high_volume_resume', 'live_output', 'faq_command'].forEach(key => {
+    [
+      'kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities',
+      'noise_kind', 'noise_reason', 'high_volume_resume', 'live_output', 'faq_command',
+    ].forEach(key => {
       if (source[key] !== undefined && source[key] !== null && source[key] !== '') merged[key] = source[key];
     });
   });
@@ -975,12 +980,12 @@ function _lineEventPayload(text, cls, metadata = null) {
   if (text && typeof text === 'object') {
     const payload = { ...text };
     if (payload.metadata && typeof payload.metadata === 'object') {
-      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'noise_kind', 'noise_reason'].forEach(key => {
         if (payload[key] === undefined && payload.metadata[key] !== undefined) payload[key] = payload.metadata[key];
       });
     }
     if (metadata && typeof metadata === 'object') {
-      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'noise_kind', 'noise_reason'].forEach(key => {
         if (metadata[key] !== undefined) payload[key] = metadata[key];
       });
     }
@@ -988,7 +993,7 @@ function _lineEventPayload(text, cls, metadata = null) {
   }
   const payload = { text: String(text ?? ''), cls: String(cls || '') };
   if (metadata && typeof metadata === 'object') {
-    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'noise_kind', 'noise_reason'].forEach(key => {
       if (metadata[key] !== undefined) payload[key] = metadata[key];
     });
   }
@@ -1358,6 +1363,113 @@ function _appendOutputSpan(out, span) {
   else out.appendChild(span);
 }
 
+function _commandOutcomeSummariesEnabled() {
+  if (typeof getCommandOutcomeSummariesPreference === 'function') {
+    return getCommandOutcomeSummariesPreference() !== 'off';
+  }
+  return true;
+}
+
+function _normalizeCommandOutcomeSummary(outcome) {
+  if (_outputCore && typeof _outputCore.normalizeCommandOutcomeSummary === 'function') {
+    return _outputCore.normalizeCommandOutcomeSummary(outcome);
+  }
+  return null;
+}
+
+function _buildCommandOutcomeSummary(tab) {
+  if (!tab || !_outputCore || typeof _outputCore.buildCommandOutcomeSummary !== 'function') return null;
+  return _outputCore.buildCommandOutcomeSummary(tab.command || '', _commandOutcomeRawLinesForTab(tab));
+}
+
+function _commandOutcomeRawLinesForTab(tab) {
+  const rawLines = Array.isArray(tab && tab.rawLines) ? tab.rawLines : [];
+  const start = Number.isFinite(Number(tab && tab.currentRunStartIndex))
+    ? Math.max(0, Math.min(rawLines.length, Number(tab.currentRunStartIndex)))
+    : 0;
+  return rawLines.slice(start);
+}
+
+function _removeCommandOutcomeSummary(out) {
+  if (!out || typeof out.querySelectorAll !== 'function') return;
+  out.querySelectorAll('.command-outcome-summary').forEach(line => line.remove());
+}
+
+function _commandOutcomeItemText(item) {
+  if (!item || typeof item !== 'object') return '';
+  const label = String(item.label || '').trim();
+  const value = String(item.value || '').trim();
+  if (label && value) return `${label}: ${value}`;
+  return value || label;
+}
+
+function _appendCommandOutcomeLine(out, tab, text, className) {
+  const line = document.createElement('span');
+  line.className = `line command-outcome-summary ${className}`;
+  line.dataset.commandOutcomeSummary = 'true';
+  const content = document.createElement('span');
+  content.className = 'line-content';
+  content.textContent = String(text || '');
+  line.appendChild(content);
+  _assignOutputLineNumber(out, tab, line);
+  line.dataset.prefix = '';
+  _appendOutputSpan(out, line);
+  return line;
+}
+
+function renderCommandOutcomeSummary(tabId, outcome = null) {
+  const id = tabId || activeTabId;
+  const out = getOutput(id);
+  const tab = getTab(id);
+  if (!out || !tab) return false;
+  _flushPendingOutputBeforeHighVolumeSkip(id);
+  _removeCommandOutcomeSummary(out);
+  if (!_commandOutcomeSummariesEnabled()) {
+    _syncOutputPrefixesForAppend(out);
+    return false;
+  }
+  const explicitSummary = outcome !== null && outcome !== undefined
+    ? _normalizeCommandOutcomeSummary(outcome)
+    : null;
+  const currentRawLines = _commandOutcomeRawLinesForTab(tab);
+  const builtSummary = _buildCommandOutcomeSummary(tab);
+  const hasCurrentOutput = currentRawLines.length > 0;
+  const cachedSummary = !explicitSummary && !builtSummary && !hasCurrentOutput
+    ? _normalizeCommandOutcomeSummary(tab.commandOutcomeSummary)
+    : null;
+  const summary = explicitSummary || builtSummary || cachedSummary;
+  if (!summary) {
+    tab.commandOutcomeSummary = null;
+    _syncOutputPrefixesForAppend(out);
+    return false;
+  }
+  tab.commandOutcomeSummary = summary;
+  _appendCommandOutcomeLine(out, tab, summary.title || 'Command outcome', 'command-outcome-summary-title');
+  summary.items.forEach(item => {
+    const text = _commandOutcomeItemText(item);
+    if (text) _appendCommandOutcomeLine(out, tab, text, 'command-outcome-summary-row');
+  });
+  _syncOutputPrefixesForAppend(out);
+  _followOutputAfterAppend(out, tab);
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  return true;
+}
+
+function setTabCommandOutcomeSummary(tabId, outcome, { render = true } = {}) {
+  const tab = getTab(tabId || activeTabId);
+  if (!tab) return null;
+  tab.commandOutcomeSummary = _normalizeCommandOutcomeSummary(outcome);
+  if (render) renderCommandOutcomeSummary(tab.id, tab.commandOutcomeSummary);
+  return tab.commandOutcomeSummary;
+}
+
+function refreshCommandOutcomeSummaries() {
+  if (!Array.isArray(tabs)) return;
+  tabs.forEach(tab => {
+    if (tab && tab.id) renderCommandOutcomeSummary(tab.id);
+  });
+}
+
 function _stickOutputToBottom(out, tab) {
   if (!out) return;
   if (tab) {
@@ -1495,6 +1607,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
   const out = getOutput(tabId);
   const tab = getTab(tabId);
   if (!out || !tab) return;
+  const restoredSummary = tab.commandOutcomeSummary;
   const lines = Array.isArray(rawLines) ? rawLines.map(line => ({
     text: String(line && line.text || ''),
     cls: String(line && line.cls || ''),
@@ -1514,6 +1627,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
   tab.rawLines = lines;
   _resetTabOutputSignalCounts(tab, lines);
   lines.forEach(line => _appendRestoredOutputSpan(out, line, tabId));
+  renderCommandOutcomeSummary(tabId, restoredSummary);
   syncOutputPrefixes(out);
   if (lines.length) {
     tab.followOutput = true;
@@ -1628,11 +1742,13 @@ function syncOutputPrefixes(scope = document) {
 function _setLnMode(mode) {
   lnMode = mode;
   document.body.classList.toggle('ln-on', mode === 'on');
-  const label = mode === 'on' ? 'line numbers: on' : 'line numbers: off';
+  // Binary toggle: the active-dot indicator carries on/off, so the label stays
+  // a plain "line numbers"; aria-pressed conveys state to assistive tech.
   const lnBtn = document.getElementById('ln-btn');
   if (lnBtn) {
-    lnBtn.textContent = label;
+    lnBtn.textContent = 'line numbers';
     lnBtn.classList.toggle('active', mode === 'on');
+    lnBtn.setAttribute('aria-pressed', mode === 'on' ? 'true' : 'false');
   }
   syncOutputPrefixes();
   try {

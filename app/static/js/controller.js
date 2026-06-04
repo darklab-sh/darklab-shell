@@ -283,6 +283,9 @@ function setupModalFocusTraps() {
     'faq-modal',
     'command-registry-modal',
     'provider-status-modal',
+    'findings-board-modal',
+    'finding-triage-modal',
+    'atlas-import-modal',
     'project-workspace-modal',
     'project-target-editor-modal',
     'project-package-manifest-modal',
@@ -293,6 +296,7 @@ function setupModalFocusTraps() {
     'workflow-editor-form',
     'schedules-modal',
     'watchers-modal',
+    'team-scope-modal',
   ];
   ids.forEach((id) => {
     const card = document.getElementById(id);
@@ -406,6 +410,9 @@ optionsShareRedactionSelect?.addEventListener('change', e => {
 });
 optionsNotifyToggle?.addEventListener('change', e => {
   applyRunNotifyPreference(e.target.checked ? 'on' : 'off');
+});
+optionsCommandOutcomeSummariesToggle?.addEventListener('change', e => {
+  applyCommandOutcomeSummariesPreference(e.target.checked ? 'on' : 'off');
 });
 optionsProjectAutoLinkExternalRunsToggle?.addEventListener('change', e => {
   applyProjectAutoLinkExternalRunsPreference(e.target.checked ? 'on' : 'off');

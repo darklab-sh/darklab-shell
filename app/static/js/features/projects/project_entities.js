@@ -69,9 +69,69 @@
     const countTextHistory = new Map();
     const countLoads = new Map();
     const pageLimit = 50;
+    const ruleStates = new Map();
+    const targetKinds = [
+      { value: 'any', label: 'Any' },
+      { value: 'domain', label: 'Domain' },
+      { value: 'ip', label: 'IP' },
+      { value: 'url', label: 'URL' },
+      { value: 'cve', label: 'CVE' },
+      { value: 'hash', label: 'Hash' },
+    ];
+    const matchModes = [
+      { value: 'exact', label: 'Exact' },
+      { value: 'contains', label: 'Contains' },
+      { value: 'wildcard', label: 'Wildcard' },
+      { value: 'domain_suffix', label: 'Domain suffix' },
+      { value: 'cidr', label: 'CIDR' },
+      { value: 'regex', label: 'Regex', disabled: true },
+    ];
+    const domainSuffixTargetKinds = new Set(['any', 'domain', 'url']);
+    const cidrTargetKinds = new Set(['any', 'ip']);
 
     function activeTab() {
       return String(ctx.getActiveTab?.() || 'ip');
+    }
+
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
+    function canMutateProjects() {
+      return activeTeamScopeCan('mutate_projects');
+    }
+
+    function projectForRules(projectId) {
+      const summaryProject = ctx.getSummary?.(projectId)?.project;
+      if (summaryProject) return summaryProject;
+      const rows = typeof ctx.projectRows === 'function' ? ctx.projectRows() : [];
+      return rows.find(project => String(project && project.id || '') === String(projectId || '')) || null;
+    }
+
+    function projectRuleMutationDeniedMessage(projectId) {
+      const project = projectForRules(projectId);
+      if (project && typeof ctx.projectIsArchived === 'function' && ctx.projectIsArchived(project)) {
+        return 'Archived projects are read-only.';
+      }
+      return teamScopeDeniedMessage('change team projects');
+    }
+
+    function canMutateProjectRules(projectId) {
+      const project = projectForRules(projectId);
+      if (project && typeof ctx.projectIsArchived === 'function' && ctx.projectIsArchived(project)) return false;
+      return canMutateProjects();
+    }
+
+    function denyProjectMutation(projectId) {
+      ctx.setProjectWorkspaceMessage?.(projectRuleMutationDeniedMessage(projectId), { error: true });
     }
 
     function pageKey(projectId) {
@@ -93,6 +153,170 @@
         loadSeq: 0,
       });
       return pages.get(key);
+    }
+
+    function ruleState(projectId) {
+      const normalizedProjectId = String(projectId || '');
+      if (!ruleStates.has(normalizedProjectId)) ruleStates.set(normalizedProjectId, {
+        open: false,
+        loading: false,
+        loaded: false,
+        rules: [],
+        error: '',
+        editor: null,
+        preview: null,
+        previewKey: '',
+        previewLoading: false,
+        busyRuleId: '',
+        filtersOpen: false,
+      });
+      return ruleStates.get(normalizedProjectId);
+    }
+
+    function rulesPanelId(projectId) {
+      const safeId = String(projectId || 'active').replace(/[^a-zA-Z0-9_-]/g, '_') || 'active';
+      return `project-auto-promote-rules-${safeId}`;
+    }
+
+    function matchModesForTarget(targetKind) {
+      const normalized = String(targetKind || 'any');
+      return matchModes.filter((mode) => {
+        if (mode.value === 'domain_suffix') return domainSuffixTargetKinds.has(normalized);
+        if (mode.value === 'cidr') return cidrTargetKinds.has(normalized);
+        return true;
+      });
+    }
+
+    function normalizeRuleEditorMatchMode(editor) {
+      if (!editor) return editor;
+      const available = matchModesForTarget(editor.target_entity_kind);
+      if (!available.some(mode => mode.value === editor.match_mode)) {
+        const fallback = available.find(mode => !mode.disabled) || available[0];
+        editor.match_mode = fallback ? fallback.value : 'exact';
+      }
+      return editor;
+    }
+
+    function defaultRuleEditor(projectId, rule = null) {
+      const filters = rule && rule.filters && typeof rule.filters === 'object' ? rule.filters : {};
+      return normalizeRuleEditorMatchMode({
+        projectId: String(projectId || ''),
+        ruleId: String(rule && rule.id || ''),
+        created: String(rule && rule.created || ''),
+        name: String(rule && rule.name || ''),
+        enabled: rule ? rule.enabled !== false : true,
+        apply_on_run: !!(rule && rule.apply_on_run),
+        target_entity_kind: String(rule && rule.target_entity_kind || 'domain'),
+        match_mode: String(rule && rule.match_mode || 'domain_suffix'),
+        pattern: String(rule && rule.pattern || ''),
+        source_command_roots: Array.isArray(filters.source_command_roots) ? filters.source_command_roots.join(', ') : '',
+        source_run_ids: Array.isArray(filters.source_run_ids) ? filters.source_run_ids.join(', ') : '',
+        include_suppressed: !!filters.include_suppressed,
+        first_seen_after_rule_created: !!filters.first_seen_after_rule_created,
+        applyAfterSave: false,
+      });
+    }
+
+    function openAutoPromoteRuleEditor(projectId, draft = {}) {
+      const normalizedProjectId = String(projectId || draft.project_id || '').trim();
+      if (!normalizedProjectId) return false;
+      const editor = defaultRuleEditor(normalizedProjectId, {
+        name: draft.name,
+        enabled: draft.enabled,
+        apply_on_run: draft.apply_on_run,
+        target_entity_kind: draft.target_entity_kind,
+        match_mode: draft.match_mode,
+        pattern: draft.pattern,
+        filters: draft.filters,
+      });
+      setRulesOpen(normalizedProjectId, true);
+      setEditor(normalizedProjectId, editor);
+      loadRules(normalizedProjectId).catch(() => {});
+      ctx.setWorkspaceTab?.('entities');
+      ctx.renderProjectExplorer?.();
+      if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+      return true;
+    }
+
+    function openAutoPromoteRuleFromAtlas(projectId, draft = {}) {
+      return openAutoPromoteRuleEditor(projectId, draft);
+    }
+
+    function splitCsv(value) {
+      return String(value || '').split(',').map(item => item.trim()).filter(Boolean);
+    }
+
+    function editorPayload(editor) {
+      const filters = {
+        source_command_roots: splitCsv(editor.source_command_roots),
+        source_run_ids: splitCsv(editor.source_run_ids),
+        include_suppressed: !!editor.include_suppressed,
+        first_seen_after_rule_created: !!editor.first_seen_after_rule_created,
+      };
+      const payload = {
+        name: String(editor.name || '').trim(),
+        enabled: !!editor.enabled,
+        apply_on_run: !!editor.apply_on_run,
+        target_entity_kind: String(editor.target_entity_kind || 'domain'),
+        match_mode: String(editor.match_mode || 'domain_suffix'),
+        pattern: String(editor.pattern || '').trim(),
+        filters,
+      };
+      if (editor.created) payload.created = String(editor.created);
+      return payload;
+    }
+
+    function editorPreviewPayload(editor) {
+      const payload = editorPayload(editor);
+      delete payload.name;
+      delete payload.enabled;
+      delete payload.apply_on_run;
+      if (!payload.filters?.first_seen_after_rule_created) delete payload.created;
+      return payload;
+    }
+
+    function previewRelevantField(field) {
+      return [
+        'target_entity_kind',
+        'match_mode',
+        'pattern',
+        'source_command_roots',
+        'source_run_ids',
+        'include_suppressed',
+        'first_seen_after_rule_created',
+      ].includes(String(field || ''));
+    }
+
+    function payloadKey(payload) {
+      return JSON.stringify(payload || {});
+    }
+
+    function previewSummaryText(preview) {
+      if (!preview) return '';
+      const shown = Number(preview.shown_match_count ?? preview.matched_count ?? 0);
+      const scanMatches = Number(preview.matched_in_scan_count ?? preview.total_matches ?? shown);
+      const linked = Number(preview.already_linked_count || 0);
+      const next = Number(preview.new_link_count || 0);
+      const promoted = Number(preview.promoted_count || preview.promotable_count || 0);
+      const quota = Number(preview.quota_limited_count || 0);
+      const skipped = Number(preview.skipped_suppressed_count || 0);
+      const scanLimited = preview.candidate_scan_truncated || Number(preview.candidate_scan_limited_count || 0);
+      const scanned = Number(preview.candidate_scan_count || 0);
+      const scanLimit = Number(preview.candidate_scan_limit || 0);
+      const countCapped = preview.match_count_is_capped || scanMatches > shown || scanLimited;
+      const matchLabel = countCapped ? 'shown' : `match${shown === 1 ? '' : 'es'}`;
+      const parts = [
+        `${shown.toLocaleString()} ${matchLabel}`,
+        `${next.toLocaleString()} new`,
+        `${linked.toLocaleString()} linked`,
+      ];
+      if (!scanLimited && scanMatches > shown) parts.splice(1, 0, `${scanMatches.toLocaleString()} matches in scan`);
+      if (promoted) parts.splice(2, 0, `${promoted.toLocaleString()} promoted`);
+      if (quota) parts.push(`${quota.toLocaleString()} quota-limited`);
+      if (skipped) parts.push(`${skipped.toLocaleString()} suppressed skipped`);
+      if (scanLimited) parts.push(`scanned first ${(scanned || scanLimit).toLocaleString()} candidates`);
+      if (preview.truncated || Number(preview.match_cap_limited_count || 0)) parts.push('limited');
+      return parts.join(' · ');
     }
 
     function setPageOffset(projectId, offset = 0) {
@@ -432,6 +656,12 @@
 
     function chips(entity) {
       const chipItems = ctx.entityMetadataChips?.(entity) || [];
+      const source = String(entity && entity.source || '');
+      const detail = entity && entity.source_detail && typeof entity.source_detail === 'object' ? entity.source_detail : {};
+      if (source === 'auto_promote_rule') {
+        const ruleName = String(detail.rule_name || '').trim();
+        chipItems.push({ label: ruleName ? `Auto-promoted: ${ruleName}` : 'Auto-promoted', kind: 'note' });
+      }
       const intelCount = Number(entity && entity.intel_provider_count || 0);
       if (intelCount > 0) {
         const providers = _entityIntelProviders(entity);
@@ -447,6 +677,290 @@
         chipItems.push({ label: `${runCount} run${runCount === 1 ? '' : 's'}`, kind: 'note' });
       }
       return chipItems;
+    }
+
+    function rulePatternSummary(rule) {
+      const target = String(rule && rule.target_entity_kind || 'any');
+      const mode = String(rule && rule.match_mode || '');
+      const pattern = String(rule && rule.pattern || '');
+      return `${target} · ${mode.replace(/_/g, ' ')} · ${pattern}`;
+    }
+
+    function logAutoPromoteClientError(action, projectId, err, ruleId = '') {
+      if (typeof ctx.logClientError !== 'function') return;
+      const safeProjectId = String(projectId || '');
+      const safeRuleId = String(ruleId || '');
+      const parts = [`project auto-promote rule ${action} failed`, `project_id=${safeProjectId}`];
+      if (safeRuleId) parts.push(`rule_id=${safeRuleId}`);
+      ctx.logClientError(parts.join(' '), err);
+    }
+
+    function renderProjectExplorerSafe(action, projectId, ruleId = '') {
+      try {
+        ctx.renderProjectExplorer?.();
+      } catch (err) {
+        logAutoPromoteClientError(action, projectId, err, ruleId);
+      }
+    }
+
+    function ruleDetail(rule) {
+      const parts = [];
+      if (rule && rule.enabled === false) parts.push('disabled');
+      else parts.push('enabled');
+      parts.push(rule && rule.apply_on_run ? 'applies to new runs' : 'manual apply');
+      if (rule && rule.last_applied_at) parts.push(`last applied ${ctx.formatDate(rule.last_applied_at)}`);
+      const linked = Number(rule && rule.linked_count || 0);
+      if (linked) parts.push(`${linked.toLocaleString()} linked last apply`);
+      return parts.join(' · ');
+    }
+
+    async function loadRules(projectId, { force = false } = {}) {
+      const state = ruleState(projectId);
+      if (!projectId || state.loading || (state.loaded && !force)) return state;
+      state.loading = true;
+      state.error = '';
+      ctx.renderProjectExplorer?.();
+      try {
+        const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(projectId)}/auto-promote-rules`, {
+          cache: 'no-store',
+        });
+        if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load auto-promote rules.');
+        const data = await resp.json();
+        state.rules = Array.isArray(data.rules) ? data.rules : [];
+        state.loaded = true;
+      } catch (err) {
+        state.error = err && err.message ? err.message : 'Could not load auto-promote rules.';
+        ctx.setProjectWorkspaceMessage?.(state.error, { error: true });
+        logAutoPromoteClientError('list', projectId, err);
+      } finally {
+        state.loading = false;
+        ctx.renderProjectExplorer?.();
+        if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+      }
+      return state;
+    }
+
+    async function previewRuleRequest(projectId, payload) {
+      const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(projectId)}/auto-promote-rules/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+      });
+      if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not preview auto-promote rule.');
+      return resp;
+    }
+
+    function setRulesOpen(projectId, open) {
+      const state = ruleState(projectId);
+      state.open = !!open;
+      if (state.open && !state.loaded && !state.loading) loadRules(projectId).catch(() => {});
+    }
+
+    function setEditor(projectId, editor) {
+      const state = ruleState(projectId);
+      state.editor = editor;
+      state.preview = null;
+      state.previewKey = '';
+    }
+
+    async function previewEditorRule(projectId) {
+      const state = ruleState(projectId);
+      if (!state.editor) return null;
+      const payload = editorPayload(state.editor);
+      const previewKey = payloadKey(editorPreviewPayload(state.editor));
+      state.previewLoading = true;
+      state.preview = null;
+      state.previewKey = '';
+      const previewRequest = previewRuleRequest(projectId, payload);
+      try {
+        await Promise.resolve();
+        renderProjectExplorerSafe('preview render', projectId, state.editor?.ruleId || '');
+        const resp = await previewRequest;
+        const data = await resp.json().catch(() => ({}));
+        state.preview = data.preview || null;
+        state.previewKey = previewKey;
+        return state.preview;
+      } catch (err) {
+        ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not preview auto-promote rule.', {
+          error: true,
+        });
+        logAutoPromoteClientError('preview', projectId, err, state.editor?.ruleId || '');
+        return null;
+      } finally {
+        state.previewLoading = false;
+        renderProjectExplorerSafe('preview final render', projectId, state.editor?.ruleId || '');
+      }
+    }
+
+    async function confirmApplyRule(rule, preview) {
+      const confirmFn = typeof ctx.showConfirm === 'function'
+        ? ctx.showConfirm
+        : (typeof global.showConfirm === 'function' ? global.showConfirm : null);
+      if (!confirmFn) return true;
+      const choice = await confirmFn({
+        body: {
+          text: `Apply "${String(rule && rule.name || 'this rule')}" to existing Atlas entities?`,
+          note: previewSummaryText(preview),
+        },
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary' },
+        ],
+      });
+      return choice === 'apply';
+    }
+
+    async function confirmDeleteRule(rule) {
+      const confirmFn = typeof ctx.showConfirm === 'function'
+        ? ctx.showConfirm
+        : (typeof global.showConfirm === 'function' ? global.showConfirm : null);
+      if (!confirmFn) return true;
+      const choice = await confirmFn({
+        body: {
+          text: `Delete "${String(rule && rule.name || 'this rule')}"?`,
+          note: 'Existing promoted links stay in the project.',
+        },
+        tone: 'danger',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'delete', label: 'Delete', role: 'destructive' },
+        ],
+      });
+      return choice === 'delete';
+    }
+
+    async function previewStoredRule(projectId, rule) {
+      const resp = await previewRuleRequest(projectId, rule);
+      const data = await resp.json().catch(() => ({}));
+      return data.preview || null;
+    }
+
+    async function applyStoredRule(projectId, rule) {
+      if (!canMutateProjectRules(projectId)) {
+        denyProjectMutation(projectId);
+        return;
+      }
+      const state = ruleState(projectId);
+      const ruleId = String(rule && rule.id || '');
+      if (!ruleId) return;
+      state.busyRuleId = ruleId;
+      ctx.renderProjectExplorer?.();
+      try {
+        const preview = await previewStoredRule(projectId, rule);
+        const confirmed = await confirmApplyRule(rule, preview);
+        if (!confirmed) return;
+        const resp = await ctx.projectWorkspaceRequest(
+          `/projects/${encodeURIComponent(projectId)}/auto-promote-rules/${encodeURIComponent(ruleId)}/apply`,
+          { method: 'POST' },
+        );
+        const data = await resp.json().catch(() => ({}));
+        const result = data.result || {};
+        await loadRules(projectId, { force: true });
+        await load(projectId, { offset: page(projectId).offset, skipFinalRender: true });
+        await ctx.refreshProjectWorkspace?.();
+        ctx.setProjectWorkspaceMessage?.(`Auto-promote applied: ${previewSummaryText(result)}.`);
+      } catch (err) {
+        ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not apply auto-promote rule.', {
+          error: true,
+        });
+        logAutoPromoteClientError('apply', projectId, err, ruleId);
+      } finally {
+        state.busyRuleId = '';
+        ctx.renderProjectExplorer?.();
+      }
+    }
+
+    async function deleteStoredRule(projectId, rule) {
+      if (!canMutateProjectRules(projectId)) {
+        denyProjectMutation(projectId);
+        return;
+      }
+      const ruleId = String(rule && rule.id || '');
+      if (!ruleId) return;
+      const confirmed = await confirmDeleteRule(rule);
+      if (!confirmed) return;
+      const state = ruleState(projectId);
+      state.busyRuleId = ruleId;
+      ctx.renderProjectExplorer?.();
+      try {
+        await ctx.projectWorkspaceRequest(
+          `/projects/${encodeURIComponent(projectId)}/auto-promote-rules/${encodeURIComponent(ruleId)}`,
+          { method: 'DELETE' },
+        );
+        await loadRules(projectId, { force: true });
+        ctx.setProjectWorkspaceMessage?.('Auto-promote rule deleted.');
+      } catch (err) {
+        ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not delete auto-promote rule.', {
+          error: true,
+        });
+        logAutoPromoteClientError('delete', projectId, err, ruleId);
+      } finally {
+        state.busyRuleId = '';
+        ctx.renderProjectExplorer?.();
+      }
+    }
+
+    async function saveEditorRule(projectId) {
+      if (!canMutateProjectRules(projectId)) {
+        denyProjectMutation(projectId);
+        return;
+      }
+      const state = ruleState(projectId);
+      const editor = state.editor;
+      if (!editor) return;
+      const payload = editorPayload(editor);
+      const currentKey = payloadKey(editorPreviewPayload(editor));
+      if (editor.enabled !== false && state.previewKey !== currentKey) {
+        ctx.setProjectWorkspaceMessage?.('Preview the rule before saving.', { error: true });
+        return;
+      }
+      const isUpdate = !!editor.ruleId;
+      state.busyRuleId = editor.ruleId || '__new__';
+      try {
+        const saveRequest = ctx.projectWorkspaceRequest(
+          isUpdate
+            ? `/projects/${encodeURIComponent(projectId)}/auto-promote-rules/${encodeURIComponent(editor.ruleId)}`
+            : `/projects/${encodeURIComponent(projectId)}/auto-promote-rules`,
+          {
+            method: isUpdate ? 'PUT' : 'POST',
+            body: JSON.stringify(payload),
+          },
+        );
+        renderProjectExplorerSafe('save render', projectId, editor.ruleId || '');
+        const resp = await saveRequest;
+        const data = await resp.json().catch(() => ({}));
+        const savedRule = data.rule || { ...payload, id: editor.ruleId };
+        if (editor.applyAfterSave && savedRule.enabled !== false) {
+          const savedPreview = await previewStoredRule(projectId, savedRule);
+          const confirmed = await confirmApplyRule(savedRule, savedPreview);
+          if (confirmed) {
+            const applyResp = await ctx.projectWorkspaceRequest(
+              `/projects/${encodeURIComponent(projectId)}/auto-promote-rules/${encodeURIComponent(savedRule.id)}/apply`,
+              { method: 'POST' },
+            );
+            const applyData = await applyResp.json().catch(() => ({}));
+            await ctx.refreshProjectWorkspace?.();
+            ctx.setProjectWorkspaceMessage?.(`Auto-promote rule saved and applied: ${previewSummaryText(applyData.result)}.`);
+          } else {
+            ctx.setProjectWorkspaceMessage?.('Auto-promote rule saved.');
+          }
+        } else {
+          ctx.setProjectWorkspaceMessage?.('Auto-promote rule saved.');
+        }
+        state.editor = null;
+        state.preview = null;
+        state.previewKey = '';
+        await loadRules(projectId, { force: true });
+        await load(projectId, { offset: page(projectId).offset, skipFinalRender: true });
+      } catch (err) {
+        ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not save auto-promote rule.', {
+          error: true,
+        });
+        logAutoPromoteClientError('save', projectId, err, editor.ruleId || '');
+      } finally {
+        state.busyRuleId = '';
+        renderProjectExplorerSafe('save final render', projectId, editor.ruleId || '');
+      }
     }
 
     function rowAccessory(projectId, entity) {
@@ -499,14 +1013,23 @@
       toolbar.className = 'project-entity-toolbar';
       const actions = document.createElement('div');
       actions.className = 'project-entity-toolbar-actions';
+      const rules = ctx.makeProjectButton('Rules', 'toggle-project-auto-promote-rules', projectId);
+      rules.classList.add('project-auto-promote-rules-toggle');
+      rules.setAttribute('aria-expanded', ruleState(projectId).open ? 'true' : 'false');
+      rules.setAttribute('aria-controls', rulesPanelId(projectId));
       actions.append(
         ctx.makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
+        rules,
         ctx.makeProjectButton('Export CSV', 'export-project-entities-csv', projectId),
         ctx.makeProjectButton('Export JSONL', 'export-project-entities-jsonl', projectId),
       );
       const select = document.createElement('div');
       select.className = 'project-entity-select-actions';
       const toggle = ctx.makeProjectButton(selectMode() ? 'Done' : 'Select', 'toggle-project-entity-select', projectId);
+      if (!selectMode() && !activeTeamScopeCan('mutate_projects')) {
+        toggle.disabled = true;
+        toggle.title = teamScopeDeniedMessage('change team projects');
+      }
       select.appendChild(toggle);
       if (selectMode()) {
         const currentSelected = selectedIds();
@@ -524,6 +1047,269 @@
       }
       toolbar.append(actions, select);
       return toolbar;
+    }
+
+    function renderRuleSelect(name, value, options, disabled) {
+      const select = document.createElement('select');
+      select.className = 'form-select project-auto-promote-field';
+      select.dataset.projectAutoPromoteField = name;
+      select.disabled = !!disabled;
+      options.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.label;
+        option.selected = item.value === value;
+        option.disabled = !!item.disabled;
+        select.appendChild(option);
+      });
+      return select;
+    }
+
+    function renderRuleField(labelText, control) {
+      const label = document.createElement('label');
+      label.className = 'project-auto-promote-field-wrap';
+      const text = document.createElement('span');
+      text.textContent = labelText;
+      label.append(text, control);
+      return label;
+    }
+
+    function renderRuleCheckbox(labelText, field, checked, disabled = false) {
+      const label = document.createElement('label');
+      label.className = 'form-check project-auto-promote-check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.projectAutoPromoteField = field;
+      input.checked = !!checked;
+      input.disabled = !!disabled;
+      const text = document.createElement('span');
+      text.textContent = labelText;
+      label.append(input, text);
+      return label;
+    }
+
+    function renderRuleEditor(projectId, state) {
+      const editor = state.editor;
+      if (!editor) return null;
+      normalizeRuleEditorMatchMode(editor);
+      const disabled = !canMutateProjectRules(projectId) || !!state.busyRuleId;
+      const currentPayloadKey = payloadKey(editorPreviewPayload(editor));
+      const requiresPreview = editor.enabled !== false;
+      const previewCurrent = !requiresPreview || state.previewKey === currentPayloadKey;
+      const canAttemptSave = !state.previewLoading && !state.busyRuleId;
+      const availableMatchModes = matchModesForTarget(editor.target_entity_kind);
+      const card = document.createElement('form');
+      card.className = 'project-auto-promote-editor panel-row';
+      card.dataset.projectAutoPromoteEditor = '1';
+      card.dataset.projectId = projectId;
+      card.addEventListener('submit', (event) => {
+        event.preventDefault();
+      });
+      const title = document.createElement('div');
+      title.className = 'project-auto-promote-editor-title';
+      title.textContent = editor.ruleId ? 'Edit rule' : 'New rule';
+      const grid = document.createElement('div');
+      grid.className = 'project-auto-promote-editor-grid';
+      const name = document.createElement('input');
+      name.className = 'form-control project-auto-promote-field';
+      name.dataset.projectAutoPromoteField = 'name';
+      name.value = editor.name;
+      name.maxLength = 120;
+      name.disabled = disabled;
+      const pattern = document.createElement('input');
+      pattern.className = 'form-control project-auto-promote-field';
+      pattern.dataset.projectAutoPromoteField = 'pattern';
+      pattern.value = editor.pattern;
+      pattern.maxLength = 500;
+      pattern.disabled = disabled;
+      grid.append(
+        renderRuleField('Name', name),
+        renderRuleField('Entity kind', renderRuleSelect('target_entity_kind', editor.target_entity_kind, targetKinds, disabled)),
+        renderRuleField('Match mode', renderRuleSelect('match_mode', editor.match_mode, availableMatchModes, disabled)),
+        renderRuleField('Pattern', pattern),
+      );
+      const toggles = document.createElement('div');
+      toggles.className = 'project-auto-promote-toggle-row';
+      toggles.append(
+        renderRuleCheckbox('Enabled', 'enabled', editor.enabled, disabled),
+        renderRuleCheckbox('Apply automatically to new runs', 'apply_on_run', editor.apply_on_run, disabled),
+        renderRuleCheckbox('Apply to existing entities after save', 'applyAfterSave', editor.applyAfterSave, disabled),
+      );
+      const filters = document.createElement('div');
+      filters.className = 'project-auto-promote-filters';
+      const filterTrigger = document.createElement('button');
+      filterTrigger.type = 'button';
+      filterTrigger.className = 'control-row project-auto-promote-filters-trigger';
+      filterTrigger.textContent = 'Optional filters';
+      const filterPanel = document.createElement('div');
+      filterPanel.className = 'project-auto-promote-filters-panel';
+      filterPanel.hidden = !state.filtersOpen;
+      filters.append(filterTrigger, filterPanel);
+      const filterGrid = document.createElement('div');
+      filterGrid.className = 'project-auto-promote-editor-grid';
+      const commandRoots = document.createElement('input');
+      commandRoots.className = 'form-control project-auto-promote-field';
+      commandRoots.dataset.projectAutoPromoteField = 'source_command_roots';
+      commandRoots.value = editor.source_command_roots;
+      commandRoots.disabled = disabled;
+      const runIds = document.createElement('input');
+      runIds.className = 'form-control project-auto-promote-field';
+      runIds.dataset.projectAutoPromoteField = 'source_run_ids';
+      runIds.value = editor.source_run_ids;
+      runIds.disabled = disabled;
+      filterGrid.append(
+        renderRuleField('Command roots', commandRoots),
+        renderRuleField('Source run IDs', runIds),
+      );
+      const filterChecks = document.createElement('div');
+      filterChecks.className = 'project-auto-promote-toggle-row';
+      filterChecks.append(
+        renderRuleCheckbox('Include suppressed entities', 'include_suppressed', editor.include_suppressed, disabled),
+        renderRuleCheckbox('Only first seen after rule creation', 'first_seen_after_rule_created', editor.first_seen_after_rule_created, disabled),
+      );
+      filterPanel.append(filterGrid, filterChecks);
+      const bindDisclosureFn = typeof global.bindDisclosure === 'function' ? global.bindDisclosure : null;
+      if (bindDisclosureFn) {
+        bindDisclosureFn(filterTrigger, {
+          panel: filterPanel,
+          hiddenClass: 'u-hidden',
+          openClass: 'is-open',
+          initialOpen: state.filtersOpen,
+          stopPropagation: true,
+          onToggle: (open) => {
+            state.filtersOpen = !!open;
+            filterPanel.hidden = !open;
+          },
+        });
+      } else {
+        filterTrigger.setAttribute('aria-expanded', state.filtersOpen ? 'true' : 'false');
+        filterTrigger.addEventListener('click', () => {
+          state.filtersOpen = !state.filtersOpen;
+          filterTrigger.setAttribute('aria-expanded', state.filtersOpen ? 'true' : 'false');
+          filterPanel.hidden = !state.filtersOpen;
+        });
+      }
+      const preview = document.createElement('div');
+      preview.className = 'project-auto-promote-preview';
+      preview.setAttribute('aria-live', 'polite');
+      if (state.previewLoading) {
+        preview.textContent = 'Previewing...';
+      } else if (state.preview) {
+        preview.textContent = previewSummaryText(state.preview);
+      } else if (!requiresPreview) {
+        preview.textContent = 'Disabled rules can be saved without preview.';
+      } else {
+        preview.textContent = 'Preview required before save.';
+      }
+      const actions = document.createElement('div');
+      actions.className = 'project-auto-promote-editor-actions';
+      const previewBtn = ctx.makeProjectButton('Preview', 'preview-project-auto-promote-rule', projectId);
+      previewBtn.disabled = disabled || state.previewLoading || !requiresPreview;
+      const cancel = ctx.makeProjectButton('Cancel', 'cancel-project-auto-promote-rule', projectId);
+      const save = ctx.makeProjectButton(editor.ruleId ? 'Save rule' : 'Create rule', 'save-project-auto-promote-rule', projectId, 'primary');
+      save.disabled = disabled || !canAttemptSave;
+      if (!previewCurrent) save.title = 'Preview the rule before saving.';
+      previewBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        void previewEditorRule(projectId);
+      }, { capture: true });
+      cancel.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        setEditor(projectId, null);
+        ctx.renderProjectExplorer?.();
+      }, { capture: true });
+      save.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        void saveEditorRule(projectId);
+      }, { capture: true });
+      actions.append(previewBtn, cancel, save);
+      card.append(title, grid, toggles, filters, preview, actions);
+      return card;
+    }
+
+    function renderRulesPanel(projectId) {
+      const state = ruleState(projectId);
+      if (!state.open) return null;
+      if (!state.loaded && !state.loading) loadRules(projectId).catch(() => {});
+      const panel = document.createElement('section');
+      panel.className = 'project-auto-promote-panel';
+      panel.id = rulesPanelId(projectId);
+      panel.setAttribute('aria-label', 'Auto-promote rules');
+      const header = document.createElement('div');
+      header.className = 'project-auto-promote-header';
+      const title = document.createElement('div');
+      title.className = 'project-auto-promote-title';
+      title.textContent = 'Auto-promote rules';
+      const actions = document.createElement('div');
+      actions.className = 'project-auto-promote-actions';
+      const refresh = ctx.makeProjectButton('Refresh', 'refresh-project-auto-promote-rules', projectId);
+      const create = ctx.makeProjectButton('New rule', 'new-project-auto-promote-rule', projectId, 'primary');
+      if (!canMutateProjectRules(projectId)) {
+        create.disabled = true;
+        create.title = projectRuleMutationDeniedMessage(projectId);
+      }
+      actions.append(refresh, create);
+      header.append(title, actions);
+      panel.appendChild(header);
+      if (state.loading && !state.loaded) {
+        panel.appendChild(ctx.emptyProjectPanel('Loading auto-promote rules...'));
+      } else if (state.error) {
+        panel.appendChild(ctx.emptyProjectPanel(state.error));
+      } else if (!state.rules.length) {
+        panel.appendChild(ctx.emptyProjectPanel('No auto-promote rules yet.'));
+      } else {
+        const list = document.createElement('div');
+        list.className = 'project-auto-promote-list';
+        state.rules.forEach((rule) => {
+          const ruleId = String(rule.id || '');
+          const accessory = document.createElement('div');
+          accessory.className = 'project-auto-promote-row-actions';
+          const preview = ctx.makeProjectButton('Preview', 'preview-stored-project-auto-promote-rule', projectId);
+          preview.dataset.ruleId = ruleId;
+          const edit = ctx.makeProjectButton('Edit', 'edit-project-auto-promote-rule', projectId);
+          edit.dataset.ruleId = ruleId;
+          const apply = ctx.makeProjectButton('Apply now', 'apply-project-auto-promote-rule', projectId, 'primary');
+          apply.dataset.ruleId = ruleId;
+          const del = ctx.makeProjectButton('Delete', 'delete-project-auto-promote-rule', projectId, 'destructive');
+          del.dataset.ruleId = ruleId;
+          const busy = state.busyRuleId === ruleId;
+          if (!canMutateProjectRules(projectId)) {
+            [edit, apply, del].forEach((btn) => {
+              btn.disabled = true;
+              btn.title = projectRuleMutationDeniedMessage(projectId);
+            });
+          }
+          if (rule.enabled === false) {
+            preview.disabled = true;
+            preview.title = 'Disabled rules cannot preview or apply.';
+            apply.disabled = true;
+            apply.title = 'Disabled rules cannot preview or apply.';
+          }
+          [preview, edit, apply, del].forEach((btn) => { btn.disabled = btn.disabled || busy; });
+          accessory.append(preview, edit, apply, del);
+          list.appendChild(ctx.projectItemRow({
+            title: String(rule.name || 'Untitled rule'),
+            meta: rulePatternSummary(rule),
+            detail: ruleDetail(rule),
+            chips: [
+              { label: rule.enabled === false ? 'disabled' : 'enabled', kind: rule.enabled === false ? 'label' : 'success' },
+              { label: rule.apply_on_run ? 'auto-run' : 'manual', kind: 'label' },
+            ],
+            accessory,
+            forceArticle: true,
+          }));
+        });
+        panel.appendChild(list);
+      }
+      const editor = renderRuleEditor(projectId, state);
+      if (editor) panel.appendChild(editor);
+      return panel;
     }
 
     function renderPagination(projectId, total, position = 'bottom') {
@@ -731,6 +1517,8 @@
       });
       container.appendChild(renderTypeTabs(projectId, summary));
       container.appendChild(renderToolbar(projectId, visibleEntities));
+      const rulesPanel = renderRulesPanel(projectId);
+      if (rulesPanel) container.appendChild(rulesPanel);
       if (!totalEntities) {
         container.appendChild(ctx.emptyProjectPanel('No Atlas entities are linked to this project yet.'));
         return;
@@ -802,12 +1590,19 @@
       const fragment = document.createDocumentFragment();
       const toolbar = document.createElement('div');
       toolbar.className = 'project-mobile-tab-toolbar';
+      const rules = ctx.makeProjectButton('Rules', 'toggle-project-auto-promote-rules', projectId);
+      rules.classList.add('project-auto-promote-rules-toggle');
+      rules.setAttribute('aria-expanded', ruleState(projectId).open ? 'true' : 'false');
+      rules.setAttribute('aria-controls', rulesPanelId(projectId));
       toolbar.append(
         ctx.makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
+        rules,
         ctx.makeProjectButton('Export CSV', 'export-project-entities-csv', projectId),
       );
       fragment.appendChild(toolbar);
       fragment.appendChild(renderTypeTabs(projectId, summary));
+      const rulesPanel = renderRulesPanel(projectId);
+      if (rulesPanel) fragment.appendChild(rulesPanel);
       const state = page(projectId);
       const visibleEntities = pagedItemsForActiveTab(projectId, summary);
       const totalEntities = Number(summary?.counts?.entities || 0);
@@ -937,6 +1732,121 @@
       return false;
     }
 
+    function updateEditorFromControl(control) {
+      const projectId = String(control.dataset.projectId || ctx.getSelectedProjectId?.() || '');
+      const state = ruleState(projectId);
+      if (!state.editor) return false;
+      const field = String(control.dataset.projectAutoPromoteField || '');
+      if (!field) return false;
+      if (control.type === 'checkbox') state.editor[field] = !!control.checked;
+      else state.editor[field] = String(control.value || '');
+      if (field === 'target_entity_kind') normalizeRuleEditorMatchMode(state.editor);
+      if (previewRelevantField(field)) {
+        state.preview = null;
+        state.previewKey = '';
+      }
+      return true;
+    }
+
+    function handleAutoPromoteInput(event) {
+      const control = event.target.closest?.('[data-project-auto-promote-field]');
+      if (!control) return false;
+      updateEditorFromControl(control);
+      return true;
+    }
+
+    function handleAutoPromoteChange(event) {
+      const control = event.target.closest?.('[data-project-auto-promote-field]');
+      if (!control) return false;
+      updateEditorFromControl(control);
+      const tagName = String(control.tagName || '').toUpperCase();
+      const type = String(control.type || '').toLowerCase();
+      if (tagName === 'INPUT' && type !== 'checkbox' && type !== 'radio') return true;
+      ctx.renderProjectExplorer?.();
+      return true;
+    }
+
+    function ruleById(projectId, ruleId) {
+      return ruleState(projectId).rules.find(rule => String(rule && rule.id || '') === String(ruleId || '')) || null;
+    }
+
+    async function handleAutoPromoteClick(event) {
+      const btn = event.target.closest?.('[data-project-action]');
+      if (!btn) return false;
+      const action = String(btn.dataset.projectAction || '');
+      if (!action.includes('project-auto-promote')) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(btn.dataset.projectId || ctx.getSelectedProjectId?.() || '');
+      const state = ruleState(projectId);
+      const ruleId = String(btn.dataset.ruleId || '');
+      const rule = ruleById(projectId, ruleId);
+      if (action === 'toggle-project-auto-promote-rules') {
+        setRulesOpen(projectId, !state.open);
+        ctx.renderProjectExplorer?.();
+        return true;
+      }
+      if (action === 'refresh-project-auto-promote-rules') {
+        await loadRules(projectId, { force: true });
+        return true;
+      }
+      if (action === 'new-project-auto-promote-rule') {
+        if (!canMutateProjectRules(projectId)) {
+          denyProjectMutation(projectId);
+          return true;
+        }
+        setRulesOpen(projectId, true);
+        setEditor(projectId, defaultRuleEditor(projectId));
+        ctx.renderProjectExplorer?.();
+        return true;
+      }
+      if (action === 'edit-project-auto-promote-rule') {
+        if (!canMutateProjectRules(projectId)) {
+          denyProjectMutation(projectId);
+          return true;
+        }
+        if (!rule) return true;
+        setEditor(projectId, defaultRuleEditor(projectId, rule));
+        ctx.renderProjectExplorer?.();
+        return true;
+      }
+      if (action === 'cancel-project-auto-promote-rule') {
+        setEditor(projectId, null);
+        ctx.renderProjectExplorer?.();
+        return true;
+      }
+      if (action === 'preview-project-auto-promote-rule') {
+        await previewEditorRule(projectId);
+        return true;
+      }
+      if (action === 'save-project-auto-promote-rule') {
+        await saveEditorRule(projectId);
+        return true;
+      }
+      if (action === 'preview-stored-project-auto-promote-rule') {
+        if (!rule) return true;
+        try {
+          const preview = await previewStoredRule(projectId, rule);
+          ctx.setProjectWorkspaceMessage?.(`Auto-promote preview: ${previewSummaryText(preview)}.`);
+        } catch (err) {
+          ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not preview auto-promote rule.', {
+            error: true,
+          });
+          logAutoPromoteClientError('stored preview', projectId, err, rule.id || '');
+        }
+        return true;
+      }
+      if (action === 'apply-project-auto-promote-rule') {
+        if (rule) await applyStoredRule(projectId, rule);
+        return true;
+      }
+      if (action === 'delete-project-auto-promote-rule') {
+        if (rule) await deleteStoredRule(projectId, rule);
+        return true;
+      }
+      return false;
+    }
+
     function setActiveTab(tabId) {
       ctx.setActiveTab?.(String(tabId || 'ip'));
       resetPages();
@@ -997,6 +1907,8 @@
       renderEntities,
       renderMobileEntitiesTab,
       openInAtlas,
+      openAutoPromoteRuleEditor,
+      openAutoPromoteRuleFromAtlas,
       closePicker,
       loadPickerRows,
       openPicker,
@@ -1004,6 +1916,9 @@
       handlePickerInput,
       handlePickerChange,
       handlePickerClick,
+      handleAutoPromoteInput,
+      handleAutoPromoteChange,
+      handleAutoPromoteClick,
       setActiveTab,
       page,
       setPageOffset,

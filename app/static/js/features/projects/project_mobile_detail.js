@@ -478,6 +478,7 @@
           } : null,
           accessory: findingId ? actionMenu(projectId, `Finding actions for ${finding.title || findingId}`, [
             { node: findingReviewNode(finding, projectId) },
+            { label: 'Edit triage', action: 'edit-finding-triage', dataset: { findingId } },
             { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
           ]) : null,
         }));

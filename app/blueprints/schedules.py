@@ -18,17 +18,20 @@ from services.scheduler.route_helpers import (
     normalize_schedule_create_payload,
     normalize_schedule_update_payload,
 )
-from services.scheduler.serialization import get_user_schedule_for_session, schedule_fire_payload, schedule_payload
+from services.scheduler.serialization import get_user_schedule_for_owner, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
     ScheduleError,
     create_schedule,
     delete_schedule,
     list_schedule_fires,
-    list_for_session,
+    list_for_owner,
     update_schedule,
 )
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
 from services.session.variables import SessionVariableError
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
+from services.teams.request_scope import RequestScope, RequestScopeError, current_request_scope, scope_error_payload
 
 log = logging.getLogger("shell")
 
@@ -100,6 +103,7 @@ def _schedule_log_payload(schedule=None, *, session_id: str = "", source: str = 
     if schedule is not None:
         payload.update({
             "schedule_id": schedule.id,
+            "team_id": schedule.team_id,
             "enabled": schedule.enabled,
             "cron_expr": schedule.cron_expr,
             "cadence_preset": schedule.cadence_preset or "",
@@ -123,8 +127,30 @@ def _log_schedule_rejected(action: str, session_id: str, exc: Exception, respons
     })
 
 
-def _schedule_for_session_or_404(schedule_id: str, session_id: str):
-    schedule = get_user_schedule_for_session(schedule_id, session_id)
+def _request_scope_response(session_id: str) -> tuple[RequestScope | None, Any]:
+    try:
+        return current_request_scope(session_id, request), None
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return None, (jsonify(payload), status)
+
+
+def _team_capability_error_response(exc: TeamPermissionDenied):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _require_automation_capability(owner_scope: RequestScope):
+    if not owner_scope.is_team:
+        return None
+    try:
+        require_capability(str((owner_scope.member or {}).get("role") or ""), Capability.MANAGE_AUTOMATION)
+    except TeamPermissionDenied as exc:
+        return _team_capability_error_response(exc)
+    return None
+
+
+def _schedule_for_session_or_404(schedule_id: str, session_id: str, *, team_id: str = ""):
+    schedule = get_user_schedule_for_owner(schedule_id, session_id, team_id=team_id)
     if schedule is None:
         raise ScheduleNotFound("schedule not found")
     return schedule
@@ -171,8 +197,15 @@ def schedules_list():
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
-        schedules = [schedule_payload(schedule) for schedule in list_for_session(session_id)]
+        schedules = [
+            schedule_payload(schedule)
+            for schedule in list_for_owner(session_id, team_id=owner_scope.team_id)
+        ]
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _schedule_error_response(exc)
         _log_schedule_rejected("list", session_id, exc, response)
@@ -186,8 +219,12 @@ def schedules_detail(schedule_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
-        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+        schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     return jsonify({"schedule": schedule_payload(schedule)})
@@ -198,8 +235,12 @@ def schedules_fires(schedule_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
-        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+        schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
         limit = normalize_page_limit(request.args.get("limit"), default=20, maximum=100)
         offset = normalize_page_offset(request.args.get("offset"))
         fires, total = list_schedule_fires(schedule.id, limit=limit, offset=offset)
@@ -224,6 +265,13 @@ def schedules_create():
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     data, body_error = _json_body()
     if body_error:
         return body_error
@@ -233,6 +281,7 @@ def schedules_create():
         payload = normalize_schedule_create_payload(data, session_id)
         schedule = create_schedule(
             session_id,
+            team_id=owner_scope.team_id,
             **payload,
         )
     except (
@@ -256,8 +305,15 @@ def schedules_update(schedule_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     try:
-        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+        schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     data, body_error = _json_body()
@@ -297,8 +353,15 @@ def schedules_delete(schedule_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     try:
-        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+        schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     removed = delete_schedule(schedule.id)
@@ -312,8 +375,15 @@ def schedules_run_now(schedule_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     try:
-        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+        schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     try:

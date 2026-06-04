@@ -18,7 +18,8 @@ Each watcher stores:
 - bounded diff details from the last completed check
 - recent fire audit rows
 
-Watchers require a durable `tok_` session token. Anonymous browser sessions cannot create watchers because the worker needs a stable owner after the browser closes, and token revocation must still stop future fires.
+Watchers belong to the active personal or team scope. Anonymous browser sessions cannot create watchers because the worker needs a durable `tok_` token after the browser closes, and token revocation must still stop future personal fires. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
+Archived teams pause their team-owned watchers. Reactivating a team restores access, but archive-paused watchers stay paused until someone resumes them.
 
 ---
 
@@ -59,7 +60,7 @@ Custom cron expressions use the same rules as scheduled runs: five-field POSIX c
 
 The baseline run is the point every new watcher fire compares against.
 
-- A watcher can be created from a completed run visible to the current token, or from the first successful watcher fire.
+- A watcher can be created from a completed run visible to the active personal or team scope, or from the first successful watcher fire.
 - First-run watchers show as pending until a successful run is captured as the baseline.
 - If the first run fails, the watcher records the error and keeps the baseline pending for the next fire or manual **Run now**.
 - A watcher can be paused, resumed, manually fired, or deleted without changing the baseline.
@@ -112,6 +113,8 @@ The textual fallback is intentionally more sensitive than the structured classif
 
 Watchers do not have a separate timer. The scheduler worker claims due watcher-owned schedule rows, starts the watched command through the same brokered run path as scheduled commands, and records a pending watcher fire.
 
+If a watcher-fired command is still active when you open or reload the UI, it stays in the Status Monitor instead of automatically taking over the terminal. Use **Attach** from Status Monitor when you want to watch that run live.
+
 When the run finalizes, the watcher finalization hook:
 
 - compares the completed run against the baseline
@@ -136,7 +139,7 @@ The API uses the same JSON error envelope as the rest of `/api/v1`.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/watchers` | List current-token watchers. |
+| `GET` | `/api/v1/watchers` | List watchers for the active personal/team API scope. |
 | `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, and optional command override. |
 | `GET` | `/api/v1/watchers/<watcher_id>` | Read one watcher. |
 | `PATCH` | `/api/v1/watchers/<watcher_id>` | Update command, cadence, label, options, or pause/resume state. |
@@ -165,11 +168,12 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 
 ## Limits and config
 
-- `watchers.max_per_session` defaults to `32`.
+- `watchers.max_per_session` defaults to `32` per durable personal or team scope.
 - Watchers require durable `tok_` sessions.
 - Watchers monitor one baseline command at a time.
 - Watcher-owned schedules share the scheduler worker, missed-fire recovery, revoked-token handling, overlap policy, and cron rules used by normal schedules.
-- Threshold-based alerting, multi-command watcher graphs, blackout calendars, and cross-session watchers are not part of this feature.
+- Team-owned watchers pause when their team is archived and stay paused after the team is reactivated until someone resumes them.
+- Threshold-based alerting, multi-command watcher graphs, and blackout calendars are not part of this feature.
 
 ---
 
@@ -192,7 +196,7 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

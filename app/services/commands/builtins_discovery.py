@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 import os
 import re
 import subprocess
@@ -17,10 +18,13 @@ from services.commands.builtins_format import (
 )
 from services.commands.registry import (
     command_catalog_entry,
+    command_catalog_from_registry,
     command_root,
+    is_feature_required_enabled,
     load_all_faq,
     load_command_policy,
     load_commands_registry,
+    pipe_catalog_from_registry,
     resolve_runtime_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -40,6 +44,10 @@ def run_builtin_help() -> list[dict[str, object]]:
         _output_line("Use `commands --built-in` or `commands --external` to filter that catalog.", "builtin-plain"),
         _output_line(
             "Use `commands info <command>` to see examples, flags, and subcommands for a supported command.",
+            "builtin-plain",
+        ),
+        _output_line(
+            "Use `commands search <term>` to find commands by name, description, category, or guidance notes.",
             "builtin-plain",
         ),
         _output_line("Autocomplete appears as you type; press Tab to accept or cycle suggestions.", "builtin-plain"),
@@ -73,6 +81,8 @@ def _allowed_external_command_groups(
         policy = entry.get("policy") if isinstance(entry.get("policy"), dict) else {}
         if not policy.get("allow"):
             continue
+        if not is_feature_required_enabled(entry.get("feature_required")):
+            continue
         seen_roots.add(root)
         category = str(entry.get("category") or "Allowed commands")
         roots = group_map.get(category)
@@ -85,15 +95,28 @@ def _allowed_external_command_groups(
     return rows or None
 
 
+_KNOWLEDGE_SECTION_ORDER: tuple[tuple[str, str], ...] = (
+    ("notes", "Notes:"),
+    ("gotchas", "Gotchas:"),
+    ("safe_defaults", "Safe Defaults:"),
+    ("common_flags", "Common Flags:"),
+)
+
+
 def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, object]]:
-    if len(parts) not in {3, 4}:
-        return [_output_line("Usage: commands info <command> [subcommand]")]
-    root = parts[2].lower()
-    subcommand = parts[3].lower() if len(parts) == 4 else None
+    json_output = "--json" in {p.lower() for p in parts[2:]}
+    non_flag_parts = [p for p in parts[2:] if p.lower() != "--json"]
+    if len(non_flag_parts) not in {1, 2}:
+        return [_output_line("Usage: commands info <command> [subcommand] [--json]")]
+    root = non_flag_parts[0].lower()
+    subcommand = non_flag_parts[1].lower() if len(non_flag_parts) == 2 else None
     entry = command_catalog_entry(root, subcommand)
-    if not entry:
+    if not entry or not is_feature_required_enabled(entry.get("feature_required")):
         target = f"{root} {subcommand}" if subcommand else root
         return [_output_line(f"commands: no catalog entry for {target}")]
+
+    if json_output:
+        return [_output_line(json.dumps(entry, sort_keys=True, ensure_ascii=False), "builtin-json")]
 
     lines: list[dict[str, object]] = [
         _output_line(str(entry.get("root") or root), "builtin-section"),
@@ -156,6 +179,108 @@ def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, object]]:
             if text:
                 lines.append(_output_line(f"  {text}", "builtin-catalog-item"))
 
+    knowledge = entry.get("knowledge") if isinstance(entry.get("knowledge"), dict) else {}
+    for field, label in _KNOWLEDGE_SECTION_ORDER:
+        items = knowledge.get(field) if isinstance(knowledge.get(field), list) else []  # type: ignore[union-attr]
+        if items:
+            lines.append(_output_line("", "builtin-spacer"))
+            lines.append(_output_line(label, "builtin-section"))
+            for item in items:
+                text = str(item or "").strip()
+                if text:
+                    lines.append(_output_line(f"  {text}", "builtin-catalog-item"))
+
+    artifact_behavior = (
+        str(knowledge.get("artifact_behavior") or "").strip()  # type: ignore[union-attr]
+        if isinstance(knowledge, dict)
+        else ""
+    )
+    if artifact_behavior:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Artifact Behavior:", "builtin-section"))
+        lines.append(_output_line(f"  {artifact_behavior}", "builtin-catalog-item"))
+
+    return lines
+
+
+def _catalog_search_tier(term: str, entry: dict[str, object]) -> int | None:
+    """Return the match tier for *term* against *entry*, or ``None`` for no match.
+
+    Tier 0 — root starts with the search term (highest priority).
+    Tier 1 — category body contains the term.
+    Tier 2 — root body, description, example values, or knowledge fields contain
+              the term.
+    """
+    root = str(entry.get("root") or "").strip().lower()
+    if root.startswith(term):
+        return 0
+    category = str(entry.get("category") or "").strip().lower()
+    if term in category:
+        return 1
+    if term in root:
+        return 2
+    if term in str(entry.get("description") or "").lower():
+        return 2
+    raw_examples = entry.get("examples")
+    if isinstance(raw_examples, list):
+        for ex in raw_examples:
+            if isinstance(ex, dict) and term in str(ex.get("value") or "").lower():
+                return 2
+    knowledge = entry.get("knowledge") if isinstance(entry.get("knowledge"), dict) else {}
+    for field in ("notes", "gotchas"):
+        raw_items = knowledge.get(field)  # type: ignore[union-attr]
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                if term in str(item or "").lower():
+                    return 2
+    return None
+
+
+def _run_builtin_commands_search(
+    parts: list[str],
+) -> list[dict[str, object]]:
+    if len(parts) < 3 or not parts[2].strip():
+        return [_output_line("Usage: commands search <term>")]
+
+    term = " ".join(parts[2:]).strip().lower()
+    catalog = command_catalog_from_registry()
+
+    ranked: list[tuple[int, str, dict[str, object]]] = []
+    for entry in catalog:
+        if not is_feature_required_enabled(entry.get("feature_required")):
+            continue
+        tier = _catalog_search_tier(term, entry)
+        if tier is not None:
+            root_key = str(entry.get("root") or "").strip().lower()
+            ranked.append((tier, root_key, entry))
+    ranked.sort(key=lambda t: (t[0], t[1]))
+
+    if not ranked:
+        return [_output_line(f"commands: no matches for '{term}'", "builtin-note")]
+
+    rows: list[tuple[str, list[tuple[str, str]]]] = []
+    group_map: dict[str, list[tuple[str, str]]] = {}
+    for _, _, entry in ranked:
+        root = str(entry.get("root") or "").strip()
+        category = str(entry.get("category") or "Allowed commands").strip()
+        description = str(entry.get("description") or "").strip()
+        bucket = group_map.get(category)
+        if bucket is None:
+            bucket = []
+            group_map[category] = bucket
+            rows.append((category, bucket))
+        bucket.append((root, description))
+
+    lines: list[dict[str, object]] = []
+    for category, roots in rows:
+        lines.append(_output_line(f"[{category}]", "builtin-section"))
+        width = max((len(r) for r, _ in roots), default=0)
+        for root, description in roots:
+            suffix = f"  - {description}" if description else ""
+            lines.append(_output_line(f"  {root:<{width}}{suffix}", "builtin-catalog-item"))
+        lines.append(_output_line("", "builtin-spacer"))
+    if lines and lines[-1].get("text", "") == "":
+        lines.pop()
     return lines
 
 
@@ -168,12 +293,18 @@ def run_builtin_commands(
     parts = split_command(command)
     if len(parts) > 1 and parts[1].lower() == "info":
         return _run_builtin_commands_info(parts)
+    if len(parts) > 1 and parts[1].lower() == "search":
+        return _run_builtin_commands_search(parts)
 
     filters = {part.lower() for part in parts[1:]}
     valid_filters = {"--built-in", "--external"}
     invalid_filters = sorted(filters - valid_filters)
     if invalid_filters:
-        return [_output_line("Usage: commands [--built-in] [--external] | commands info <command> [subcommand]")]
+        return [_output_line(
+            "Usage: commands [--built-in] [--external]"
+            " | commands info <command> [subcommand]"
+            " | commands search <term>"
+        )]
 
     show_builtins = True
     show_external = True
@@ -192,7 +323,10 @@ def run_builtin_commands(
             lines.append(_output_line(f"  {name:<{width}}  {description}", "builtin-help-row"))
 
     if show_external:
-        external_groups = _allowed_external_command_groups(load_registry)
+        # Load the registry once and reuse it for both the external catalog and
+        # the pipe-helpers section so discovery makes a single registry read.
+        registry = load_registry()
+        external_groups = _allowed_external_command_groups(lambda: registry)
         if lines:
             lines.append(_output_line("", "builtin-spacer"))
         lines.append(_output_line("Allowed external commands:", "builtin-section"))
@@ -215,6 +349,25 @@ def run_builtin_commands(
                 lines.append(_output_line("", "builtin-spacer"))
             if lines and lines[-1].get("text", "") == "":
                 lines.pop()
+
+        pipes = [
+            p for p in pipe_catalog_from_registry(registry)
+            if is_feature_required_enabled(p.get("feature_required"))
+        ]
+        if pipes:
+            if lines:
+                lines.append(_output_line("", "builtin-spacer"))
+            lines.append(_output_line("App-native pipe helpers:", "builtin-section"))
+            lines.append(_output_line(
+                "  App-managed filters — not arbitrary shell pipelines.",
+                "builtin-note",
+            ))
+            width = max((len(str(p.get("root") or "")) for p in pipes), default=0)
+            for pipe in pipes:
+                root = str(pipe.get("root") or "").strip()
+                description = str(pipe.get("description") or "").strip()
+                suffix = f"  - {description}" if description else ""
+                lines.append(_output_line(f"  {root:<{width}}{suffix}", "builtin-catalog-item"))
 
     return lines
 

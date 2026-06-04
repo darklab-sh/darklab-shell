@@ -37,6 +37,7 @@ def _channel(*, secrets=None, config=None) -> NotificationChannel:
     return NotificationChannel(
         id="ntc_webhook",
         session_token="tok_notifications",
+        team_id="",
         kind="webhook",
         label="Webhook",
         secrets=secrets or {"url": "NOTIFY_WEBHOOK_URL"},

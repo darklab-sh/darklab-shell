@@ -82,6 +82,7 @@ from services.commands.builtins_system import (
     run_builtin_who as _run_builtin_who,
     run_builtin_whoami as _run_builtin_whoami,
 )
+from services.commands.builtins_team import run_builtin_team as _run_builtin_team
 from services.commands.builtins_workspace import (
     parse_workspace_list_command as _parse_workspace_list_command,
     run_builtin_workspace as _run_builtin_workspace,
@@ -89,6 +90,7 @@ from services.commands.builtins_workspace import (
 )
 from services.commands.builtins_wordlist import run_builtin_wordlist as _run_builtin_wordlist
 from services.commands.wordlists import load_wordlist_catalog
+from services.teams.scope import OwnerContext, owner_context_for_scope
 from config import CFG
 from core.process import active_runs_for_session, redis_client
 
@@ -338,6 +340,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "stats":     lambda cmd, sid: _run_builtin_stats(sid),
     "status":    lambda cmd, sid: _run_builtin_status(sid),
     "tail":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "team":      lambda cmd, sid: _run_builtin_team(cmd, sid),
     "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),
     "theme":     lambda cmd, sid: _run_builtin_client_side_command("theme"),
@@ -365,7 +368,15 @@ _BUILTIN_COMMAND_DISPATCH = {
 }
 
 
-def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") -> tuple[list[dict[str, object]], int]:
+def execute_builtin_command(
+    command: str,
+    session_id: str,
+    *,
+    tab_id: str = "",
+    team_id: str = "",
+    team_role: str = "",
+    owner_context: OwnerContext | None = None,
+) -> tuple[list[dict[str, object]], int]:
     # Built-in commands still return the same [{text, class}, ...], exit_code shape
     # as real runs so the frontend path is identical.
     _sync_builtin_module_hooks()
@@ -373,8 +384,38 @@ def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") 
     handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
+    if root in _WORKSPACE_BUILTIN_ROOTS:
+        workspace_owner = owner_context
+        if workspace_owner is None:
+            workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
+        if root == "file":
+            result = _run_builtin_workspace(
+                command,
+                session_id,
+                owner_context=workspace_owner,
+                team_role=team_role,
+            )
+        else:
+            result = _run_builtin_workspace_alias(
+                command,
+                session_id,
+                owner_context=workspace_owner,
+                team_role=team_role,
+            )
+        return result, 0
     if root == "project":
         result = _run_builtin_project(command, session_id, tab_id=tab_id)
+        return result, 0
+    if root == "secret":
+        result = _run_builtin_secret(command, session_id, team_id=team_id, team_role=team_role)
+        return result, 0
+    if root == "providers":
+        result = _run_builtin_secret("secret show-consumers", session_id, team_id=team_id, team_role=team_role)
+        return result, 0
+    if root == "intel":
+        return _run_builtin_intel(command, session_id, team_id=team_id)
+    if root == "team":
+        result = _run_builtin_team(command, session_id, team_id=team_id, team_role=team_role)
         return result, 0
     result = handler(command, session_id)
     if isinstance(result, tuple):

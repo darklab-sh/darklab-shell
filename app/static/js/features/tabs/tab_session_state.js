@@ -26,6 +26,19 @@ function _snapshotTabRawLines(rawLines) {
   }));
 }
 
+function _snapshotTabCommandOutcomeSummary(summary) {
+  if (!summary) return null;
+  const normalized = typeof window !== 'undefined'
+    && window.DarklabOutputCore
+    && typeof window.DarklabOutputCore.normalizeCommandOutcomeSummary === 'function'
+    ? window.DarklabOutputCore.normalizeCommandOutcomeSummary(summary)
+    : null;
+  return normalized ? {
+    title: normalized.title,
+    items: normalized.items,
+  } : null;
+}
+
 function _flushActiveTabDraftForSessionState() {
   const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
   if (!activeTab || activeTab.st === 'running') return;
@@ -60,6 +73,7 @@ function _tabSessionSnapshot() {
       previewTruncated: !!tab.previewTruncated,
       fullOutputAvailable: !!tab.fullOutputAvailable,
       fullOutputLoaded: !!tab.fullOutputLoaded,
+      commandOutcomeSummary: _snapshotTabCommandOutcomeSummary(tab.commandOutcomeSummary),
       rawLines: _snapshotTabRawLines(tab.rawLines),
     }));
   if (!persisted.length) return null;
@@ -169,6 +183,7 @@ function restoreTabSessionState() {
       tab.previewTruncated = !!(item && item.previewTruncated);
       tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
       tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
+      tab.commandOutcomeSummary = item && item.commandOutcomeSummary || null;
       if (typeof renderRestoredTabOutput === 'function') {
         renderRestoredTabOutput(tabId, item && item.rawLines);
       }
@@ -206,6 +221,7 @@ function restoreTabSessionState() {
       tab.previewTruncated = !!(item && item.previewTruncated);
       tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
       tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
+      tab.commandOutcomeSummary = item && item.commandOutcomeSummary || null;
     });
 
     if (!restoredIds.length) return false;

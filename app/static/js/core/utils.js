@@ -146,7 +146,9 @@ async function copyTextToClipboard(text) {
   return _copyTextFallback(value);
 }
 
-function downloadBlobAsAttachment(blob, filename, { revokeDelayMs = 2000 } = {}) {
+function downloadBlobAsAttachment(blob, filename, options = {}) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const { revokeDelayMs = 2000, container = null } = opts;
   if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
     throw new Error('Blob downloads are not available');
   }
@@ -154,7 +156,8 @@ function downloadBlobAsAttachment(blob, filename, { revokeDelayMs = 2000 } = {})
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename || 'download';
-  document.body.appendChild(anchor);
+  const parent = container && typeof container.appendChild === 'function' ? container : document.body;
+  parent.appendChild(anchor);
   anchor.click();
   anchor.remove();
 
@@ -173,6 +176,22 @@ function downloadBlobAsAttachment(blob, filename, { revokeDelayMs = 2000 } = {})
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('pagehide', revoke, { once: true });
   }
+}
+
+function downloadUrlAsAttachment(url, options = {}) {
+  const href = String(url || '').trim();
+  if (!href) throw new Error('Download URL is required');
+  const opts = options && typeof options === 'object' ? options : {};
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  if (opts.filename) anchor.download = String(opts.filename);
+  anchor.rel = 'noopener';
+  const parent = opts.container && typeof opts.container.appendChild === 'function'
+    ? opts.container
+    : document.body;
+  parent.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 async function shareUrl(url) {

@@ -17,8 +17,9 @@ from services.intel.schema import ENTITY_TYPES
 ATLAS_ENTITY_TYPES = frozenset(ENTITY_TYPES)
 
 
-def atlas_entity_id(session_id: str, entity_type: str, canonical_value: str) -> str:
-    raw = f"{session_id}\x1f{entity_type}\x1f{canonical_value}".encode("utf-8", errors="replace")
+def atlas_entity_id(session_id: str, entity_type: str, canonical_value: str, *, team_id: str = "") -> str:
+    owner_id = str(team_id or session_id)
+    raw = f"{owner_id}\x1f{entity_type}\x1f{canonical_value}".encode("utf-8", errors="replace")
     return "ent_" + hashlib.sha256(raw).hexdigest()[:32]
 
 
@@ -57,23 +58,32 @@ def upsert_entity(
     entity_type: str,
     canonical_value: str,
     *,
+    team_id: str = "",
     seen_at: str = "",
     occurrence_count: int = 0,
 ) -> str:
     timestamp = str(seen_at or _now())
+    team_id = str(team_id or "").strip()
     signature_hash = entity_signature(entity_type, canonical_value)
-    entity_id = atlas_entity_id(session_id, entity_type, canonical_value)
+    entity_id = atlas_entity_id(session_id, entity_type, canonical_value, team_id=team_id)
+    conflict_target = (
+        "ON CONFLICT(team_id, type, signature_hash) WHERE team_id != '' DO UPDATE SET "
+        if team_id
+        else "ON CONFLICT(session_id, type, signature_hash) WHERE team_id = '' DO UPDATE SET "
+    )
     conn.execute(
         "INSERT INTO entities "
-        "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(session_id, type, signature_hash) DO UPDATE SET "
+        "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+        "occurrence_count, created) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        f"{conflict_target}"  # nosec
         "last_seen_at = CASE "
         "WHEN excluded.last_seen_at > entities.last_seen_at THEN excluded.last_seen_at ELSE entities.last_seen_at END, "
         "occurrence_count = entities.occurrence_count + excluded.occurrence_count",
         (
             entity_id,
             session_id,
+            team_id,
             entity_type,
             canonical_value,
             signature_hash,
@@ -83,10 +93,16 @@ def upsert_entity(
             timestamp,
         ),
     )
-    row = conn.execute(
-        "SELECT id FROM entities WHERE session_id = ? AND type = ? AND signature_hash = ?",
-        (session_id, entity_type, signature_hash),
-    ).fetchone()
+    if team_id:
+        row = conn.execute(
+            "SELECT id FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
+            (team_id, entity_type, signature_hash),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM entities WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
+            (session_id, entity_type, signature_hash),
+        ).fetchone()
     return str(row["id"]) if row else entity_id
 
 
@@ -106,7 +122,15 @@ def _iter_entry_entities(entries: Iterable[object]) -> Iterable[Mapping[str, Any
                 yield raw_entity
 
 
-def materialize_run_entities(conn, session_id: str, run_id: str, entries: Iterable[object], *, seen_at: str = ""):
+def materialize_run_entities(
+    conn,
+    session_id: str,
+    run_id: str,
+    entries: Iterable[object],
+    *,
+    team_id: str = "",
+    seen_at: str = "",
+):
     """Store unique normalized entities and run links for a completed run."""
     timestamp = str(seen_at or _now())
     existing_rows = conn.execute(
@@ -129,6 +153,7 @@ def materialize_run_entities(conn, session_id: str, run_id: str, entries: Iterab
             session_id,
             entity_type,
             canonical_value,
+            team_id=team_id,
             seen_at=timestamp,
             occurrence_count=int(occurrence_count),
         )

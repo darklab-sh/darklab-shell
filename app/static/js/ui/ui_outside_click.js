@@ -48,6 +48,7 @@
     const triggers = _toArray(opts.triggers);
     const exemptSelectors = _toArray(opts.exemptSelectors);
     const scope = opts.scope || (typeof document !== 'undefined' ? document : null);
+    const capture = !!opts.capture;
     if (!scope || typeof scope.addEventListener !== 'function') return null;
 
     const handler = (e) => {
@@ -69,11 +70,11 @@
       onCloseFn();
     };
 
-    scope.addEventListener('click', handler);
+    scope.addEventListener('click', handler, capture);
 
     return {
       dispose: () => {
-        scope.removeEventListener('click', handler);
+        scope.removeEventListener('click', handler, capture);
       },
     };
   }

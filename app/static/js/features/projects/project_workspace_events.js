@@ -29,11 +29,43 @@
       return ctx.selectedFindingIds?.() || new Set();
     }
 
+    function activeTeamScopeCan(capability) {
+      return typeof global.activeTeamScopeCan === 'function'
+        ? global.activeTeamScopeCan(capability)
+        : true;
+    }
+
+    function teamScopeDeniedMessage(action) {
+      return typeof global.teamScopeDeniedMessage === 'function'
+        ? global.teamScopeDeniedMessage(action)
+        : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+    }
+
+    function denyTeamScopeAction(action) {
+      ctx.setProjectWorkspaceMessage(teamScopeDeniedMessage(action), { error: true });
+    }
+
     function projectFromRowsOrSummary(projectId) {
       const summary = ctx.projectSummary?.(projectId);
       return (summary && summary.project && typeof summary.project === 'object')
         ? summary.project
         : projectRows().find(item => String(item.id || '') === String(projectId || ''));
+    }
+
+    function projectFindingById(projectId, findingId) {
+      const normalizedFindingId = String(findingId || '');
+      if (!normalizedFindingId) return null;
+      const summary = ctx.projectSummary?.(projectId);
+      const lists = [
+        ctx.projectFindingItems?.(projectId),
+        ctx.filteredProjectFindings?.(projectId, summary),
+      ];
+      for (const list of lists) {
+        if (!Array.isArray(list)) continue;
+        const finding = list.find(item => String(item && item.id || '') === normalizedFindingId);
+        if (finding) return finding;
+      }
+      return null;
     }
 
     function restoreHistoryRun() {
@@ -122,11 +154,22 @@
     }
 
     async function handleInput(event) {
+      if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
       ctx.packagesController?.().handleInput(event);
     }
 
     async function handleChange(event) {
+      if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
       if (ctx.packagesController?.().handleChange(event)) return;
+      const findingViewModeControl = event.target.closest?.('[data-project-finding-view-mode]');
+      if (findingViewModeControl) {
+        event.preventDefault();
+        event.stopPropagation();
+        const mode = String(findingViewModeControl.dataset.projectFindingViewMode || 'list');
+        ctx.setFindingViewMode(mode);
+        ctx.renderProjectExplorer();
+        return;
+      }
       const compareModeControl = event.target.closest?.('[data-project-compare-mode]');
       if (compareModeControl) {
         event.stopPropagation();
@@ -261,6 +304,10 @@
         const projectId = String(bulkReview.dataset.projectId || selectedProjectId() || '');
         const reviewState = String(bulkReview.value || '');
         if (!projectId || !reviewState || !selectedFindingIds().size) return;
+        if (!activeTeamScopeCan('triage_findings')) {
+          denyTeamScopeAction('triage team findings');
+          return;
+        }
         const findingIds = [...selectedFindingIds()];
         try {
           const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/findings/review`, {
@@ -296,6 +343,11 @@
       const reviewState = String(control.value || 'new');
       const previousReviewState = String(control.dataset.previousReviewState || 'new');
       ctx.setProjectWorkspaceMessage('');
+      if (!activeTeamScopeCan('triage_findings')) {
+        control.value = previousReviewState;
+        denyTeamScopeAction('triage team findings');
+        return;
+      }
       ctx.setCachedFindingReviewState(projectId, findingId, reviewState);
       ctx.renderProjectExplorer();
       if (mobileView() === 'detail' && workspaceTab() === 'findings' && selectedProjectId() === projectId) {
@@ -340,6 +392,7 @@
     }
 
     async function handleClick(event) {
+      if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
       if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
       if (mobileDetailTab) {
@@ -598,6 +651,15 @@
         ctx.renderProjectExplorer();
         return;
       }
+      const findingViewModeButton = event.target.closest?.('[data-project-finding-view-mode]');
+      if (findingViewModeButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const mode = String(findingViewModeButton.dataset.projectFindingViewMode || 'list');
+        ctx.setFindingViewMode(mode);
+        ctx.renderProjectExplorer();
+        return;
+      }
       const tabBtn = event.target.closest?.('[data-project-tab]');
       if (tabBtn) {
         event.preventDefault();
@@ -793,6 +855,17 @@
             });
           }
           return;
+        } else if (action === 'open-findings-board') {
+          const project = projectFromRowsOrSummary(projectId);
+          if (typeof global.openFindingsBoard === 'function') {
+            ctx.closeProjectWorkspace({ refocus: false });
+            void global.openFindingsBoard({
+              source: 'project-workspace',
+              projectId,
+              projectName: project ? ctx.projectDisplayName(project) : '',
+            });
+          }
+          return;
         } else if (action === 'open-project-entity') {
           const summary = ctx.projectSummary?.(projectId);
           const entityId = String(btn.dataset.entityId || '');
@@ -810,11 +883,19 @@
           return;
         } else if (action === 'toggle-project-entity-select') {
           const nextMode = !ctx.entitySelectMode();
+          if (nextMode && !activeTeamScopeCan('mutate_projects')) {
+            denyTeamScopeAction('change team projects');
+            return;
+          }
           ctx.entitiesController?.().setSelectMode(nextMode);
           if (!nextMode) ctx.entitiesController?.().clearSelection();
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'select-all-project-entities') {
+          if (!activeTeamScopeCan('mutate_projects')) {
+            denyTeamScopeAction('change team projects');
+            return;
+          }
           ctx.entitiesController?.().selectAllForActiveTab(ctx.projectSummary?.(projectId));
           ctx.renderProjectExplorer();
           return;
@@ -867,6 +948,10 @@
           return;
         } else if (action === 'toggle-project-finding-select') {
           const nextMode = !ctx.findingSelectMode();
+          if (nextMode && !activeTeamScopeCan('triage_findings')) {
+            denyTeamScopeAction('triage team findings');
+            return;
+          }
           ctx.setFindingSelectMode(nextMode);
           if (!nextMode) selectedFindingIds().clear();
           ctx.renderProjectExplorer();
@@ -880,6 +965,10 @@
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'select-all-project-findings') {
+          if (!activeTeamScopeCan('triage_findings')) {
+            denyTeamScopeAction('triage team findings');
+            return;
+          }
           ctx.filteredProjectFindings(projectId, ctx.projectSummary?.(projectId)).forEach((finding) => {
             if (finding && finding.id) selectedFindingIds().add(String(finding.id));
           });
@@ -926,10 +1015,34 @@
           return;
         } else if (action === 'edit-finding-metadata') {
           const findingId = String(btn.dataset.findingId || '');
-          const finding = ctx.projectFindingItems(projectId).find(item => String(item.id || '') === findingId);
+          const finding = projectFindingById(projectId, findingId);
           if (!finding) throw new Error('Finding is missing its details.');
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectEntityEditor(projectId, 'finding', finding);
+          return;
+        } else if (action === 'edit-finding-triage') {
+          const findingId = String(btn.dataset.findingId || '');
+          const finding = projectFindingById(projectId, findingId);
+          if (!finding) throw new Error('Finding is missing its details.');
+          ctx.setProjectWorkspaceMessage('');
+          if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+            throw new Error('Finding triage editor is not available.');
+          }
+          await global.DarklabFindingTriageEditor.open(finding, {
+            canEdit: activeTeamScopeCan('triage_findings'),
+            onSaved: async (triage) => {
+              const compact = global.DarklabFindingTriageEditor.compactTriage(triage);
+              ctx.updateCachedProjectFinding?.(projectId, findingId, {
+                triage: compact,
+                verification_status: compact.verification_status,
+              });
+              ctx.renderProjectExplorer?.();
+              if (mobileView() === 'detail' && workspaceTab() === 'findings' && selectedProjectId() === projectId) {
+                ctx.renderProjectMobileDetail?.();
+              }
+              ctx.setProjectWorkspaceMessage('Finding triage saved.');
+            },
+          });
           return;
         } else if (action === 'edit-run-metadata') {
           const runId = String(btn.dataset.runId || '');

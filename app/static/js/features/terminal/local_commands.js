@@ -72,6 +72,13 @@ function _formatCliRecord(key, value, width = 18) {
   return `${key.padEnd(width)}  ${value}`;
 }
 
+function _formatCliTableRow(values, widths) {
+  const lastIndex = values.length - 1;
+  return values.map((value, index) => (
+    index === lastIndex ? String(value || '') : String(value || '').padEnd(widths[index] || 0)
+  )).join('  ');
+}
+
 function _cliThemeDescription(entry) {
   const label = String(entry?.label || entry?.name || '').trim();
   const slug = _cliThemeSlug(entry);
@@ -218,6 +225,13 @@ function _cliConfigEntries() {
       set: (value) => applyRunNotifyPreference(value),
     },
     {
+      key: 'command-outcome-summaries',
+      description: 'Show short app-generated summaries below completed command output',
+      values: ['on', 'off'],
+      get: () => getCommandOutcomeSummariesPreference(),
+      set: (value) => applyCommandOutcomeSummariesPreference(value),
+    },
+    {
       key: 'hud-clock',
       description: 'HUD clock timezone',
       values: _hudClockModes.slice(),
@@ -309,7 +323,18 @@ function _printCliConfigEntry(entry, tabId) {
 
 function _printCliConfigList(tabId) {
   _cliAppendLine('Current user config:', 'builtin-section', tabId);
-  _cliConfigEntries().forEach(entry => _printCliConfigEntry(entry, tabId));
+  const rows = _cliConfigEntries().map(entry => ({
+    option: entry.key,
+    value: _cliConfigDisplayValue(entry.get()),
+  }));
+  const widths = [
+    Math.max('option'.length, ...rows.map(row => row.option.length)),
+    Math.max('value'.length, ...rows.map(row => row.value.length)),
+  ];
+  _cliAppendLine(_formatCliTableRow(['option', 'value'], widths), 'builtin-table-header', tabId);
+  rows.forEach(row => {
+    _cliAppendLine(_formatCliTableRow([row.option, row.value], widths), 'builtin-table-row', tabId);
+  });
 }
 
 async function handleConfigCommand(cmd, tabId = null) {

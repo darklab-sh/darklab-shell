@@ -487,7 +487,7 @@ describe('Status Monitor', () => {
 
     await openStatusMonitor({ source: 'test' })
 
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active')).toHaveLength(3)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active?include_scheduled=1')).toHaveLength(3)
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 44%')
     expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
 
@@ -527,7 +527,7 @@ describe('Status Monitor', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await vi.advanceTimersByTimeAsync(900)
 
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active')).toHaveLength(2)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active?include_scheduled=1')).toHaveLength(2)
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 47%')
 
     closeStatusMonitor()
@@ -943,7 +943,7 @@ describe('Status Monitor', () => {
     const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[activeRun], []] })
 
     const firstOpen = openStatusMonitor({ source: 'test' })
-    expect(apiFetch.mock.calls[0]?.[0]).toBe('/history/active')
+    expect(apiFetch.mock.calls[0]?.[0]).toBe('/history/active?include_scheduled=1')
     expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('Loading active runs...')
     expect(document.querySelector('.status-monitor-runs-empty')?.textContent).toBe('Loading active runs...')
     expect(document.querySelector('.status-monitor-list')?.textContent).not.toContain('sleep 10')

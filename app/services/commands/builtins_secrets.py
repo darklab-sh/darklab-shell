@@ -7,8 +7,11 @@ from typing import Any
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.intel.registry import provider_status_catalog
+from services.secrets.audit import emit_secret_event
 from services.secrets.storage import InvalidSecretName, delete_secret, list_secret_metadata, normalize_secret_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
 
 
 def _secret_usage() -> list[dict[str, object]]:
@@ -46,9 +49,9 @@ def _provider_display_secret_names(provider: dict[str, Any]) -> str:
     return "No secret needed"
 
 
-def _provider_secret_name_set(session_id: str) -> set[str]:
+def _provider_secret_name_set(secret_scope_id: str) -> set[str]:
     names: set[str] = set()
-    for row in list_secret_metadata(session_id):
+    for row in list_secret_metadata(secret_scope_id):
         name = str(row.get("name") or "").strip().upper()
         if name:
             names.add(name)
@@ -97,9 +100,9 @@ def _format_provider_status_row(provider: dict[str, Any], status_label: str) -> 
     return format_native_record(label, detail, 22)
 
 
-def _run_secret_show_consumers(session_id: str) -> list[dict[str, object]]:
+def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
     try:
-        stored_secret_names = _provider_secret_name_set(session_id)
+        stored_secret_names = _provider_secret_name_set(secret_scope_id)
     except (MasterKeyError, SecretDecryptError) as exc:
         return [output_line(f"secret: {exc}")]
 
@@ -147,20 +150,22 @@ def _run_secret_show_consumers(session_id: str) -> list[dict[str, object]]:
     return lines
 
 
-def run_builtin_secret(command: str, session_id: str) -> list[dict[str, object]]:
+def run_builtin_secret(command: str, session_id: str, *, team_id: str = "", team_role: str = "") -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
+    secret_scope_id = team_id or session_id
 
     if subcommand in {"help", "-h", "--help"}:
         return _secret_usage()
 
     if subcommand == "list":
         try:
-            rows = list_secret_metadata(session_id)
+            rows = list_secret_metadata(secret_scope_id)
         except (MasterKeyError, SecretDecryptError) as exc:
             return [output_line(f"secret: {exc}")]
         if not rows:
-            return [output_line("No secrets stored for this session.", "builtin-note")]
+            scope_label = "team" if team_id else "session"
+            return [output_line(f"No secrets stored for this {scope_label}.", "builtin-note")]
         lines = [output_line("Stored secrets:", "builtin-section")]
         for row in rows:
             envs = ", ".join(row.get("consumer_envs") or [])
@@ -185,17 +190,37 @@ def run_builtin_secret(command: str, session_id: str) -> list[dict[str, object]]
     if subcommand in {"unset", "delete", "rm"}:
         if len(parts) != 3:
             return [output_line("Usage: secret unset NAME")]
+        if team_id:
+            try:
+                require_capability(
+                    team_role,
+                    Capability.MANAGE_SECRETS,
+                    team_id=team_id,
+                    action="secret_unset",
+                    surface="terminal_builtin",
+                )
+            except TeamPermissionDenied:
+                return [output_line("secret: your team role cannot manage shared secrets.", "exit-fail")]
         try:
             name = normalize_secret_name(parts[2])
-            removed = delete_secret(session_id, name)
+            removed = delete_secret(secret_scope_id, name)
         except (InvalidSecretName, MasterKeyError, SecretDecryptError) as exc:
             return [output_line(f"secret: {exc}")]
+        if team_id:
+            emit_secret_event(
+                "SECRET_DELETED" if removed else "SECRET_DELETE_NOOP",
+                session_id,
+                name=name,
+                team_id=team_id,
+                actor_role=team_role,
+                surface="terminal_builtin",
+            )
         if removed:
             return [output_line(f"{name} removed.", "builtin-success")]
         return [output_line(f"{name} was not set.", "builtin-note")]
 
     if subcommand == "show-consumers":
-        return _run_secret_show_consumers(session_id)
+        return _run_secret_show_consumers(secret_scope_id)
 
     return [
         output_line(f"secret: unknown subcommand '{subcommand}'"),

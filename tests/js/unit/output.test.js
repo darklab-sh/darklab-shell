@@ -30,8 +30,12 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     recordLiveOutputCoalescedLines,
     disableHighVolumeOutputResumeControls,
     renderRestoredTabOutput,
+    renderCommandOutcomeSummary,
+    setTabCommandOutcomeSummary,
+    refreshCommandOutcomeSummaries,
     resetHighVolumeOutputState,
     _restoreOutputTailAfterLayout,
+    syncOutputPrefixes,
     _setTsMode,
     _setLnMode,
     buildPromptLabel,
@@ -368,7 +372,12 @@ describe('appendLine', () => {
   })
 
   it('coalesces restored progress rows while keeping restored raw lines intact', () => {
-    const { renderRestoredTabOutput, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+    const { renderRestoredTabOutput, setTabCommandOutcomeSummary, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    setTabCommandOutcomeSummary('tab-1', {
+      title: 'Command outcome',
+      items: [{ label: 'Result', value: 'Finished cleanly' }],
+    }, { render: false })
 
     renderRestoredTabOutput('tab-1', [
       { text: 'loading 1', cls: 'progress', tsC: '12:00:00', tsE: '+0.1s', line_number: 1 },
@@ -377,10 +386,15 @@ describe('appendLine', () => {
     ])
 
     const lines = Array.from(document.querySelectorAll('.line'))
-    expect(lines).toHaveLength(2)
+    expect(lines).toHaveLength(4)
     expect(lines[0].textContent).toContain('loading 2')
     expect(lines[0].dataset.lineNumber).toBe('1')
     expect(lines[1].textContent).toContain('finished')
+    expect(lines[2].classList.contains('command-outcome-summary-title')).toBe(true)
+    expect(lines[3].classList.contains('command-outcome-summary-row')).toBe(true)
+    expect(lines[3].textContent).toContain('Result: Finished cleanly')
+    expect(lines[2].dataset.lineNumber).toBeUndefined()
+    expect(lines[3].dataset.lineNumber).toBeUndefined()
     expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['loading 1', 'loading 2', 'finished'])
   })
 
@@ -633,11 +647,13 @@ describe('appendLine', () => {
 
     _setLnMode('on')
     expect(document.body.classList.contains('ln-on')).toBe(true)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
+    expect(document.getElementById('ln-btn').getAttribute('aria-pressed')).toBe('true')
 
     _setLnMode('off')
     expect(document.body.classList.contains('ln-on')).toBe(false)
-    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers')
+    expect(document.getElementById('ln-btn').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('numbers the prompt line after the current output rows', () => {
@@ -665,19 +681,253 @@ describe('appendLine', () => {
   })
 
   it('does not assign prefixes to synthetic summary lines', () => {
-    const { appendLine, _setLnMode, _setTsMode } = loadOutputFns()
+    const { appendLine, renderCommandOutcomeSummary, _getTabs, _setLnMode, _setTsMode } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+    })
 
     _setLnMode('on')
     _setTsMode('elapsed')
+    _getTabs()[0].command = 'nmap -sV darklab.sh'
+    appendLine('443/tcp open https', '', 'tab-1', { signals: ['findings'], command_root: 'nmap' })
+    appendLine('22/tcp open ssh OpenSSH 9.9', '', 'tab-1')
+    appendLine('Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel', '', 'tab-1')
+    appendLine('Nmap done: 1 IP address (1 host up) scanned in 3.00 seconds', '', 'tab-1')
     appendLine('Command Findings:', 'builtin-signal-summary-header', 'tab-1')
     appendLine('findings (2)', 'builtin-signal-summary-section', 'tab-1')
     appendLine('- 443/tcp open https', 'builtin-signal-summary-row', 'tab-1')
+    expect(renderCommandOutcomeSummary('tab-1')).toBe(true)
 
     const lines = document.querySelectorAll('.line')
-    expect(lines[0]?.dataset.prefix || '').toBe('')
-    expect(lines[1]?.dataset.prefix || '').toBe('')
-    expect(lines[2]?.dataset.prefix || '').toBe('')
+    expect(lines[0]?.dataset.prefix || '').toMatch(/^\+\d+\.\ds$/)
+    const syntheticLines = Array.from(document.querySelectorAll([
+      '.builtin-signal-summary-header',
+      '.builtin-signal-summary-section',
+      '.builtin-signal-summary-row',
+      '.command-outcome-summary',
+    ].join(',')))
+    expect(syntheticLines.every(line => (line.dataset.prefix || '') === '')).toBe(true)
+    expect(syntheticLines.every(line => line.dataset.lineNumber === undefined)).toBe(true)
+    expect(document.querySelector('.command-outcome-summary-row')?.textContent)
+      .toContain('Hosts: 1 up')
+    expect(document.getElementById('out').textContent)
+      .toContain('Open ports: 2 (443/tcp https, 22/tcp ssh OpenSSH 9.9)')
+    expect(document.getElementById('out').textContent)
+      .toContain('OS / service hints: OS: Linux; CPE: cpe:/o:linux:linux_kernel')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual([
+      '443/tcp open https',
+      '22/tcp open ssh OpenSSH 9.9',
+      'Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel',
+      'Nmap done: 1 IP address (1 host up) scanned in 3.00 seconds',
+      'Command Findings:',
+      'findings (2)',
+      '- 443/tcp open https',
+    ])
+    expect(_getTabs()[0]._outputSignalCounts).toEqual({
+      findings: 1,
+      warnings: 0,
+      errors: 0,
+      summaries: 0,
+    })
     expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
+
+    const disabled = loadOutputFns({
+      extraGlobals: {
+        getCommandOutcomeSummariesPreference: () => 'off',
+      },
+    })
+    disabled._getTabs()[0].commandOutcomeSummary = {
+      title: 'Command outcome',
+      items: [{ value: 'Hidden by preference' }],
+    }
+    expect(disabled.renderCommandOutcomeSummary('tab-1')).toBe(false)
+    expect(document.querySelector('.command-outcome-summary')).toBeNull()
+
+    const resetOutputFixture = () => {
+      document.body.innerHTML = `
+        <div id="out" class="output">
+          <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
+            <span class="prompt-prefix">anon@darklab:~$</span>
+            <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
+              <span class="shell-prompt-text" id="shell-prompt-text"></span>
+            </div>
+          </div>
+        </div>
+      `
+    }
+    const parserCases = [
+      {
+        command: 'dig example.com',
+        lines: [
+          ';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1',
+          ';; flags: qr rd ra; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 1',
+          ';; ANSWER SECTION:',
+          'example.com. 300 IN A 93.184.216.34',
+          'example.com. 300 IN A 93.184.216.35',
+          ';; Query time: 12 msec',
+          ';; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)',
+        ],
+        expected: [
+          'Status: NOERROR',
+          'Answers: 2',
+          'Answer records: example.com A 93.184.216.34, example.com A 93.184.216.35',
+          'Record types: A',
+          'Query time: 12 msec',
+        ],
+      },
+      {
+        command: 'curl -I https://example.com',
+        lines: [
+          'HTTP/2 301',
+          'location: https://www.example.com/',
+          'HTTP/2 200',
+          'content-type: text/html; charset=UTF-8',
+          'content-length: 1256',
+        ],
+        expected: ['Final status: 200', 'Redirects: 1', 'Final URL: https://www.example.com/', 'Content type: text/html; charset=UTF-8'],
+      },
+      {
+        command: 'nslookup -type=A darklab.sh',
+        lines: [
+          'Server:\t\t127.0.0.11',
+          'Address:\t127.0.0.11#53',
+          'Non-authoritative answer:',
+          'Name:\tdarklab.sh',
+          'Address: 104.21.4.35',
+          'Name:\tdarklab.sh',
+          'Address: 172.67.131.156',
+        ],
+        expected: [
+          'Answers: 2',
+          'A records: darklab.sh A 104.21.4.35, darklab.sh A 172.67.131.156',
+          'Record types: A',
+          'Resolver: 127.0.0.11 (127.0.0.11#53)',
+        ],
+      },
+      {
+        command: 'nslookup -type=MX darklab.sh',
+        lines: [
+          'Server:\t\t127.0.0.11',
+          'Address:\t127.0.0.11#53',
+          'Non-authoritative answer:',
+          'darklab.sh\tmail exchanger = 10 alt3.aspmx.l.google.com.',
+          'darklab.sh\tmail exchanger = 5 alt1.aspmx.l.google.com.',
+        ],
+        expected: [
+          'Answers: 2',
+          'MX records: darklab.sh MX 10 alt3.aspmx.l.google.com, darklab.sh MX 5 alt1.aspmx.l.google.com',
+          'Record types: MX',
+        ],
+      },
+      {
+        command: 'nslookup -type=TXT darklab.sh',
+        lines: [
+          'Server:\t\t127.0.0.11',
+          'Address:\t127.0.0.11#53',
+          'Non-authoritative answer:',
+          'darklab.sh\ttext = "v=spf1 include:_spf.protonmail.ch mx include:_spf.google.com ~all"',
+          'darklab.sh\ttext = "openai-domain-verification=dv-f0XWNwfe5BYCJzmlj3w4a9DE"',
+        ],
+        expected: [
+          'Answers: 2',
+          'TXT records: darklab.sh TXT v=spf1 include:_spf.protonmail.ch mx include:_spf.google.com ~all, darklab.sh TXT openai-domain-verification=dv-f0XWNwfe5BYCJzmlj3w4a9DE',
+          'Record types: TXT',
+        ],
+      },
+      {
+        command: 'openssl s_client -connect example.com:443',
+        lines: [
+          'subject=CN = example.com',
+          'issuer=C = US, O = Example CA',
+          'notBefore=Jan  1 00:00:00 2026 GMT',
+          'notAfter=Apr  1 00:00:00 2026 GMT',
+          'Protocol  : TLSv1.3',
+          'Cipher    : TLS_AES_256_GCM_SHA384',
+          'Verify return code: 0 (ok)',
+        ],
+        expected: ['Subject: CN = example.com', 'Issuer: C = US, O = Example CA', 'Protocol: TLSv1.3', 'Cipher: TLS_AES_256_GCM_SHA384'],
+      },
+    ]
+    parserCases.forEach(({ command, lines: outputLines, expected }) => {
+      resetOutputFixture()
+      const parsed = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+      parsed._getTabs()[0].command = command
+      outputLines.forEach(line => parsed.appendLine(line, '', 'tab-1'))
+      expect(parsed.renderCommandOutcomeSummary('tab-1')).toBe(true)
+      const rendered = document.getElementById('out').textContent
+      expected.forEach(text => expect(rendered).toContain(text))
+      expect(parsed._getTabs()[0].rawLines.map(line => line.text)).toEqual(outputLines)
+    })
+
+    resetOutputFixture()
+    const noiseFiltered = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    noiseFiltered._getTabs()[0].command = 'nmap -sV darklab.sh'
+    noiseFiltered.appendLine('9999/tcp open fake-service', '', 'tab-1', { noise_kind: 'boilerplate' })
+    noiseFiltered.appendLine('443/tcp open https nginx', '', 'tab-1')
+    expect(noiseFiltered.renderCommandOutcomeSummary('tab-1')).toBe(true)
+    const outcomeText = Array.from(document.querySelectorAll('.command-outcome-summary-row'))
+      .map(line => line.textContent)
+      .join('\n')
+    expect(outcomeText).toContain('Open ports: 1 (443/tcp https nginx)')
+    expect(outcomeText).not.toContain('fake-service')
+
+    resetOutputFixture()
+    const unsupported = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    unsupported._getTabs()[0].command = 'whoami'
+    unsupported.appendLine('nona', '', 'tab-1')
+    expect(unsupported.renderCommandOutcomeSummary('tab-1')).toBe(false)
+    expect(document.querySelector('.command-outcome-summary')).toBeNull()
+
+    resetOutputFixture()
+    const failedNmap = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    failedNmap._getTabs()[0].command = [
+      'nmap -sC -p 139,445',
+      '--script=smb-vuln-cve2009-1231,smb-vuln-cve-2017-7494',
+      '192.168.1.5',
+    ].join(' ')
+    failedNmap._getTabs()[0].commandOutcomeSummary = {
+      title: 'Command outcome',
+      items: [
+        { label: 'Hosts', value: '1 up' },
+        { label: 'Open ports', value: '25 (22/tcp ssh OpenSSH 10.0)' },
+      ],
+    }
+    failedNmap.appendLine('Starting Nmap 7.95 ( https://nmap.org ) at 2026-06-03 01:15 UTC', '', 'tab-1')
+    failedNmap.appendLine('NSE: failed to initialize the script engine:', 'error', 'tab-1')
+    failedNmap.appendLine("'smb-vuln-cve2009-1231' did not match a category, filename, or directory", 'error', 'tab-1')
+    failedNmap.appendLine('QUITTING!', 'error', 'tab-1')
+    failedNmap.appendLine('[process exited with code 1 in 0.2s]', 'exit-fail', 'tab-1')
+    expect(failedNmap.renderCommandOutcomeSummary('tab-1')).toBe(false)
+    expect(document.querySelector('.command-outcome-summary')).toBeNull()
+    expect(document.getElementById('out').textContent).not.toContain('Open ports: 25')
+    expect(failedNmap._getTabs()[0].commandOutcomeSummary).toBeNull()
+
+    resetOutputFixture()
+    const bracketFailedNmap = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    bracketFailedNmap._getTabs()[0].command = 'nmap -sT -p 10-10000 [192.168.1.5]'
+    bracketFailedNmap.appendLine('22/tcp open ssh', '', 'tab-1')
+    bracketFailedNmap.appendLine('80/tcp open http', '', 'tab-1')
+    bracketFailedNmap.appendLine('Nmap done: 1 IP address (1 host up) scanned in 0.28 seconds', '', 'tab-1')
+    bracketFailedNmap._getTabs()[0].currentRunStartIndex = bracketFailedNmap._getTabs()[0].rawLines.length
+    bracketFailedNmap.appendLine('Failed to resolve "[192.168.1.5]".', 'error', 'tab-1')
+    bracketFailedNmap.appendLine('WARNING: No targets were specified, so 0 hosts scanned.', 'warning', 'tab-1')
+    bracketFailedNmap.appendLine('Nmap done: 0 IP addresses (0 hosts up) scanned in 0.03 seconds', '', 'tab-1')
+    expect(bracketFailedNmap.renderCommandOutcomeSummary('tab-1')).toBe(true)
+    const bracketOutcomeText = Array.from(document.querySelectorAll('.command-outcome-summary-row'))
+      .map(line => line.textContent)
+      .join('\n')
+    expect(bracketOutcomeText).toContain('Hosts: 0 up')
+    expect(bracketOutcomeText).not.toContain('Open ports:')
+    expect(bracketOutcomeText).not.toContain('22/tcp')
+
+    resetOutputFixture()
+    const explicitOutcome = loadOutputFns({ appConfig: { max_output_lines: 30 } })
+    explicitOutcome._getTabs()[0].command = 'nmap --script bad 192.168.1.5'
+    explicitOutcome.appendLine('NSE: failed to initialize the script engine:', 'error', 'tab-1')
+    explicitOutcome.setTabCommandOutcomeSummary('tab-1', {
+      title: 'Command outcome',
+      items: [{ label: 'Status', value: 'saved summary' }],
+    })
+    expect(document.getElementById('out').textContent).toContain('Status: saved summary')
   })
 
   it('combines line numbers and timestamps into a compact shared prefix', () => {
@@ -699,6 +949,24 @@ describe('appendLine', () => {
     _setTsMode('elapsed')
 
     expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
+  })
+
+  it('keeps the elapsed timestamp gutter stable after a full prefix resync', () => {
+    const { appendLine, syncOutputPrefixes, _setTsMode } = loadOutputFns({
+      extraGlobals: {
+        tabs: [{ id: 'tab-1', st: 'idle', rawLines: [], runStart: 0 }],
+      },
+    })
+
+    _setTsMode('elapsed')
+    appendLine('', 'prompt-echo', 'tab-1')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('8ch')
+
+    syncOutputPrefixes()
+
+    expect(document.querySelector('.line.prompt-echo')?.dataset.prefix).toBe('+0.0s')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('8ch')
   })
 
   it('does nothing when there is no output container for the target tab', () => {

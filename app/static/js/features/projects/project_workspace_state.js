@@ -4,6 +4,38 @@
 (function projectWorkspaceStateModule(global) {
   'use strict';
 
+  const FINDING_VIEW_MODE_KEY = 'darklab_project_finding_view_mode';
+  const FINDING_VIEW_MODES = new Set(['list', 'board']);
+
+  function normalizedFindingViewMode(value) {
+    const normalized = String(value || 'list');
+    return FINDING_VIEW_MODES.has(normalized) ? normalized : 'list';
+  }
+
+  function sessionStore() {
+    try {
+      return global.sessionStorage || global.window?.sessionStorage || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readFindingViewMode() {
+    try {
+      return normalizedFindingViewMode(sessionStore()?.getItem(FINDING_VIEW_MODE_KEY));
+    } catch (_) {
+      return 'list';
+    }
+  }
+
+  function writeFindingViewMode(value) {
+    try {
+      sessionStore()?.setItem(FINDING_VIEW_MODE_KEY, normalizedFindingViewMode(value));
+    } catch (_) {
+      // Session persistence is a convenience; the in-memory state remains authoritative.
+    }
+  }
+
   function createProjectWorkspaceState() {
     let rows = [];
     let summaries = new Map();
@@ -20,6 +52,7 @@
     const selectedEntityIds = new Set();
     let findingSelectMode = false;
     const selectedFindingIds = new Set();
+    let findingViewMode = readFindingViewMode();
     let entityPicker = null;
 
     function setPagination(nextPagination = {}) {
@@ -90,6 +123,11 @@
       findingSelectMode: () => findingSelectMode,
       setFindingSelectMode: (enabled) => { findingSelectMode = !!enabled; },
       selectedFindingIds: () => selectedFindingIds,
+      findingViewMode: () => findingViewMode,
+      setFindingViewMode: (mode) => {
+        findingViewMode = normalizedFindingViewMode(mode);
+        writeFindingViewMode(findingViewMode);
+      },
       entityPicker: () => entityPicker,
       setEntityPicker: (picker) => { entityPicker = picker; },
     };

@@ -16,6 +16,7 @@ def _update_workspace_file_metadata(conn, from_session_id, to_session_id, table_
     result = conn.execute(
         f"UPDATE {table_name} SET session_id = ? "  # nosec
         "WHERE session_id = ? AND entity_type = 'workspace_file' "
+        "AND (team_id IS NULL OR team_id = '') "
         f"AND entity_id IN ({placeholders})",
         [to_session_id, from_session_id, *paths],
     )
@@ -25,7 +26,8 @@ def _update_workspace_file_metadata(conn, from_session_id, to_session_id, table_
 def _count_workspace_file_metadata(conn, session_id, table_name):
     row = conn.execute(
         f"SELECT COUNT(*) AS count FROM {table_name} "  # nosec
-        "WHERE session_id = ? AND entity_type = 'workspace_file'",
+        "WHERE session_id = ? AND entity_type = 'workspace_file' "
+        "AND (team_id IS NULL OR team_id = '')",
         (session_id,),
     ).fetchone()
     return int(row["count"] or 0) if row else 0

@@ -9,6 +9,7 @@ import unittest.mock as mock
 import app as shell_app
 from core.database import db_init, db_connect
 from services.commands.builtins import execute_builtin_command
+from services.teams import storage as team_storage
 
 
 def get_client():
@@ -57,21 +58,44 @@ def _create_schedule(client, token: str, **payload):
     return client.post("/schedules", headers={"X-Session-ID": token}, json=body)
 
 
+def _create_team(token: str, *, name: str = "Automation Team") -> str:
+    _register_token(token)
+    with db_connect() as conn:
+        team = team_storage.create_team(conn, name=name, creator_session_token=token)
+        conn.commit()
+    return str(team["id"])
+
+
+def _add_team_member(team_id: str, token: str, *, role: str = "viewer", display_name: str = "Viewer"):
+    _register_token(token)
+    with db_connect() as conn:
+        team_storage.add_team_member(
+            conn,
+            team_id=team_id,
+            session_token=token,
+            role=role,
+            display_name=display_name,
+        )
+        conn.commit()
+
+
 def _insert_completed_run(
     token: str,
     run_id: str,
     *,
+    team_id: str = "",
     command: str = "nmap -sV darklab.sh",
     finished: str | None = "2026-05-20T00:00:01+00:00",
 ):
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
-            "VALUES (?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
+            "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
             (
                 run_id,
                 token,
+                team_id,
                 command,
                 "2026-05-20T00:00:00+00:00",
                 finished,
@@ -137,6 +161,65 @@ class TestSchedulesRoutes:
         assert client.get(f"/schedules/{schedule_id}/fires", headers={"X-Session-ID": other}).status_code == 404
         assert other_patch.status_code == 404
         assert other_delete.status_code == 404
+
+    def test_schedule_routes_scope_team_owned_rows_and_fires(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        owner = "tok_schedule_team_owner"
+        viewer = "tok_schedule_team_viewer"
+        outsider = "tok_schedule_team_outsider"
+        team_id = _create_team(owner, name="Schedule Operators")
+        _add_team_member(team_id, viewer, role="viewer", display_name="Schedule viewer")
+        _register_token(outsider)
+
+        captured = []
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda schedule: captured.append(schedule.team_id) or "run_team_schedule",
+        )
+        created = client.post(
+            "/schedules",
+            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            json={"command": "ping -c 1 darklab.sh", "cadence_preset": "hourly"},
+        )
+        schedule = created.get_json()["schedule"]
+        personal_list = client.get("/schedules", headers={"X-Session-ID": owner})
+        team_list = client.get("/schedules", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
+        outsider_list = client.get("/schedules", headers={"X-Session-ID": outsider, "X-Team-ID": team_id})
+        fired = client.post(f"/schedules/{schedule['id']}/run-now", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
+        fires = client.get(f"/schedules/{schedule['id']}/fires", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
+        blocked_personal_detail = client.get(f"/schedules/{schedule['id']}", headers={"X-Session-ID": owner})
+        viewer_headers = {"X-Session-ID": viewer, "X-Team-ID": team_id}
+        viewer_list = client.get("/schedules", headers=viewer_headers)
+        viewer_detail = client.get(f"/schedules/{schedule['id']}", headers=viewer_headers)
+        viewer_fires = client.get(f"/schedules/{schedule['id']}/fires", headers=viewer_headers)
+        viewer_create = client.post(
+            "/schedules",
+            headers=viewer_headers,
+            json={"command": "ping -c 1 darklab.sh", "cadence_preset": "hourly"},
+        )
+        viewer_patch = client.patch(f"/schedules/{schedule['id']}", headers=viewer_headers, json={"enabled": False})
+        viewer_run_now = client.post(f"/schedules/{schedule['id']}/run-now", headers=viewer_headers)
+        viewer_delete = client.delete(f"/schedules/{schedule['id']}", headers=viewer_headers)
+
+        assert created.status_code == 201
+        assert schedule["team_id"] == team_id
+        assert personal_list.get_json()["schedules"] == []
+        assert [item["id"] for item in team_list.get_json()["schedules"]] == [schedule["id"]]
+        assert outsider_list.status_code == 403
+        assert outsider_list.get_json()["error"] == "team_forbidden"
+        assert fired.status_code == 200
+        assert captured == [team_id]
+        assert fires.get_json()["fires"][0]["team_id"] == team_id
+        assert blocked_personal_detail.status_code == 404
+        assert [item["id"] for item in viewer_list.get_json()["schedules"]] == [schedule["id"]]
+        assert viewer_detail.get_json()["schedule"]["id"] == schedule["id"]
+        assert viewer_fires.get_json()["fires"][0]["team_id"] == team_id
+        for response in (viewer_create, viewer_patch, viewer_run_now, viewer_delete):
+            assert response.status_code == 403
+            assert response.get_json()["error"] == "team_forbidden"
 
     def test_schedule_preview_returns_next_three_fires(self, monkeypatch, tmp_path):
         import blueprints.schedules as schedules_blueprint
@@ -284,6 +367,56 @@ class TestSchedulesRoutes:
         assert payload["items"][0]["scheduled"] is True
         assert payload["items"][0]["schedule_id"] == schedule_id
 
+    def test_active_history_skips_scheduled_runs_unless_requested(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_active_restore"
+        scheduled_run_id = "run_scheduled_active_restore"
+        manual_run_id = "run_manual_active_restore"
+        _register_token(token)
+        created = _create_schedule(client, token)
+        schedule_id = created.get_json()["schedule"]["id"]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO schedule_fires (id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES (?, ?, 'user', '', ?, ?, 'fired', 'started scheduled run')",
+                (
+                    "fire_scheduled_active_restore",
+                    schedule_id,
+                    "2026-05-20T00:00:00+00:00",
+                    scheduled_run_id,
+                ),
+            )
+            conn.commit()
+
+        def active_runs(_session_id, **_kwargs):
+            return [
+                {
+                    "run_id": scheduled_run_id,
+                    "command": "ping -c 1 darklab.sh",
+                    "started": "2026-05-20T00:00:00+00:00",
+                },
+                {
+                    "run_id": manual_run_id,
+                    "command": "curl https://darklab.sh",
+                    "started": "2026-05-20T00:00:01+00:00",
+                },
+            ]
+
+        with mock.patch("blueprints.history.active_runs_for_session", side_effect=active_runs):
+            default_resp = client.get("/history/active", headers={"X-Session-ID": token})
+            inclusive_resp = client.get("/history/active?include_scheduled=1", headers={"X-Session-ID": token})
+
+        default_payload = default_resp.get_json()
+        inclusive_payload = inclusive_resp.get_json()
+
+        assert default_resp.status_code == 200
+        assert [run["run_id"] for run in default_payload["runs"]] == [manual_run_id]
+        assert inclusive_resp.status_code == 200
+        assert [run["run_id"] for run in inclusive_payload["runs"]] == [scheduled_run_id, manual_run_id]
+        assert inclusive_payload["runs"][0]["scheduled"] is True
+        assert inclusive_payload["runs"][0]["schedule_id"] == schedule_id
+        assert inclusive_payload["runs"][1]["scheduled"] is False
+
     def test_schedule_create_enforces_session_cap(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_cap"
@@ -302,7 +435,7 @@ class TestSchedulesRoutes:
 
         assert first.status_code == 201
         assert second.status_code == 409
-        assert second.get_json()["message"] == "schedule quota exceeded for this session"
+        assert second.get_json()["message"] == "schedule quota exceeded for this scope"
 
     def test_schedule_create_and_patch_normalize_edge_inputs(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -433,6 +566,138 @@ class TestWatchersRoutes:
             ).fetchone()
         assert watcher_count["count"] == 0
         assert schedule_count["count"] == 0
+
+    def test_watcher_routes_scope_team_owned_baselines_and_fires(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        owner = "tok_watcher_team_owner"
+        viewer = "tok_watcher_team_viewer"
+        outsider = "tok_watcher_team_outsider"
+        team_id = _create_team(owner, name="Watcher Operators")
+        _add_team_member(team_id, viewer, role="viewer", display_name="Watcher viewer")
+        _register_token(outsider)
+        _insert_completed_run(owner, "run_watcher_team_baseline", team_id=team_id, command="nmap -sV darklab.sh")
+        _insert_completed_run(owner, "run_watcher_personal_baseline", command="nmap -sV darklab.sh")
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda schedule: f"run_team_{schedule.owner_id[-8:]}")
+
+        created = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            json={"baseline_run_id": "run_watcher_team_baseline", "cadence_preset": "hourly", "label": "Team drift"},
+        )
+        watcher = created.get_json()["watcher"]
+        blocked_personal_baseline = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            json={"baseline_run_id": "run_watcher_personal_baseline", "cadence_preset": "hourly"},
+        )
+        personal_list = client.get("/watchers", headers={"X-Session-ID": owner})
+        team_list = client.get("/watchers", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
+        outsider_list = client.get("/watchers", headers={"X-Session-ID": outsider, "X-Team-ID": team_id})
+        fired = client.post(f"/watchers/{watcher['id']}/run-now", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
+        fires = client.get(f"/watchers/{watcher['id']}/fires", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
+        blocked_personal_detail = client.get(f"/watchers/{watcher['id']}/fires", headers={"X-Session-ID": owner})
+        viewer_headers = {"X-Session-ID": viewer, "X-Team-ID": team_id}
+        viewer_list = client.get("/watchers", headers=viewer_headers)
+        viewer_fires = client.get(f"/watchers/{watcher['id']}/fires", headers=viewer_headers)
+        viewer_create = client.post(
+            "/watchers",
+            headers=viewer_headers,
+            json={"baseline_run_id": "run_watcher_team_baseline", "cadence_preset": "hourly"},
+        )
+        viewer_patch = client.patch(f"/watchers/{watcher['id']}", headers=viewer_headers, json={"state": "paused"})
+        viewer_run_now = client.post(f"/watchers/{watcher['id']}/run-now", headers=viewer_headers)
+        viewer_accept = client.post(f"/watchers/{watcher['id']}/accept-baseline", headers=viewer_headers)
+        viewer_delete = client.delete(f"/watchers/{watcher['id']}", headers=viewer_headers)
+
+        assert created.status_code == 201
+        assert watcher["team_id"] == team_id
+        assert watcher["schedule"]["team_id"] == team_id
+        assert blocked_personal_baseline.status_code == 404
+        assert personal_list.get_json()["watchers"] == []
+        assert [item["id"] for item in team_list.get_json()["watchers"]] == [watcher["id"]]
+        assert outsider_list.status_code == 403
+        assert outsider_list.get_json()["error"] == "team_forbidden"
+        assert fired.status_code == 200
+        assert fires.get_json()["fires"][0]["team_id"] == team_id
+        assert blocked_personal_detail.status_code == 404
+        assert [item["id"] for item in viewer_list.get_json()["watchers"]] == [watcher["id"]]
+        assert viewer_fires.get_json()["fires"][0]["team_id"] == team_id
+        for response in (viewer_create, viewer_patch, viewer_run_now, viewer_accept, viewer_delete):
+            assert response.status_code == 403
+            assert response.get_json()["error"] == "team_forbidden"
+
+    def test_archiving_team_pauses_team_schedules_and_watchers(self, monkeypatch, tmp_path):
+        from services.scheduler.dispatch import fire_schedule
+        from services.scheduler.models import FIRE_STATUS_FAILED
+        from services.scheduler.service import get_schedule
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        owner = "tok_team_archive_owner"
+        team_id = _create_team(owner, name="Archive Operators")
+        _insert_completed_run(owner, "run_archive_baseline", team_id=team_id, command="nmap -sV darklab.sh")
+        schedule = client.post(
+            "/schedules",
+            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            json={"command": "ping -c 1 darklab.sh", "cadence_preset": "hourly"},
+        ).get_json()["schedule"]
+        watcher = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            json={"baseline_run_id": "run_archive_baseline", "cadence_preset": "hourly"},
+        ).get_json()["watcher"]
+
+        archived = client.patch(
+            f"/session/teams/{team_id}",
+            headers={"X-Session-ID": owner},
+            json={"status": "archived"},
+        )
+        with db_connect() as conn:
+            schedule_row = conn.execute(
+                "SELECT enabled, paused_reason FROM schedules WHERE id = ?",
+                (schedule["id"],),
+            ).fetchone()
+            watcher_row = conn.execute(
+                "SELECT state, state_reason FROM watchers WHERE id = ?",
+                (watcher["id"],),
+            ).fetchone()
+            watcher_schedule_row = conn.execute(
+                "SELECT enabled, paused_reason FROM schedules WHERE id = ?",
+                (watcher["schedule_id"],),
+            ).fetchone()
+            conn.execute(
+                "UPDATE schedules SET enabled = 1, paused_reason = '', last_error = '' WHERE id = ?",
+                (schedule["id"],),
+            )
+            forced_schedule = get_schedule(schedule["id"], conn=conn)
+            assert forced_schedule is not None
+            forced_status = fire_schedule(
+                conn,
+                forced_schedule,
+                fired_at="2026-05-29T00:00:00+00:00",
+            )
+            forced_schedule_row = conn.execute(
+                "SELECT enabled, paused_reason, last_error FROM schedules WHERE id = ?",
+                (schedule["id"],),
+            ).fetchone()
+            forced_fire_row = conn.execute(
+                "SELECT status, reason FROM schedule_fires WHERE schedule_id = ? ORDER BY fired_at DESC LIMIT 1",
+                (schedule["id"],),
+            ).fetchone()
+
+        assert archived.status_code == 200
+        assert archived.get_json()["team"]["status"] == "archived"
+        assert dict(schedule_row) == {"enabled": 0, "paused_reason": "team_archived"}
+        assert dict(watcher_row) == {"state": "paused", "state_reason": "team_archived"}
+        assert dict(watcher_schedule_row) == {"enabled": 0, "paused_reason": "team_archived"}
+        assert forced_status == FIRE_STATUS_FAILED
+        assert dict(forced_schedule_row) == {
+            "enabled": 0,
+            "paused_reason": "team_archived",
+            "last_error": "team archived",
+        }
+        assert dict(forced_fire_row) == {"status": FIRE_STATUS_FAILED, "reason": "team archived"}
 
     def test_watcher_create_validates_baseline_visibility_and_completion(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)

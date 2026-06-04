@@ -525,6 +525,8 @@ describe('history panel actions', () => {
     downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
     submitComposerCommandImpl = vi.fn(() => true),
+    activeTeamScopeCanImpl = () => true,
+    teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
   } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
@@ -639,12 +641,19 @@ describe('history panel actions', () => {
           })
         }
         if (url === '/history/run-1?json&preview=1') {
+          const scheduleId = 'sch_c38d8b4eee00d435b91d1d7791e5ff70c'
           return Promise.resolve({
             json: () =>
               Promise.resolve({
                 command: 'ping darklab.sh',
+                schedule_id: scheduleId,
+                scheduled: true,
                 output: ['ok'],
                 output_entries: [{ text: 'ok', cls: '' }],
+                command_outcome_summary: {
+                  title: 'Command outcome',
+                  items: [{ label: 'Result', value: 'Finished cleanly' }],
+                },
                 exit_code: 0,
               }),
           })
@@ -656,6 +665,10 @@ describe('history panel actions', () => {
                 id: 'run-1',
                 command: 'ping darklab.sh',
                 output_entries: [{ text: 'full export line', cls: '' }],
+                command_outcome_summary: {
+                  title: 'Command outcome',
+                  items: [{ label: 'Result', value: 'Finished cleanly' }],
+                },
                 exit_code: 0,
                 started: '2026-01-01T00:00:00Z',
               }),
@@ -789,6 +802,8 @@ describe('history panel actions', () => {
             if (typeof end === 'number') cmdInput.selectionEnd = end
           },
           refocusComposerAfterAction,
+          activeTeamScopeCan: activeTeamScopeCanImpl,
+          teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
         },
       `{
         refreshHistoryPanel,
@@ -912,6 +927,11 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-subtitle').textContent).toBe('ping darklab.sh')
+    const scheduleSummary = document.querySelector('.history-run-schedule-summary')
+    expect(scheduleSummary?.textContent).toBe('Scheduled runView schedule')
+    expect(scheduleSummary?.textContent).not.toContain('sch_c38d8b4eee00d435b91d1d7791e5ff70c')
+    expect(scheduleSummary?.querySelector('[data-history-run-action="open-schedule"]')?.getAttribute('title'))
+      .toBe('Open schedule sch_c38d8b4eee00d435b91d1d7791e5ff70c')
     expect([...document.querySelectorAll('.history-run-tab')].map(tab => tab.textContent)).toEqual([
       'Summary',
       'Output',
@@ -957,6 +977,12 @@ describe('history panel actions', () => {
       runId: 'run-1',
       runLabel: 'ping darklab.sh',
     })
+
+    document.querySelector('[data-history-run-tab="output"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.getElementById('history-run-body').textContent).toContain('Command outcome')
+    expect(document.getElementById('history-run-body').textContent).toContain('ResultFinished cleanly')
+    expect(_historyRunPlainExportText(_historyRunPrimary())).toContain('Command outcome')
   })
 
   it('opens the watchers modal from the Run Details baseline action', async () => {
@@ -2029,8 +2055,12 @@ describe('history panel actions', () => {
       .find(btn => btn.textContent === 'Select all')
     expect(selectAll.getAttribute('aria-pressed')).toBe('mixed')
 
+    const documentClick = vi.fn()
+    document.addEventListener('click', documentClick)
     selectAll.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document.removeEventListener('click', documentClick)
     await new Promise((resolve) => setImmediate(resolve))
+    expect(documentClick).not.toHaveBeenCalled()
     expect(historyFetchCount()).toBe(1)
     expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
     expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))
@@ -2058,7 +2088,9 @@ describe('history panel actions', () => {
     expect(historyFetchCount()).toBe(1)
   })
 
-  it('disables project bulk actions without an active project or with mixed selected item types', async () => {
+  it('keeps export enabled for mixed selections while disabling project bulk actions', async () => {
+    const exportBlob = new Blob(['{"kind":"summary","items":2}\n'], { type: 'application/x-ndjson' })
+    const downloadBlobAsAttachment = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -2084,9 +2116,19 @@ describe('history panel actions', () => {
           }),
         })
       }
+      if (url === '/history/bulk-export') {
+        return Promise.resolve({
+          ok: true,
+          headers: { get: () => 'attachment; filename="darklab-history-test.jsonl"' },
+          blob: () => Promise.resolve(exportBlob),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      downloadBlobAsAttachmentImpl: downloadBlobAsAttachment,
+    })
 
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
@@ -2106,7 +2148,25 @@ describe('history panel actions', () => {
 
     expect(document.querySelector('[data-action="bulk-add-project"]').disabled).toBe(true)
     expect(document.querySelector('[data-action="bulk-remove-project"]').disabled).toBe(true)
+    expect(document.querySelector('[data-action="bulk-export-txt"]').disabled).toBe(false)
+    expect(document.querySelector('[data-action="bulk-export-jsonl"]').disabled).toBe(false)
     expect(document.querySelector('[data-action="bulk-delete"]').disabled).toBe(false)
+
+    document.querySelector('[data-action="bulk-export-jsonl"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
+    const exportCall = apiFetch.mock.calls.find(([url]) => url === '/history/bulk-export')
+    expect(JSON.parse(exportCall[1].body)).toEqual({
+      run_ids: ['run-1'],
+      snapshot_ids: ['snap-1'],
+      format: 'jsonl',
+    })
+    expect(downloadBlobAsAttachment).toHaveBeenCalledWith(
+      exportBlob,
+      'darklab-history-test.jsonl',
+      expect.objectContaining({ container: document.getElementById('history-panel') }),
+    )
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
   })
 
   it('resets select mode and selection before the next history drawer open', async () => {
@@ -3281,6 +3341,99 @@ describe('history panel actions', () => {
                   removed: [{ workspace_path: 'reports/old.json', kind: 'output', byte_size: 10 }],
                 },
               },
+              derived_changes: {
+                group_count: 2,
+                changed_count: 5,
+                truncated: false,
+                groups: [
+                  {
+                    id: 'nmap_ports',
+                    kind: 'ports',
+                    title: 'Open ports and services',
+                    display_target: 'darklab.sh',
+                    added_count: 1,
+                    removed_count: 1,
+                    changed_count: 1,
+                    added: [{
+                      key: '443/tcp',
+                      port: '443',
+                      proto: 'tcp',
+                      state: 'open',
+                      service: 'https',
+                      line: '443/tcp open https',
+                      compare_line_index: 1,
+                      compare_side: 'right',
+                    }],
+                    removed: [{
+                      key: '8080/tcp',
+                      port: '8080',
+                      proto: 'tcp',
+                      state: 'open',
+                      service: 'http-proxy',
+                      line: '8080/tcp open http-proxy',
+                      compare_line_index: 1,
+                      compare_side: 'left',
+                    }],
+                    changed: [{
+                      key: '80/tcp',
+                      before: {
+                        key: '80/tcp',
+                        port: '80',
+                        proto: 'tcp',
+                        state: 'open',
+                        service: 'http',
+                        service_text: 'http Apache httpd',
+                        compare_line_index: 0,
+                        compare_side: 'left',
+                      },
+                      after: {
+                        key: '80/tcp',
+                        port: '80',
+                        proto: 'tcp',
+                        state: 'open',
+                        service: 'http',
+                        service_text: 'http nginx',
+                        compare_line_index: 0,
+                        compare_side: 'right',
+                      },
+                    }],
+                  },
+                  {
+                    id: 'web_urls',
+                    kind: 'urls',
+                    title: 'URLs and HTTP status',
+                    display_target: 'darklab.sh',
+                    added_count: 1,
+                    removed_count: 0,
+                    changed_count: 1,
+                    added: [{
+                      canonical_url: 'https://darklab.sh/admin',
+                      status_code: 200,
+                      title: 'Admin',
+                      compare_line_index: 1,
+                      compare_side: 'right',
+                    }],
+                    removed: [],
+                    changed: [{
+                      key: 'https://darklab.sh',
+                      before: {
+                        canonical_url: 'https://darklab.sh',
+                        status_code: 200,
+                        title: 'Old title',
+                        compare_line_index: 0,
+                        compare_side: 'left',
+                      },
+                      after: {
+                        canonical_url: 'https://darklab.sh',
+                        status_code: 301,
+                        title: 'New title',
+                        compare_line_index: 0,
+                        compare_side: 'right',
+                      },
+                    }],
+                  },
+                ],
+              },
               truncated: {},
             }),
         })
@@ -3348,6 +3501,13 @@ describe('history panel actions', () => {
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed findings (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed artifacts (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('reports/new.json')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Detected changes (5)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Open ports and services')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('URLs and HTTP status')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('80/tcp')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('80/tcp open http Apache httpd -> 80/tcp open http nginx')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('https://darklab.sh/admin')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('https://darklab.sh · 200 · Old title -> https://darklab.sh · 301 · New title')
     let insertedOutputRow = document.querySelector('.history-compare-pane[data-side="b"] .history-compare-row.is-insert')
     let pairedSpacer = document.querySelector(
       `.history-compare-pane[data-side="a"] .history-compare-row[data-compare-pair="${insertedOutputRow.dataset.comparePair}"]`,
@@ -3425,6 +3585,17 @@ describe('history panel actions', () => {
     clearOutputPulses()
     nextChange.click()
     expect(pulsedPair()).toBe(visitedPairs[0])
+
+    const addedDerivedPortRow = [...document.querySelectorAll(
+      '.history-compare-derived-row[data-derived-kind="ports"][data-compare-side="b"]',
+    )].find(row => row.textContent.includes('443/tcp open https'))
+    expect(addedDerivedPortRow.tagName).toBe('BUTTON')
+    emitUiEvent.mockClear()
+    addedDerivedPortRow.click()
+    expect(emitUiEvent).toHaveBeenCalledWith('app:compare-anchor-scroll', {
+      side: 'b',
+      compare_line_index: 1,
+    })
 
     const addedFindingRow = document.querySelector(
       '.history-compare-object-row[data-object-kind="finding"][data-compare-side="b"]',
@@ -3545,6 +3716,87 @@ describe('history panel actions', () => {
       expect.objectContaining({ id: 'run-1', command: 'nmap darklab.sh' }),
       expect.objectContaining({ onSaved: expect.any(Function) }),
     )
+  })
+
+  it('hides history metadata edit and delete actions for view-only team members', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      activeTeamScopeCanImpl: capability => capability !== 'manage_history',
+      apiFetchImpl: vi.fn((url) => {
+        if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                roots: [],
+                items: [
+                  {
+                    id: 'run-external',
+                    type: 'run',
+                    run_kind: 'external',
+                    command: 'nmap darklab.sh',
+                    label: 'nmap darklab.sh',
+                    started: '2026-01-01T00:00:00Z',
+                    created: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                  {
+                    id: 'run-builtin',
+                    type: 'run',
+                    run_kind: 'builtin',
+                    command: 'theme list',
+                    label: 'theme list',
+                    started: '2026-01-01T00:00:00Z',
+                    created: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                  {
+                    id: 'snap-viewer',
+                    type: 'snapshot',
+                    label: 'viewer snapshot',
+                    created: '2026-01-01T00:00:00Z',
+                  },
+                ],
+                runs: [],
+              }),
+          })
+        }
+        if (url === '/history/run-builtin?json&preview=1') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                id: 'run-builtin',
+                run_kind: 'builtin',
+                command: 'theme list',
+                output_entries: [{ text: 'theme output', cls: '' }],
+                exit_code: 0,
+                started: '2026-01-01T00:00:00Z',
+              }),
+          })
+        }
+        if (url === '/projects?include_archived=1') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [] }) })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entries = document.querySelectorAll('#history-list .history-entry')
+    expect(entries[0].querySelector('[data-action="edit-metadata"]')).toBeNull()
+    expect(entries[0].querySelector('[data-action="delete"]')).toBeNull()
+    expect(entries[0].querySelector('.history-action-menu')?.textContent).not.toContain('edit')
+    expect(entries[0].querySelector('.history-action-menu')?.textContent).not.toContain('delete')
+    expect(entries[1].querySelector('[data-action="delete"]')).toBeNull()
+    expect(entries[2].querySelector('[data-action="edit-metadata"]')).toBeNull()
+    expect(entries[2].querySelector('[data-action="delete"]')).toBeNull()
+
+    entries[1].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    await Promise.resolve()
+
+    expect(document.querySelector('[data-history-run-action="edit-metadata"]')).toBeNull()
+    expect(document.querySelector('.history-run-section-header')?.textContent).toBe('Metadata')
   })
 
   it('renders snapshot rows with open and copy-link actions', async () => {
@@ -4409,6 +4661,33 @@ describe('history panel actions', () => {
 
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to delete run')
     expect(document.querySelectorAll('#history-list .history-entry')).toHaveLength(1)
+  })
+
+  it('shows a team-scope denial when history delete is rejected by the server', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('one'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/history/run-1/atlas-cleanup-preview') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ cleanup: {} }) })
+      }
+      if (url === '/history/run-1' && options.method === 'DELETE') {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: 'team_forbidden' }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [] }) })
+    })
+    const { confirmHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
+
+    confirmHistAction('delete', 'run-1', 'ping darklab.sh')
+    await new Promise((resolve) => setImmediate(resolve))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.getElementById('permalink-toast').textContent)
+      .toBe("View-only team members can't delete team history. Switch to Personal or ask for operator access.")
   })
 
   it('executeHistAction shows a failure toast when clearing non-favorite history fails', async () => {

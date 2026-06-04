@@ -31,12 +31,15 @@ from services.watchers.service import (
     create_watcher,
     delete_watcher,
     get_watcher,
-    list_for_session,
+    list_for_owner,
     list_watcher_fires,
     pause_watcher,
     resume_watcher,
     update_watcher,
 )
+from services.teams.capabilities import Capability, require_capability
+from services.teams.contracts import TeamPermissionDenied
+from services.teams.request_scope import RequestScope, RequestScopeError, current_request_scope, scope_error_payload
 
 log = logging.getLogger("shell")
 
@@ -89,6 +92,7 @@ def _watcher_log_payload(watcher=None, *, session_id: str = "", source: str = "b
     if watcher is not None:
         payload.update({
             "watcher_id": watcher.id,
+            "team_id": watcher.team_id,
             "schedule_id": watcher.schedule_id,
             "baseline_run_id": watcher.baseline_run_id,
             "last_run_id": watcher.last_run_id,
@@ -131,9 +135,37 @@ def _log_watcher_rejected(action: str, session_id: str, exc: Exception, response
     })
 
 
-def _watcher_for_session_or_404(watcher_id: str, session_id: str, *, conn=None):
+def _request_scope_response(session_id: str) -> tuple[RequestScope | None, Any]:
+    try:
+        return current_request_scope(session_id, request), None
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return None, (jsonify(payload), status)
+
+
+def _team_capability_error_response(exc: TeamPermissionDenied):
+    return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
+
+
+def _require_automation_capability(owner_scope: RequestScope):
+    if not owner_scope.is_team:
+        return None
+    try:
+        require_capability(str((owner_scope.member or {}).get("role") or ""), Capability.MANAGE_AUTOMATION)
+    except TeamPermissionDenied as exc:
+        return _team_capability_error_response(exc)
+    return None
+
+
+def _watcher_for_session_or_404(watcher_id: str, session_id: str, *, team_id: str = "", conn=None):
     watcher = get_watcher(watcher_id, conn=conn)
-    if watcher is None or watcher.session_token != session_id:
+    if watcher is None:
+        raise WatcherNotFound("watcher not found")
+    if team_id:
+        if watcher.team_id != team_id:
+            raise WatcherNotFound("watcher not found")
+        return watcher
+    if watcher.team_id or watcher.session_token != session_id:
         raise WatcherNotFound("watcher not found")
     return watcher
 
@@ -143,9 +175,13 @@ def watchers_list():
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
         with database.db_connect() as conn:
-            watchers = list_for_session(session_id, conn=conn)
+            watchers = list_for_owner(session_id, team_id=owner_scope.team_id, conn=conn)
             schedules = {
                 watcher.schedule_id: get_schedule(watcher.schedule_id, conn=conn)
                 for watcher in watchers
@@ -169,6 +205,13 @@ def watchers_create():
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     data, body_error = _json_body()
     if body_error:
         return body_error
@@ -176,9 +219,15 @@ def watchers_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         with database.db_connect() as conn:
-            payload = normalize_watcher_create_payload(data, session_id, conn=conn)
+            payload = normalize_watcher_create_payload(
+                data,
+                session_id,
+                team_id=owner_scope.team_id,
+                conn=conn,
+            )
             watcher = create_watcher(
                 session_id,
+                team_id=owner_scope.team_id,
                 **payload,
                 conn=conn,
             )
@@ -207,6 +256,13 @@ def watchers_update(watcher_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     data, body_error = _json_body()
     if body_error:
         return body_error
@@ -214,7 +270,12 @@ def watchers_update(watcher_id):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         with database.db_connect() as conn:
-            watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
+            watcher = _watcher_for_session_or_404(
+                watcher_id,
+                session_id,
+                team_id=owner_scope.team_id,
+                conn=conn,
+            )
             route_update = normalize_watcher_update_payload(data, session_id)
             updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
             if updated is None:
@@ -249,9 +310,21 @@ def watchers_delete(watcher_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     try:
         with database.db_connect() as conn:
-            watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
+            watcher = _watcher_for_session_or_404(
+                watcher_id,
+                session_id,
+                team_id=owner_scope.team_id,
+                conn=conn,
+            )
             removed = delete_watcher(watcher.id, conn=conn)
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ValueError) as exc:
@@ -267,11 +340,20 @@ def watchers_fires(watcher_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
     try:
         limit = normalize_page_limit(request.args.get("limit"), default=20, maximum=100)
         offset = normalize_page_offset(request.args.get("offset"))
         with database.db_connect() as conn:
-            watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
+            watcher = _watcher_for_session_or_404(
+                watcher_id,
+                session_id,
+                team_id=owner_scope.team_id,
+                conn=conn,
+            )
             fires, total = list_watcher_fires(watcher.id, limit=limit, offset=offset, conn=conn)
     except (WatcherNotFound, WatcherError, ValueError) as exc:
         response = _watcher_error_response(exc)
@@ -294,13 +376,25 @@ def watchers_accept_baseline(watcher_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     data, body_error = _json_body()
     if body_error:
         return body_error
     data = data or {}
     try:
         with database.db_connect() as conn:
-            watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
+            watcher = _watcher_for_session_or_404(
+                watcher_id,
+                session_id,
+                team_id=owner_scope.team_id,
+                conn=conn,
+            )
             accepted = accept_baseline(watcher.id, run_id=data.get("run_id"), conn=conn)
             if accepted is None:
                 raise WatcherNotFound("watcher not found")
@@ -320,9 +414,21 @@ def watchers_run_now(watcher_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
+    owner_scope, scope_response = _request_scope_response(session_id)
+    if scope_response:
+        return scope_response
+    assert owner_scope is not None
+    capability_response = _require_automation_capability(owner_scope)
+    if capability_response:
+        return capability_response
     try:
         with database.db_connect() as conn:
-            watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
+            watcher = _watcher_for_session_or_404(
+                watcher_id,
+                session_id,
+                team_id=owner_scope.team_id,
+                conn=conn,
+            )
             status, refreshed, refreshed_schedule, fired_at = fire_watcher_now(conn, watcher)
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:

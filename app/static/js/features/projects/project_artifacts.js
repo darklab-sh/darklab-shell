@@ -353,16 +353,16 @@
 
     async function download(projectId, artifactId, artifactPath = '') {
       const resp = await ctx.apiFetch(
-        `/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
-        { cache: 'no-store' },
+        `/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/download-ticket`,
+        { method: 'POST', cache: 'no-store' },
       );
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         throw new Error(data.error || 'Unable to download artifact.');
       }
-      const blob = await resp.blob();
-      ctx.downloadBlobAsAttachment(
-        blob,
+      const data = await resp.json().catch(() => ({}));
+      ctx.downloadUrlAsAttachment(
+        data.url,
         downloadName(artifactPath, artifactId || 'artifact'),
         'Artifact download started.',
       );

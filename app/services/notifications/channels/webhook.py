@@ -41,7 +41,7 @@ class WebhookChannel(Channel):
         secret_name = _webhook_url_secret_name(self.channel.secrets)
         if not secret_name:
             return None
-        return get_channel_secret(self.channel.session_token, secret_name)
+        return get_channel_secret(self.channel.secret_owner_token, secret_name)
 
     def send(self, payload: dict[str, Any]) -> ChannelResult:
         return self._send_payload(payload, label="webhook", test_send=str(payload.get("trigger") or "") == "test")

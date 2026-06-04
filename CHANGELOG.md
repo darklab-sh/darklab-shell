@@ -6,6 +6,138 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.1] — 2026-06-03
+
+### Added
+
+- **Finding remediation and verification** — Atlas, Projects, and the Findings Board now share a triage editor for remediation guidance, verification steps, verification status, and optional private verification notes. List rows and board cards show compact follow-up badges, read-only users can still open the details they are allowed to view, evidence packages include report-ready remediation and verification fields with redaction/private-note handling, imports can seed remediation from Nessus/ZAP/Burp, and re-imports preserve operator-edited remediation.
+
+- **Atlas import from external tools** — Atlas can preview and import Generic CSV/JSONL, Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, and Burp Suite XML without creating fake History runs. Imports show counts, samples, warnings, provenance, and allowed apply options before writing rows; use hardened XML parsing and configurable guardrails; preserve import-only entities/findings in Atlas; support optional Project links and target creation; and keep apply behavior idempotent.
+
+- **Command knowledge and discovery** — command guidance now has one registry-backed feature family across the terminal and Command Registry: `commands info` shows notes, gotchas, safe defaults, common flags, and artifact behavior; `commands info --json` returns a deterministic catalog entry; `commands search <term>` finds commands by name/category/description/examples/guidance; app-native pipe helpers are documented in the catalog; grep autocomplete can suggest tokens from the active tab's output; and twelve high-traffic tools ship with web-shell-specific guidance.
+
+- **Team-Mode** — durable session-token users can create teams, join by invite or recovery code, manage members, switch active personal/team scope, and use that scope from the browser, terminal `team` command, `/api/v1`, and bundled `darklab team ...` CLI. Team scope now covers shared runs, History, Run Details, Files, Projects, Atlas rows, labels/notes, finding review, cached intel, workflows, schedules, watchers, notifications, AI assists, package builds, explicit team secrets, provider readiness, and shareable team-owned permalinks while keeping personal work separate. Viewer roles stay read-only across write/destructive surfaces, archived teams stay reviewable but reject new work until reactivated, and the onboarding tour introduces the active scope model.
+
+- **Atlas auto-promote rules** — Projects can save rules that preview, apply once, or automatically apply matching Atlas entities from future runs. Rules support exact, contains, wildcard, domain-suffix, and IPv4/IPv6 CIDR matching for domains, IPs, URLs, CVEs, hashes, or any entity type; reject regex and overly broad patterns; respect team view-only locks; label promoted rows; and keep existing links when rules are disabled, edited, or deleted.
+
+- **Command outcome summaries and quieter transcript views** — supported noisy tools (`nmap`, `dig`, `nslookup`, `curl`, and `openssl s_client`) can show deterministic outcome blocks below completed output, controlled by the synced `command-outcome-summaries` preference. Shared transcript noise metadata keeps progress/status chatter out of new-run search text, command summaries, default comparisons, and package manifest line indexes while preserving raw transcripts and signal-bearing lines.
+
+- **Config-backed evidence package presets** — evidence package presets now load from a validated catalog with shipped Evidence, Summary, Full Archive, and Redacted choices plus an operator `package_presets_file` override. The package wizard renders configured presets and applies their default labels, notes, redaction, artifact, and private-note options.
+
+- **Bulk history export** — selected completed runs and snapshots can be exported from History as readable text or JSONL. Active, missing, or out-of-scope rows are reported inside the download instead of failing the whole export.
+
+- **Project Findings board view** — Project Findings can switch between list and desktop board views, and the larger Findings Board modal can open from the rail, Atlas toolbar, or a Project Findings tab. Mobile keeps the list flow for narrow screens.
+
+- **Operator blocked-scan CIDR guard** — `RESTRICTED_COMMAND_INPUT_CIDRS` now gives Compose deployments one setting for app-layer command rejection and scanner-user egress blocking.
+
+### Changed
+
+- **Scope HUD switching** — the desktop `SCOPE` cell now opens a compact Project-style pop-up menu with Personal and team choices, without the old modal-style interruption, search, or create controls.
+
+- **Mobile menu ordering and hints** — the mobile hamburger menu now keeps Options at the top, then follows the desktop tool order for Workflows, Scope, Atlas, Projects, History, Files, Schedules, Watchers, Findings, Status, Commands, FAQ, Theme, and Diagnostics. History, Atlas, and Files now show compact counts in the sheet, matching the existing Scope, Projects, Workflows, Schedules, Watchers, and Theme hints.
+
+- **Browser downloads start immediately for large files** — workspace files, project artifacts, and evidence package archives now use short-lived direct download URLs with known content lengths, so the browser can show native download progress instead of waiting for JavaScript to buffer the whole file first.
+
+- **Bundled Postgres 18 service** — moved the optional Compose, CI, and disposable test Postgres images from 17 to 18.
+  - **Before:** the bundled Compose profile mounted `postgres-data` at the old `/var/lib/postgresql/data` image path used by Postgres 17 and earlier.
+  - **After:** the bundled service uses Postgres 18's `/var/lib/postgresql` volume mount so the official image stores data in its versioned layout. The operator docs now describe the export/import path for existing Compose-managed Postgres 17 volumes instead of recommending a Docker `pg_upgrade` wrapper.
+
+- **Interactive PTY resize throttling** — normal PTY layout changes no longer trip the generic run burst limit.
+  - **What:** PTY resize posts now use a dedicated resize rate-limit bucket and the browser coalesces same-size/intermediate resize events before sending the final terminal size.
+
+- **Diagnostics Redis orphan cleanup** — `/diag` now cleans dead active-run metadata while reporting Redis orphan probes.
+  - **What:** Redis diagnostics remove `procmeta:*` rows whose session index no longer references the run and whose `proc:*` key is already gone, and the page shows how many stale rows were cleaned. Normal active-run listing paths also run the same cleanup on a short throttle, so stale metadata is pruned during regular UI/API/status checks instead of depending on an operator opening `/diag`.
+
+- **Shared diff classifier foundation** — lifted the watcher diff classifier registry into `services.diff.classifiers` so Watchers and run-comparison summaries can share one tool-aware parser family.
+  - Kept `services.watchers.classifiers` as compatibility exports for existing imports.
+  - Added shared diff result constants in `services.diff.models`.
+  - Added optional source `line_index` values to normalized diff records so compare-facing adapters can map derived changes back to transcript rows without changing watcher payload expectations.
+  - Added `derived_changes` to `/history/compare`, currently populated for nmap-style open-port/service deltas with added, removed, and changed port buckets plus transcript jump pointers.
+  - Added URL/status derived changes for `httpx`, `ffuf`, `gobuster`, and `katana` comparisons, including URL additions/removals plus status, title, and redirect changes when the output format exposes them confidently.
+  - Run Comparison now renders derived changes in a compact **Detected changes** section above the transcript diff, grouped by tool-aware change type with jump actions back to the matching transcript rows.
+
+- **Auto-collapsing tab-bar chrome** — when the tab strip runs low on room, the right-hand chrome (search, findings badge, summarize, line numbers, timestamps) automatically collapses to a magnifier (`⌕`, opens search) plus the findings badge, so tabs reclaim the width. A leading toggle reads as its action — `»` collapses the chrome, `«` restores it — and pins the chrome open when used; the choice persists.
+  - The collapse decision is computed from intrinsic widths (tab content + full-chrome width vs. the bar width), so it is state-independent and never oscillates between collapsed and expanded.
+  - Keyboard shortcuts and the Options/mobile menus still reach search and the line-number/timestamp toggles when the inline chrome is collapsed.
+
+- **Tighter toolbar labels** — the line-number and timestamp toggles drop their `: on`/`: off` suffix (the active-dot indicator already shows state), and the search button no longer repeats the findings count carried by the badge beside it. The timestamp button still shows its mode (`timestamps: elapsed`/`timestamps: clock`) when active, and both toggles now expose `aria-pressed` so state stays available to assistive tech.
+
+- **Active Project HUD switcher** — the Active Project HUD chip now opens a compact searchable switcher instead of jumping straight into the Projects modal. The menu shows the current active project or `No project`, loads bounded active/MRU/search results from `/projects?mode=switcher`, lets users select or clear active-project focus without a page refresh, and keeps **Create project** plus **Open Projects** as deeper-work actions. Team viewers can select or clear focus without gaining project mutation rights, while project creation stays locked to roles that can mutate projects.
+
+### Fixed
+
+- **Scope HUD menu loading state** — the desktop `SCOPE` pop-up clears its `Loading teams...` note once team choices are rendered, instead of leaving stale loading copy below the loaded menu.
+
+- **Mobile Projects view-only triage** — opening finding triage from the Projects sheet now uses the visible filtered finding row, so view-only team members get the read-only triage warning instead of a missing-finding error.
+
+- **Options Teams can return to Personal scope** — the Teams tab now shows a Personal row above team rows, lets users switch back from an active team scope inside Options, and keeps the desktop HUD scope chip visually aligned with the other HUD values by removing its standalone glyph and font override.
+
+- **Command outcome summaries ignore stale tab state** — failed or unsupported commands no longer reuse the previous command's summary when the current transcript has no parsable outcome, and active-tab summaries now read only the current run's raw lines so stale nmap ports cannot carry into a later failed scan.
+
+- **Redis-backed PTY lifecycle logging** — distributed interactive PTY runs now log Redis event, snapshot, payload-decode, and control-queue failures with structured context, and reader cleanup plus `RUN_END` / `PTY_SESSION_ENDED` still run even if final Redis publication fails.
+
+- **Stats top-command table rendering** — the `stats` command now renders the **Top commands** header as a plain table header instead of leaking ANSI underline escape text, with command counts, success rates, and average durations kept in aligned columns.
+
+- **Config list table rendering** — `config list` now uses the shared terminal table styling for option/value rows, keeping long option names readable and aligned with other built-in command tables.
+
+- **Finding triage quota default** — `max_finding_triage_details_per_owner` now lives in the built-in app config defaults, matching the documented `config.yaml` and `CONFIGURATION.md` default.
+
+- **Built-in list table rendering** — `schedule list`, `watch list`, `wordlist list`, long `file list`, Project lists, and Team lists now use the shared terminal table header/row classes instead of generic help or key/value rows.
+
+- **AI next-command suggestions now avoid bracketed concrete targets and hallucinated SMB NSE script ids** — suggestion validation strips unnecessary brackets from concrete target tokens like `[192.168.1.5]` before display, rejects invented SMB CVE script names such as `smb-vuln-cve2009-1231`, and the next-command prompt now names known-good SMB NSE examples instead of asking for generic SMB scripts.
+
+- **Bundled llama.cpp sidecar starts without memory locking by default** — the optional `llama` Compose profile no longer passes `--mlock` or requests Docker memory-lock privileges in the base stack.
+  - **Fix:** removed the `IPC_LOCK`, `memlock`, and `--mlock` defaults so local Docker hosts that do not support memory locking avoid llama.cpp startup crashes; operators can still opt into memory locking with a local Compose override.
+
+- **Run Details metadata editor layering** — the **Edit** action in the Run Details metadata section now opens the metadata editor above the Run Details modal instead of behind it.
+  - **Fix:** raised the shared metadata editor overlay above the Run Details overlay while leaving the other project nested editor layers unchanged.
+
+- **Tour sample tab output routing** — commands launched from a `tour` sample chip now keep their prompt echo and live output in the sample tab while the tour waits in its original tab.
+  - **Fix:** the local-command capture wrapper now only captures output, command echoes, status updates, and client-run persistence for the tab that started the local command, forwarding other tabs normally.
+
+- **Scheduled active-run auto-attach** — scheduled and watcher-fired commands that are still running when the UI opens now remain in Status Monitor instead of automatically taking over the terminal.
+  - **Fix:** `/history/active` filters scheduled active runs by default for browser reload recovery, while Status Monitor requests the inclusive active-run list so **Attach** and **Kill** still work for automation-owned commands.
+
+- **Nmap Vulners findings** — Nmap `vulners` script CVE rows and exploit rows are now recorded as findings instead of plain transcript text.
+  - **Fix:** the output classifier marks Vulners CVE rows and `*EXPLOIT*` rows as findings, keeps the affected Nmap host, port, and service as finding context, filters `vulners.com` reference links out of Atlas entities, groups exploit-only reference rows by affected service, and maps the numeric Vulners score to info, low, medium, high, or critical severity. AI summary context now relies on those persisted grouped findings, includes a compact exploit-backed findings section, corrects provider text that says there are no actionable findings when persisted findings exist, and skips raw Nmap Vulners reference rows in the transcript tail.
+
+- **Workspace command output files can be rewritten after permission repair** — scanner-owned output files no longer get stranded as zero-byte, read-only targets after a restart or failed write.
+  - **Root cause:** command output targets were prepared with a direct appuser `chmod`, which could not repair files already owned by the `scanner` user.
+  - **Fix:** write-target preparation now falls back through the validated scanner sudo path and restores `0660` permissions before launching the command.
+
+- **Fast-exiting interactive PTY stream replay** — Redis-backed PTY streams now try to replay any already-published output and exit events before stale-run cleanup can prune an open-looking run, so very short invalid interactive commands show their real terminal error and exit code instead of falling back to a missing-transcript notice.
+
+- **Redis 8 read-only sidecar persistence** — the bundled Redis service now disables RDB/AOF persistence when running under a read-only root filesystem.
+  - **Root cause:** Redis 8 attempted its default RDB background save without a writable `/data` path, entered `MISCONF`, and rejected mutating commands needed by rate limits, run broker state, and AI coordination.
+  - **Fix:** Compose starts Redis with `--save ""`, `--appendonly no`, and `--stop-writes-on-bgsave-error no`, keeping Redis ephemeral to match its coordination/cache role while durable app data stays in SQLite/Postgres, `/data`, and workspace volumes.
+
+- **Run broker idle Redis timeouts** — quiet command output no longer causes a spurious browser stream-recovery notice or leaves smoke-test warmups without their terminal event when Redis reports an idle read timeout.
+  - **Root cause:** Redis stream reads could time out before the broker heartbeat window, and Redis 8/redis-py may surface that idle blocked-read as either `TimeoutError` or `ConnectionError("Timeout reading from socket")`; both paths could end the HTTP stream even though the command was still healthy.
+  - **Fix:** run and PTY broker streams now treat both Redis idle timeout shapes as idle polls and emit heartbeats instead of closing the browser stream.
+
+- **Elapsed timestamp gutter stability** — terminal rows no longer shift the prompt left/right when elapsed timestamps resync after blank prompts or command output.
+  - **Fix:** the full prefix resync path now keeps the same reserved elapsed gutter as the append path, and timestamp labels align to the right edge of that gutter so the visible prompt gap stays stable.
+
+- **Atlas toolbar dropdown layout** — Atlas export menus now stay anchored and readable from the modal, and the saved-view selector keeps a usable width when it only has the placeholder option.
+
+- **Run Details schedule summary** — scheduled runs now show a readable `Scheduled run` or `Watcher run` summary with the right owner action instead of wrapping the raw `sch_...` identifier inside the Summary card.
+
+- **Schedules and Watchers shortcut focus** — opening Schedules or Watchers from keyboard shortcuts now moves focus into the modal without drawing a selected-card border, so typing cannot leak into the terminal prompt and Escape closes the modal like menu-opened panels.
+
+- **Workspace cleanup permissions** — inactive workspace cleanup now repairs scanner-owned child directories before removing expired session workspaces, removes empty unreadable direct child directories when recursive repair cannot enter stale tool output, and the container entrypoint repairs immediate workspace children before recursive normalization so stale numeric-UID command output folders become traversable on restart. The entrypoint also repairs an existing `/workspaces` mount when local config points the app there without exporting `WORKSPACE_ROOT`, avoids the GNU `find` `{}` error during recursive repair, and startup repair failures now log `WORKSPACE_REPAIR_FAILED` with the failed path and stage. Any remaining cleanup skip logs render the path and reason directly in the log line.
+
+- **Findings Board run opens** — clicking **Open** on a Findings Board card now closes the board after handing the source run to Run Details, so the run doesn't open behind the modal.
+
+- **History bulk-select drawer stability** — clicking **Select all** or **Clear** in History bulk mode no longer bubbles into document-level outside-click handlers after the toolbar re-renders.
+
+- **Mobile menu schedule and watcher counts** — the mobile menu now shows saved-count hints for Schedules and Watchers, matching the existing count hints for History and Workflows.
+
+- **Atlas intel refresh feedback** — Refresh intel now shows a blocking progress panel while configured intel providers run, disables duplicate refresh actions, and uses the same wording from Atlas detail, mobile Atlas, and transcript entity menus.
+
+- **Grafana run-duration panel readability** — the example dashboard's top-5 average run-duration panel now uses an instant horizontal bar gauge over the selected dashboard range, so it stays capped at five tools and reads clearly in the Runs section.
+
+---
+
 ## [2.0] — 2026-05-26
 
 ### Added
@@ -115,6 +247,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Added history/output/artifact/project read routes, paged project runs and Atlas entities, active current-token job listing through `GET /runs`, ranged stored output through `/runs/<id>/output?range=N-M`, saved-output search through `/history/search?q=...&context=N`, Atlas readers under `/atlas`, notification channel/audit readers, and completed-run project link/unlink with audit logs and archived-project rejection.
     - Added brokered run start/status/stream/cancel, script-friendly `POST /runs/<id>/wait`, explicit project linking for API-started external runs, browser-parity workspace file rewrites, archived-project rejection before execution, immediate terminal status for API-started synthetic runs, and validated ISO datetime filters for history `since`/`until`.
     - Added the in-repo `darklab` CLI package with `darklab active`, `darklab run --wait`, `darklab run --link-project NAME`, `darklab grep`, `darklab atlas ...`, `darklab project-runs`, `darklab project-entities`, `darklab notify ...`, and `darklab output --range`.
+    - Bumped the bundled `darklab-cli` package to `0.2.0` for the v2.1 release, keeping it pre-1.0 while it gains team, schedule, watcher, notification, completion, and download coverage alongside the API.
     - Improved CLI behavior with explicit `http://` and custom-port `api_url` support, real TOML config parsing, separated `--follow` / `--no-follow` run behavior, concise argparse help with per-command default/max caps, aligned text tables, finished timestamps in history, newest rows printed last, single-spaced live text output, incomplete-stream exit code `2`, clean Ctrl+C exit code `130`, generated build-artifact ignores under `tools/`, and safer artifact downloads that sanitize filenames, honor UTF-8 attachment names, refuse overwrites, and point users to `darklab artifacts <run_id>`.
     - Added run label/note counts to history summaries and made `whoami` update and return the current session-token authentication timestamp without echoing the token.
   - **Tests:** added `tests/py/test_api_v1.py` for API auth, revoked-token route flow, history/project/artifact scoping, run streaming and failure paths, finalized project linking, OpenAPI snapshot parity, idle stream heartbeat coverage, active-run listing, API read-route rate limiting, and CLI config/HTTP/SSE/JSON behavior including clean Ctrl+C stream detaches.
@@ -427,7 +560,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** extended existing History insights coverage to prove constellation rows use the summary-backed output kind without changing the suite count.
 - **Watcher CLI details match schedule details** — `darklab watch info` now uses the same sectioned detail rendering as `darklab schedule info`, including watcher state, baseline and last-run fields, cadence, health counters, options, and recent fire rows.
   - **Tests:** extended existing CLI watcher coverage without changing the suite count.
-- **darklab CLI installs shell completions** — `darklab completion bash|zsh|fish` now emits static completion scripts for CLI subcommands, nested command groups, option names, and fixed choices such as output formats, Atlas orphan filters, and notification channel kinds without requiring an API request. `darklab completion install --shell auto` writes the right script into the current user's shell-completion directory.
+- **darklab CLI installs shell completions** — `darklab completion bash|zsh|fish` now emits static completion scripts for CLI subcommands, nested command groups, option names, and fixed choices such as output formats, Atlas orphan filters, and notification channel kinds without requiring an API request. Bash and zsh completion now follow third-level command groups such as `team invite create` before offering command-specific flags. `darklab completion install --shell auto` writes the right script into the current user's shell-completion directory.
   - **Tests:** extended existing CLI smoke coverage without changing the suite count.
 - **Workspace sudo fallback checks are cached** — workspace repair/delete/move paths now reuse cached sudo and scanner-user lookups instead of walking `PATH` and querying passwd data on every fallback operation.
   - **Tests:** reran the focused workspace backend coverage without changing the suite count.

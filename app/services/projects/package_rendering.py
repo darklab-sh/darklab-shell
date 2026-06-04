@@ -15,11 +15,13 @@ from jinja2 import Environment, select_autoescape
 from core.redaction import line_entries_from_events, redact_line_entries
 from services.history.permalinks import _font_face_css, _format_duration, _permalink_context
 from services.projects.contracts import ProjectWorkspaceError
+from services.projects.metadata import _metadata_owner_where
 from services.projects.models import entity_note_body as _entity_note_body
 from services.projects.packages import (
     redact_package_run as _redact_package_run,
     redact_package_value as _redact_package_value,
 )
+from services.projects.scope import shared_owner_where
 from services.projects.utils import cfg_int as _cfg_int
 from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 from services.runs.output_store import load_full_output_entries
@@ -315,16 +317,17 @@ def _package_preview_output_entries(run) -> list[dict[str, object]]:
     return [_package_output_entry(item) for item in loaded]
 
 
-def _package_run_rows(conn, session_id, run_ids):
+def _package_run_rows(conn, session_id, run_ids, *, team_id=""):
     ids = [str(run_id) for run_id in run_ids if run_id]
     if not ids:
         return []
     placeholders = ",".join("?" for _ in ids)
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
     rows = conn.execute(
         "SELECT r.*, art.rel_path "  # nosec
         "FROM runs r LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
-        f"WHERE r.session_id = ? AND r.id IN ({placeholders})",
-        [session_id, *ids],
+        "WHERE " + owner_sql + f" AND r.id IN ({placeholders})",  # nosec
+        [*owner_params, *ids],
     ).fetchall()
     by_id = {str(row["id"]): dict(row) for row in rows}
     return [by_id[run_id] for run_id in ids if run_id in by_id]
@@ -592,6 +595,7 @@ def _finding_run_anchor(finding):
 def _package_finding_metadata_markdown(finding):
     labels = finding.get("labels") if isinstance(finding.get("labels"), list) else []
     note = finding.get("note") if isinstance(finding.get("note"), dict) else None
+    triage = finding.get("triage") if isinstance(finding.get("triage"), dict) else None
     parts = []
     label_values = [
         _package_markdown_code(label.get("label") or "")
@@ -600,6 +604,19 @@ def _package_finding_metadata_markdown(finding):
     ]
     if label_values:
         parts.append("Labels: " + ", ".join(label_values))
+    if triage:
+        verification_status = str(triage.get("verification_status") or "not_started").strip()
+        remediation = str(triage.get("remediation") or "").strip()
+        verification_steps = str(triage.get("verification_steps") or "").strip()
+        verification_notes = str(triage.get("verification_notes") or "").strip()
+        if verification_status and verification_status != "not_started":
+            parts.append("Verification: " + _package_markdown_code(verification_status))
+        if remediation:
+            parts.append("Remediation: " + _package_markdown_text(remediation))
+        if verification_steps:
+            parts.append("Verification steps: " + _package_markdown_text(verification_steps))
+        if verification_notes:
+            parts.append("Verification notes: " + _package_markdown_text(verification_notes))
     if note and note.get("body"):
         parts.append("Note: " + _package_markdown_text(note.get("body") or ""))
     return "<br>" + "<br>".join(parts) if parts else ""
@@ -1183,8 +1200,9 @@ def _package_manifest_with_inline_metadata(manifest, labels, notes):
     return enriched
 
 
-def _package_metadata_rows(conn, session_id, table, targets):
+def _package_metadata_rows(conn, session_id, table, targets, *, team_id=""):
     rows = []
+    metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id)
     for entity_type, entity_ids in targets.items():
         if not entity_ids:
             continue
@@ -1192,16 +1210,16 @@ def _package_metadata_rows(conn, session_id, table, targets):
         if table == "entity_labels":
             rows.extend(conn.execute(
                 "SELECT id, entity_type, entity_id, label, source, created "  # nosec
-                f"FROM entity_labels WHERE session_id = ? AND entity_type = ? "
+                "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = ? "
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, label ASC",
-                [session_id, entity_type, *entity_ids],
+                [*metadata_owner_params, entity_type, *entity_ids],
             ).fetchall())
         elif table == "entity_notes":
             rows.extend(conn.execute(
                 "SELECT id, entity_type, entity_id, body, created, updated "  # nosec
-                f"FROM entity_notes WHERE session_id = ? AND entity_type = ? "
+                "FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = ? "
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, updated ASC, id ASC",
-                [session_id, entity_type, *entity_ids],
+                [*metadata_owner_params, entity_type, *entity_ids],
             ).fetchall())
     return rows
 

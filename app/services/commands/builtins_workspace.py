@@ -8,13 +8,14 @@ from typing import Sequence, cast
 
 from config import CFG
 from services.commands.builtins_format import (
-    ansi_underline,
     format_bytes,
     format_native_record,
     output_line,
     text_lines,
 )
 from services.commands.registry import split_command_argv
+from services.teams.capabilities import Capability, role_can
+from services.teams.scope import OwnerContext, owner_context_for_scope
 from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
@@ -23,14 +24,14 @@ from services.workspace.files import (
     WorkspacePathNotFound,
     WorkspacePermissionDenied,
     WorkspaceQuotaExceeded,
-    expand_workspace_path_pattern,
-    list_workspace_directories,
-    list_workspace_files,
-    move_workspace_path,
-    read_workspace_text_file,
+    expand_owner_workspace_path_pattern,
+    list_owner_workspace_directories,
+    list_owner_workspace_files,
+    move_owner_workspace_path,
+    read_owner_workspace_text_file,
     workspace_path_has_glob,
     workspace_settings,
-    workspace_usage,
+    owner_workspace_usage,
 )
 
 
@@ -49,11 +50,11 @@ def _format_clock(value: str | None) -> str:
 
 def _workspace_command_error(exc: Exception) -> list[dict[str, object]]:
     if isinstance(exc, WorkspaceDisabled):
-        return [output_line("file: session file storage is disabled on this instance")]
+        return [output_line("file: workspace file storage is disabled on this instance")]
     if isinstance(exc, WorkspaceFileNotFound):
         return [output_line("file: file was not found")]
     if isinstance(exc, WorkspacePathNotFound):
-        return [output_line("file: session file or folder was not found")]
+        return [output_line("file: workspace file or folder was not found")]
     if isinstance(exc, WorkspacePermissionDenied):
         return [output_line(f"file: {exc}")]
     if isinstance(exc, WorkspaceBinaryFile):
@@ -209,6 +210,22 @@ def parse_workspace_list_command(parts: list[str]) -> tuple[bool, bool, str, str
     return _parse_workspace_list_command(parts)
 
 
+def _workspace_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
+    if owner_context is not None:
+        return owner_context
+    return owner_context_for_scope(session_id)
+
+
+def _can_manage_workspace_files(owner_context: OwnerContext, team_role: str = "") -> bool:
+    if not owner_context.is_team:
+        return True
+    return role_can(team_role, Capability.MANAGE_WORKSPACE_FILES)
+
+
+def _workspace_write_denied() -> list[dict[str, object]]:
+    return [output_line("file: your team role can view Files but can't change them")]
+
+
 def _workspace_item_size(item: dict[str, object]) -> int:
     value = item.get("size")
     if isinstance(value, int):
@@ -221,13 +238,16 @@ def _workspace_item_size(item: dict[str, object]) -> int:
     return 0
 
 
-def _underline_text(text: str) -> str:
-    return ansi_underline(text)
-
-
-def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, object]]:
+def run_builtin_workspace(
+    command: str,
+    session_id: str,
+    *,
+    owner_context: OwnerContext | None = None,
+    team_role: str = "",
+) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
+    owner = _workspace_owner_context(session_id, owner_context)
 
     if subcommand in {"help", "--help", "-h"}:
         return [
@@ -260,9 +280,9 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
             return [output_line(usage_error)]
         try:
             settings = workspace_settings(CFG)
-            files = list_workspace_files(session_id, CFG)
-            directories = list_workspace_directories(session_id, CFG)
-            usage = workspace_usage(session_id, CFG)
+            files = list_owner_workspace_files(owner, CFG)
+            directories = list_owner_workspace_directories(owner, CFG)
+            usage = owner_workspace_usage(owner, CFG)
         except Exception as exc:
             return _workspace_command_error(exc)
 
@@ -283,7 +303,7 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
         if target and workspace_path_has_glob(target):
             try:
                 rows = _workspace_glob_list_rows(
-                    expand_workspace_path_pattern(session_id, target, CFG),
+                    expand_owner_workspace_path_pattern(owner, target, CFG),
                     files,
                 )
             except Exception as exc:
@@ -292,7 +312,7 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
             rows = _workspace_list_rows(files, directories, recursive=recursive, target=target)
         if not rows:
             lines.append(output_line(
-                "  No matching session files." if target else "  No session files yet.",
+                "  No matching workspace files." if target else "  No workspace files yet.",
                 "builtin-note",
             ))
             return lines
@@ -303,26 +323,26 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
             return lines
 
         width = max((len(str(item.get("display") or item["path"])) for item in rows), default=4)
-        path_header = f"{_underline_text('path')}{' ' * max(0, width - len('path'))}"
-        size_header = f"{_underline_text('size')}{' ' * (8 - len('size'))}"
-        modified_header = _underline_text("modified")
-        lines.append(output_line(f"  {path_header}  {size_header}  {modified_header}", "builtin-help-row"))
+        path_header = f"{'path':<{width}}"
+        size_header = f"{'size':<8}"
+        modified_header = "modified"
+        lines.append(output_line(f"  {path_header}  {size_header}  {modified_header}", "builtin-table-header"))
         for row in rows:
             path = str(row.get("display") or row["path"])
             if row["kind"] == "directory":
-                lines.append(output_line(f"  {path:<{width}}  folder", "builtin-help-row"))
+                lines.append(output_line(f"  {path:<{width}}  folder", "builtin-table-row"))
                 continue
             item = cast(dict[str, object], row["item"])
             size = format_bytes(_workspace_item_size(item))
             mtime = _format_clock(str(item.get("mtime") or ""))
-            lines.append(output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "builtin-help-row"))
+            lines.append(output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "builtin-table-row"))
         return lines
 
     if subcommand in {"show", "cat"}:
         if len(parts) != 3:
             return [output_line("Usage: file show <file>")]
         try:
-            text = read_workspace_text_file(session_id, parts[2])
+            text = read_owner_workspace_text_file(owner, parts[2], CFG)
         except Exception as exc:
             return _workspace_command_error(exc)
         file_lines = text.splitlines() or [""]
@@ -339,6 +359,8 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
             or (subcommand in {"edit", "download"} and len(parts) != 3)
         ):
             return [output_line(f"Usage: {expected}")]
+        if subcommand in {"add", "edit"} and not _can_manage_workspace_files(owner, team_role):
+            return _workspace_write_denied()
         if subcommand == "add":
             return [output_line("file add requires the browser Files panel — reload the page and try again.")]
         if len(parts) != 3:
@@ -352,28 +374,32 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
     if subcommand in {"rm", "delete"}:
         if len(parts) != 3:
             return [output_line("Usage: file rm <file-or-folder>")]
+        if not _can_manage_workspace_files(owner, team_role):
+            return _workspace_write_denied()
         return [output_line("file rm requires browser confirmation — reload the page and try again.")]
 
     if subcommand in {"move", "mv"}:
         if len(parts) != 4:
             return [output_line("Usage: file move <source> <destination>")]
+        if not _can_manage_workspace_files(owner, team_role):
+            return _workspace_write_denied()
         try:
             if workspace_path_has_glob(parts[2]):
-                matches = expand_workspace_path_pattern(session_id, parts[2], CFG)
+                matches = expand_owner_workspace_path_pattern(owner, parts[2], CFG)
                 if not matches:
                     return [output_line(f"file: no matches: {parts[2]}")]
                 destination_is_directory = parts[3] == "/" or any(
                     directory["path"] == parts[3].strip("/")
-                    for directory in list_workspace_directories(session_id, CFG)
+                    for directory in list_owner_workspace_directories(owner, CFG)
                 )
                 if len(matches) > 1 and not destination_is_directory:
                     return [output_line("file: destination must be an existing folder when moving multiple matches")]
                 lines = []
                 for match in matches:
-                    moved = move_workspace_path(session_id, match.path, parts[3], CFG)
+                    moved = move_owner_workspace_path(owner, match.path, parts[3], CFG)
                     lines.append(output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success"))
                 return lines
-            moved = move_workspace_path(session_id, parts[2], parts[3], CFG)
+            moved = move_owner_workspace_path(owner, parts[2], parts[3], CFG)
         except Exception as exc:
             return _workspace_command_error(exc)
         return [output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success")]
@@ -387,25 +413,48 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, objec
     ]
 
 
-def run_builtin_workspace_alias(command: str, session_id: str) -> list[dict[str, object]]:
+def run_builtin_workspace_alias(
+    command: str,
+    session_id: str,
+    *,
+    owner_context: OwnerContext | None = None,
+    team_role: str = "",
+) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     root = parts[0].lower() if parts else ""
     if root == "ls":
-        return run_builtin_workspace("file list " + " ".join(parts[1:]), session_id)
+        return run_builtin_workspace(
+            "file list " + " ".join(parts[1:]),
+            session_id,
+            owner_context=owner_context,
+            team_role=team_role,
+        )
     if root == "ll":
-        return run_builtin_workspace("file list -l " + " ".join(parts[1:]), session_id)
+        return run_builtin_workspace(
+            "file list -l " + " ".join(parts[1:]),
+            session_id,
+            owner_context=owner_context,
+            team_role=team_role,
+        )
     if root == "cat":
         if len(parts) != 2:
             return [output_line("Usage: cat <file>")]
-        return run_builtin_workspace(f"file show {parts[1]}", session_id)
+        return run_builtin_workspace(f"file show {parts[1]}", session_id, owner_context=owner_context, team_role=team_role)
     if root == "rm":
         if len(parts) != 2:
             return [output_line("Usage: rm <file-or-folder>")]
-        return run_builtin_workspace(f"file rm {parts[1]}", session_id)
+        return run_builtin_workspace(f"file rm {parts[1]}", session_id, owner_context=owner_context, team_role=team_role)
     if root == "mv":
         if len(parts) != 3:
             return [output_line("Usage: mv <source> <destination>")]
-        return run_builtin_workspace(f"file move {parts[1]} {parts[2]}", session_id)
+        return run_builtin_workspace(
+            f"file move {parts[1]} {parts[2]}",
+            session_id,
+            owner_context=owner_context,
+            team_role=team_role,
+        )
+    if root == "mkdir" and not _can_manage_workspace_files(_workspace_owner_context(session_id, owner_context), team_role):
+        return _workspace_write_denied()
     if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
         return [output_line(f"{root}: handled in the browser workspace terminal")]
     return [output_line(

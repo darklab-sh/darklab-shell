@@ -789,12 +789,12 @@ def run_builtin_stats(
     ok_width = max(len("ok"), *(len(row["ok"]) for row in top_rows))
     avg_width = max(len("avg"), *(len(row["avg"]) for row in top_rows))
     header = column_gap.join((
-        _ansi_cell("command", root_width, "<", _ansi_underline),
-        _ansi_cell("runs", runs_width, ">", _ansi_underline),
-        _ansi_cell("ok", ok_width, ">", _ansi_underline),
-        _ansi_cell("avg", avg_width, ">", _ansi_underline),
+        f"{'command':<{root_width}}",
+        f"{'runs':>{runs_width}}",
+        f"{'ok':>{ok_width}}",
+        f"{'avg':>{avg_width}}",
     ))
-    lines.append(_output_line(f"  {header}", "builtin-help-row"))
+    lines.append(_output_line(f"  {header}", "builtin-table-header"))
     for row in top_rows:
         rendered = column_gap.join((
             f"{row['root']:<{root_width}}",
@@ -802,7 +802,7 @@ def run_builtin_stats(
             f"{row['ok']:>{ok_width}}",
             f"{row['avg']:>{avg_width}}",
         ))
-        lines.append(_output_line(f"  {rendered}", "builtin-help-row"))
+        lines.append(_output_line(f"  {rendered}", "builtin-table-row"))
     return lines
 
 

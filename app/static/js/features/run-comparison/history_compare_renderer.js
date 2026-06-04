@@ -722,6 +722,21 @@ function _renderHistoryCompareOmittedNote(truncated = {}) {
   return note;
 }
 
+function _historyCompareNoiseOmittedTotal(data = {}) {
+  const left = Number(data.left?.output_source?.noise_lines_omitted || 0);
+  const right = Number(data.right?.output_source?.noise_lines_omitted || 0);
+  return Math.max(0, left) + Math.max(0, right);
+}
+
+function _renderHistoryCompareNoiseNote(data = {}) {
+  const omitted = _historyCompareNoiseOmittedTotal(data);
+  if (!omitted) return null;
+  const note = document.createElement('div');
+  note.className = 'history-compare-counts-note';
+  note.textContent = `${omitted.toLocaleString()} noisy transcript line(s) folded out of this comparison.`;
+  return note;
+}
+
 function _historyCompareObjectText(item, kind) {
   if (!item || typeof item !== 'object') return '';
   if (kind === 'artifact') {
@@ -811,6 +826,242 @@ function _renderHistoryCompareObjectSection(title, items, kind, sign) {
     list.appendChild(row);
   });
   section.appendChild(list);
+  return section;
+}
+
+function _historyCompareDerivedSide(side) {
+  const normalized = String(side || '').toLowerCase();
+  if (normalized === 'right' || normalized === 'b' || normalized === '+') return 'b';
+  if (normalized === 'left' || normalized === 'a' || normalized === '-') return 'a';
+  return '';
+}
+
+function _historyCompareDerivedPointer(item) {
+  if (!item || typeof item !== 'object') return null;
+  const compareLineIndex = _historyCompareNumber(item.compare_line_index);
+  const compareSide = _historyCompareDerivedSide(item.compare_side);
+  if (compareLineIndex === null || !compareSide) return null;
+  return { compareLineIndex, compareSide };
+}
+
+function _historyCompareDerivedChangedPointer(item) {
+  return _historyCompareDerivedPointer(item?.after) || _historyCompareDerivedPointer(item?.before);
+}
+
+function _historyCompareDerivedRecordLabel(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  if (kind === 'ports') {
+    const key = item.key || (item.port && item.proto ? `${item.port}/${item.proto}` : '');
+    return [
+      key,
+      item.state || '',
+      item.service_text || item.service || '',
+    ].filter(Boolean).join(' ');
+  }
+  if (kind === 'urls') {
+    return item.canonical_url || item.url || item.key || '';
+  }
+  return item.label || item.key || item.line || '';
+}
+
+function _historyCompareDerivedRecordMeta(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  if (kind === 'ports') {
+    return [
+      item.host || '',
+      item.line && item.line !== _historyCompareDerivedRecordLabel(item, kind) ? item.line : '',
+    ].filter(Boolean).join(' · ');
+  }
+  if (kind === 'urls') {
+    const status = item.status_code !== undefined && item.status_code !== null
+      ? String(item.status_code)
+      : '';
+    return [
+      status,
+      item.title || '',
+      item.redirect_url ? `redirect ${item.redirect_url}` : '',
+    ].filter(Boolean).join(' · ');
+  }
+  return item.detail || item.value || '';
+}
+
+function _historyCompareDerivedRecordSummary(item, kind) {
+  const label = _historyCompareDerivedRecordLabel(item, kind);
+  const meta = _historyCompareDerivedRecordMeta(item, kind);
+  return [label, meta].filter(Boolean).join(' · ');
+}
+
+function _historyCompareDerivedChangedLabel(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  return item.key || _historyCompareDerivedRecordLabel(item.after, kind)
+    || _historyCompareDerivedRecordLabel(item.before, kind);
+}
+
+function _historyCompareDerivedChangedMeta(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  const before = _historyCompareDerivedRecordSummary(item.before, kind);
+  const after = _historyCompareDerivedRecordSummary(item.after, kind);
+  if (before && after && before !== after) return `${before} -> ${after}`;
+  return after || before || '';
+}
+
+function _historyCompareDerivedCount(group, key, listKey) {
+  const explicit = _historyCompareNumber(group?.[key]);
+  if (explicit !== null) return explicit;
+  const values = group && Array.isArray(group[listKey]) ? group[listKey] : [];
+  return values.length;
+}
+
+function _historyCompareDerivedGroupCounts(group) {
+  const added = _historyCompareDerivedCount(group, 'added_count', 'added');
+  const removed = _historyCompareDerivedCount(group, 'removed_count', 'removed');
+  const changed = _historyCompareDerivedCount(group, 'changed_count', 'changed');
+  return {
+    added,
+    removed,
+    changed,
+    total: added + removed + changed,
+  };
+}
+
+function _historyCompareDerivedCountsText(counts) {
+  return [
+    counts.added ? `${counts.added.toLocaleString()} added` : '',
+    counts.removed ? `${counts.removed.toLocaleString()} removed` : '',
+    counts.changed ? `${counts.changed.toLocaleString()} changed` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function _historyCompareDerivedNoResultText(group) {
+  if (!group || typeof group !== 'object') return '';
+  if (group.note) return String(group.note);
+  if (group.unavailable_reason) {
+    const title = group.title || group.id || 'Tool-aware changes';
+    return `${title} did not produce a confident summary (${group.unavailable_reason}).`;
+  }
+  if (group.applicable) {
+    const title = group.title || group.id || 'Tool-aware changes';
+    return `${title} did not produce a confident summary.`;
+  }
+  return '';
+}
+
+function _historyCompareAppendDerivedRow(list, item, kind, sign, pointer, options = {}) {
+  const row = pointer ? document.createElement('button') : document.createElement('div');
+  if (row.tagName === 'BUTTON') {
+    row.type = 'button';
+    row.addEventListener('click', () => {
+      _historyCompareScrollToLine(pointer.compareSide, pointer.compareLineIndex, { emit: true });
+    });
+    if (typeof bindPressable === 'function') bindPressable(row);
+  }
+  row.className = 'history-compare-line history-compare-object-row history-compare-derived-row'
+    + (pointer ? ' control-row is-anchorable' : '');
+  row.dataset.objectKind = `derived-${kind || 'change'}`;
+  row.dataset.derivedKind = kind || 'change';
+  if (pointer) {
+    row.dataset.compareSide = pointer.compareSide;
+    row.dataset.compareLineIndex = String(pointer.compareLineIndex);
+  }
+
+  const mark = document.createElement('span');
+  if (sign === '+') mark.className = 'history-compare-line-added';
+  else if (sign === '-') mark.className = 'history-compare-line-removed';
+  else mark.className = 'history-compare-derived-change-mark';
+  mark.textContent = sign;
+  row.appendChild(mark);
+
+  const content = document.createElement('div');
+  content.className = 'history-compare-object-content';
+  const primary = document.createElement('code');
+  primary.textContent = options.label || _historyCompareDerivedRecordLabel(item, kind);
+  content.appendChild(primary);
+  const meta = options.meta || _historyCompareDerivedRecordMeta(item, kind);
+  if (meta) {
+    const metaEl = document.createElement('div');
+    metaEl.className = 'history-compare-object-meta';
+    metaEl.textContent = meta;
+    content.appendChild(metaEl);
+  }
+  row.appendChild(content);
+  list.appendChild(row);
+}
+
+function _renderHistoryCompareDerivedChanges(derivedChanges = {}) {
+  const groups = Array.isArray(derivedChanges.groups) ? derivedChanges.groups : [];
+  const visibleGroups = groups
+    .map(group => ({ group, counts: _historyCompareDerivedGroupCounts(group) }))
+    .filter(entry => entry.counts.total > 0);
+  const notes = groups.map(_historyCompareDerivedNoResultText).filter(Boolean);
+  if (!visibleGroups.length && !notes.length) return null;
+  if (!visibleGroups.length) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-counts-note';
+    note.textContent = notes.join(' ');
+    return note;
+  }
+
+  const total = visibleGroups.reduce((sum, entry) => sum + entry.counts.total, 0);
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines history-compare-object-section history-compare-derived-section';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `Detected changes (${total.toLocaleString()})`;
+  section.appendChild(summary);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'history-compare-derived-groups';
+  visibleGroups.forEach(({ group, counts }) => {
+    const kind = group.kind || group.id || 'change';
+    const groupEl = document.createElement('div');
+    groupEl.className = 'history-compare-derived-group';
+    const title = document.createElement('div');
+    title.className = 'history-compare-derived-group-title';
+    title.textContent = [
+      group.title || group.id || 'Derived changes',
+      group.display_target || '',
+      _historyCompareDerivedCountsText(counts),
+    ].filter(Boolean).join(' · ');
+    groupEl.appendChild(title);
+
+    const list = document.createElement('div');
+    list.className = 'history-compare-line-list';
+    (Array.isArray(group.added) ? group.added : []).forEach(item => {
+      _historyCompareAppendDerivedRow(list, item, kind, '+', _historyCompareDerivedPointer(item));
+    });
+    (Array.isArray(group.removed) ? group.removed : []).forEach(item => {
+      _historyCompareAppendDerivedRow(list, item, kind, '-', _historyCompareDerivedPointer(item));
+    });
+    (Array.isArray(group.changed) ? group.changed : []).forEach(item => {
+      _historyCompareAppendDerivedRow(
+        list,
+        item,
+        kind,
+        '~',
+        _historyCompareDerivedChangedPointer(item),
+        {
+          label: _historyCompareDerivedChangedLabel(item, kind),
+          meta: _historyCompareDerivedChangedMeta(item, kind),
+        },
+      );
+    });
+    groupEl.appendChild(list);
+    wrap.appendChild(groupEl);
+  });
+  section.appendChild(wrap);
+
+  if (notes.length) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-counts-note';
+    note.textContent = notes.join(' ');
+    section.appendChild(note);
+  }
+  if (derivedChanges.truncated) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-counts-note';
+    note.textContent = 'Some detected changes were omitted by compare limits.';
+    section.appendChild(note);
+  }
   return section;
 }
 
@@ -904,6 +1155,8 @@ function _renderHistoryComparison(data) {
   body.appendChild(metrics);
   const omittedNote = _renderHistoryCompareOmittedNote(data.truncated || {});
   if (omittedNote) body.appendChild(omittedNote);
+  const noiseNote = _renderHistoryCompareNoiseNote(data);
+  if (noiseNote) body.appendChild(noiseNote);
 
   const findingsTruncated = !!(
     data.truncated
@@ -930,6 +1183,8 @@ function _renderHistoryComparison(data) {
       : 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
     body.appendChild(note);
   }
+  const derivedChangesSection = _renderHistoryCompareDerivedChanges(data.derived_changes || {});
+  if (derivedChangesSection) body.appendChild(derivedChangesSection);
 
   const toolbar = document.createElement('div');
   toolbar.className = 'history-compare-toolbar';
@@ -954,6 +1209,7 @@ function _renderHistoryComparison(data) {
   const removedArtifacts = Array.isArray(artifactObjects.removed) ? artifactObjects.removed : [];
   const addedEntities = Array.isArray(entityObjects.added) ? entityObjects.added : [];
   const removedEntities = Array.isArray(entityObjects.removed) ? entityObjects.removed : [];
+  const hasDerivedChanges = !!derivedChangesSection;
   if (addedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Added findings', addedFindings, 'finding', '+'));
   if (removedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Removed findings', removedFindings, 'finding', '-'));
   if (addedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Added entities', addedEntities, 'entity', '+'));
@@ -962,6 +1218,7 @@ function _renderHistoryComparison(data) {
   if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
   if (
     !changedOutputCount
+    && !hasDerivedChanges
     && !addedFindings.length && !removedFindings.length
     && !addedEntities.length && !removedEntities.length
     && !addedArtifacts.length && !removedArtifacts.length

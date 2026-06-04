@@ -241,6 +241,58 @@
       });
   }
 
+  function isCommandOutcomeSummaryLine(line) {
+    const cls = String(line && line.cls || line && line.legacy_cls || '');
+    return cls.split(/\s+/).includes('command-outcome-summary')
+      || Boolean(line && line.command_outcome_summary === true);
+  }
+
+  function commandOutcomeItemText(item) {
+    if (!item || typeof item !== 'object') return '';
+    const label = String(item.label || '').trim();
+    const value = String(item.value || '').trim();
+    if (label && value) return `${label}: ${value}`;
+    return value || label;
+  }
+
+  function buildExportCommandOutcomeSummary(command, rawLines) {
+    const core = window.DarklabOutputCore || null;
+    if (!core || typeof core.buildCommandOutcomeSummary !== 'function') return null;
+    const normalizer = typeof core.normalizeCommandOutcomeSummary === 'function'
+      ? core.normalizeCommandOutcomeSummary
+      : (value) => value;
+    return normalizer(core.buildCommandOutcomeSummary(command, rawLines));
+  }
+
+  function commandOutcomeSummaryToLines(summary) {
+    if (!summary || !Array.isArray(summary.items) || !summary.items.length) return [];
+    const lines = [];
+    const title = String(summary.title || 'Command outcome').trim() || 'Command outcome';
+    lines.push({
+      text: title,
+      cls: 'command-outcome-summary command-outcome-summary-title',
+      command_outcome_summary: true,
+    });
+    summary.items.forEach((item) => {
+      const text = commandOutcomeItemText(item);
+      if (!text) return;
+      lines.push({
+        text,
+        cls: 'command-outcome-summary command-outcome-summary-row',
+        command_outcome_summary: true,
+      });
+    });
+    return lines;
+  }
+
+  function appendCommandOutcomeSummaryLines(rawLines, { command = '', enabled = true } = {}) {
+    const normalized = normalizeExportTranscriptLines(rawLines);
+    if (!enabled || normalized.some(isCommandOutcomeSummaryLine)) return normalized;
+    const summary = buildExportCommandOutcomeSummary(command, normalized);
+    if (!summary) return normalized;
+    return normalized.concat(commandOutcomeSummaryToLines(summary));
+  }
+
   function normalizeExportRunMeta(runMeta) {
     if (!runMeta) return null;
     return {
@@ -258,13 +310,17 @@
     createdText = '',
     runMeta = null,
     rawLines = [],
+    command = '',
+    includeCommandOutcomeSummary = false,
   }) {
     return {
       appName: String(appName || ''),
       title: String(title || ''),
       metaLine: buildExportMetaLine({ label, createdText }),
       runMeta: normalizeExportRunMeta(runMeta),
-      rawLines: normalizeExportTranscriptLines(rawLines),
+      rawLines: includeCommandOutcomeSummary
+        ? appendCommandOutcomeSummaryLines(rawLines, { command, enabled: true })
+        : normalizeExportTranscriptLines(rawLines),
     };
   }
 
@@ -531,6 +587,10 @@ ${includeHighlightToggle ? buildTerminalExportScript() : ''}
     buildExportMetaLine,
     normalizeExportTranscriptLine,
     normalizeExportTranscriptLines,
+    appendCommandOutcomeSummaryLines,
+    buildExportCommandOutcomeSummary,
+    commandOutcomeSummaryToLines,
+    isCommandOutcomeSummaryLine,
     normalizeExportRunMeta,
     lineEventFromWire,
     lineLegacyClass,

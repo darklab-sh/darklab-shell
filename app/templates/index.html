@@ -186,6 +186,24 @@
             <span class="menu-item-label">options</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
+            <span class="menu-item-icon" aria-hidden="true">⚙</span>
+            <span class="menu-item-label">workflows</span>
+            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item mobile-scope-row" data-menu-action="scope">
+            <span class="menu-item-icon" aria-hidden="true">@</span>
+            <span class="menu-item-label">scope</span>
+            <span id="mobile-team-scope-label" class="menu-item-hint">Personal</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="atlas">
+            <span class="menu-item-icon" aria-hidden="true">◎</span>
+            <span class="menu-item-label">atlas</span>
+            <span class="menu-item-hint" id="mobile-menu-atlas-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item" data-menu-action="projects">
             <span class="menu-item-icon" aria-hidden="true">◇</span>
             <span class="menu-item-label">projects</span>
@@ -198,9 +216,29 @@
             <span class="menu-item-hint" id="mobile-menu-history-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="atlas">
-            <span class="menu-item-icon" aria-hidden="true">◎</span>
-            <span class="menu-item-label">atlas</span>
+          {% if workspace_enabled %}
+          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
+            <span class="menu-item-icon" aria-hidden="true">▣</span>
+            <span class="menu-item-label">files</span>
+            <span class="menu-item-hint" id="mobile-menu-files-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% endif %}
+          <button type="button" class="menu-item nav-item" data-menu-action="schedules">
+            <span class="menu-item-icon" aria-hidden="true">↻</span>
+            <span class="menu-item-label">schedules</span>
+            <span class="menu-item-hint" id="mobile-menu-schedules-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="watchers">
+            <span class="menu-item-icon" aria-hidden="true">◌</span>
+            <span class="menu-item-label">watchers</span>
+            <span class="menu-item-hint" id="mobile-menu-watchers-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="findings-board">
+            <span class="menu-item-icon" aria-hidden="true">▦</span>
+            <span class="menu-item-label">findings</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
           <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
@@ -213,42 +251,19 @@
             <span class="menu-item-label">commands</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
-            <span class="menu-item-icon" aria-hidden="true">⚙</span>
-            <span class="menu-item-label">workflows</span>
-            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="schedules">
-            <span class="menu-item-icon" aria-hidden="true">↻</span>
-            <span class="menu-item-label">schedules</span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="watchers">
-            <span class="menu-item-icon" aria-hidden="true">◌</span>
-            <span class="menu-item-label">watchers</span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
-          {% if workspace_enabled %}
-          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
-            <span class="menu-item-icon" aria-hidden="true">▣</span>
-            <span class="menu-item-label">files</span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
-          {% endif %}
-          <button type="button" class="menu-item nav-item" data-menu-action="theme">
-            <span class="menu-item-icon" aria-hidden="true">◐</span>
-            <span class="menu-item-label">theme</span>
-            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
           <button type="button" class="menu-item nav-item" data-menu-action="faq">
             <span class="menu-item-icon" aria-hidden="true">?</span>
             <span class="menu-item-label">FAQ</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="theme">
+            <span class="menu-item-icon" aria-hidden="true">◑</span>
+            <span class="menu-item-label">theme</span>
+            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
-            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-icon" aria-hidden="true">⊕</span>
             <span class="menu-item-label">diag</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
@@ -319,6 +334,7 @@
         <button class="rail-nav-item nav-item rail-more-item" data-action="schedules" type="button" role="menuitem" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="watchers" type="button" role="menuitem" title="Change-detection watchers"><span class="rail-nav-glyph">◌</span><span class="rail-nav-label">watchers</span></button>
         <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="findings-board" type="button" role="menuitem" title="Finding triage board"><span class="rail-nav-glyph">▦</span><span class="rail-nav-label">findings</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="status-monitor" type="button" role="menuitem" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="command-registry" type="button" role="menuitem" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
         <button class="rail-nav-item nav-item rail-more-item" data-action="faq" type="button" role="menuitem" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
@@ -342,13 +358,14 @@
         </div>
         <button id="tabs-scroll-right" class="tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll tabs right" title="Scroll tabs right" aria-hidden="true">▶</button>
       </div>
-      <div class="tabbar-chrome">
+      <div class="tabbar-chrome" id="tabbar-chrome">
+        <button id="tabbar-chrome-toggle" class="chrome-btn btn btn-ghost btn-icon-only btn-compact u-hidden" type="button" aria-expanded="true" title="Collapse toolbar to make room for tabs">»</button>
         <button id="search-toggle-btn" class="chrome-btn btn btn-ghost btn-compact" title="Search output (Alt+S)" data-search-label="search">⌕ search</button>
         <span id="search-signal-summary" class="search-signal-summary u-hidden" aria-live="polite"></span>
-        <button id="search-summary-btn" class="chrome-btn btn btn-ghost btn-compact" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
-        <span class="tabbar-chrome-divider" aria-hidden="true"></span>
-        <button id="ln-btn" class="chrome-btn btn btn-ghost btn-compact" title="Toggle line numbers">ln: off</button>
-        <button id="ts-btn" class="chrome-btn btn btn-ghost btn-compact" title="Toggle timestamp display">ts: off</button>
+        <button id="search-summary-btn" class="chrome-btn chrome-collapsible btn btn-ghost btn-compact" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
+        <span class="tabbar-chrome-divider chrome-collapsible" aria-hidden="true"></span>
+        <button id="ln-btn" class="chrome-btn chrome-collapsible btn btn-ghost btn-compact" title="Toggle line numbers" aria-pressed="false">line numbers</button>
+        <button id="ts-btn" class="chrome-btn chrome-collapsible btn btn-ghost btn-compact" title="Toggle timestamp display" aria-pressed="false">timestamps</button>
       </div>
     </div>
 
@@ -413,26 +430,24 @@
           <span class="hud-label">tabs</span>
           <span id="hud-tabs" class="hud-value hud-muted">0</span>
         </div>
-        <div class="hud-cell" data-hud-chip="transport">
-          <span class="hud-label">transport</span>
-          <span class="hud-value hud-value-green">SSE</span>
-        </div>
         <div class="hud-cell">
           <span class="hud-label">latency</span>
           <span id="hud-latency" class="hud-value hud-muted">— ms</span>
-        </div>
-        <div class="hud-cell" data-hud-chip="mode">
-          <span class="hud-label">mode</span>
-          <span class="hud-value">ISOLATED</span>
         </div>
         <div class="hud-cell">
           <span class="hud-label">session</span>
           <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
         </div>
+        <div class="hud-cell hud-scope-cell">
+          <span class="hud-label">scope</span>
+          <button id="team-scope-trigger" class="hud-value hud-scope-trigger hud-action-cell" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="team-scope-menu" aria-label="Open active data scope menu">
+            <span id="team-scope-label">Personal</span>
+          </button>
+        </div>
         <div class="hud-cell hud-project-context hud-cell-clickable hud-action-cell u-hidden" id="hud-project-cell"
-             role="button" tabindex="0" aria-haspopup="dialog" aria-label="Open projects from active project">
+             role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" aria-controls="hud-project-menu" aria-label="Open active project switcher">
           <span class="hud-label">project</span>
-          <span id="hud-project" class="hud-value hud-muted">—</span>
+          <span id="hud-project" class="hud-value hud-muted">No project</span>
         </div>
         <div class="hud-cell">
           <span class="hud-label">uptime</span>
@@ -508,6 +523,7 @@
               <select id="atlas-suppression-filter" class="form-select form-control-compact atlas-suppression-filter" aria-label="Filter Atlas rows by suppression state"></select>
             </div>
             <div class="atlas-toolbar-actions">
+              <button id="atlas-import-btn" class="btn btn-secondary btn-compact" type="button">Import</button>
               <div id="atlas-export-wrap" class="atlas-export-wrap save-menu-wrap save-menu-down">
                 <button id="atlas-export-menu-btn" class="btn btn-ghost btn-compact" type="button" aria-expanded="false">Export</button>
                 <div id="atlas-export-menu" class="atlas-export-menu save-menu dropdown-surface">
@@ -516,14 +532,18 @@
                 </div>
               </div>
               <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+              <button id="atlas-findings-board-btn" class="btn btn-secondary btn-compact" type="button">Board</button>
               <button id="atlas-clear-filters-btn" class="btn btn-ghost btn-compact" type="button">Clear filters</button>
             </div>
           </div>
           <div class="atlas-saved-view-row">
-            <select id="atlas-saved-view-select" class="form-select form-control-compact atlas-saved-view-select" aria-label="Saved Atlas views"></select>
+            <div class="atlas-saved-view-select-cell">
+              <select id="atlas-saved-view-select" class="form-select form-control-compact atlas-saved-view-select" aria-label="Saved Atlas views"></select>
+            </div>
             <button id="atlas-saved-view-save" class="btn btn-secondary btn-compact" type="button">Save view</button>
             <button id="atlas-saved-view-update" class="btn btn-ghost btn-compact" type="button">Update</button>
             <button id="atlas-saved-view-delete" class="btn btn-ghost btn-compact" type="button">Delete</button>
+            <button id="atlas-saved-view-create-rule" class="btn btn-ghost btn-compact" type="button">Create rule</button>
           </div>
           <div id="atlas-finding-bulk-row" class="atlas-finding-bulk-row u-hidden">
             <div class="atlas-bulk-action-row">
@@ -553,6 +573,53 @@
         </div>
       </div>
       <aside id="atlas-detail" class="atlas-detail nice-scroll" aria-live="polite"></aside>
+    </div>
+    <div id="atlas-import-overlay" class="modal-overlay mobile-sheet-overlay atlas-import-overlay u-hidden" aria-hidden="true">
+      <form id="atlas-import-modal" class="modal-card mobile-sheet-surface atlas-import-modal" role="dialog" aria-modal="true" aria-labelledby="atlas-import-title" tabindex="-1">
+        <div class="surface-header">
+          <div>
+            <span class="faq-title" id="atlas-import-title">IMPORT ATLAS DATA</span>
+            <div class="atlas-import-subtitle" id="atlas-import-subtitle">External findings and entities</div>
+          </div>
+          <button type="button" class="close-btn" id="atlas-import-close" aria-label="Close import">✕</button>
+        </div>
+        <div class="atlas-import-body nice-scroll">
+          <section class="atlas-import-section">
+            <div class="atlas-detail-section-title">Source</div>
+            <div class="atlas-import-grid">
+              <label class="form-field">
+                <span>Format</span>
+                <select id="atlas-import-format" class="form-select form-control-compact">
+                  <option value="nuclei_jsonl">Nuclei JSONL</option>
+                  <option value="nessus_xml">Nessus XML</option>
+                  <option value="zap_json">OWASP ZAP JSON</option>
+                  <option value="zap_xml">OWASP ZAP XML</option>
+                  <option value="burp_xml">Burp Suite XML</option>
+                  <option value="generic_csv">Generic CSV</option>
+                  <option value="generic_jsonl">Generic JSONL</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Name</span>
+                <input id="atlas-import-name" class="form-control form-control-compact" type="text" maxlength="120" placeholder="Import name">
+              </label>
+              <label class="form-field atlas-import-file-field">
+                <span>File</span>
+                <input id="atlas-import-file" class="form-control form-control-compact" type="file" accept=".jsonl,application/x-ndjson,application/jsonl,application/json">
+              </label>
+            </div>
+            <div class="atlas-import-actions">
+              <button id="atlas-import-preview-btn" class="btn btn-secondary btn-compact" type="submit">Preview</button>
+              <span id="atlas-import-status" class="atlas-muted" aria-live="polite"></span>
+            </div>
+          </section>
+          <section id="atlas-import-preview" class="atlas-import-section u-hidden" aria-live="polite"></section>
+        </div>
+        <div class="modal-actions atlas-import-footer">
+          <button id="atlas-import-cancel" class="btn btn-ghost btn-compact" type="button">Cancel</button>
+          <button id="atlas-import-apply" class="btn btn-secondary btn-compact" type="button" disabled>Apply import</button>
+        </div>
+      </form>
     </div>
   </section>
 </div>
@@ -784,7 +851,7 @@
 
 <!-- Schedules Modal -->
 <div id="schedules-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
-  <section id="schedules-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="schedules-title">
+  <section id="schedules-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="schedules-title" tabindex="-1">
     <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close schedules"></div>
     <div class="faq-header">
       <span class="faq-title" id="schedules-title">SCHEDULES</span>
@@ -808,7 +875,7 @@
 
 <!-- Watchers Modal -->
 <div id="watchers-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
-  <section id="watchers-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="watchers-title">
+  <section id="watchers-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="watchers-title" tabindex="-1">
     <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close watchers"></div>
     <div class="faq-header">
       <span class="faq-title" id="watchers-title">WATCHERS</span>
@@ -856,6 +923,24 @@
     </div>
     <div id="command-registry-body" class="command-registry-body nice-scroll" aria-live="polite"></div>
   </div>
+</div>
+
+<div id="findings-board-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="findings-board-modal" class="modal-card mobile-sheet-surface findings-board-modal" role="dialog" aria-modal="true" aria-labelledby="findings-board-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close findings board"></div>
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="findings-board-title">FINDINGS BOARD</span>
+        <div class="findings-board-subtitle" id="findings-board-subtitle">All findings</div>
+      </div>
+      <div class="findings-board-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="findings-board-refresh-btn">Refresh</button>
+        <button type="button" class="close-btn findings-board-close" aria-label="Close findings board">✕</button>
+      </div>
+    </div>
+    <div id="findings-board-message" class="findings-board-message u-hidden" role="status" aria-live="polite"></div>
+    <div id="findings-board-body" class="findings-board-body nice-scroll" aria-live="polite"></div>
+  </section>
 </div>
 
 <div id="project-workspace-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
@@ -1011,6 +1096,54 @@
   </div>
 </div>
 
+<div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
+  <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal" role="dialog" aria-modal="true" aria-labelledby="finding-triage-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close finding triage editor"></div>
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="finding-triage-title">FINDING TRIAGE</span>
+        <div class="project-entity-editor-subtitle" id="finding-triage-subtitle"></div>
+      </div>
+      <button type="button" id="finding-triage-close" class="close-btn finding-triage-close" aria-label="Close finding triage editor">✕</button>
+    </div>
+    <div id="finding-triage-message" class="project-workspace-message finding-triage-message u-hidden" role="status" aria-live="polite"></div>
+    <form id="finding-triage-form" class="project-target-editor-form finding-triage-form">
+      <section class="finding-triage-section" aria-labelledby="finding-triage-remediation-label">
+        <span class="project-workspace-section-label" id="finding-triage-remediation-label">Remediation</span>
+        <label class="project-target-edit-field">
+          <span>What should be fixed</span>
+          <textarea id="finding-triage-remediation" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="5" placeholder="Remediation guidance" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding remediation"></textarea>
+        </label>
+      </section>
+      <section class="finding-triage-section" aria-labelledby="finding-triage-verification-label">
+        <span class="project-workspace-section-label" id="finding-triage-verification-label">Verification</span>
+        <label class="project-target-edit-field">
+          <span>Status</span>
+          <select id="finding-triage-status" class="form-select form-control-compact" aria-label="Finding verification status">
+            <option value="not_started">Not started</option>
+            <option value="ready_to_verify">Ready to verify</option>
+            <option value="verified">Verified</option>
+            <option value="needs_retest">Needs retest</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Steps</span>
+          <textarea id="finding-triage-verification-steps" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="4" placeholder="How to prove the fix worked" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding verification steps"></textarea>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Notes</span>
+          <textarea id="finding-triage-verification-notes" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="3" placeholder="Optional verification notes" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding verification notes"></textarea>
+        </label>
+      </section>
+      <div class="modal-actions">
+        <button type="button" id="finding-triage-cancel" class="btn btn-secondary btn-compact finding-triage-cancel">Cancel</button>
+        <button type="submit" id="finding-triage-save" class="btn btn-primary btn-compact">Save triage</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="command-catalog-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
   <div id="command-catalog-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="command-catalog-title">
     <div class="faq-header">
@@ -1078,6 +1211,7 @@
       <div id="options-tabs" class="options-tabs tab-strip" role="tablist" aria-label="Options sections">
         <button type="button" id="options-tab-preferences" class="tab-strip-item is-active" data-options-tab="preferences" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
         <button type="button" id="options-tab-secrets" class="tab-strip-item" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+        <button type="button" id="options-tab-teams" class="tab-strip-item" data-options-tab="teams" role="tab" aria-selected="false" aria-controls="options-panel-teams">Teams</button>
         <button type="button" id="options-tab-notifications" class="tab-strip-item" data-options-tab="notifications" role="tab" aria-selected="false" aria-controls="options-panel-notifications">Notifications</button>
       </div>
     </div>
@@ -1175,6 +1309,15 @@
           </div>
         </div>
         <div class="faq-item">
+          <div class="faq-q">Command Outcome Summaries</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-command-outcome-summaries-toggle">
+              <span>Show short app-generated summaries below completed command output</span>
+            </label>
+          </div>
+        </div>
+        <div class="faq-item">
           <div class="faq-q">Share Snapshot Redaction</div>
           <div class="faq-a">
             <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
@@ -1215,13 +1358,33 @@
             <button id="options-secrets-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh secrets" title="Refresh secrets">⟳</button>
           </div>
           <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Store per-session API keys for tools that need them. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
+            <div class="options-session-token-desc">Store API keys for the active personal or team scope. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
             <div class="options-session-token-actions">
               <button id="options-provider-status-btn" class="btn btn-secondary btn-compact" type="button">Provider Status</button>
               <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
             </div>
             <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
             <div id="options-secrets-list" class="options-secrets-list" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+      <div id="options-panel-teams" class="options-tab-panel" data-options-panel="teams" role="tabpanel" aria-labelledby="options-tab-teams" hidden>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Teams</span>
+            <button id="options-teams-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh teams" title="Refresh teams">⟳</button>
+          </div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Use teams to share team-scoped runs, projects, schedules, watchers, and Atlas data with other session-token holders.</div>
+            <div class="options-session-token-actions">
+              <button id="options-team-create-btn" class="btn btn-secondary btn-compact" type="button">Create team</button>
+              <button id="options-team-join-btn" class="btn btn-secondary btn-compact" type="button">Join team</button>
+              <button id="options-team-recover-btn" class="btn btn-secondary btn-compact" type="button">Use recovery code</button>
+            </div>
+            <div id="options-teams-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-team-form" class="options-team-form"></div>
+            <div id="options-teams-list" class="options-team-list" aria-live="polite"></div>
+            <div id="options-team-detail" class="options-team-detail" aria-live="polite"></div>
           </div>
         </div>
       </div>
@@ -1245,6 +1408,22 @@
   </div>
 </div>
 
+<div id="team-scope-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true" inert>
+  <section id="team-scope-modal" class="modal-card modal-card-compact mobile-sheet-surface team-scope-modal" role="dialog" aria-modal="true" aria-labelledby="team-scope-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close scope selector"></div>
+    <div class="faq-header team-scope-header">
+      <div>
+        <span class="faq-title" id="team-scope-title">ACTIVE SCOPE</span>
+        <div id="team-scope-current" class="options-session-token-desc">Personal</div>
+      </div>
+      <button type="button" class="close-btn team-scope-close" aria-label="Close scope selector">✕</button>
+    </div>
+    <div id="team-scope-status" class="team-scope-status u-hidden" role="status" aria-live="polite"></div>
+    <div id="team-scope-list" class="team-scope-list" role="listbox" aria-label="Active data scope"></div>
+  </section>
+</div>
+<div id="team-scope-announcer" class="team-scope-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+
 <div id="provider-status-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
   <div id="provider-status-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="provider-status-title">
     <div class="faq-header">
@@ -1260,6 +1439,7 @@
 
 <script src="/static/js/core/session_core.js"></script>
 <script src="/static/js/session.js"></script>
+<script src="/static/js/features/team_scope.js"></script>
 <script src="/static/js/core/state.js"></script>
 <script src="/static/js/core/utils.js"></script>
 <script id="app-config-json" type="application/json">{{ frontend_config|tojson }}</script>
@@ -1332,6 +1512,7 @@
 <script src="/static/js/features/tabs/tab_session_state.js"></script>
 <script src="/static/js/features/preferences/preferences.js"></script>
 <script src="/static/js/features/preferences/secrets_panel.js"></script>
+<script src="/static/js/features/preferences/teams_panel.js"></script>
 <script src="/static/js/features/preferences/notification_channels.js"></script>
 <script src="/static/js/features/preferences/session_token_controls.js"></script>
 <script src="/static/js/features/command-registry/command_registry.js"></script>
@@ -1372,6 +1553,9 @@
 <script src="/static/js/features/projects/project_filters.js"></script>
 <script src="/static/js/features/projects/project_entities.js"></script>
 <script src="/static/js/features/projects/project_findings.js"></script>
+<script src="/static/js/features/projects/project_findings_board.js"></script>
+<script src="/static/js/features/findings/finding_triage_editor.js"></script>
+<script src="/static/js/features/findings/findings_board_modal.js"></script>
 <script src="/static/js/features/projects/project_artifacts.js"></script>
 <script src="/static/js/features/projects/project_packages.js"></script>
 <script src="/static/js/tour_modal.js"></script>

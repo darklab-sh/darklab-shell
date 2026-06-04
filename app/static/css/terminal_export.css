@@ -175,6 +175,14 @@
 .export-output .line.exit-fail { color: var(--red);   font-weight: 700; }
 .export-output .line.denied    { color: var(--amber); font-weight: 700; }
 .export-output .line.notice    { color: var(--blue);  font-style: italic; }
+.export-output .line.command-outcome-summary-title {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 8px;
+}
+.export-output .line.command-outcome-summary-row {
+  color: var(--text);
+}
 .export-output .perm-prefix {
   display: inline-block;
   min-width: var(--perm-prefix-width, 0ch);

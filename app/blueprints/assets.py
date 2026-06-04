@@ -406,6 +406,7 @@ def _diag_redis_stats(client):
         cursor = 0
         scanned = 0
         orphans = 0
+        cleaned = 0
         while scanned < _DIAG_REDIS_ORPHAN_PROBE_CAP:
             cursor, batch = client.scan(
                 cursor=cursor, match="procmeta:*", count=_DIAG_REDIS_SCAN_COUNT,
@@ -432,14 +433,22 @@ def _diag_redis_stats(client):
                     orphans += 1
                     continue
                 try:
-                    if not client.sismember(f"sessionprocs:{session_id}", run_id):
+                    session_key = f"sessionprocs:{session_id}"
+                    if not client.sismember(session_key, run_id):
                         orphans += 1
+                        proc_key = f"proc:{run_id}"
+                        if client.get(proc_key) is None:
+                            client.delete(key, proc_key)
+                            client.srem(session_key, run_id)
+                            cleaned += 1
                 except Exception as exc:
                     log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "orphan_membership", "error": str(exc)})
                     continue
             if not cursor:
                 break
         stats["orphans"] = {"probed": scanned, "orphaned": orphans}
+        if cleaned:
+            stats["orphans"]["cleaned"] = cleaned
     except Exception as exc:
         log.warning("DIAG_REDIS_SCAN_INCOMPLETE", extra={"stage": "orphan_probe", "error": str(exc)})
 
@@ -609,18 +618,29 @@ def _diag_db_stats() -> dict:
 
 @assets_bp.route("/log", methods=["POST"])
 def client_log():
-    """Receive client-side error reports and emit them as server log entries."""
+    """Receive client-side reports and emit them as server log entries."""
     data = request.get_json(silent=True) or {}
     context = str(data.get("context") or "")[:200]
     message = str(data.get("message") or "")[:500]
+    event = str(data.get("event") or "CLIENT_ERROR").strip().upper()[:80]
+    if not event.replace("_", "").isalnum():
+        event = "CLIENT_ERROR"
+    level = str(data.get("level") or "warning").strip().lower()
     from services import metrics as app_metrics  # noqa: PLC0415
-    app_metrics.record_client_error(context or "unknown")
-    log.warning("CLIENT_ERROR", extra={
+    extra = {
         "ip": get_client_ip(),
         "session": get_log_session_id(),
         "context": context,
         "client_message": message,
-    })
+    }
+    if level == "debug":
+        log.debug(event, extra=extra)
+    elif level == "error":
+        app_metrics.record_client_error(context or event or "unknown")
+        log.error(event, extra=extra)
+    else:
+        app_metrics.record_client_error(context or event or "unknown")
+        log.warning(event, extra=extra)
     return jsonify({"ok": True})
 
 

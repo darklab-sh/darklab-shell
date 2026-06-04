@@ -693,7 +693,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"):
-            resp = client.post("/kill", json={"run_id": "run-123"})
+            resp = client.post("/kill", headers={"X-Session-ID": "session-1"}, json={"run_id": "run-123"})
 
         assert resp.status_code == 200
         calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_KILL"]
@@ -704,7 +704,7 @@ class TestRunLifecycleEvents:
 
         with mock.patch.object(shell_app.log, "debug") as mock_debug, \
              mock.patch("blueprints.run.pid_for_session", return_value=None):
-            resp = client.post("/kill", json={"run_id": "missing-run"})
+            resp = client.post("/kill", headers={"X-Session-ID": "session-1"}, json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "KILL_MISS"]
@@ -1124,18 +1124,31 @@ class TestKillFailedEvent:
         with mock.patch("blueprints.run.pid_for_session", return_value=99999):
             with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
-                    client.post("/kill", json={"run_id": "fake-run-id"})
+                    client.post("/kill", headers={"X-Session-ID": "session-1"}, json={"run_id": "fake-run-id"})
         kill_failed = [c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED"]
         assert len(kill_failed) == 1
 
     def test_kill_failed_extra_has_run_id(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_for_session", return_value=99999):
-            with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
-                with mock.patch.object(shell_app.log, "warning") as mock_warn:
-                    client.post("/kill", json={"run_id": "test-run-xyz"})
+        team_scope = mock.Mock(team_id="team-1", is_team=True, member={"id": "tmem-killer", "role": "operator"})
+        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
+             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "test-run-xyz"}]), \
+             mock.patch("blueprints.run.pid_for_team", return_value=99999), \
+             mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")), \
+             mock.patch.object(shell_app.log, "warning") as mock_warn:
+            client.post(
+                "/kill",
+                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1"},
+                json={"run_id": "test-run-xyz"},
+            )
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED")
-        assert call.kwargs["extra"]["run_id"] == "test-run-xyz"
+        extra = call.kwargs["extra"]
+        assert extra["run_id"] == "test-run-xyz"
+        assert extra["team_id"] == "team-1"
+        assert extra["actor_member_id"] == "tmem-killer"
+        assert extra["team_role"] == "operator"
+        assert extra["pid"] == 99999
+        assert extra["pgid"] == 99999
 
 
 # ── SHARE_VIEWED ──────────────────────────────────────────────────────────────

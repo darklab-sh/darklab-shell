@@ -174,9 +174,9 @@ function refreshSearchDiscoverabilityUi() {
   searchSignalCounts = counts;
   if (typeof searchToggleBtn !== 'undefined' && searchToggleBtn) {
     const summary = _formatFindingSummary(counts);
-    const buttonLabel = counts.findings > 0
-      ? `search • ${counts.findings} finding${counts.findings === 1 ? '' : 's'}`
-      : 'search';
+    // The findings count lives in the signal-summary badge beside the button, so
+    // the button label stays a plain "search" to avoid duplicating it.
+    const buttonLabel = 'search';
     searchToggleBtn.dataset.searchLabel = buttonLabel;
     searchToggleBtn.textContent = `⌕ ${buttonLabel}`;
     searchToggleBtn.title = summary
@@ -252,6 +252,9 @@ function refreshSearchDiscoverabilityUi() {
         : `Jump between ${count} ${_searchScopeUnitLabel(scope, count)}`;
     });
   }
+  // The findings badge appearing/disappearing changes the chrome's width, so
+  // re-evaluate whether the tab-bar chrome should auto-collapse.
+  if (typeof updateTabbarChromeFit === 'function') updateTabbarChromeFit();
   return counts;
 }
 

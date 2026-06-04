@@ -708,6 +708,47 @@
 
 
 
+.history-compare-derived-groups {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+
+
+.history-compare-derived-group {
+  display: grid;
+  gap: 4px;
+}
+
+
+
+.history-compare-derived-group-title {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+
+
+.history-compare-derived-group .history-compare-line-list {
+  margin-top: 0;
+}
+
+
+
+.history-compare-derived-change-mark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--amber) 48%, transparent);
+  color: color-mix(in srgb, var(--text) 88%, var(--amber));
+  display: inline-block;
+  justify-self: start;
+  padding: 0 1px;
+}
+
+
+
 .history-compare-object-meta {
   color: var(--muted);
   font-family: var(--font-mono);

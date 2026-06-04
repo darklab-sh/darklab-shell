@@ -36,6 +36,8 @@ function loadTabsFns({
   showConfirm = undefined,
   detachRunStreamForTab = undefined,
   markActiveRunDetachedForRestore = undefined,
+  activeTeamScopeCanImpl = () => true,
+  teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
   urlImpl = {
@@ -111,6 +113,8 @@ function loadTabsFns({
       ...(markActiveRunDetachedForRestore ? { markActiveRunDetachedForRestore } : {}),
       cancelWelcome: () => {},
       confirmPermalinkRedactionChoice,
+      activeTeamScopeCan: activeTeamScopeCanImpl,
+      teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
       apiFetch,
       location: { origin: 'https://example.test' },
       navigator,
@@ -925,6 +929,26 @@ describe('tabs helpers', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to share yet')
   })
 
+  it('permalinkTab blocks view-only team members before creating a snapshot', () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
+    )
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      activeTeamScopeCanImpl: capability => capability !== 'manage_history',
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(document.getElementById('permalink-toast').textContent).toBe(
+      "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.",
+    )
+    expect(document.querySelector('[data-action="permalink"][data-tab]')?.disabled).toBe(true)
+  })
+
   it('permalinkTab shows a failure toast when the share request rejects', async () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('share failed')))
     const { createTab, permalinkTab, _getTabs } = loadTabsFns({ apiFetch })
@@ -1173,8 +1197,8 @@ describe('tabs helpers', () => {
       },
     }
 
-    const { buildExportLinesHtml, buildTerminalExportHtml } = fromDomScripts(
-      ['app/static/js/export_html.js'],
+    const { buildExportLinesHtml, buildExportDocumentModel, buildTerminalExportHtml } = fromDomScripts(
+      ['app/static/js/core/output_core.js', 'app/static/js/export_html.js'],
       {
         document,
         window,
@@ -1213,6 +1237,21 @@ describe('tabs helpers', () => {
     expect(html).toContain('<span class="export-entity-token"')
     expect(html).toContain('data-export-toggle-highlights')
     expect(html).not.toContain('href="#entity-')
+
+    const exportModel = buildExportDocumentModel({
+      appName: 'darklab_shell',
+      title: 'nmap scan',
+      label: 'nmap scan',
+      command: 'nmap -sV darklab.sh',
+      includeCommandOutcomeSummary: true,
+      rawLines: [
+        { text: '443/tcp open  https', cls: '' },
+        { text: 'Nmap done: 1 IP address (1 host up) scanned in 2.10 seconds', cls: '' },
+      ],
+    })
+    expect(exportModel.rawLines.map(line => line.text)).toContain('Command outcome')
+    expect(exportModel.rawLines.map(line => line.text)).toContain('Open ports: 1 (443/tcp https)')
+    expect(exportModel.rawLines.map(line => line.text)).toContain('Hosts: 1 up')
 
     delete window.ThemeRegistry
   })

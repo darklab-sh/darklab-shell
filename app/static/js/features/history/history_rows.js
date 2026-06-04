@@ -82,6 +82,16 @@ function _historyElapsedLabel(run) {
   return _historyCore.elapsedLabel(run);
 }
 
+function _historyCanEditMetadata() {
+  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
+function _historyCanDeleteItems() {
+  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
+  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+}
+
 function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'history-action-menu-wrap save-menu-wrap save-menu-down';
@@ -96,9 +106,8 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   menu.className = 'history-action-menu save-menu dropdown-surface';
   const projectLinks = Array.isArray(run?.project_links) ? run.project_links : [];
   const isProjectLinkableRun = String(run?.run_kind || 'external') !== 'builtin';
-  const items = [
-    ['edit-metadata', 'edit'],
-  ];
+  const items = [];
+  if (_historyCanEditMetadata()) items.push(['edit-metadata', 'edit']);
   if (isProjectLinkableRun) items.push(['open-atlas', 'open in atlas']);
   items.push(
     ...(isProjectLinkableRun ? [['watch-command', 'create watcher from this baseline']] : []),
@@ -112,7 +121,7 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
     items.push(['add-project', 'add to project']);
   }
   items.push(['copy-run-id', 'copy run id']);
-  if (includeDelete) items.push(['delete', 'delete']);
+  if (includeDelete && _historyCanDeleteItems()) items.push(['delete', 'delete']);
   items.forEach(([action, label]) => {
     const item = document.createElement('button');
     item.type = 'button';
@@ -190,15 +199,25 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('run'));
   if (run.scheduled || run.schedule_id) {
+    const scheduleOwnerKind = String(run.schedule_owner_kind || '');
+    const scheduleOwnerId = String(run.schedule_owner_id || run.watcher_id || '');
+    const isWatcherRun = scheduleOwnerKind === 'watcher' && scheduleOwnerId;
     const scheduledBadge = _historyMetaKindBadge('schedule', 'scheduled');
-    scheduledBadge.title = run.schedule_id ? `Schedule ${run.schedule_id}` : 'Scheduled run';
-    if (run.schedule_id) {
+    scheduledBadge.title = isWatcherRun
+      ? `Watcher ${scheduleOwnerId}`
+      : (run.schedule_id ? `Schedule ${run.schedule_id}` : 'Scheduled run');
+    if (run.schedule_id || isWatcherRun) {
       scheduledBadge.classList.add('chip-action');
       scheduledBadge.dataset.action = 'open-schedule';
       scheduledBadge.dataset.scheduleId = run.schedule_id;
+      scheduledBadge.dataset.scheduleOwnerKind = scheduleOwnerKind;
+      scheduledBadge.dataset.scheduleOwnerId = scheduleOwnerId;
       scheduledBadge.setAttribute('role', 'button');
       scheduledBadge.tabIndex = 0;
-      scheduledBadge.setAttribute('aria-label', `Open schedule ${run.schedule_id}`);
+      scheduledBadge.setAttribute(
+        'aria-label',
+        isWatcherRun ? `Open watcher ${scheduleOwnerId}` : `Open schedule ${run.schedule_id}`,
+      );
     }
     meta.appendChild(scheduledBadge);
   }
@@ -263,7 +282,7 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   restoreBtn.textContent = 'restore';
   actions.appendChild(restoreBtn);
 
-  if (!isMobile) {
+  if (!isMobile && _historyCanDeleteItems()) {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
     deleteBtn.type = 'button';
@@ -340,19 +359,23 @@ function _createSnapshotHistoryEntry(snapshot, options = {}) {
   linkBtn.textContent = 'copy link';
   actions.appendChild(linkBtn);
 
-  const editBtn = document.createElement('button');
-  editBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  editBtn.type = 'button';
-  editBtn.dataset.action = 'edit-metadata';
-  editBtn.textContent = 'edit';
-  actions.appendChild(editBtn);
+  if (_historyCanEditMetadata()) {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+    editBtn.type = 'button';
+    editBtn.dataset.action = 'edit-metadata';
+    editBtn.textContent = 'edit';
+    actions.appendChild(editBtn);
+  }
 
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  deleteBtn.type = 'button';
-  deleteBtn.dataset.action = 'delete';
-  deleteBtn.textContent = 'delete';
-  actions.appendChild(deleteBtn);
+  if (_historyCanDeleteItems()) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+    deleteBtn.type = 'button';
+    deleteBtn.dataset.action = 'delete';
+    deleteBtn.textContent = 'delete';
+    actions.appendChild(deleteBtn);
+  }
 
   entry.appendChild(actions);
   return entry;

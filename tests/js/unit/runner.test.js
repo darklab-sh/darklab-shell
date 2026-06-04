@@ -595,6 +595,40 @@ describe('client-side UI command pipe helpers', () => {
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
 
+  it('keeps another tab output visible while the tour is waiting', async () => {
+    let finishTour
+    const tourPromise = new Promise(resolve => { finishTour = resolve })
+    const handleTourCommand = vi.fn(() => tourPromise)
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs') return new Promise(() => {})
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+    })
+    const { submitCommand, _handleRunStreamMessage, activateTab } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+      activeTabId: 'tab-1',
+      appendLine,
+      apiFetch,
+      handleTourCommand,
+    })
+
+    submitCommand('tour')
+    await vi.waitFor(() => expect(handleTourCommand).toHaveBeenCalledWith('tour', 'tab-1'))
+
+    activateTab('tab-2')
+    submitCommand('ping darklab.sh')
+    _handleRunStreamMessage({ type: 'output', text: '64 bytes from darklab.sh' }, 'tab-2', {})
+
+    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', null, null)
+    expect(appendLine).toHaveBeenCalledWith('64 bytes from darklab.sh', '', 'tab-2', null)
+
+    finishTour(true)
+    await flushPromises()
+  })
+
   it('scrubs accidental secret set values before history, echo, and client persistence', async () => {
     const secretValue = 'plain-secret-value'
     const addToHistory = vi.fn()
@@ -730,6 +764,8 @@ function loadRunnerFns({
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
   normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
   workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
+  workspaceCanWrite: workspaceCanWriteOverride = undefined,
+  teamScopeDeniedMessage: teamScopeDeniedMessageOverride = undefined,
   refreshActiveProjectContext: refreshActiveProjectContextOverride = undefined,
   refreshProjectWorkspace: refreshProjectWorkspaceOverride = undefined,
   isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = undefined,
@@ -799,10 +835,12 @@ function loadRunnerFns({
     if (dot) dot.className = `tab-status ${nextStatus}`
   })
   const clearTab = clearTabOverride || vi.fn()
+  let setRuntimeActiveTabIdForTest = null
   const activateTab = vi.fn((id) => {
     const tab = normalizedTabs.find((t) => t.id === id)
     if (tab) {
       activeTabId = id
+      if (typeof setRuntimeActiveTabIdForTest === 'function') setRuntimeActiveTabIdForTest(id)
       status.className = 'status-pill running'
       status.textContent = 'RUNNING'
     }
@@ -915,6 +953,8 @@ function loadRunnerFns({
       ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
       ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
       ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
+      ...(workspaceCanWriteOverride ? { workspaceCanWrite: workspaceCanWriteOverride } : {}),
+      ...(teamScopeDeniedMessageOverride ? { teamScopeDeniedMessage: teamScopeDeniedMessageOverride } : {}),
       ...(refreshActiveProjectContextOverride ? { refreshActiveProjectContext: refreshActiveProjectContextOverride } : {}),
       ...(refreshProjectWorkspaceOverride ? { refreshProjectWorkspace: refreshProjectWorkspaceOverride } : {}),
       ...(isProjectWorkspaceOpenOverride ? { isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride } : {}),
@@ -953,9 +993,11 @@ function loadRunnerFns({
     _clearStalledTimeout,
     _recoverStalledRun,
     _getPendingKillTabId: () => pendingKillTabId,
+    __setActiveTabIdForTest: (id) => { activeTabId = id; setActiveTabId(id); },
     }`,
     `${runnerInitCode}\nsetTabs(tabs); setActiveTabId(activeTabId);`,
   )
+  setRuntimeActiveTabIdForTest = fns.__setActiveTabIdForTest
 
   return {
     ...fns,
@@ -967,6 +1009,7 @@ function loadRunnerFns({
     setTabLabel,
     setTabStatus,
     clearTab,
+    activateTab,
     closeTab: closeTabOverride,
     cancelWelcome,
     showToast,
@@ -1383,6 +1426,85 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('[reattached to active run after stream recovery]', 'notice', 'tab-1')
   })
 
+  it('checks scheduled manually attached streams against the inclusive active list', async () => {
+    const firstStream = brokerStreamResponse([
+      'id: 1-5',
+      'data: {"type":"output","text":"before disconnect","event_id":"1-5"}',
+      '',
+    ].join('\n') + '\n')
+    const secondStream = pendingBrokerStreamResponse()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-1/stream?tab_id=tab-1') return Promise.resolve(firstStream)
+      if (url === '/history/active?include_scheduled=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            runs: [{
+              run_id: 'run-1',
+              command: 'ping darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              scheduled: true,
+              schedule_id: 'sch-1',
+            }],
+          }),
+        })
+      }
+      if (url === '/runs/run-1/stream?tab_id=tab-1&after=1-5') return Promise.resolve(secondStream)
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _subscribeRunStream, tabs } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        command: 'ping darklab.sh',
+        scheduledRun: true,
+        rawLines: [{ text: 'ping darklab.sh', cls: 'prompt-echo' }],
+        pendingKill: false,
+        killed: false,
+      }],
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-1', 'tab-1')).resolves.toBe(true)
+    await flushPromises()
+
+    expect(tabs[0].st).toBe('running')
+    expect(apiFetch).toHaveBeenCalledWith('/history/active?include_scheduled=1')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
+  })
+
+  it('shows run stream JSON messages instead of machine error codes', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-1/stream?tab_id=tab-1') {
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          headers: { get: () => 'application/json' },
+          json: () => Promise.resolve({
+            error: 'run_scope_mismatch',
+            message: 'Run exists in a different team scope. Switch to that team scope to view it.',
+          }),
+        })
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _subscribeRunStream } = loadRunnerFns({
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-1', 'tab-1')).resolves.toBe(false)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[server error] The server could not stream the command. Run exists in a different team scope. Switch to that team scope to view it.',
+      'exit-fail',
+      'tab-1',
+    )
+  })
+
   it('pauses background run streams for Status Monitor API calls and resumes from the last event id', async () => {
     const activeStream = controllableBrokerStreamResponse()
     const backgroundStream = controllableBrokerStreamResponse()
@@ -1470,6 +1592,28 @@ describe('runner helpers', () => {
 
     expect(createTab).toHaveBeenCalledWith()
     expect(tabs[0].historyRunId).toBe('run-old')
+  })
+
+  it('restoreActiveRunsAfterReload skips scheduled runs', () => {
+    const createTab = vi.fn(() => 'tab-2')
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      createTab,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-scheduled',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        scheduled: true,
+        owned_by_this_client: true,
+      },
+    ])
+
+    expect(restored).toBe(false)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('idle')
   })
 
   it('attachActiveRunFromMonitor opens an attached subscribed tab with kill controls', async () => {
@@ -1574,6 +1718,24 @@ describe('runner helpers', () => {
       project_id: 'project-1',
       project_name: 'Demo',
       count: 2,
+    })
+
+    _handleRunStreamMessage({
+      type: 'notice',
+      text: '[project] auto-promoted 1 Atlas entity',
+      project_auto_promoted: true,
+      project_id: 'project-1',
+      project_ids: ['project-1'],
+      entity_count: 1,
+      promoted_count: 1,
+    }, 'tab-1')
+
+    expect(notifyProjectWorkspaceChanged).toHaveBeenCalledWith('auto-promoted', 'project-1')
+    expect(emitUiEvent).toHaveBeenCalledWith('app:project-auto-promoted', {
+      project_id: 'project-1',
+      project_ids: ['project-1'],
+      count: 1,
+      promoted_count: 1,
     })
   })
 
@@ -2060,6 +2222,33 @@ describe('runner helpers', () => {
     expect(runBtn.disabled).toBe(false)
   })
 
+  it('blocks team-scope command starts before posting when the active role is view-only', () => {
+    const apiFetch = vi.fn()
+    const appendLine = vi.fn()
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+      appendCommandEcho,
+      runnerInitCode: `
+        function activeTeamScopeCan(capability) { return capability !== 'run_commands'; }
+        function teamScopeDeniedMessage(action) {
+          return "View-only team members can't " + action + ". Switch to Personal or ask for operator access.";
+        }
+      `,
+    })
+
+    expect(submitCommand('ping darklab.sh')).toBe(true)
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith(
+      "[denied] View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.",
+      'denied',
+      'tab-1',
+    )
+  })
+
   it('runCommand shows the missing-secret setup hint from the server', async () => {
     const apiFetch = vi.fn(() =>
       Promise.resolve({
@@ -2272,10 +2461,11 @@ describe('runner helpers', () => {
 
     loaded.runCommand()
 
-    await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1'))
-    expect(appendLine).toHaveBeenCalledWith('', 'builtin-faq-spacer', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    await vi.waitFor(() => {
+      expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
+      expect(appendLine).toHaveBeenCalledWith('', 'builtin-faq-spacer', 'tab-1')
+      expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    })
     await vi.waitFor(() =>
       expect(appendLines).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -3272,6 +3462,43 @@ describe('workspace file delete confirmation', () => {
     expect(status.className).toBe('status-pill ok')
   })
 
+  it('blocks terminal workspace write commands when Files are read-only in team scope', async () => {
+    const appendLine = vi.fn()
+    const createWorkspaceDirectory = vi.fn()
+    const moveWorkspacePath = vi.fn()
+    const openWorkspaceEditorFromCommand = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      apiFetch,
+      createWorkspaceDirectory,
+      moveWorkspacePath,
+      openWorkspaceEditorFromCommand,
+      workspaceCanWrite: vi.fn(() => false),
+      teamScopeDeniedMessage: action => `View-only team members can't ${action}.`,
+    })
+
+    await submitCommand('mkdir reports')
+    await submitCommand('file move targets.txt reports')
+    await submitCommand('file add notes.txt')
+    await submitCommand('rm targets.txt')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      "[error] View-only team members can't create folders in Files.",
+      'exit-fail',
+      'tab-1',
+    ))
+    expect(appendLine).toHaveBeenCalledWith("[error] View-only team members can't move Files.", 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith("[error] View-only team members can't create Files.", 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith("[error] View-only team members can't delete Files.", 'exit-fail', 'tab-1')
+    expect(createWorkspaceDirectory).not.toHaveBeenCalled()
+    expect(moveWorkspacePath).not.toHaveBeenCalled()
+    expect(openWorkspaceEditorFromCommand).not.toHaveBeenCalled()
+    expect(apiFetch).not.toHaveBeenCalledWith('/workspace/files/info?path=targets.txt')
+    expect(status.className).toBe('status-pill fail')
+  })
+
   it('shows usage for incomplete workspace move commands', async () => {
     const appendLine = vi.fn()
     const moveWorkspacePath = vi.fn()
@@ -3455,7 +3682,7 @@ describe('workspace file delete confirmation', () => {
     const setComposerPromptMode = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (String(url).startsWith('/workspace/files/info?path=missing.txt')) {
-        return Promise.resolve(new Response(JSON.stringify({ error: 'session file or folder was not found' }), {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'workspace file or folder was not found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -3472,7 +3699,7 @@ describe('workspace file delete confirmation', () => {
     await submitCommand('file rm missing.txt')
 
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('[error] session file or folder was not found', 'exit-fail', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('[error] workspace file or folder was not found', 'exit-fail', 'tab-1'),
     )
     expect(appendLine).not.toHaveBeenCalledWith("delete session file 'missing.txt'?", '', 'tab-1')
     expect(setComposerPromptMode).not.toHaveBeenCalledWith('confirm')

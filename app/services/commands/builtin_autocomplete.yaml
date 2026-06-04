@@ -883,6 +883,63 @@ commands:
     description: "built-in: show session activity totals and command breakdowns"
     autocomplete:
       arguments: []
+  - root: team
+    description: "built-in: create, join, inspect, and manage teams"
+    autocomplete:
+      subcommands:
+        - value: status
+          description: "Show active personal/team scope"
+          closes: true
+        - value: list
+          description: "List teams joined by the current token"
+          closes: true
+        - value: create
+          description: "Create a team"
+          takes_value: true
+          insert: "create "
+          value_hint:
+            value: "<name>"
+            hint_only: true
+            description: "Team name"
+        - value: members
+          description: "List members for the active team or supplied team id"
+          takes_value: true
+          insert: "members "
+          value_hint:
+            value: "<team-id>"
+            hint_only: true
+            description: "Optional team id"
+        - value: invite
+          description: "Create or revoke team invites"
+          takes_value: true
+          insert: "invite "
+          value_hint:
+            value: "create --role operator"
+            hint_only: true
+            description: "Invite action"
+        - value: join
+          description: "Join a team with an invite code"
+          takes_value: true
+          insert: "join "
+          value_hint:
+            value: "<invite-code>"
+            hint_only: true
+            description: "Invite code"
+        - value: leave
+          description: "Leave the active team or supplied team id"
+          takes_value: true
+          insert: "leave "
+          value_hint:
+            value: "<team-id>"
+            hint_only: true
+            description: "Optional team id"
+        - value: recovery
+          description: "Rotate a team recovery code"
+          takes_value: true
+          insert: "recovery rotate"
+        - value: switch
+          description: "Show team scope switching guidance"
+          closes: true
   - root: sort
     description: "built-in: sort a session file"
     feature_required: workspace
