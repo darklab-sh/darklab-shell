@@ -15,12 +15,17 @@
   const grabHandle = overlay?.querySelector?.('.sheet-grab');
   const STORAGE_PREFIX = 'active_team_id:';
   const PERSONAL_SCOPE_OPTION = 'personal';
+  const MENU_ID = 'team-scope-menu';
   let teams = [];
   let activeTeamId = '';
   let refreshing = null;
   let teamScopesResolved = false;
   let scopeLoadError = false;
   let dismissibleBound = false;
+  let menu = null;
+  let menuList = null;
+  let menuNote = null;
+  let menuOutsideBound = false;
 
   function storageKey() {
     const sessionId = typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'anonymous';
@@ -193,13 +198,61 @@
     return button;
   }
 
-  function renderOptions() {
-    if (!listEl) return;
-    listEl.innerHTML = '';
-    listEl.appendChild(renderButton(null));
-    teams.forEach(team => {
-      listEl.appendChild(renderButton(team));
+  function renderMenuButton(team = null) {
+    const active = team ? team.id === activeTeamId : !activeTeamId;
+    const label = team ? optionLabel(team) : 'Personal';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dropdown-item dropdown-item-compact team-scope-menu-option';
+    button.dataset.teamScopeMenuOption = team ? team.id : PERSONAL_SCOPE_OPTION;
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', active ? 'true' : 'false');
+    button.textContent = active ? `${label} (active)` : label;
+    button.title = active ? `Active scope: ${label}` : `Switch to ${label}`;
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setActiveTeamId(button.dataset.teamScopeMenuOption || '', { source: 'selector' });
+      closeScopeMenu();
     });
+    return button;
+  }
+
+  function isModalOpen() {
+    return !!(overlay && overlay.classList.contains('open'));
+  }
+
+  function isScopeMenuOpen() {
+    return !!(menu && !menu.classList.contains('u-hidden'));
+  }
+
+  function setScopeMenuNote(text = '') {
+    if (!menuNote) return;
+    menuNote.textContent = String(text || '');
+    menuNote.classList.toggle('u-hidden', !text);
+  }
+
+  function renderMenuOptions() {
+    if (!menuList) return;
+    menuList.replaceChildren();
+    menuList.appendChild(renderMenuButton(null));
+    teams.forEach(team => {
+      menuList.appendChild(renderMenuButton(team));
+    });
+    if (refreshing && !teamScopesResolved) setScopeMenuNote('Loading teams...');
+    else if (!teams.length) setScopeMenuNote('No teams yet.');
+    else setScopeMenuNote('');
+  }
+
+  function renderOptions() {
+    if (listEl) {
+      listEl.innerHTML = '';
+      listEl.appendChild(renderButton(null));
+      teams.forEach(team => {
+        listEl.appendChild(renderButton(team));
+      });
+    }
+    renderMenuOptions();
   }
 
   function render() {
@@ -269,7 +322,96 @@
   }
 
   function isOpen() {
-    return !!(overlay && overlay.classList.contains('open'));
+    return isModalOpen() || isScopeMenuOpen();
+  }
+
+  function positionScopeMenu() {
+    if (!menu || !trigger || !isScopeMenuOpen()) return;
+    const anchor = trigger.closest?.('.hud-cell') || trigger;
+    const rect = anchor.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth || 260;
+    const viewportWidth = global.innerWidth || document.documentElement.clientWidth || 0;
+    const left = Math.max(8, Math.min(rect.left, Math.max(8, viewportWidth - menuWidth - 8)));
+    menu.style.left = `${left}px`;
+    menu.style.bottom = `${Math.max(8, (global.innerHeight || 0) - rect.top - 1)}px`;
+  }
+
+  function closeScopeMenu({ restoreFocus = false } = {}) {
+    if (!menu) return;
+    menu.classList.add('u-hidden');
+    trigger?.classList.remove('open');
+    trigger?.setAttribute('aria-expanded', 'false');
+    setScopeMenuNote('');
+    if (restoreFocus && trigger && typeof trigger.focus === 'function') {
+      trigger.focus({ preventScroll: true });
+    }
+  }
+
+  function focusScopeMenuItem(delta) {
+    if (!menu) return;
+    const items = Array.from(menu.querySelectorAll('.dropdown-item:not([disabled])'));
+    if (!items.length) return;
+    const currentIdx = items.indexOf(document.activeElement);
+    const fallbackIdx = delta > 0 ? -1 : 0;
+    const nextIdx = (currentIdx >= 0 ? currentIdx : fallbackIdx) + delta;
+    items[(nextIdx + items.length) % items.length]?.focus({ preventScroll: true });
+  }
+
+  function ensureScopeMenu() {
+    if (menu) return menu;
+    const popup = document.createElement('div');
+    popup.id = MENU_ID;
+    popup.className = 'hud-project-menu team-scope-menu dropdown-surface dropdown-up u-hidden';
+    popup.setAttribute('role', 'menu');
+    popup.setAttribute('aria-label', 'Active data scope');
+
+    const section = document.createElement('div');
+    section.className = 'hud-project-menu-section';
+    popup.appendChild(section);
+
+    const note = document.createElement('div');
+    note.className = 'hud-project-menu-note u-hidden';
+    popup.appendChild(note);
+
+    popup.addEventListener('click', event => event.stopPropagation());
+    popup.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeScopeMenu({ restoreFocus: true });
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        focusScopeMenuItem(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusScopeMenuItem(-1);
+      } else if (event.key === 'Tab') {
+        closeScopeMenu();
+      }
+    });
+
+    document.body.appendChild(popup);
+    menu = popup;
+    menuList = section;
+    menuNote = note;
+
+    if (typeof global.bindOutsideClickClose === 'function') {
+      global.bindOutsideClickClose(menu, {
+        capture: true,
+        triggers: trigger,
+        isOpen: isScopeMenuOpen,
+        onClose: () => closeScopeMenu(),
+      });
+    } else if (!menuOutsideBound) {
+      menuOutsideBound = true;
+      document.addEventListener('click', event => {
+        if (!isScopeMenuOpen()) return;
+        const target = event.target;
+        if (target instanceof Node && (menu.contains(target) || trigger?.contains?.(target))) return;
+        closeScopeMenu();
+      }, true);
+    }
+    return menu;
   }
 
   function setOverlayAccessible(open) {
@@ -282,6 +424,7 @@
   }
 
   function closeTeamScopeSelector({ refocus = true } = {}) {
+    closeScopeMenu();
     if (!overlay) return;
     setOverlayAccessible(false);
     overlay.classList.add('u-hidden');
@@ -295,6 +438,7 @@
 
   function showTeamScopeSelector() {
     if (!overlay) return false;
+    closeScopeMenu();
     bindModalDismissal();
     if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
     if (typeof global.blurVisibleComposerInputIfMobile === 'function') global.blurVisibleComposerInputIfMobile();
@@ -306,6 +450,29 @@
     if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
     const active = listEl?.querySelector?.('.team-scope-option.is-active');
     (active || closeBtn || modal)?.focus?.({ preventScroll: true });
+    return true;
+  }
+
+  function toggleScopeMenu(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (isScopeMenuOpen()) {
+      closeScopeMenu({ restoreFocus: true });
+      return true;
+    }
+    if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
+    closeTeamScopeSelector({ refocus: false });
+    ensureScopeMenu();
+    render();
+    menu.classList.remove('u-hidden');
+    trigger?.classList.add('open');
+    trigger?.setAttribute('aria-expanded', 'true');
+    positionScopeMenu();
+    requestAnimationFrame(positionScopeMenu);
+    const active = menu.querySelector?.('[aria-checked="true"]');
+    const first = menu.querySelector?.('.dropdown-item:not([disabled])');
+    (active || first || menu)?.focus?.({ preventScroll: true });
+    refreshTeamScopes().catch(() => {});
     return true;
   }
 
@@ -399,16 +566,21 @@
         teamScopesResolved = true;
         scopeLoadError = !!activeTeamId;
         render();
-        if (isOpen()) showStatus('Could not load teams.', 'error');
+        if (isModalOpen()) showStatus('Could not load teams.', 'error');
+        if (isScopeMenuOpen()) setScopeMenuNote('Could not load teams.');
         return teams;
       })
       .finally(() => { refreshing = null; });
     return refreshing;
   }
 
-  trigger?.addEventListener('click', () => {
-    showTeamScopeSelector();
-    refreshTeamScopes().catch(() => {});
+  trigger?.addEventListener('click', toggleScopeMenu);
+  trigger?.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') toggleScopeMenu(event);
+    else if (event.key === 'Escape' && isScopeMenuOpen()) {
+      event.preventDefault();
+      closeScopeMenu({ restoreFocus: true });
+    }
   });
 
   listEl?.addEventListener('click', event => {
@@ -455,6 +627,7 @@
       }
     }
   });
+  window.addEventListener('resize', positionScopeMenu);
   document.addEventListener('DOMContentLoaded', () => {
     bindModalDismissal();
     refreshTeamScopes().catch(() => {});

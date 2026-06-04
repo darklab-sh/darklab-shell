@@ -52,6 +52,22 @@
         : projectRows().find(item => String(item.id || '') === String(projectId || ''));
     }
 
+    function projectFindingById(projectId, findingId) {
+      const normalizedFindingId = String(findingId || '');
+      if (!normalizedFindingId) return null;
+      const summary = ctx.projectSummary?.(projectId);
+      const lists = [
+        ctx.projectFindingItems?.(projectId),
+        ctx.filteredProjectFindings?.(projectId, summary),
+      ];
+      for (const list of lists) {
+        if (!Array.isArray(list)) continue;
+        const finding = list.find(item => String(item && item.id || '') === normalizedFindingId);
+        if (finding) return finding;
+      }
+      return null;
+    }
+
     function restoreHistoryRun() {
       return typeof global.restoreHistoryRunIntoTab === 'function'
         ? global.restoreHistoryRunIntoTab
@@ -999,14 +1015,14 @@
           return;
         } else if (action === 'edit-finding-metadata') {
           const findingId = String(btn.dataset.findingId || '');
-          const finding = ctx.projectFindingItems(projectId).find(item => String(item.id || '') === findingId);
+          const finding = projectFindingById(projectId, findingId);
           if (!finding) throw new Error('Finding is missing its details.');
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectEntityEditor(projectId, 'finding', finding);
           return;
         } else if (action === 'edit-finding-triage') {
           const findingId = String(btn.dataset.findingId || '');
-          const finding = ctx.projectFindingItems(projectId).find(item => String(item.id || '') === findingId);
+          const finding = projectFindingById(projectId, findingId);
           if (!finding) throw new Error('Finding is missing its details.');
           ctx.setProjectWorkspaceMessage('');
           if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {

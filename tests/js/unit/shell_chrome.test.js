@@ -1866,6 +1866,60 @@ describe('shell chrome project workspace', () => {
     }
   })
 
+  it('opens read-only triage for visible filtered Project findings in view-only team scope', async () => {
+    const finding = {
+      id: 'finding-filtered-mobile',
+      title: 'Filtered mobile finding',
+      review_state: 'new',
+      triage: {
+        remediation: 'Review the exposed endpoint.',
+        verification_status: 'not_started',
+      },
+    }
+    const editor = {
+      compactTriage: vi.fn(triage => triage),
+      open: vi.fn(() => Promise.resolve()),
+    }
+    const sandbox = {
+      activeTeamScopeCan: capability => capability !== 'triage_findings',
+      DarklabFindingTriageEditor: editor,
+      teamScopeDeniedMessage: action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
+    }
+    const projectEvents = new Function(
+      'globalThis',
+      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn globalThis.DarklabProjectWorkspaceEvents;`,
+    )(sandbox)
+    const setProjectWorkspaceMessage = vi.fn()
+    const controller = projectEvents.createProjectWorkspaceEventsController({
+      filteredProjectFindings: () => [finding],
+      mobileView: () => 'detail',
+      projectFindingItems: () => [],
+      projectSummary: () => ({ project: { id: 'project-1', name: 'Project' } }),
+      renderProjectExplorer: vi.fn(),
+      renderProjectMobileDetail: vi.fn(),
+      selectedProjectId: () => 'project-1',
+      setProjectWorkspaceMessage,
+      updateCachedProjectFinding: vi.fn(),
+      workspaceTab: () => 'findings',
+    })
+    const button = document.createElement('button')
+    button.dataset.projectAction = 'edit-finding-triage'
+    button.dataset.projectId = 'project-1'
+    button.dataset.findingId = 'finding-filtered-mobile'
+
+    await controller.handleActionButton(button)
+
+    expect(setProjectWorkspaceMessage).toHaveBeenCalledWith('')
+    expect(editor.open).toHaveBeenCalledWith(finding, expect.objectContaining({
+      canEdit: false,
+      onSaved: expect.any(Function),
+    }))
+    expect(setProjectWorkspaceMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('Finding is missing'),
+      expect.anything(),
+    )
+  })
+
   it('opens the mobile project compare stepper and runs a baseline label comparison', async () => {
     document.body.classList.add('mobile-terminal-mode')
     const fetchAndRenderHistoryComparison = vi.fn()

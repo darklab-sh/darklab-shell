@@ -53,6 +53,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'workflows') openWorkflows();
   if (action === 'schedules' && typeof openSchedulesModal === 'function') void openSchedulesModal();
   if (action === 'watchers' && typeof openWatchersModal === 'function') void openWatchersModal();
+  if (action === 'findings-board' && typeof openFindingsBoard === 'function') void openFindingsBoard({ source: 'mobile-menu' });
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';

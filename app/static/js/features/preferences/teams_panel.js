@@ -317,6 +317,24 @@
     return row;
   }
 
+  function _personalScopeRow() {
+    const active = !_activeTeamId();
+    const row = _node('div', 'options-team-row panel-row');
+    const body = _node('div', 'options-team-row-body');
+    const name = _node('div', 'options-team-name', 'Personal');
+    const chips = _node('div', 'options-team-chips');
+    chips.appendChild(_node('span', 'badge badge-tone-muted options-team-chip', 'Private scope'));
+    if (active) chips.appendChild(_node('span', 'badge badge-tone-green options-team-chip', 'Active scope'));
+    const meta = _node('div', 'options-team-meta', 'Your personal runs, files, projects, secrets, and history.');
+    body.append(name, chips, meta);
+    const actions = _node('div', 'options-team-actions');
+    const switchBtn = _button(active ? 'Active' : 'Switch', 'switch-personal');
+    switchBtn.disabled = active;
+    actions.appendChild(switchBtn);
+    row.append(body, actions);
+    return row;
+  }
+
   function _renderList() {
     const list = _el('options-teams-list');
     _clear(list);
@@ -333,6 +351,7 @@
       list.appendChild(_node('div', 'options-team-empty', 'Loading teams...'));
       return;
     }
+    list.appendChild(_personalScopeRow());
     if (!_teams.length) {
       list.appendChild(_node('div', 'options-team-empty', 'No teams yet.'));
       return;
@@ -579,6 +598,7 @@
         _detail = null;
       }
       _render();
+      _syncScopeSelector();
       return _teams;
     } catch (error) {
       _logTeamActionFailure('list_teams', error);
@@ -730,6 +750,14 @@
     const teamId = target.dataset.teamId || '';
     if (action === 'select-team') {
       await _loadTeamDetail(teamId);
+    } else if (action === 'switch-personal') {
+      const setScope = typeof setActiveTeamId === 'function'
+        ? setActiveTeamId
+        : (typeof global.setActiveTeamId === 'function' ? global.setActiveTeamId.bind(global) : null);
+      if (setScope && setScope('')) {
+        _toast('Personal scope selected');
+        _render();
+      }
     } else if (action === 'switch-team') {
       const setScope = typeof setActiveTeamId === 'function'
         ? setActiveTeamId

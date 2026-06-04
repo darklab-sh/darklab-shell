@@ -750,11 +750,6 @@
   .hud-cell.hud-action-cell:focus-visible {
     box-shadow: inset 0 0 0 1px var(--border-bright);
   }
-  .hud.hud-running [data-hud-chip="transport"],
-  .hud.hud-running [data-hud-chip="mode"] {
-    display: none;
-  }
-
   .hud-label {
     color: var(--muted);
     font-size: 9px;
@@ -847,16 +842,11 @@
     opacity: 0.55;
   }
 
-  .hud-scope-cell {
-    min-width: 116px;
-  }
-
   .hud-scope-trigger {
     appearance: none;
     border: 0;
     background: transparent;
     cursor: pointer;
-    font: inherit;
     justify-content: flex-start;
     max-width: 150px;
     min-height: 20px;
@@ -885,12 +875,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .hud-scope-trigger::after {
-    color: var(--muted);
-    content: "›";
-    font-size: 11px;
   }
 
   .hud-value-green {

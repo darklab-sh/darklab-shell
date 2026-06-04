@@ -89,12 +89,13 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
 
 async function switchScopeFromSelector(page, teamId = '') {
   await page.locator('#team-scope-trigger').click()
-  await expect(page.locator('#team-scope-overlay')).toHaveClass(/\bopen\b/)
+  const menu = page.locator('#team-scope-menu')
+  await expect(menu).toBeVisible()
   const option = teamId
-    ? page.locator(`[data-team-scope-option="${teamId}"]`)
-    : page.locator('[data-team-scope-option="personal"]')
+    ? menu.locator(`[data-team-scope-menu-option="${teamId}"]`)
+    : menu.locator('[data-team-scope-menu-option="personal"]')
   await option.click()
-  await expect(page.locator('#team-scope-overlay')).not.toHaveClass(/\bopen\b/)
+  await expect(menu).toBeHidden()
 }
 
 async function historyCommands(page) {

@@ -37,6 +37,8 @@
   const menuSchedulesCount    = document.getElementById('mobile-menu-schedules-count');
   const menuWatchersCount     = document.getElementById('mobile-menu-watchers-count');
   const menuHistoryCount      = document.getElementById('mobile-menu-history-count');
+  const menuAtlasHint         = document.getElementById('mobile-menu-atlas-hint');
+  const menuFilesHint         = document.getElementById('mobile-menu-files-hint');
   const menuProjectHint       = document.getElementById('mobile-menu-project-hint');
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
   const kbHelper              = document.getElementById('mobile-kb-helper');
@@ -154,6 +156,11 @@
     const total = Math.max(0, Number(count || 0));
     el.textContent = total > 0 ? `${total} saved` : '';
   }
+  function pluralCount(count, singular, plural = `${singular}s`) {
+    const total = Math.max(0, Number(count || 0));
+    if (!total) return '';
+    return `${total} ${total === 1 ? singular : plural}`;
+  }
   let schedulesCountRequestSeq = 0;
   function refreshSchedulesCount(items = null) {
     if (!menuSchedulesCount) return;
@@ -195,7 +202,7 @@
   let historyCountRequestSeq = 0;
   function setMenuHistoryCount(count) {
     const total = Number(count || 0);
-    menuHistoryCount.textContent = total > 0 ? `${total}` : '';
+    menuHistoryCount.textContent = total > 0 ? `${total} saved` : '';
   }
   function _recentsTotalCountFromCache() {
     if (!_recentsLoaded) return null;
@@ -207,18 +214,47 @@
     const runs = readCmdHistory();
     setMenuHistoryCount(runs.length);
     const requestSeq = ++historyCountRequestSeq;
-    const cachedTotal = _recentsTotalCountFromCache();
-    if (cachedTotal !== null) {
-      setMenuHistoryCount(cachedTotal);
-      return;
-    }
-    _recentsPrefetch()
+    _recentsRefresh({ render: false })
       .then(() => {
         if (requestSeq !== historyCountRequestSeq) return;
         const total = _recentsTotalCountFromCache();
         if (total !== null) setMenuHistoryCount(total);
       })
       .catch(() => {});
+  }
+  let atlasHintRequestSeq = 0;
+  function refreshAtlasHint() {
+    if (!menuAtlasHint || typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++atlasHintRequestSeq;
+    global.apiFetch('/atlas?orphan_filter=hide&suppression_filter=hide', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== atlasHintRequestSeq) return;
+        const total = Math.max(0, Number(data?.total || 0));
+        const findings = Math.max(0, Number(data?.findings || 0));
+        menuAtlasHint.textContent = total
+          ? pluralCount(total, 'entity', 'entities')
+          : pluralCount(findings, 'finding');
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load Atlas count for mobile menu', err);
+      });
+  }
+  let filesHintRequestSeq = 0;
+  function refreshFilesHint() {
+    if (!menuFilesHint || typeof global.apiFetch !== 'function') return;
+    const requestSeq = ++filesHintRequestSeq;
+    global.apiFetch('/workspace/files', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
+        if (requestSeq !== filesHintRequestSeq) return;
+        const usageCount = Number(data?.usage?.file_count);
+        const files = Number.isFinite(usageCount) ? usageCount : (Array.isArray(data?.files) ? data.files.length : 0);
+        menuFilesHint.textContent = pluralCount(files, 'file');
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load Files count for mobile menu', err);
+      });
   }
   function _projectHintName(project) {
     if (!project || typeof project !== 'object') return '';
@@ -265,6 +301,8 @@
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
+    refreshAtlasHint();
+    refreshFilesHint();
     refreshSchedulesCount();
     refreshWatchersCount();
     refreshProjectHintFromServer();

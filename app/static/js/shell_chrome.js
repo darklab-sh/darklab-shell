@@ -1046,13 +1046,6 @@
     _refreshHudShareSnapshotState();
   }
 
-  function refreshHudRunningState() {
-    if (!hud) return;
-    const id = _currentTabId();
-    const tab = (typeof getTab === 'function') ? getTab(id) : null;
-    hud.classList.toggle('hud-running', !!(tab && tab.st === 'running'));
-  }
-
   buildHudActions();
   document.addEventListener('app:scope-changed', () => {
     _refreshHudShareSnapshotState();
@@ -3340,22 +3333,18 @@
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-activated', () => {
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-created', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-closed', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
-      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:last-exit-changed', (e) => {
       hudState.lastExit = e.detail ? e.detail.value : null;
@@ -3379,7 +3368,6 @@
   _renderDb();
   _renderRedis();
   _renderActiveProject();
-  refreshHudRunningState();
 
   _startHudStatusPoll({ pollNow: true });
   setInterval(() => { _renderClock(); _renderUptime(); _renderSession(); }, CLOCK_TICK_MS);

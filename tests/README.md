@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,551
+- behavior tests: 3,553
 - docs/inventory meta-tests: 34
 - `pytest`: 1996 (1962 behavior + 34 meta)
-- `vitest`: 1330
+- `vitest`: 1332
 - `playwright`: 259
-- total: 3,585
+- total: 3,587
 
 This document is organized in two parts:
 
@@ -3272,6 +3272,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `creates projects from the mobile create sheet` | Verifies that the mobile Projects create entry point opens its sheet, creates a project, selects it as active, and returns to the list. |
 | `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
 | `renders mobile project tab content with mobile row actions` | Verifies that mobile Projects detail tabs render summary metadata, targets, runs, findings, artifacts, packages, and mobile row action affordances. |
+| `opens read-only triage for visible filtered Project findings in view-only team scope` | Verifies that visible filtered Project findings can open the triage editor in read-only mode when the active team role cannot triage. |
 | `opens the mobile project compare stepper and runs a baseline label comparison` | Verifies that the mobile Projects run-compare stepper can compare a selected run against a baseline label using the project compare endpoint. |
 | `opens the active project HUD switcher and keeps Projects as a menu action` | Verifies that the active project HUD chip opens the searchable switcher menu, focuses search, prevents menu keydown leakage, closes from HUD re-click and terminal-area outside clicks, gates project creation by team capability, reloads scoped results after personal/team scope changes, selects and clears a project through the active-project route, restores focus on Escape, and keeps the Projects modal action available. |
 | `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists while the HUD still shows the `No project` switcher state. |
@@ -3454,6 +3455,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `allows the current owner role to change only when another active owner exists` | Verifies that the Options Teams panel locks the current owner's role field until another active owner exists. |
 | `shows invite statuses and only offers revoke for active invites` | Verifies that active, used, expired, and revoked invite rows render distinct statuses and only active invites expose the revoke action. |
 | `copies a newly created invite code even after the detail pane refreshes` | Verifies that newly created one-time invite codes remain copyable from the Teams panel even if the rendered copy button loses its transient code attribute. |
+| `lets the Teams tab switch back to Personal scope` | Verifies that the Options Teams panel can move from an active team scope back to Personal without opening the separate scope selector. |
 | `surfaces failed invite creation with inline status and safe client logging` | Verifies that a denied invite creation shows the server message in the Teams panel and logs a safe client-side action failure. |
 | `surfaces failed recovery rotation with confirmation and safe client logging` | Verifies that denied recovery-code rotation goes through confirmation, shows the server message, and logs a safe client-side action failure. |
 
@@ -3928,7 +3930,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `hamburger button is visible and legacy desktop header button DOM is absent at mobile width` | Verifies that hamburger button is visible and the removed legacy desktop header button container is absent at mobile width. |
 | `clicking the hamburger opens the mobile menu` | Verifies that clicking the hamburger opens the mobile menu. |
 | `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell and can be dismissed by tapping the backdrop, matching the shared mobile-sheet contract. |
-| `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history, Status Monitor, Files, and theme action buttons. |
+| `mobile menu follows desktop tool order and shows context hints` | Verifies that the mobile menu keeps the desktop-aligned tool order and shows History, Atlas, Files, Schedules, and Watchers hints alongside the existing action rows. |
 | `mobile menu opens the idle Status Monitor sheet` | Verifies that the mobile menu opens Status Monitor as a bottom sheet even when the active tab is idle. |
 | `mobile Files create inputs use mobile-safe text defaults` | Verifies that mobile Files create inputs use mobile-safe text defaults and 16px text to avoid browser focus zoom. |
 | `timestamps menu expands inline and applies the selected mode` | Verifies that the mobile menu `timestamps` row expands inline to a three-mode picker (off / elapsed / clock), keeps the sheet open while expanded, applies the selected mode on tap, closes the sheet, and resets the sub-menu to collapsed on the next sheet open. |

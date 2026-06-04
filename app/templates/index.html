@@ -186,10 +186,22 @@
             <span class="menu-item-label">options</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
+            <span class="menu-item-icon" aria-hidden="true">⚙</span>
+            <span class="menu-item-label">workflows</span>
+            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item mobile-scope-row" data-menu-action="scope">
             <span class="menu-item-icon" aria-hidden="true">@</span>
             <span class="menu-item-label">scope</span>
             <span id="mobile-team-scope-label" class="menu-item-hint">Personal</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="atlas">
+            <span class="menu-item-icon" aria-hidden="true">◎</span>
+            <span class="menu-item-label">atlas</span>
+            <span class="menu-item-hint" id="mobile-menu-atlas-hint"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
           <button type="button" class="menu-item nav-item" data-menu-action="projects">
@@ -204,27 +216,14 @@
             <span class="menu-item-hint" id="mobile-menu-history-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="atlas">
-            <span class="menu-item-icon" aria-hidden="true">◎</span>
-            <span class="menu-item-label">atlas</span>
+          {% if workspace_enabled %}
+          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
+            <span class="menu-item-icon" aria-hidden="true">▣</span>
+            <span class="menu-item-label">files</span>
+            <span class="menu-item-hint" id="mobile-menu-files-hint"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
-            <span class="menu-item-icon" aria-hidden="true">◉</span>
-            <span class="menu-item-label">status</span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
-            <span class="menu-item-icon" aria-hidden="true">⌘</span>
-            <span class="menu-item-label">commands</span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
-          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
-            <span class="menu-item-icon" aria-hidden="true">⚙</span>
-            <span class="menu-item-label">workflows</span>
-            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-          </button>
+          {% endif %}
           <button type="button" class="menu-item nav-item" data-menu-action="schedules">
             <span class="menu-item-icon" aria-hidden="true">↻</span>
             <span class="menu-item-label">schedules</span>
@@ -237,17 +236,19 @@
             <span class="menu-item-hint" id="mobile-menu-watchers-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          {% if workspace_enabled %}
-          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
-            <span class="menu-item-icon" aria-hidden="true">▣</span>
-            <span class="menu-item-label">files</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="findings-board">
+            <span class="menu-item-icon" aria-hidden="true">▦</span>
+            <span class="menu-item-label">findings</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          {% endif %}
-          <button type="button" class="menu-item nav-item" data-menu-action="theme">
-            <span class="menu-item-icon" aria-hidden="true">◐</span>
-            <span class="menu-item-label">theme</span>
-            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+          <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
+            <span class="menu-item-icon" aria-hidden="true">◉</span>
+            <span class="menu-item-label">status</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
+            <span class="menu-item-icon" aria-hidden="true">⌘</span>
+            <span class="menu-item-label">commands</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
           <button type="button" class="menu-item nav-item" data-menu-action="faq">
@@ -255,8 +256,14 @@
             <span class="menu-item-label">FAQ</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="theme">
+            <span class="menu-item-icon" aria-hidden="true">◑</span>
+            <span class="menu-item-label">theme</span>
+            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
-            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-icon" aria-hidden="true">⊕</span>
             <span class="menu-item-label">diag</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
@@ -423,17 +430,9 @@
           <span class="hud-label">tabs</span>
           <span id="hud-tabs" class="hud-value hud-muted">0</span>
         </div>
-        <div class="hud-cell" data-hud-chip="transport">
-          <span class="hud-label">transport</span>
-          <span class="hud-value hud-value-green">SSE</span>
-        </div>
         <div class="hud-cell">
           <span class="hud-label">latency</span>
           <span id="hud-latency" class="hud-value hud-muted">— ms</span>
-        </div>
-        <div class="hud-cell" data-hud-chip="mode">
-          <span class="hud-label">mode</span>
-          <span class="hud-value">ISOLATED</span>
         </div>
         <div class="hud-cell">
           <span class="hud-label">session</span>
@@ -441,7 +440,7 @@
         </div>
         <div class="hud-cell hud-scope-cell">
           <span class="hud-label">scope</span>
-          <button id="team-scope-trigger" class="hud-value hud-scope-trigger hud-action-cell" type="button" aria-haspopup="dialog" aria-controls="team-scope-overlay" aria-label="Open active data scope selector">
+          <button id="team-scope-trigger" class="hud-value hud-scope-trigger hud-action-cell" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="team-scope-menu" aria-label="Open active data scope menu">
             <span id="team-scope-label">Personal</span>
           </button>
         </div>

@@ -32,6 +32,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Scope HUD switching** — the desktop `SCOPE` cell now opens a compact Project-style pop-up menu with Personal and team choices, without the old modal-style interruption, search, or create controls.
+
+- **Mobile menu ordering and hints** — the mobile hamburger menu now keeps Options at the top, then follows the desktop tool order for Workflows, Scope, Atlas, Projects, History, Files, Schedules, Watchers, Findings, Status, Commands, FAQ, Theme, and Diagnostics. History, Atlas, and Files now show compact counts in the sheet, matching the existing Scope, Projects, Workflows, Schedules, Watchers, and Theme hints.
+
 - **Browser downloads start immediately for large files** — workspace files, project artifacts, and evidence package archives now use short-lived direct download URLs with known content lengths, so the browser can show native download progress instead of waiting for JavaScript to buffer the whole file first.
 
 - **Bundled Postgres 18 service** — moved the optional Compose, CI, and disposable test Postgres images from 17 to 18.
@@ -61,6 +65,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Active Project HUD switcher** — the Active Project HUD chip now opens a compact searchable switcher instead of jumping straight into the Projects modal. The menu shows the current active project or `No project`, loads bounded active/MRU/search results from `/projects?mode=switcher`, lets users select or clear active-project focus without a page refresh, and keeps **Create project** plus **Open Projects** as deeper-work actions. Team viewers can select or clear focus without gaining project mutation rights, while project creation stays locked to roles that can mutate projects.
 
 ### Fixed
+
+- **Scope HUD menu loading state** — the desktop `SCOPE` pop-up clears its `Loading teams...` note once team choices are rendered, instead of leaving stale loading copy below the loaded menu.
+
+- **Mobile Projects view-only triage** — opening finding triage from the Projects sheet now uses the visible filtered finding row, so view-only team members get the read-only triage warning instead of a missing-finding error.
+
+- **Options Teams can return to Personal scope** — the Teams tab now shows a Personal row above team rows, lets users switch back from an active team scope inside Options, and keeps the desktop HUD scope chip visually aligned with the other HUD values by removing its standalone glyph and font override.
 
 - **Command outcome summaries ignore stale tab state** — failed or unsupported commands no longer reuse the previous command's summary when the current transcript has no parsable outcome, and active-tab summaries now read only the current run's raw lines so stale nmap ports cannot carry into a later failed scan.
 

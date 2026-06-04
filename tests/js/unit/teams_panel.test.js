@@ -315,6 +315,25 @@ describe('Options Teams permissions UI', () => {
     expect(showToast).toHaveBeenCalledWith('Code copied', 'success')
   })
 
+  it('lets the Teams tab switch back to Personal scope', async () => {
+    const { showToast } = await loadTeamsPanel({ role: 'owner' })
+
+    document.querySelector('#options-teams-list [data-team-action="switch-team"]').click()
+    await vi.waitFor(() => {
+      expect(window.getActiveTeamId()).toBe('team_permissions_1')
+    })
+
+    const personalRow = Array.from(document.querySelectorAll('#options-teams-list .options-team-row'))
+      .find(row => row.textContent.includes('Personal'))
+    expect(personalRow).toBeTruthy()
+    expect(personalRow.textContent).toContain('Private scope')
+    personalRow.querySelector('[data-team-action="switch-personal"]').click()
+
+    expect(window.getActiveTeamId()).toBe('')
+    expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
+    expect(showToast).toHaveBeenCalledWith('Personal scope selected', 'success')
+  })
+
   it('surfaces failed invite creation with inline status and safe client logging', async () => {
     const apiFetch = buildApiFetch({
       role: 'owner',

@@ -574,7 +574,27 @@ test.beforeEach(async ({ page }) => {
     await dragSheetHandleToClose('#watchers-overlay', '#watchers-modal')
   })
 
-  test('mobile menu contains history and theme action buttons', async ({ page }) => {
+  test('mobile menu follows desktop tool order and shows context hints', async ({ page }) => {
+    await page.route(/\/history(?:\?.*)?$/, route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [{ id: 'run_1' }, { id: 'run_2' }, { id: 'run_3' }],
+        page: 1,
+        page_size: 50,
+        total_count: 3,
+        page_count: 1,
+        has_prev: false,
+        has_next: false,
+      }),
+    }))
+    await page.route('**/atlas?*', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ total: 4, findings: 2, counts: { ip: 4 } }),
+    }))
+    await page.route('**/workspace/files', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ files: [{ path: 'notes.txt' }, { path: 'targets.txt' }], usage: { file_count: 2 } }),
+    }))
     await page.route('**/schedules', route => route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ schedules: [{ id: 'sch_1' }, { id: 'sch_2' }] }),
@@ -587,8 +607,33 @@ test.beforeEach(async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     const menu = page.locator('#mobile-menu-sheet')
     await expect(menu.locator('[data-menu-action="history"]')).toBeVisible()
+    const toolOrder = await menu.locator('.menu-scroll .menu-group').nth(1)
+      .locator('[data-menu-action]')
+      .evaluateAll(nodes => nodes
+        .filter(node => !node.classList.contains('u-hidden'))
+        .map(node => node.getAttribute('data-menu-action')))
+    expect(toolOrder).toEqual([
+      'options',
+      'workflows',
+      'scope',
+      'atlas',
+      'projects',
+      'history',
+      'workspace',
+      'schedules',
+      'watchers',
+      'findings-board',
+      'status-monitor',
+      'command-registry',
+      'faq',
+      'theme',
+      'diag',
+    ])
     await expect(menu.locator('[data-menu-action="status-monitor"] .menu-item-label')).toHaveText('status')
     await expect(menu.locator('[data-menu-action="workspace"] .menu-item-label')).toHaveText('files')
+    await expect(menu.locator('#mobile-menu-history-count')).toHaveText('3 saved')
+    await expect(menu.locator('#mobile-menu-atlas-hint')).toHaveText('4 entities')
+    await expect(menu.locator('#mobile-menu-files-hint')).toHaveText('2 files')
     await expect(menu.locator('#mobile-menu-schedules-count')).toHaveText('2 saved')
     await expect(menu.locator('#mobile-menu-watchers-count')).toHaveText('1 saved')
     await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()

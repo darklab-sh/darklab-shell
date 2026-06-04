@@ -33,7 +33,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 - **Terminal workflow** — live output streaming with structured row metadata, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep` and `tail`, keyboard shortcuts, quiet-stream warnings, and same-tab recovery when an active stream detaches or starts moving again
 - **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
-- **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, and a mobile History panel with collapsible search, filter, and bulk-action tools
+- **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, a desktop-aligned mobile menu with compact context hints, and a mobile History panel with collapsible search, filter, and bulk-action tools
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, deterministic outcome summaries for supported noisy tools, quieter handling for known progress/status chatter, jump-to-live / jump-to-bottom controls, and exports/permalinks that include the same visible summaries while keeping raw transcripts unchanged
 - **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, cleaner saved search text that skips known scanner noise without deleting raw output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, selected-history exports as text or JSONL, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
 - **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context, folded scanner chatter, detected-change summaries for supported scan output, lazy expansion for unchanged lines, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
@@ -892,7 +892,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── tab_drag_reorder.js # Tab pointer/touch drag reordering behavior
 │   │       │   │   ├── tab_exports.js # Tab transcript copy, export, and permalink actions
 │   │       │   │   └── tab_session_state.js # Tab session persistence and restore after reload
-│   │       │   ├── team_scope.js # Active personal/team scope selector and cross-surface refresh wiring
+│   │       │   ├── team_scope.js # Active personal/team scope menu, selector, and cross-surface refresh wiring
 │   │       │   ├── terminal/
 │   │       │   │   ├── composer_controller.js # Terminal composer paste, focus, autocomplete input, and keyboard handling
 │   │       │   │   ├── composer_editing.js # Terminal composer caret, selection, and word-boundary helpers
@@ -1073,7 +1073,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
     │       ├── tabbar_chrome_collapse.test.js # tab-bar chrome auto-collapse behavior and persisted pinning coverage
     │       ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
-    │       ├── team_scope.test.js  # active personal/team scope selector storage, refresh, and reload edge cases
+    │       ├── team_scope.test.js  # active personal/team scope menu/selector storage, refresh, and reload edge cases
     │       ├── teams_panel.test.js # Options Teams role/capability UI and failed mutation coverage
     │       ├── tour_modal.test.js  # desktop visual onboarding tour renderer, navigation, sample-chip, and dismissal coverage
     │       ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
