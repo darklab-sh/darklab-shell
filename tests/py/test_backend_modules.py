@@ -11395,7 +11395,8 @@ class TestPtyBrokerService:
                  pty_service,
                  "active_runs_for_team",
                  return_value=[{"run_id": team_run_id, "run_type": "pty", "team_id": "team-1"}],
-             ):
+             ), \
+             mock.patch.object(pty_service.log, "debug") as debug_log:
             assert pty_service.write_pty_input(
                 team_run_id,
                 "member-session",
@@ -11409,6 +11410,83 @@ class TestPtyBrokerService:
                 140,
                 team_id="team-1",
             ) == (True, "", 40, 140)
+
+        queued_events = [call.args[0] for call in debug_log.call_args_list]
+        assert queued_events.count("PTY_CONTROL_QUEUED") == 2
+
+        class QueueFailingRedis(process._FakeRedisClient):
+            def xadd(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise RuntimeError("redis queue failed")
+
+        failing = QueueFailingRedis()
+        failing.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", failing), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ), \
+             mock.patch.object(pty_service.log, "warning") as warning_log:
+            ok, message = pty_service.write_pty_input(run_id, "session-1", "q")
+            resize_ok, resize_message, resize_rows, resize_cols = pty_service.resize_pty(run_id, "session-1", 33, 120)
+
+        warning_events = [call.args[0] for call in warning_log.call_args_list]
+        assert ok is False
+        assert "redis queue failed" in message
+        assert resize_ok is False
+        assert "redis queue failed" in resize_message
+        assert (resize_rows, resize_cols) == (0, 0)
+        assert warning_events.count("PTY_CONTROL_QUEUE_FAILED") == 2
+
+        class MetaFailingRedis(process._FakeRedisClient):
+            fail_sets = False
+
+            def set(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                if self.fail_sets:
+                    raise RuntimeError("redis meta failed")
+                return super().set(*args, **kwargs)
+
+        meta_failing = MetaFailingRedis()
+        meta_failing.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+        meta_failing.fail_sets = True
+
+        with mock.patch.object(pty_service, "redis_client", meta_failing), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ), \
+             mock.patch.object(pty_service.log, "error") as error_log:
+            resize_ok, resize_message, resize_rows, resize_cols = pty_service.resize_pty(run_id, "session-1", 33, 120)
+
+        error_events = [call.args[0] for call in error_log.call_args_list]
+        assert resize_ok is False
+        assert "redis meta failed" in resize_message
+        assert (resize_rows, resize_cols) == (0, 0)
+        assert "PTY_META_SAVE_FAILED" in error_events
 
     def test_pty_stream_replays_redis_output_events_for_any_worker(self):
         fake = process._FakeRedisClient()
@@ -11431,7 +11509,10 @@ class TestPtyBrokerService:
                  pty_service,
                  "active_runs_for_session",
                  return_value=[{"run_id": run_id, "run_type": "pty"}],
-             ):
+             ), \
+             mock.patch.object(pty_service.log, "debug") as debug_log, \
+             mock.patch.object(pty_service.log, "warning") as warning_log:
+            fake.xadd(pty_service._stream_key(run_id), {"payload": "{bad"})
             pty_service.publish_pty_event(run_id, "output", {"text": "live hop"})
             stream = pty_service.stream_pty_events(run_id, "session-1")
             chunk = next(stream)
@@ -11439,6 +11520,11 @@ class TestPtyBrokerService:
             if callable(close_stream):
                 close_stream()
 
+        debug_events = [call.args[0] for call in debug_log.call_args_list]
+        warning_events = [call.args[0] for call in warning_log.call_args_list]
+        assert "PTY_EVENT_PUBLISHED" in debug_events
+        assert "PTY_PAYLOAD_DECODE_FAILED" in warning_events
+        assert "PTY_STREAM_EVENT_SKIPPED" in warning_events
         assert "live hop" in chunk
         assert '"type": "output"' in chunk
 
@@ -11509,11 +11595,14 @@ class TestPtyBrokerService:
                  pty_service,
                  "active_runs_for_session",
                  return_value=[{"run_id": run.run_id, "run_type": "pty"}],
-             ):
+             ), \
+             mock.patch.object(pty_service.log, "debug") as debug_log:
             pty_service._store_pty_meta(run)
             pty_service._store_pty_snapshot(run, force=True)
             ok, message, snapshot = pty_service.pty_run_snapshot(run.run_id, "session-1")
 
+        debug_events = [call.args[0] for call in debug_log.call_args_list]
+        assert "PTY_SNAPSHOT_PUBLISHED" in debug_events
         assert ok is True
         assert message == ""
         assert snapshot is not None
@@ -11704,6 +11793,64 @@ class TestPtyBrokerService:
 
         assert stored_snapshot is not None
         assert run.snapshot_pending_bytes == 0
+
+        class FailingRedis(process._FakeRedisClient):
+            def xadd(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise RuntimeError("redis event failed")
+
+            def set(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise RuntimeError("redis snapshot failed")
+
+        class FakeFinishedProc:
+            pid = 4243
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):  # noqa: ARG002
+                return 0
+
+        failing_run = pty_service.PtyRun(
+            run_id="pty-run-cleanup-after-redis-failure",
+            session_id="session-1",
+            team_id="team-1",
+            command="mtr --interactive darklab.sh",
+            argv=["mtr", "darklab.sh"],
+            started="2026-01-01T00:00:00+00:00",
+            master_fd=99,
+            proc=cast(subprocess.Popen, FakeFinishedProc()),
+            rows=24,
+            cols=100,
+            allow_input=True,
+            max_runtime_seconds=900,
+            brokered=True,
+            terminal_capture=cast(pty_service.PtyTerminalCapture, FakeCapture()),
+        )
+        with pty_service._runs_lock:
+            pty_service._runs[failing_run.run_id] = failing_run
+
+        with mock.patch.object(pty_service, "redis_client", FailingRedis()), \
+             mock.patch.object(pty_service.select, "select", return_value=([], [], [])), \
+             mock.patch.object(pty_service.os, "close") as close_fd, \
+             mock.patch.object(pty_service, "pid_pop") as pid_pop, \
+             mock.patch.object(pty_service, "active_run_remove") as active_run_remove, \
+             mock.patch.object(pty_service.log, "error") as error_log, \
+             mock.patch.object(pty_service.log, "info") as info_log:
+            pty_service._reader_loop(failing_run, "127.0.0.1")
+
+        with pty_service._runs_lock:
+            assert failing_run.run_id not in pty_service._runs
+        error_events = [call.args[0] for call in error_log.call_args_list]
+        info_events = [call.args[0] for call in info_log.call_args_list]
+        assert close_fd.call_args_list == [mock.call(99)]
+        pid_pop.assert_called_once_with(failing_run.run_id)
+        active_run_remove.assert_called_once_with(failing_run.run_id)
+        assert "PTY_EVENT_PUBLISH_FAILED" in error_events
+        assert "PTY_SNAPSHOT_SAVE_FAILED" in error_events
+        assert "PTY_RUNTIME_CLEANED" in info_events
+        assert "RUN_END" in info_events
+        assert "PTY_SESSION_ENDED" in info_events
 
     def test_pty_stream_reports_stale_run_before_heartbeating_forever(self):
         fake = process._FakeRedisClient()

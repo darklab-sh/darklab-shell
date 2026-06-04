@@ -543,15 +543,15 @@ def _completion_choice_cases(spec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _completion_nested_cases(spec: dict[str, Any]) -> str:
+def _completion_path_step_cases(spec: dict[str, Any]) -> str:
     lines: list[str] = []
     for key in sorted(spec):
-        if ":" in key or not key:
-            continue
         subcommands = _completion_shell_words(spec[key].get("subcommands") or [])
         if subcommands:
             lines.append(
-                f"        {shlex.quote(key)}) _darklab_word_in \"$word\" {shlex.quote(subcommands)} && sub=\"$word\" ;;"
+                f"      {shlex.quote(key)}) "
+                f"_darklab_word_in \"$word\" {shlex.quote(subcommands)} "
+                "&& path_key=\"${path_key:+$path_key:}$word\" ;;"
             )
     return "\n".join(lines)
 
@@ -560,7 +560,7 @@ def _completion_bash(spec: dict[str, Any]) -> str:
     top_commands = _completion_shell_words(spec[""].get("subcommands") or [])
     return f"""# bash completion for darklab
 _darklab_completion() {{
-  local cur prev top sub word path_key
+  local cur prev word path_key
   COMPREPLY=()
   cur="${{COMP_WORDS[COMP_CWORD]}}"
   prev="${{COMP_WORDS[COMP_CWORD-1]}}"
@@ -568,21 +568,14 @@ _darklab_completion() {{
   _darklab_word_in() {{ case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }}
   _darklab_comp_words() {{ COMPREPLY=( $(compgen -W "$1" -- "$cur") ); }}
 
-  top=""
-  sub=""
+  path_key=""
   for ((i=1; i<COMP_CWORD; i++)); do
     word="${{COMP_WORDS[i]}}"
     [[ "$word" == -* ]] && continue
-    if [[ -z "$top" ]]; then
-      _darklab_word_in "$word" {shlex.quote(top_commands)} && top="$word"
-    elif [[ -z "$sub" ]]; then
-      case "$top" in
-{_completion_nested_cases(spec)}
-      esac
-    fi
+    case "$path_key" in
+{_completion_path_step_cases(spec)}
+    esac
   done
-  path_key="$top"
-  [[ -n "$sub" ]] && path_key="$top:$sub"
 
   case "$path_key:$prev" in
 {_completion_choice_cases(spec)}
@@ -595,15 +588,13 @@ _darklab_completion() {{
     return
   fi
 
-  if [[ -z "$top" ]]; then
+  if [[ -z "$path_key" ]]; then
     _darklab_comp_words {shlex.quote(top_commands)}
     return
   fi
-  if [[ -z "$sub" ]]; then
-    case "$top" in
+  case "$path_key" in
 {_completion_path_cases(spec, "subcommands")}
-    esac
-  fi
+  esac
   case "$path_key" in
 {_completion_path_cases(spec, "arguments")}
   esac
@@ -615,28 +606,21 @@ def _completion_zsh(spec: dict[str, Any]) -> str:
     top_commands = _completion_shell_words(spec[""].get("subcommands") or [])
     return f"""#compdef darklab
 _darklab() {{
-  local cur prev top sub word path_key
+  local cur prev word path_key
   cur="${{words[CURRENT]}}"
   prev="${{words[CURRENT-1]}}"
 
   _darklab_word_in() {{ case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }}
   _darklab_comp_words() {{ compadd -- ${{(z)1}}; }}
 
-  top=""
-  sub=""
+  path_key=""
   for ((i=2; i<CURRENT; i++)); do
     word="${{words[i]}}"
     [[ "$word" == -* ]] && continue
-    if [[ -z "$top" ]]; then
-      _darklab_word_in "$word" {shlex.quote(top_commands)} && top="$word"
-    elif [[ -z "$sub" ]]; then
-      case "$top" in
-{_completion_nested_cases(spec)}
-      esac
-    fi
+    case "$path_key" in
+{_completion_path_step_cases(spec)}
+    esac
   done
-  path_key="$top"
-  [[ -n "$sub" ]] && path_key="$top:$sub"
 
   case "$path_key:$prev" in
 {_completion_choice_cases(spec)}
@@ -649,15 +633,13 @@ _darklab() {{
     return
   fi
 
-  if [[ -z "$top" ]]; then
+  if [[ -z "$path_key" ]]; then
     _darklab_comp_words {shlex.quote(top_commands)}
     return
   fi
-  if [[ -z "$sub" ]]; then
-    case "$top" in
+  case "$path_key" in
 {_completion_path_cases(spec, "subcommands")}
-    esac
-  fi
+  esac
   case "$path_key" in
 {_completion_path_cases(spec, "arguments")}
   esac

@@ -252,7 +252,7 @@ describe('finding triage editor', () => {
     expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('finding-triage-message').textContent).toBe('Could not load details.')
     expect(window.enhanceAppSelects).toHaveBeenCalledWith(document.getElementById('finding-triage-overlay'))
-    expect(window.bindFocusTrap).toHaveBeenCalledWith(document.getElementById('finding-triage-modal'))
+    expect(window.bindFocusTrap).not.toHaveBeenCalled()
     expect(appSelect.querySelector('.app-select-trigger').disabled).toBe(true)
   })
 })

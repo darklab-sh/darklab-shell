@@ -3352,25 +3352,6 @@ button.project-explorer-item:focus-visible,
   color: var(--text-muted, var(--muted));
 }
 
-.project-finding-board-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.project-finding-board-badge.is-important {
-  border-color: color-mix(in srgb, var(--amber) 64%, var(--border));
-  color: var(--amber);
-}
-
 .project-finding-board-card-actions .project-finding-review {
   width: min(100%, 150px);
 }

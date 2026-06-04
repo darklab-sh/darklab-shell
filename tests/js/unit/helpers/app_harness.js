@@ -239,6 +239,11 @@ export async function loadAppFns({
         <button class="project-entity-editor-close"></button>
       </div>
     </div>
+    <div id="finding-triage-overlay" class="u-hidden">
+      <div id="finding-triage-modal">
+        <button id="finding-triage-close"></button>
+      </div>
+    </div>
     <div id="schedules-overlay" class="u-hidden">
       <div id="schedules-modal">
         <button class="schedules-close"></button>

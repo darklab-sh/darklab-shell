@@ -41,6 +41,32 @@
       return wrap;
     }
 
+    function boardBadge(label, tone = 'muted') {
+      const el = document.createElement('span');
+      const toneClass = {
+        amber: 'badge-tone-amber',
+        red: 'badge-tone-red',
+        green: 'badge-tone-green',
+      }[tone] || 'badge-tone-muted';
+      el.className = `badge ${toneClass}`;
+      el.textContent = String(label || '');
+      return el;
+    }
+
+    function severityTone(severity) {
+      const normalized = String(severity || '').toLowerCase();
+      return normalized === 'high' || normalized === 'critical' ? 'red' : 'muted';
+    }
+
+    function cardFinding(card) {
+      const finding = card.finding && typeof card.finding === 'object' ? card.finding : {};
+      return {
+        ...finding,
+        triage: finding.triage || card.triage,
+        verification_status: finding.verification_status || card.verification_status,
+      };
+    }
+
     function renderCard(projectId, summary, card) {
       const article = document.createElement('article');
       article.className = [
@@ -60,16 +86,10 @@
       const badges = document.createElement('div');
       badges.className = 'project-finding-board-card-badges';
       if (card.important) {
-        const important = document.createElement('span');
-        important.className = 'project-finding-board-badge is-important';
-        important.textContent = 'important';
-        badges.appendChild(important);
+        badges.appendChild(boardBadge('important', 'amber'));
       }
       if (card.severity) {
-        const severity = document.createElement('span');
-        severity.className = 'project-finding-board-badge';
-        severity.textContent = card.severity;
-        badges.appendChild(severity);
+        badges.appendChild(boardBadge(card.severity, severityTone(card.severity)));
       }
       if (badges.children.length) header.appendChild(badges);
       article.appendChild(header);
@@ -87,7 +107,7 @@
         detail.textContent = card.raw_line;
         article.appendChild(detail);
       }
-      const chips = ctx.entityMetadataChips(card.finding || {});
+      const chips = ctx.entityMetadataChips(cardFinding(card));
       if (Array.isArray(chips) && chips.length) {
         const chipWrap = document.createElement('div');
         chipWrap.className = 'project-finding-board-card-chips';

@@ -4741,6 +4741,11 @@ describe('shell chrome project workspace', () => {
         severity: 'critical',
         review_state: 'important',
         target_id: 'target-web',
+        triage: {
+          verification_status: 'verified',
+          has_remediation: true,
+          has_verification_steps: true,
+        },
       },
     ]
     const apiFetch = vi.fn((url) => {
@@ -4900,7 +4905,15 @@ describe('shell chrome project workspace', () => {
       .toEqual(['New', 'Reviewed', 'False positive', 'Follow-up'])
     expect(Array.from(document.querySelectorAll('.project-finding-board-card-title')).map(node => node.textContent))
       .toEqual(['High issue', 'Critical issue', 'Low issue'])
-    expect(document.querySelector('.project-finding-board-badge.is-important')?.textContent).toBe('important')
+    const importantBadge = Array.from(document.querySelectorAll('.project-finding-board-card-badges .badge'))
+      .find(node => node.textContent === 'important')
+    expect(importantBadge?.classList.contains('badge-tone-amber')).toBe(true)
+    const criticalSeverityBadge = Array.from(document.querySelectorAll('.project-finding-board-card-badges .badge'))
+      .find(node => node.textContent === 'critical')
+    expect(criticalSeverityBadge?.classList.contains('badge-tone-red')).toBe(true)
+    const inlineBoardChips = Array.from(document.querySelectorAll('.project-finding-board-card-chips .badge'))
+      .map(node => node.textContent)
+    expect(inlineBoardChips).toEqual(expect.arrayContaining(['Verified', 'remediation', 'verification steps']))
     expect(document.querySelector('.project-finding-bulk-toolbar')).toBeNull()
 
     document.querySelector('[data-project-finding-view-mode="list"]').click()
@@ -4946,6 +4959,9 @@ describe('shell chrome project workspace', () => {
       }),
     }))
     expect(document.getElementById('findings-board-message').textContent).toBe('Finding triage saved.')
+    const globalBoardChips = Array.from(document.querySelectorAll('#findings-board-body .project-finding-board-card-chips .badge'))
+      .map(node => node.textContent)
+    expect(globalBoardChips).toEqual(expect.arrayContaining(['Ready to verify', 'remediation']))
     const boardReview = document.querySelector('#findings-board-body [data-findings-board-review]')
     boardReview.value = 'false_positive'
     boardReview.dispatchEvent(new Event('change', { bubbles: true }))

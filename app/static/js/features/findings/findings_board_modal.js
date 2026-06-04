@@ -202,6 +202,38 @@
     ].filter(Boolean).join(' · ');
   }
 
+  function boardBadge(label, tone = 'muted') {
+    const el = document.createElement('span');
+    const toneClass = {
+      amber: 'badge-tone-amber',
+      red: 'badge-tone-red',
+      green: 'badge-tone-green',
+    }[tone] || 'badge-tone-muted';
+    el.className = `badge ${toneClass}`;
+    el.textContent = String(label || '');
+    return el;
+  }
+
+  function severityTone(severity) {
+    const normalized = String(severity || '').toLowerCase();
+    return normalized === 'high' || normalized === 'critical' ? 'red' : 'muted';
+  }
+
+  function triageChips(finding) {
+    const triage = finding && finding.triage && typeof finding.triage === 'object' ? finding.triage : null;
+    if (!triage) return [];
+    const chips = [];
+    const status = String(triage.verification_status || finding.verification_status || 'not_started');
+    if (status && status !== 'not_started') {
+      const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+      const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+      chips.push(boardBadge(label, tone));
+    }
+    if (triage.has_remediation) chips.push(boardBadge('remediation', 'muted'));
+    if (triage.has_verification_steps) chips.push(boardBadge('verification steps', 'muted'));
+    return chips;
+  }
+
   function renderCard(card) {
     const finding = card.finding || {};
     const article = document.createElement('article');
@@ -224,16 +256,10 @@
     const badges = document.createElement('div');
     badges.className = 'project-finding-board-card-badges';
     if (card.important) {
-      const important = document.createElement('span');
-      important.className = 'project-finding-board-badge is-important';
-      important.textContent = 'important';
-      badges.appendChild(important);
+      badges.appendChild(boardBadge('important', 'amber'));
     }
     if (card.severity) {
-      const severity = document.createElement('span');
-      severity.className = 'project-finding-board-badge';
-      severity.textContent = card.severity;
-      badges.appendChild(severity);
+      badges.appendChild(boardBadge(card.severity, severityTone(card.severity)));
     }
     if (badges.children.length) header.appendChild(badges);
     article.appendChild(header);
@@ -250,6 +276,14 @@
       detail.className = 'project-finding-board-card-detail';
       detail.textContent = card.raw_line;
       article.appendChild(detail);
+    }
+
+    const chips = triageChips(finding);
+    if (chips.length) {
+      const chipWrap = document.createElement('div');
+      chipWrap.className = 'project-finding-board-card-chips';
+      chips.forEach(chip => chipWrap.appendChild(chip));
+      article.appendChild(chipWrap);
     }
 
     const actions = document.createElement('div');

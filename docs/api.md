@@ -202,7 +202,7 @@ Run, history, artifact, project, AI assist, schedule, and watcher routes are sco
 
 ## Teams
 
-Teams let multiple durable session tokens share team-owned data without sharing one token. Browser users manage teams from Options > Teams, API users can call `/api/v1/teams`, and CLI users can use `darklab team`. The terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation; use Options, `/api/v1/teams`, or `darklab team ...` for member updates, member removal, recovery-code redemption, archive/reactivate, and saved CLI scope switching.
+Teams let multiple durable session tokens share team-owned data without sharing one token. Browser users manage teams from Options > Teams, API users can call `/api/v1/teams`, and CLI users can use `darklab team`. The terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation; use Options, `/api/v1/teams`, or `darklab team ...` for member updates, member removal, recovery-code redemption, and saved CLI scope switching. Archive and reactivate teams from Options or `/api/v1/teams`.
 
 ```bash
 darklab team create "Ops Team" --slug ops --display-name "Primary token"
@@ -217,7 +217,7 @@ darklab team recovery rotate team_123
 
 Owners can manage owner membership and owner invites, rotate recovery codes, archive or reactivate teams, and use every team-scoped write path. Admins can do operator work and can also manage non-owner members, non-owner invites, shared workflows, notification channels, and shared team secrets, but they cannot rotate recovery codes or manage owners. Operators can run commands, manage shared history and automation, update projects, and triage findings, but they cannot manage membership or shared secrets. Viewers can inspect shared data but cannot start commands or mutate shared resources. Teams always keep at least one active owner, so owner removal or self-demotion that would leave no active owner returns `409 team_owner_required`. Team membership objects include a `capabilities` array with the server-granted permission names for that member role, so API clients can decide which controls to show without copying the role matrix. Role failures return `403` with the normal API error envelope.
 
-Archiving a team pauses team-owned schedules and watchers in place. Archived teams stay readable to members, but active team-scope requests, invite changes, membership edits, and recovery-code rotation are rejected until the team is reactivated. Reactivating the team restores access, but those paused schedules and watchers stay paused until someone resumes them.
+Archiving a team pauses team-owned schedules and watchers in place. Archived teams stay visible in team lists and team detail responses so members can review or reactivate them, and Files has a deliberate read-only exception: members can list, preview, and download team files while file changes are blocked. Other active team-scoped API routes, including runs, History, Atlas, Projects, schedules, watchers, notifications, AI assists, invite changes, membership edits, and recovery-code rotation, reject archived-team scope until the team is reactivated. Reactivating the team restores access, but those paused schedules and watchers stay paused until someone resumes them.
 
 ---
 

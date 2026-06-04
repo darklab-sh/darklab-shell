@@ -17,7 +17,6 @@
     finding: null,
     options: {},
     bound: false,
-    focusTrap: null,
   };
 
   function el(id) {
@@ -109,8 +108,6 @@
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
-    if (state.focusTrap && typeof state.focusTrap.dispose === 'function') state.focusTrap.dispose();
-    state.focusTrap = null;
     state.finding = null;
     state.options = {};
     if (typeof global.refocusComposerAfterAction === 'function') {
@@ -214,10 +211,6 @@
 
   function bindOpenChrome(overlay) {
     if (typeof global.enhanceAppSelects === 'function') global.enhanceAppSelects(overlay);
-    if (typeof global.bindFocusTrap === 'function') {
-      if (state.focusTrap && typeof state.focusTrap.dispose === 'function') state.focusTrap.dispose();
-      state.focusTrap = global.bindFocusTrap(el('finding-triage-modal'));
-    }
   }
 
   async function open(finding, options = {}) {

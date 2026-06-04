@@ -3687,11 +3687,19 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert "active artifacts atlas cancel completion download grep history notify" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
+    assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion
+    invite_create_completion = (
+        "team:invite:create) _darklab_comp_words '--expires-at --format --help --label --max-uses --role -h'"
+    )
+    assert invite_create_completion in bash_completion
     assert "run:--format) _darklab_comp_words 'text json ndjson'; return ;;" in bash_completion
+    assert "team:invite:create:--role) _darklab_comp_words 'owner admin operator viewer'; return ;;" in bash_completion
     assert "notify:create) _darklab_comp_words 'webhook slack discord telegram pushover email'" in bash_completion
     assert cli_main.main(["completion", "zsh"]) == 0
     zsh_completion = capsys.readouterr().out
     assert "#compdef darklab" in zsh_completion
+    assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in zsh_completion
+    assert "team:invite:create) _darklab_comp_words '--expires-at --format --help --label --max-uses --role -h'" in zsh_completion
     assert "compdef _darklab darklab" in zsh_completion
     assert cli_main.main(["completion", "fish"]) == 0
     fish_completion = capsys.readouterr().out

@@ -283,6 +283,10 @@ def _coerce_text(value: object) -> str:
     return str(value)
 
 
+def _json_payload_size(payload: str) -> int:
+    return len(payload.encode("utf-8", errors="replace"))
+
+
 def _is_valid_stream_event_id(event_id: str | None) -> bool:
     try:
         left, right = str(event_id or "").split("-", 1)
@@ -299,8 +303,30 @@ def _normalize_event_id(event_id: str | None) -> str:
     return str(event_id) if _is_valid_stream_event_id(str(event_id)) else "0-0"
 
 
-def _decode_payload(fields: object) -> dict[str, Any] | None:
+def _log_pty_payload_decode_failed(
+    *,
+    run_id: str = "",
+    event_id: str = "",
+    reason: str,
+    context: str = "",
+) -> None:
+    log.warning("PTY_PAYLOAD_DECODE_FAILED", extra={
+        "run_id": run_id,
+        "event_id": event_id,
+        "reason": reason,
+        "context": context,
+    })
+
+
+def _decode_payload(
+    fields: object,
+    *,
+    run_id: str = "",
+    event_id: str = "",
+    context: str = "",
+) -> dict[str, Any] | None:
     if not isinstance(fields, dict):
+        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason="fields_not_dict", context=context)
         return None
     raw = fields.get("payload")
     if raw is None:
@@ -308,12 +334,18 @@ def _decode_payload(fields: object) -> dict[str, Any] | None:
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8", errors="replace")
     if not isinstance(raw, str):
+        reason = "missing_payload" if raw is None else "payload_not_text"
+        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason=reason, context=context)
         return None
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
+        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason="invalid_json", context=context)
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason="payload_not_object", context=context)
+        return None
+    return payload
 
 
 def _prepare_child() -> None:
@@ -400,6 +432,22 @@ def _store_pty_meta(run: PtyRun, *, closed: bool = False) -> None:
     )
     if closed:
         redis_client.delete(_control_key(run.run_id), _snapshot_key(run.run_id))
+
+
+def _safe_store_pty_meta(run: PtyRun, *, closed: bool = False) -> bool:
+    try:
+        _store_pty_meta(run, closed=closed)
+        return True
+    except Exception as exc:
+        log.error("PTY_META_SAVE_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "cmd": run.command,
+            "closed": bool(closed),
+            "error": str(exc),
+        })
+        return False
 
 
 def _delete_pty_meta(run_id: str) -> None:
@@ -605,11 +653,35 @@ def _store_pty_snapshot(run: PtyRun, *, force: bool = False) -> None:
         run.snapshot_pending_bytes = 0
         run.snapshot_last_published = now
         run.snapshot_published_event_id = run.capture_event_id
+    payload_json = json.dumps(payload, separators=(",", ":"))
     redis_client.set(
         _snapshot_key(run.run_id),
-        json.dumps(payload, separators=(",", ":")),
+        payload_json,
         ex=_active_ttl(),
     )
+    log.debug("PTY_SNAPSHOT_PUBLISHED", extra={
+        "run_id": run.run_id,
+        "after_event_id": str(payload.get("after_event_id", "")),
+        "snapshot_format": str(payload.get("snapshot_format", "")),
+        "snapshot_truncated": bool(payload.get("snapshot_truncated")),
+        "payload_bytes": _json_payload_size(payload_json),
+    })
+
+
+def _safe_store_pty_snapshot(run: PtyRun, *, force: bool = False) -> bool:
+    try:
+        _store_pty_snapshot(run, force=force)
+        return True
+    except Exception as exc:
+        log.error("PTY_SNAPSHOT_SAVE_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "cmd": run.command,
+            "force": force,
+            "error": str(exc),
+        })
+        return False
 
 
 def _load_pty_snapshot(run_id: str, session_id: str, team_id: str = "") -> dict[str, Any] | None:
@@ -723,14 +795,38 @@ def publish_pty_event(run_id: str, event_type: str, payload: dict[str, Any] | No
     data = dict(payload or {})
     data["type"] = str(event_type)
     data.setdefault("created_at", time.time())
+    payload_json = json.dumps(data, separators=(",", ":"))
+    stream_key = _stream_key(run_id)
     event_id = _coerce_text(redis_client.xadd(
-        _stream_key(run_id),
-        {"payload": json.dumps(data, separators=(",", ":"))},
+        stream_key,
+        {"payload": payload_json},
         maxlen=_pty_stream_maxlen(),
         approximate=True,
     ))
-    redis_client.expire(_stream_key(run_id), _completed_ttl() if event_type in {"exit", "error"} else _active_ttl())
+    redis_client.expire(stream_key, _completed_ttl() if event_type in {"exit", "error"} else _active_ttl())
+    log.debug("PTY_EVENT_PUBLISHED", extra={
+        "run_id": run_id,
+        "event_type": str(event_type),
+        "event_id": event_id,
+        "stream_key": stream_key,
+        "payload_bytes": _json_payload_size(payload_json),
+    })
     return event_id
+
+
+def _safe_append_pty_event(run: PtyRun, event_type: str, payload: dict[str, Any] | None = None) -> str:
+    try:
+        return run.append_event(event_type, payload)
+    except Exception as exc:
+        log.error("PTY_EVENT_PUBLISH_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "event_type": event_type,
+            "cmd": run.command,
+            "error": str(exc),
+        })
+        return ""
 
 
 def _queue_pty_control(run_id: str, action: str, payload: dict[str, Any]) -> None:
@@ -738,12 +834,22 @@ def _queue_pty_control(run_id: str, action: str, payload: dict[str, Any]) -> Non
         raise RuntimeError("Redis is not available for PTY control events")
     body = dict(payload)
     body["action"] = action
-    redis_client.xadd(_control_key(run_id), {"payload": json.dumps(body, separators=(",", ":"))}, maxlen=1000, approximate=True)
-    redis_client.expire(_control_key(run_id), _active_ttl())
+    payload_json = json.dumps(body, separators=(",", ":"))
+    control_key = _control_key(run_id)
+    redis_client.xadd(control_key, {"payload": payload_json}, maxlen=1000, approximate=True)
+    redis_client.expire(control_key, _active_ttl())
+    queue_depth: int | None = None
     try:
-        app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(int(cast(Any, redis_client.xlen(_control_key(run_id)))))
+        queue_depth = int(cast(Any, redis_client.xlen(control_key)))
+        app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(queue_depth)
     except Exception as exc:
         log.debug("PTY_METRIC_WRITE_FAILED", extra={"run_id": run_id, "metric": "control_queue_depth", "error": str(exc)})
+    log.debug("PTY_CONTROL_QUEUED", extra={
+        "run_id": run_id,
+        "action": action,
+        "queue_depth": queue_depth,
+        "payload_bytes": _json_payload_size(payload_json),
+    })
 
 
 def _read_pty_control(run: PtyRun) -> list[dict[str, Any]]:
@@ -757,7 +863,7 @@ def _read_pty_control(run: PtyRun) -> list[dict[str, Any]]:
     for _key, stream_rows in rows or []:
         for event_id, fields in stream_rows:
             run.control_event_id = _coerce_text(event_id)
-            payload = _decode_payload(fields)
+            payload = _decode_payload(fields, run_id=run.run_id, event_id=run.control_event_id, context="control")
             if payload is not None:
                 controls.append(payload)
     return controls
@@ -801,8 +907,8 @@ def _apply_pty_controls(run: PtyRun) -> None:
             run.cols = _bounded_dimension(control.get("cols"), run.cols, 40, 240)
             _set_pty_size(run.master_fd, run.rows, run.cols)
             run.terminal_capture.resize(run.rows, run.cols)
-            _store_pty_meta(run)
-            _store_pty_snapshot(run, force=True)
+            _safe_store_pty_meta(run)
+            _safe_store_pty_snapshot(run, force=True)
             log.debug("PTY_CONTROL_APPLIED", extra={
                 "run_id": run.run_id,
                 "action": action,
@@ -820,22 +926,105 @@ def _apply_pty_controls(run: PtyRun) -> None:
             })
 
 
+def _cleanup_finished_pty_runtime(run: PtyRun) -> bool:
+    redis_runtime_keys_removed = False
+    cleanup_errors = 0
+
+    try:
+        os.close(run.master_fd)
+    except OSError as exc:
+        cleanup_errors += 1
+        log.error("PTY_READER_CLEANUP_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "pid": run.proc.pid,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "stage": "close_master",
+            "error": str(exc),
+        })
+
+    try:
+        with _runs_lock:
+            _runs.pop(run.run_id, None)
+    except Exception as exc:
+        cleanup_errors += 1
+        log.error("PTY_READER_CLEANUP_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "pid": run.proc.pid,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "stage": "local_registry",
+            "error": str(exc),
+        })
+
+    try:
+        pid_pop(run.run_id)
+    except Exception as exc:
+        cleanup_errors += 1
+        log.error("PTY_READER_CLEANUP_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "pid": run.proc.pid,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "stage": "pid_registry",
+            "error": str(exc),
+        })
+
+    try:
+        active_run_remove(run.run_id)
+    except Exception as exc:
+        cleanup_errors += 1
+        log.error("PTY_READER_CLEANUP_FAILED", exc_info=True, extra={
+            "run_id": run.run_id,
+            "pid": run.proc.pid,
+            "session": run.session_id,
+            "team_id": run.team_id,
+            "stage": "active_run_registry",
+            "error": str(exc),
+        })
+
+    if redis_client:
+        try:
+            redis_client.delete(_control_key(run.run_id))
+            redis_runtime_keys_removed = True
+        except Exception as exc:
+            cleanup_errors += 1
+            log.error("PTY_READER_CLEANUP_FAILED", exc_info=True, extra={
+                "run_id": run.run_id,
+                "pid": run.proc.pid,
+                "session": run.session_id,
+                "team_id": run.team_id,
+                "stage": "redis_runtime_keys",
+                "error": str(exc),
+            })
+
+    log.info("PTY_RUNTIME_CLEANED", extra={
+        "run_id": run.run_id,
+        "pid": run.proc.pid,
+        "session": run.session_id,
+        "team_id": run.team_id,
+        "redis_runtime_keys_removed": redis_runtime_keys_removed,
+        "cleanup_errors": cleanup_errors,
+    })
+    return cleanup_errors == 0
+
+
 def _reader_loop(run: PtyRun, client_ip: str) -> None:
     started_dt = datetime.fromisoformat(run.started)
     last_heartbeat = time.time()
     try:
-        run.append_event("started", {
+        _safe_append_pty_event(run, "started", {
             "run_id": run.run_id,
             "started": run.started,
             "interactive": True,
         })
-        _store_pty_snapshot(run, force=True)
+        _safe_store_pty_snapshot(run, force=True)
         while True:
             _apply_pty_controls(run)
             if run.max_runtime_seconds:
                 elapsed = (datetime.now(timezone.utc) - started_dt).total_seconds()
                 if elapsed >= run.max_runtime_seconds and run.proc.poll() is None:
-                    run.append_event("notice", {
+                    _safe_append_pty_event(run, "notice", {
                         "text": f"[timeout] Interactive PTY exceeded {run.max_runtime_seconds}s limit and was killed.",
                     })
                     _terminate_run(run)
@@ -850,15 +1039,17 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
                     text = chunk.decode("utf-8", errors="replace")
                     with run.snapshot_lock:
                         run.terminal_capture.feed(text)
-                        run.capture_event_id = run.append_event("output", {"text": text})
+                        event_id = _safe_append_pty_event(run, "output", {"text": text})
+                        if event_id:
+                            run.capture_event_id = event_id
                         run.snapshot_pending_bytes += len(chunk)
-                    _store_pty_snapshot(run)
+                    _safe_store_pty_snapshot(run)
                     continue
             if run.proc.poll() is not None:
                 break
             now = time.time()
             if now - last_heartbeat >= _pty_heartbeat_seconds():
-                run.append_event("heartbeat", {})
+                _safe_append_pty_event(run, "heartbeat", {})
                 last_heartbeat = now
 
         exit_code = run.proc.wait(timeout=5)
@@ -870,7 +1061,7 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
             "ip": client_ip,
             "cmd": run.command,
         })
-        run.append_event("error", {"text": str(exc)})
+        _safe_append_pty_event(run, "error", {"text": str(exc)})
         exit_code = run.proc.returncode if run.proc.returncode is not None else 1
         run.exit_code = exit_code
     finally:
@@ -897,25 +1088,16 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
             })
         exit_payload = {"code": code, "elapsed": elapsed, "interactive": True}
         exit_payload.update(completion_summary)
-        _store_pty_snapshot(run, force=True)
-        log.info("PTY_SNAPSHOT_PERSISTED", extra={
-            "run_id": run.run_id,
-            "session": run.session_id,
-            "rows": run.rows,
-            "cols": run.cols,
-            "forced": True,
-        })
-        run.append_event("exit", exit_payload)
-        try:
-            os.close(run.master_fd)
-        except OSError:
-            pass
-        with _runs_lock:
-            _runs.pop(run.run_id, None)
-        pid_pop(run.run_id)
-        active_run_remove(run.run_id)
-        if redis_client:
-            redis_client.delete(_control_key(run.run_id))
+        if _safe_store_pty_snapshot(run, force=True):
+            log.info("PTY_SNAPSHOT_PERSISTED", extra={
+                "run_id": run.run_id,
+                "session": run.session_id,
+                "rows": run.rows,
+                "cols": run.cols,
+                "forced": True,
+            })
+        _safe_append_pty_event(run, "exit", exit_payload)
+        _cleanup_finished_pty_runtime(run)
         output_line_count = 0
         raw_output_line_count = completion_summary.get("output_line_count", 0)
         if isinstance(raw_output_line_count, (int, str, bytes, bytearray)):
@@ -1153,7 +1335,7 @@ def pty_run_snapshot(
     with run.snapshot_lock:
         snapshot = _pty_snapshot_payload_from_run(run)
     snapshot["snapshot_age_seconds"] = 0
-    _store_pty_snapshot(run, force=True)
+    _safe_store_pty_snapshot(run, force=True)
     return True, "", snapshot
 
 
@@ -1182,7 +1364,18 @@ def write_pty_input(
         app_metrics.PTY_INPUT_DROPPED_BYTES.labels("oversize").inc(len(raw))
         return False, "Input is too large for this interactive run"
     if redis_client:
-        _queue_pty_control(run_id, "input", {"data": text})
+        try:
+            _queue_pty_control(run_id, "input", {"data": text})
+        except Exception as exc:
+            log.warning("PTY_CONTROL_QUEUE_FAILED", exc_info=True, extra={
+                "run_id": run_id,
+                "session": session_id,
+                "team_id": team_id,
+                "action": "input",
+                "payload_bytes": len(raw),
+                "error": str(exc),
+            })
+            return False, str(exc)
         app_metrics.PTY_INPUT_BYTES.inc(len(raw))
         return True, ""
     run = get_pty_run(run_id, session_id, team_id=team_id)
@@ -1214,10 +1407,32 @@ def resize_pty(
     rows_i = _bounded_dimension(rows, meta.get("rows", 24), 10, 60)
     cols_i = _bounded_dimension(cols, meta.get("cols", 100), 40, 240)
     if redis_client:
-        _queue_pty_control(run_id, "resize", {"rows": rows_i, "cols": cols_i})
+        try:
+            _queue_pty_control(run_id, "resize", {"rows": rows_i, "cols": cols_i})
+        except Exception as exc:
+            log.warning("PTY_CONTROL_QUEUE_FAILED", exc_info=True, extra={
+                "run_id": run_id,
+                "session": session_id,
+                "team_id": team_id,
+                "action": "resize",
+                "payload_bytes": _json_payload_size(json.dumps({"rows": rows_i, "cols": cols_i}, separators=(",", ":"))),
+                "error": str(exc),
+            })
+            return False, str(exc), 0, 0
         meta["rows"] = rows_i
         meta["cols"] = cols_i
-        redis_client.set(_meta_key(run_id), json.dumps(meta, separators=(",", ":")), ex=_active_ttl())
+        try:
+            redis_client.set(_meta_key(run_id), json.dumps(meta, separators=(",", ":")), ex=_active_ttl())
+        except Exception as exc:
+            log.error("PTY_META_SAVE_FAILED", exc_info=True, extra={
+                "run_id": run_id,
+                "session": session_id,
+                "team_id": team_id,
+                "cmd": str(meta.get("command", "") or ""),
+                "closed": False,
+                "error": str(exc),
+            })
+            return False, str(exc), 0, 0
         return True, "", rows_i, cols_i
     run = get_pty_run(run_id, session_id, team_id=team_id)
     if not run:
@@ -1226,7 +1441,7 @@ def resize_pty(
     run.cols = cols_i
     _set_pty_size(run.master_fd, run.rows, run.cols)
     run.terminal_capture.resize(run.rows, run.cols)
-    _store_pty_snapshot(run, force=True)
+    _safe_store_pty_snapshot(run, force=True)
     return True, "", run.rows, run.cols
 
 
@@ -1303,8 +1518,14 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
         for _key, stream_rows in rows:
             for event_id, fields in stream_rows:
                 current_id = _coerce_text(event_id)
-                payload = _decode_payload(fields)
+                payload = _decode_payload(fields, run_id=run_id, event_id=current_id, context="stream")
                 if payload is None:
+                    log.warning("PTY_STREAM_EVENT_SKIPPED", extra={
+                        "run_id": run_id,
+                        "event_id": current_id,
+                        "session": session_id,
+                        "team_id": team_id,
+                    })
                     continue
                 body = dict(payload)
                 body["event_id"] = current_id

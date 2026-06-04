@@ -361,6 +361,7 @@ describe('app helpers', () => {
       'project-package-manifest-modal',
       'project-package-wizard-modal',
       'project-entity-editor-modal',
+      'finding-triage-modal',
       'atlas-import-modal',
       'schedules-modal',
       'watchers-modal',
