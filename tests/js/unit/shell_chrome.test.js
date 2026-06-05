@@ -298,6 +298,7 @@ function loadShellChrome({
         <div id="project-package-manifest-modal">
           <span id="project-package-manifest-title"></span>
           <button class="project-package-manifest-close" type="button"></button>
+          <div id="project-package-manifest-summary"></div>
           <pre id="project-package-manifest-json"></pre>
         </div>
       </div>
@@ -3160,7 +3161,7 @@ describe('shell chrome project workspace', () => {
         status: 'draft',
         updated: '2026-05-07T00:02:12Z',
         manifest: {
-          package_format_version: 1,
+          package_format_version: 2,
           preset: 'evidence',
           redaction_mode: 'raw',
           include_private_notes: true,
@@ -3179,6 +3180,38 @@ describe('shell chrome project workspace', () => {
             finding_ids: ['finding-1'],
             artifact_ids: ['artifact-1'],
             target_ids: ['target-1'],
+          },
+          provenance: {
+            schema_version: 1,
+            kind: 'evidence_package',
+            build: {
+              redaction_mode: 'raw',
+              include_private_notes: true,
+              preset: 'evidence',
+              selected_entity_counts: {
+                run_ids: 2,
+                transcript_run_ids: 2,
+                finding_ids: 1,
+                artifact_ids: 1,
+                target_ids: 1,
+              },
+            },
+            sources: {
+              project_links: {
+                origin_sources: ['manual'],
+                counts_by_origin: { manual: 2 },
+              },
+            },
+            privacy: {
+              redaction_mode: 'raw',
+              private_notes_included: true,
+            },
+          },
+          import_hints: {
+            schema_version: 1,
+            kind: 'evidence_package_import_hints',
+            mode: 'preview_only',
+            warnings: [],
           },
         },
       },
@@ -3702,7 +3735,7 @@ describe('shell chrome project workspace', () => {
           status: 'draft',
           updated: '2026-05-07T00:03:12Z',
           manifest: {
-            package_format_version: 1,
+            package_format_version: 2,
             preset: payload.preset,
             counts: {
               runs: payload.selection.run_ids.length,
@@ -4344,6 +4377,7 @@ describe('shell chrome project workspace', () => {
     }))
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
     expect(document.getElementById('project-explorer-body').textContent).toContain('approved')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('source: manual')
     expect(document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]')).not.toBeNull()
     expectProjectPressablesBound(['.project-package-action'])
     document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]').click()
@@ -4353,7 +4387,9 @@ describe('shell chrome project workspace', () => {
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(true)
-    expect(document.getElementById('project-package-manifest-json').textContent).toContain('"package_format_version": 1')
+    expect(document.getElementById('project-package-manifest-summary').textContent).toContain('Provenance summary')
+    expect(document.getElementById('project-package-manifest-summary').textContent).toContain('manual (2)')
+    expect(document.getElementById('project-package-manifest-json').textContent).toContain('"package_format_version": 2')
     const manifestDismissible = dismissibles.find(item => item.el === document.getElementById('project-package-manifest-overlay'))
     expect(manifestDismissible?.options.isOpen()).toBe(true)
     document.querySelector('.project-package-manifest-close').click()
@@ -4594,6 +4630,10 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"estimated_archive"')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"transcript_run_ids"')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Best-guess ZIP size')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Provenance summary')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain(
+      'Project-link origin details are added',
+    )
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     await tick()

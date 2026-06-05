@@ -13,6 +13,7 @@ from core.database import DB_BACKEND
 from core.database_backend import dialect_for_backend
 from core.redaction import apply_redaction_rules
 from services.projects.package_presets import known_package_preset_ids
+from services.projects.provenance import attach_finding_target_references
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
     MAX_ENTITY_NOTE_BODY_LEN,
@@ -50,6 +51,8 @@ _TEXT_ARTIFACT_CONTENT_MARKERS = (
     "application/yaml",
     "application/x-yaml",
 )
+EVIDENCE_PACKAGE_FORMAT_VERSION = 2
+EVIDENCE_PACKAGE_PROVENANCE_SCHEMA_VERSION = 1
 
 
 def row_to_evidence_package(row):
@@ -59,6 +62,7 @@ def row_to_evidence_package(row):
         manifest = dialect_for_backend(DB_BACKEND).decode_json_dict(row["manifest"])
     except (TypeError, ValueError):
         manifest = {}
+    manifest = normalize_evidence_package_manifest(manifest)
     return {
         "id": row["id"],
         "session_id": row["session_id"],
@@ -67,7 +71,7 @@ def row_to_evidence_package(row):
         "description": row["description"] or "",
         "redaction_mode": row["redaction_mode"],
         "include_artifacts": bool(row["include_artifacts"]),
-        "manifest": manifest if isinstance(manifest, dict) else {},
+        "manifest": manifest,
         "status": row["status"],
         "created": row["created"],
         "updated": row["updated"],
@@ -119,7 +123,7 @@ def normalize_evidence_package_payload(data):
         "redaction_mode": redaction_mode,
         "include_artifacts": include_artifacts,
         "preset": preset,
-        "package_format_version": 1,
+        "package_format_version": EVIDENCE_PACKAGE_FORMAT_VERSION,
         "include_private_notes": bool(data.get("include_private_notes")),
         "selection": selection if isinstance(selection, dict) else None,
         "options": options if isinstance(options, dict) else {},
@@ -393,6 +397,324 @@ def package_manifest_without_private_notes(manifest):
     return clean
 
 
+def _selected_entity_counts(selected_entity_ids):
+    return {
+        key: len(value) if isinstance(value, list) else 0
+        for key, value in selected_entity_ids.items()
+    }
+
+
+def _project_link_origin_summary(*item_groups):
+    counts_by_origin = {}
+    for items in item_groups:
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            provenance = item.get("provenance")
+            if not isinstance(provenance, dict):
+                continue
+            origin = str(provenance.get("origin") or "").strip()
+            if not origin:
+                continue
+            counts_by_origin[origin] = counts_by_origin.get(origin, 0) + 1
+    return {
+        "origin_sources": sorted(counts_by_origin),
+        "counts_by_origin": {
+            origin: counts_by_origin[origin]
+            for origin in sorted(counts_by_origin)
+        },
+    }
+
+
+def _evidence_package_provenance(
+    payload,
+    project_payload,
+    selected_entity_ids,
+    counts,
+    output_options,
+    *,
+    selected_runs=None,
+    selected_targets=None,
+):
+    return {
+        "schema_version": EVIDENCE_PACKAGE_PROVENANCE_SCHEMA_VERSION,
+        "kind": "evidence_package",
+        "build": {
+            "redaction_mode": payload["redaction_mode"],
+            "include_private_notes": payload["include_private_notes"],
+            "include_artifacts": payload["include_artifacts"],
+            "preset": payload["preset"],
+            "options": dict(output_options),
+            "selected_entity_ids": dict(selected_entity_ids),
+            "selected_entity_counts": _selected_entity_counts(selected_entity_ids),
+            "included_entity_counts": dict(counts),
+        },
+        "sources": {
+            "project": {
+                "id": project_payload.get("id") or "",
+                "name": project_payload.get("name") or "",
+                "slug": project_payload.get("slug") or "",
+            },
+            "project_links": _project_link_origin_summary(selected_runs, selected_targets),
+        },
+        "privacy": {
+            "redaction_mode": payload["redaction_mode"],
+            "private_notes_included": payload["include_private_notes"],
+        },
+    }
+
+
+def _legacy_evidence_package_provenance(manifest):
+    selected_entity_ids = manifest.get("selected_entity_ids")
+    if not isinstance(selected_entity_ids, dict):
+        selected_entity_ids = {}
+    counts = manifest.get("counts")
+    if not isinstance(counts, dict):
+        counts = {}
+    project_payload = manifest.get("project")
+    if not isinstance(project_payload, dict):
+        project_payload = {}
+    redaction_mode = str(manifest.get("redaction_mode") or "").strip().lower() or "unknown"
+    return {
+        "schema_version": EVIDENCE_PACKAGE_PROVENANCE_SCHEMA_VERSION,
+        "kind": "evidence_package",
+        "build": {
+            "redaction_mode": redaction_mode,
+            "include_private_notes": bool(manifest.get("include_private_notes")),
+            "include_artifacts": bool(manifest.get("include_artifacts")),
+            "preset": str(manifest.get("preset") or "custom"),
+            "options": dict(manifest.get("options") or {}),
+            "selected_entity_ids": dict(selected_entity_ids),
+            "selected_entity_counts": _selected_entity_counts(selected_entity_ids),
+            "included_entity_counts": dict(counts),
+        },
+        "sources": {
+            "project": {
+                "id": project_payload.get("id") or "",
+                "name": project_payload.get("name") or "",
+                "slug": project_payload.get("slug") or "",
+            },
+            "project_links": {
+                "origin_sources": [],
+                "note": "Project-link origin details were not recorded in this package format.",
+            },
+        },
+        "privacy": {
+            "redaction_mode": redaction_mode,
+            "private_notes_included": bool(manifest.get("include_private_notes")),
+        },
+    }
+
+
+def _legacy_evidence_package_import_hints(manifest):
+    selected_entity_ids = manifest.get("selected_entity_ids")
+    if not isinstance(selected_entity_ids, dict):
+        selected_entity_ids = {}
+    return {
+        "schema_version": 1,
+        "kind": "evidence_package_import_hints",
+        "mode": "preview_only",
+        "summary": {
+            "package_metadata": "not_recorded",
+            "source_links": "not_recorded",
+            "target_relationships": "not_recorded",
+            "labels": "not_recorded",
+            "notes": "not_recorded",
+            "finding_review_state": "not_recorded",
+        },
+        "selected_entity_ids": dict(selected_entity_ids),
+        "warnings": [{
+            "code": "legacy_manifest",
+            "message": "Import hints were not recorded in this package format.",
+        }],
+    }
+
+
+def normalize_evidence_package_manifest(manifest):
+    if not isinstance(manifest, dict):
+        return {}
+    normalized = dict(manifest)
+    try:
+        package_format_version = int(normalized.get("package_format_version") or normalized.get("format") or 1)
+    except (TypeError, ValueError):
+        package_format_version = 1
+    normalized["package_format_version"] = package_format_version
+    normalized.setdefault("format", package_format_version)
+    if not isinstance(normalized.get("provenance"), dict):
+        normalized["provenance"] = _legacy_evidence_package_provenance(normalized)
+    if not isinstance(normalized.get("import_hints"), dict):
+        normalized["import_hints"] = _legacy_evidence_package_import_hints(normalized)
+    return normalized
+
+
+def _item_ids(items):
+    return [
+        str(item.get("id") or "")
+        for item in items
+        if isinstance(item, dict) and str(item.get("id") or "")
+    ]
+
+
+def _package_import_hint_warnings(
+    payload,
+    selected_runs,
+    selected_artifacts,
+    selected_findings,
+):
+    warnings = []
+    if payload["redaction_mode"] == "redacted":
+        warnings.append({
+            "code": "redacted_package",
+            "message": "Raw values were redacted before these import hints were written.",
+        })
+    if not payload["include_private_notes"]:
+        warnings.append({
+            "code": "private_notes_excluded",
+            "message": "Private notes were excluded and cannot be recreated from this package.",
+        })
+    for artifact in selected_artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        status = str(artifact.get("file_status") or "available")
+        if status == "available":
+            continue
+        warnings.append({
+            "code": "artifact_not_available",
+            "entity_type": "run_file_artifact",
+            "entity_id": str(artifact.get("id") or ""),
+            "status": status,
+            "message": str(artifact.get("file_status_detail") or "Artifact file was not available."),
+        })
+    selected_run_ids = set(_item_ids(selected_runs))
+    for finding in selected_findings:
+        if not isinstance(finding, dict):
+            continue
+        references = finding.get("target_references")
+        if not isinstance(references, list):
+            continue
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            source_run_id = str(reference.get("source_run_id") or "")
+            if source_run_id and source_run_id not in selected_run_ids:
+                warnings.append({
+                    "code": "source_run_not_selected",
+                    "entity_type": "finding",
+                    "entity_id": str(finding.get("id") or ""),
+                    "source_run_id": source_run_id,
+                    "message": "A target reference points to a source run that is not included in this package.",
+                })
+    return warnings
+
+
+def _source_link_import_hints(selected_runs, selected_targets):
+    hints = []
+    for entity_type, items in (("run", selected_runs), ("atlas_entity", selected_targets)):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_provenance = item.get("provenance")
+            provenance = raw_provenance if isinstance(raw_provenance, dict) else {}
+            hints.append({
+                "entity_type": entity_type,
+                "entity_id": str(item.get("id") or ""),
+                "source": str(provenance.get("origin") or item.get("link_source") or item.get("source") or "manual"),
+                "confidence": provenance.get("confidence", item.get("confidence", 1.0)),
+                "review_state": str(provenance.get("review_state") or item.get("review_state") or "confirmed"),
+            })
+    return hints
+
+
+def _target_relationship_import_hints(selected_findings):
+    hints = []
+    for finding in selected_findings:
+        if not isinstance(finding, dict):
+            continue
+        finding_id = str(finding.get("id") or "")
+        references = finding.get("target_references")
+        if not isinstance(references, list):
+            continue
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            hints.append({
+                "finding_id": finding_id,
+                "target_id": str(reference.get("target_id") or ""),
+                "target_type": str(reference.get("type") or "target"),
+                "source_run_id": str(reference.get("source_run_id") or ""),
+                "relationship_source": str(reference.get("relationship_source") or ""),
+                "confidence": reference.get("confidence", 1.0),
+            })
+    return hints
+
+
+def _finding_review_import_hints(selected_findings):
+    hints = []
+    for finding in selected_findings:
+        if not isinstance(finding, dict):
+            continue
+        raw_triage = finding.get("triage")
+        triage = raw_triage if isinstance(raw_triage, dict) else {}
+        hints.append({
+            "finding_id": str(finding.get("id") or ""),
+            "review_state": str(finding.get("review_state") or finding.get("status") or "new"),
+            "verification_status": str(triage.get("verification_status") or finding.get("verification_status") or ""),
+            "has_triage": bool(triage),
+        })
+    return hints
+
+
+def _evidence_package_import_hints(
+    payload,
+    project_payload,
+    selected_entity_ids,
+    *,
+    selected_runs,
+    selected_findings,
+    selected_artifacts,
+    selected_targets,
+):
+    return {
+        "schema_version": 1,
+        "kind": "evidence_package_import_hints",
+        "mode": "preview_only",
+        "note": "These hints describe a future import preview. They are not applied by this release.",
+        "package_metadata": {
+            "project_id": project_payload.get("id") or "",
+            "project_name": project_payload.get("name") or "",
+            "preset": payload["preset"],
+            "redaction_mode": payload["redaction_mode"],
+            "include_private_notes": payload["include_private_notes"],
+            "archive_paths": {
+                "manifest": "manifest.json",
+                "labels": "metadata/labels.json",
+                "notes": "notes/entity-notes.json",
+                "project_notes": "notes/project.md" if payload["include_private_notes"] and project_payload.get("note") else "",
+            },
+        },
+        "selected_entity_ids": dict(selected_entity_ids),
+        "source_links": _source_link_import_hints(selected_runs, selected_targets),
+        "target_relationships": _target_relationship_import_hints(selected_findings),
+        "labels": {
+            "archive_path": "metadata/labels.json",
+            "entity_types": ["project", "run", "finding", "target", "run_file_artifact", "package"],
+        },
+        "notes": {
+            "included": payload["include_private_notes"],
+            "archive_path": "notes/entity-notes.json",
+            "project_archive_path": (
+                "notes/project.md"
+                if payload["include_private_notes"] and project_payload.get("note")
+                else ""
+            ),
+        },
+        "finding_review_state": _finding_review_import_hints(selected_findings),
+        "warnings": _package_import_hint_warnings(payload, selected_runs, selected_artifacts, selected_findings),
+    }
+
+
 def evidence_manifest_from_summary(summary, payload, findings=None):
     findings = findings if isinstance(findings, list) else []
     selection = payload.get("selection")
@@ -425,6 +747,7 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
     selected_findings = _filter_package_items(findings, finding_ids)
     selected_artifacts = _filter_package_items(summary.get("artifacts", []), artifact_ids)
     selected_targets = _filter_package_items(summary.get("targets", []), target_ids)
+    attach_finding_target_references(selected_findings, summary.get("targets", []))
     include_raw_artifacts = bool(payload["include_artifacts"] and payload["redaction_mode"] != "redacted")
     include_redacted_artifact_derivatives = bool(
         payload["include_artifacts"] and payload["redaction_mode"] == "redacted"
@@ -448,24 +771,26 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
     }
     if payload["include_private_notes"] and summary["project"].get("note"):
         project_payload["note"] = summary["project"].get("note")
+    selected_entity_ids = {
+        "run_ids": run_ids,
+        "transcript_run_ids": transcript_run_ids,
+        "finding_ids": finding_ids,
+        "artifact_ids": artifact_ids,
+        "target_ids": target_ids,
+    }
+    counts = {
+        "runs": len(selected_runs),
+        "findings": len(selected_findings),
+        "artifacts": len(selected_artifacts),
+        "targets": len(selected_targets),
+    }
     manifest = {
-        "format": 1,
+        "format": EVIDENCE_PACKAGE_FORMAT_VERSION,
         "package_format_version": payload["package_format_version"],
         "project": project_payload,
-        "counts": {
-            "runs": len(selected_runs),
-            "findings": len(selected_findings),
-            "artifacts": len(selected_artifacts),
-            "targets": len(selected_targets),
-        },
+        "counts": counts,
         "project_counts": summary["counts"],
-        "selected_entity_ids": {
-            "run_ids": run_ids,
-            "transcript_run_ids": transcript_run_ids,
-            "finding_ids": finding_ids,
-            "artifact_ids": artifact_ids,
-            "target_ids": target_ids,
-        },
+        "selected_entity_ids": selected_entity_ids,
         "preset": payload["preset"],
         "options": output_options,
         "estimated_archive": estimate_evidence_package_archive(
@@ -484,6 +809,24 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
         "artifact_warnings": artifact_warnings,
         "redaction_mode": payload["redaction_mode"],
         "include_artifacts": payload["include_artifacts"],
+        "provenance": _evidence_package_provenance(
+            payload,
+            project_payload,
+            selected_entity_ids,
+            counts,
+            output_options,
+            selected_runs=selected_runs,
+            selected_targets=selected_targets,
+        ),
+        "import_hints": _evidence_package_import_hints(
+            payload,
+            project_payload,
+            selected_entity_ids,
+            selected_runs=selected_runs,
+            selected_findings=selected_findings,
+            selected_artifacts=selected_artifacts,
+            selected_targets=selected_targets,
+        ),
     }
     if not payload["include_private_notes"]:
         manifest = package_manifest_without_private_notes(manifest)
@@ -506,6 +849,29 @@ def redact_package_value(value, rules):
     return value
 
 
+def strip_target_reference_values(value):
+    if isinstance(value, list):
+        return [strip_target_reference_values(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    stripped = {}
+    for key, item in value.items():
+        if key == "target_references" and isinstance(item, list):
+            stripped[key] = [
+                {
+                    ref_key: strip_target_reference_values(ref_value)
+                    for ref_key, ref_value in reference.items()
+                    if ref_key != "value"
+                }
+                if isinstance(reference, dict)
+                else strip_target_reference_values(reference)
+                for reference in item
+            ]
+        else:
+            stripped[key] = strip_target_reference_values(item)
+    return stripped
+
+
 def package_redaction_rules(redaction_mode, *, cfg=None):
     if redaction_mode != "redacted":
         return []
@@ -515,7 +881,8 @@ def package_redaction_rules(redaction_mode, *, cfg=None):
 def redact_package_manifest(manifest, rules):
     if not rules:
         return dict(manifest or {})
-    redacted = redact_package_value(manifest or {}, rules)
+    stripped = strip_target_reference_values(manifest or {})
+    redacted = redact_package_value(stripped, rules)
     return redacted if isinstance(redacted, dict) else {}
 
 

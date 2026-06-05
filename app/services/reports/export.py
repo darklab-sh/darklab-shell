@@ -13,7 +13,12 @@ import zipfile
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.utils import cfg_mb_bytes
 
+from .models import normalize_report_draft
 from .rendering import render_report_html, render_report_markdown, report_generation_metadata
+
+
+REPORT_ARCHIVE_FORMAT_VERSION = 2
+REPORT_ARCHIVE_PROVENANCE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,55 @@ def _archive_filename(project: dict[str, Any] | None) -> str:
     return f"{normalized}-engagement-report.zip"
 
 
+def _report_manifest_provenance(
+    draft: dict[str, Any] | None,
+    generation: dict[str, str],
+    *,
+    project: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_draft = normalize_report_draft(draft or {})
+    selection = normalized_draft.get("selection") or {}
+    selected_entity_ids = {
+        key: list(value) if isinstance(value, list) else []
+        for key, value in selection.items()
+    }
+    included_sections = [
+        {
+            "type": str(section.get("type") or ""),
+            "title": str(section.get("title") or ""),
+        }
+        for section in normalized_draft.get("sections", [])
+        if isinstance(section, dict) and section.get("enabled")
+    ]
+    export_prefs = normalized_draft.get("export") or {}
+    return {
+        "schema_version": REPORT_ARCHIVE_PROVENANCE_SCHEMA_VERSION,
+        "kind": "engagement_report",
+        "build": {
+            "redaction_mode": generation["redaction_mode"],
+            "include_private_notes": bool(export_prefs.get("include_private_notes")),
+            "selection_modes": dict(normalized_draft.get("selection_modes") or {}),
+            "selected_entity_ids": selected_entity_ids,
+            "selected_entity_counts": {
+                key: len(value)
+                for key, value in selected_entity_ids.items()
+            },
+            "included_sections": included_sections,
+        },
+        "sources": {
+            "project": {
+                "id": str((project or {}).get("id") or ""),
+                "name": str((project or {}).get("name") or ""),
+                "slug": str((project or {}).get("slug") or ""),
+            },
+        },
+        "privacy": {
+            "redaction_mode": generation["redaction_mode"],
+            "private_notes_included": bool(export_prefs.get("include_private_notes")),
+        },
+    }
+
+
 def build_report_export_archive(
     draft: dict[str, Any] | None,
     *,
@@ -101,7 +155,7 @@ def build_report_export_archive(
         raise EvidencePackageTooLarge("report expanded content estimate exceeds configured size limit")
     manifest = {
         "kind": "engagement_report",
-        "format_version": 1,
+        "format_version": REPORT_ARCHIVE_FORMAT_VERSION,
         "generated_at": bundle.generation["generated_at"],
         "generated_by": {
             "app_name": bundle.generation["app_name"],
@@ -111,6 +165,11 @@ def build_report_export_archive(
         "project_id": str((project or {}).get("id") or ""),
         "project_name": str((project or {}).get("name") or ""),
         "files": ["report.md", "report.html"],
+        "provenance": _report_manifest_provenance(
+            draft,
+            bundle.generation,
+            project=project,
+        ),
     }
     if progress_callback:
         progress_callback("archiving", "Writing report archive")

@@ -104,7 +104,22 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 {% for finding in group.findings %}
 <tr>
 <td>{{ finding.title or finding.raw_line or finding.id }}</td>
-<td>{{ finding.target_id or finding.entity_id }}</td>
+<td>
+{% if finding.target_references %}
+{% for target in finding.target_references %}
+<p>
+<strong>{{ target.type }}:</strong> {{ target.value or target.target_id }}
+{% if target.relationship_source %}
+<br><span class="muted">{{ target.relationship_source }}
+{% if target.source_run_id %} - run {{ target.source_run_id }}{% endif %}
+</span>
+{% endif %}
+</p>
+{% endfor %}
+{% else %}
+{{ finding.target_id or finding.entity_id }}
+{% endif %}
+</td>
 <td>{{ finding.review_state or finding.status }}</td>
 <td>
 {% if finding.triage %}
@@ -262,6 +277,32 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     return lines
 
 
+def _target_reference_label(reference: Any) -> str:
+    if not isinstance(reference, dict):
+        return ""
+    target_type = _md(reference.get("type") or "target")
+    value = _md(reference.get("value") or reference.get("target_id"))
+    source = _md(reference.get("relationship_source"))
+    source_run = _md(reference.get("source_run_id"))
+    label = f"{target_type}: {value}" if value else target_type
+    details = [item for item in (source, f"run {source_run}" if source_run else "") if item]
+    return f"{label} ({', '.join(details)})" if details else label
+
+
+def _finding_target_labels(finding: dict[str, Any]) -> list[str]:
+    references = finding.get("target_references")
+    labels = [
+        _target_reference_label(reference)
+        for reference in references
+        if isinstance(reference, dict)
+    ] if isinstance(references, list) else []
+    labels = [label for label in labels if label]
+    if labels:
+        return labels
+    target_id = _md(finding.get("target_id") or finding.get("entity_id"))
+    return [target_id] if target_id else []
+
+
 def _section_enabled(section: dict[str, Any]) -> bool:
     return bool(section.get("enabled", True))
 
@@ -304,7 +345,7 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
             for finding in group.get("findings", []):
                 lines.append(f"- **{_md(finding.get('title') or finding.get('raw_line') or finding.get('id'))}**")
                 details = [
-                    ("Target", finding.get("target_id") or finding.get("entity_id")),
+                    ("Target", "; ".join(_finding_target_labels(finding))),
                     ("Review", finding.get("review_state") or finding.get("status")),
                     ("Run", finding.get("run_id")),
                 ]

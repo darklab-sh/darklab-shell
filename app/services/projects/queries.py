@@ -636,7 +636,7 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra
     provider_list_expr = dialect.string_agg_distinct("eis.provider")
     value_order_expr = dialect.case_insensitive_order("e.canonical_value")
     return (
-        "SELECT e.id, l.project_id, e.type, e.canonical_value, "  # nosec
+        "SELECT e.id, l.id AS link_id, l.project_id, e.type, e.canonical_value, "  # nosec
         "COALESCE(("
         "SELECT erl.run_id FROM entity_run_links erl "
         "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "
@@ -676,14 +676,14 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra
     )
 
 
-def _project_run_rows_to_items(conn, session_id, rows, *, team_id=""):
+def _project_run_rows_to_items(conn, session_id, rows, *, team_id="", include_provenance=False):
     run_ids = [row["id"] for row in rows if row["id"]]
     finding_counts, artifact_counts = _project_run_count_maps(conn, session_id, run_ids, team_id=team_id)
     run_labels = _entity_labels_by_id(conn, session_id, "run", run_ids, team_id=team_id)
     run_notes = _entity_notes_by_id(conn, session_id, "run", run_ids, team_id=team_id)
     runs = []
     for row in rows:
-        item = _row_to_project_run(row)
+        item = _row_to_project_run(row, include_provenance=include_provenance)
         if not item:
             continue
         run_id = str(item["id"])
@@ -709,13 +709,13 @@ def _project_entity_counts_by_type(conn, session_id, project_id, *, team_id=""):
     return {str(row["type"] or ""): int(row["count"] or 0) for row in rows}
 
 
-def _project_entity_rows_to_items(conn, session_id, rows, *, team_id=""):
+def _project_entity_rows_to_items(conn, session_id, rows, *, team_id="", include_provenance=False):
     entity_ids = [str(row["id"] or "") for row in rows if row["id"]]
     entity_labels = _entity_labels_by_id(conn, session_id, "atlas_entity", entity_ids, team_id=team_id)
     entity_notes = _entity_notes_by_id(conn, session_id, "atlas_entity", entity_ids, team_id=team_id)
     entities = []
     for row in rows:
-        item = _row_to_target(row)
+        item = _row_to_target(row, include_provenance=include_provenance)
         if not item:
             continue
         item_id = str(item["id"])
@@ -838,7 +838,7 @@ def _project_artifact_rows_to_items(session_id, conn, rows, *, team_id=""):
     return artifacts
 
 
-def get_project_summary(session_id, project_id, *, team_id=""):
+def get_project_summary(session_id, project_id, *, team_id="", include_provenance=False):
     with db_connect() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
@@ -864,7 +864,8 @@ def get_project_summary(session_id, project_id, *, team_id=""):
         entity_owner_sql, entity_owner_params = _project_entity_owner_clause(session_id, team_id)
         metadata_session = metadata_owner_id(session_id, team_id)
         run_link_rows = conn.execute(
-            "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created "
+            "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created, "
+            "l.confidence, l.review_state, l.source_detail "
             "FROM project_links l JOIN runs r ON r.id = l.entity_id "
             "WHERE l.project_id = ? AND l.entity_type = 'run' "
             "AND " + run_owner_sql + " AND r.run_kind = ? "  # nosec
@@ -872,7 +873,8 @@ def get_project_summary(session_id, project_id, *, team_id=""):
             (project_id, *run_owner_params, RUN_KIND_EXTERNAL),
         ).fetchall()
         atlas_link_rows = conn.execute(
-            "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created "  # nosec
+            "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created, "  # nosec
+            "l.confidence, l.review_state, l.source_detail "
             "FROM project_links l JOIN entities e ON e.id = l.entity_id "
             "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
             + entity_owner_sql
@@ -921,6 +923,8 @@ def get_project_summary(session_id, project_id, *, team_id=""):
                 "r.full_output_available, r.full_output_truncated, "
                 "art.byte_size AS output_artifact_byte_size, "
                 "art.line_count AS output_artifact_line_count, "
+                "l.id AS link_id, l.confidence AS link_confidence, "
+                "l.review_state AS link_review_state, l.source_detail AS link_source_detail, "
                 "l.created, l.source AS link_source "
                 "FROM project_links l JOIN runs r ON r.id = l.entity_id "
                 "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
@@ -1011,10 +1015,16 @@ def get_project_summary(session_id, project_id, *, team_id=""):
             + _count_entity_metadata_for_ids(conn, "entity_notes", "target", target_ids, session_id=session_id, team_id=team_id)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "package", package_ids, session_id=session_id, team_id=team_id)
         )
-        run_items = _project_run_rows_to_items(conn, session_id, run_rows, team_id=team_id)
-    links = [_row_to_link(row) for row in link_rows]
+        run_items = _project_run_rows_to_items(
+            conn,
+            session_id,
+            run_rows,
+            team_id=team_id,
+            include_provenance=include_provenance,
+        )
+    links = [_row_to_link(row, include_provenance=include_provenance) for row in link_rows]
     targets = []
-    for item in (_row_to_target(row) for row in target_rows):
+    for item in (_row_to_target(row, include_provenance=include_provenance) for row in target_rows):
         if not item:
             continue
         item_id = str(item["id"])
@@ -1306,7 +1316,7 @@ def _list_all_project_artifacts(session_id, project_id, *, team_id=""):
     return artifacts
 
 
-def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id=""):
+def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="", include_provenance=False):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     with db_connect() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
@@ -1330,6 +1340,8 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="")
             "r.full_output_available, r.full_output_truncated, "
             "art.byte_size AS output_artifact_byte_size, "
             "art.line_count AS output_artifact_line_count, "
+            "l.id AS link_id, l.confidence AS link_confidence, "
+            "l.review_state AS link_review_state, l.source_detail AS link_source_detail, "
             "l.created, l.source AS link_source "
             "FROM project_links l JOIN runs r ON r.id = l.entity_id "
             "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
@@ -1339,7 +1351,13 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="")
             "LIMIT ? OFFSET ?",
             (project_id, *run_owner_params, RUN_KIND_EXTERNAL, safe_limit, safe_offset),
         ).fetchall()
-        runs = _project_run_rows_to_items(conn, session_id, rows, team_id=team_id)
+        runs = _project_run_rows_to_items(
+            conn,
+            session_id,
+            rows,
+            team_id=team_id,
+            include_provenance=include_provenance,
+        )
     return _page_payload("runs", runs, total, safe_limit, safe_offset)
 
 

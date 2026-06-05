@@ -253,13 +253,32 @@
       return parts.filter(Boolean).join(' · ');
     }
 
+    function packageChips(pkg) {
+      const chips = ctx.entityMetadataChips(pkg);
+      const summary = ctx.projectProvenanceSummary?.(manifestFor(pkg), { fallbackKind: 'evidence_package' });
+      if (summary?.chips?.length) {
+        const provenanceChip = summary.chips.find(chip => String(chip.label || '').startsWith('source:'))
+          || summary.chips[0];
+        if (provenanceChip) chips.push(provenanceChip);
+      }
+      return chips;
+    }
+
     function openManifest(pkg) {
       if (!ctx.manifestOverlay || !ctx.manifestJson) {
         throw new Error('Manifest preview is not available.');
       }
       const name = String(pkg && pkg.name || 'package').trim() || 'package';
+      const manifest = manifestFor(pkg);
       if (ctx.manifestTitle) ctx.manifestTitle.textContent = `${name} manifest`;
-      ctx.manifestJson.textContent = JSON.stringify(manifestFor(pkg), null, 2);
+      if (ctx.manifestSummary) {
+        ctx.manifestSummary.replaceChildren();
+        ctx.manifestSummary.appendChild(
+          ctx.projectProvenanceSummaryElement?.(manifest, { fallbackKind: 'evidence_package' })
+            || document.createElement('div'),
+        );
+      }
+      ctx.manifestJson.textContent = JSON.stringify(manifest, null, 2);
       ctx.manifestOverlay.classList.remove('u-hidden');
       ctx.manifestOverlay.classList.add('open');
       ctx.manifestOverlay.setAttribute('aria-hidden', 'false');
@@ -274,6 +293,7 @@
       ctx.manifestOverlay.classList.add('u-hidden');
       ctx.manifestOverlay.classList.remove('open');
       ctx.manifestOverlay.setAttribute('aria-hidden', 'true');
+      if (ctx.manifestSummary) ctx.manifestSummary.replaceChildren();
       if (ctx.manifestJson) ctx.manifestJson.textContent = '';
       ctx.syncProjectWorkspaceNestedSuppression?.();
     }
@@ -1159,31 +1179,61 @@
       if (wizard.includePrivateNotes && summary?.project?.note) {
         projectPreview.note = summary.project.note;
       }
+      const selectedEntityIds = {
+        run_ids: Array.from(wizard.selection.runIds),
+        transcript_run_ids: Array.from(wizard.selection.transcriptRunIds)
+          .filter(runId => wizard.selection.runIds.has(String(runId || ''))),
+        finding_ids: Array.from(wizard.selection.findingIds),
+        artifact_ids: Array.from(wizard.selection.artifactIds),
+        target_ids: Array.from(wizard.selection.targetIds),
+      };
+      const counts = {
+        runs: wizard.selection.runIds.size,
+        findings: wizard.selection.findingIds.size,
+        artifacts: wizard.selection.artifactIds.size,
+        targets: wizard.selection.targetIds.size,
+      };
+      const options = {
+        manifest_json: true,
+        raw_artifacts: !!wizard.includeArtifacts && wizard.redactionMode !== 'redacted',
+        redacted_artifact_derivatives: !!wizard.includeArtifacts && wizard.redactionMode === 'redacted',
+        index_html: true,
+        transcripts_html: wizard.selection.transcriptRunIds.size > 0,
+      };
       return {
-        package_format_version: 1,
+        package_format_version: 2,
         preset: wizard.preset,
-        options: {
-          manifest_json: true,
-          raw_artifacts: !!wizard.includeArtifacts && wizard.redactionMode !== 'redacted',
-          redacted_artifact_derivatives: !!wizard.includeArtifacts && wizard.redactionMode === 'redacted',
-          index_html: true,
-          transcripts_html: wizard.selection.transcriptRunIds.size > 0,
-        },
+        options,
         redaction_mode: wizard.redactionMode || 'raw',
         include_private_notes: !!wizard.includePrivateNotes,
-        counts: {
-          runs: wizard.selection.runIds.size,
-          findings: wizard.selection.findingIds.size,
-          artifacts: wizard.selection.artifactIds.size,
-          targets: wizard.selection.targetIds.size,
-        },
-        selected_entity_ids: {
-          run_ids: Array.from(wizard.selection.runIds),
-          transcript_run_ids: Array.from(wizard.selection.transcriptRunIds)
-            .filter(runId => wizard.selection.runIds.has(String(runId || ''))),
-          finding_ids: Array.from(wizard.selection.findingIds),
-          artifact_ids: Array.from(wizard.selection.artifactIds),
-          target_ids: Array.from(wizard.selection.targetIds),
+        counts,
+        selected_entity_ids: selectedEntityIds,
+        provenance: {
+          schema_version: 1,
+          kind: 'evidence_package',
+          build: {
+            redaction_mode: wizard.redactionMode || 'raw',
+            include_private_notes: !!wizard.includePrivateNotes,
+            include_artifacts: !!wizard.includeArtifacts,
+            preset: wizard.preset,
+            options,
+            selected_entity_ids: selectedEntityIds,
+            selected_entity_counts: Object.fromEntries(
+              Object.entries(selectedEntityIds).map(([key, value]) => [key, value.length]),
+            ),
+            included_entity_counts: counts,
+          },
+          sources: {
+            project: projectPreview,
+            project_links: {
+              origin_sources: [],
+              note: 'Project-link origin details are added when provenance fields are requested.',
+            },
+          },
+          privacy: {
+            redaction_mode: wizard.redactionMode || 'raw',
+            private_notes_included: !!wizard.includePrivateNotes,
+          },
         },
         estimated_archive: estimate,
         skipped_preview: skipped,
@@ -1347,6 +1397,12 @@
         });
         skippedWrap.appendChild(list);
         wrap.appendChild(skippedWrap);
+      }
+      if (typeof ctx.projectProvenanceSummaryElement === 'function') {
+        wrap.appendChild(ctx.projectProvenanceSummaryElement(preview, {
+          fallbackKind: 'evidence_package',
+          title: 'Provenance summary',
+        }));
       }
       const pre = document.createElement('pre');
       pre.className = 'project-package-manifest-json project-package-preview-json nice-scroll';
@@ -1637,7 +1693,7 @@
           title: pkg.name,
           meta: metaText(pkg),
           detail,
-          chips: ctx.entityMetadataChips(pkg),
+          chips: packageChips(pkg),
           accessory: accessory(projectId, pkg),
         }));
       });

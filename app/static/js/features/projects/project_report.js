@@ -676,6 +676,65 @@
       host.appendChild(section);
     }
 
+    function provenanceCountsFromItems(items) {
+      const counts = {};
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const provenance = item?.provenance && typeof item.provenance === 'object' ? item.provenance : null;
+        const origin = String(provenance?.origin || item?.link_source || '').trim();
+        if (!origin) return;
+        counts[origin] = (counts[origin] || 0) + 1;
+      });
+      return counts;
+    }
+
+    function reportProvenanceManifest(st, summary) {
+      const draft = st?.draft || defaultDraft();
+      const runCounts = provenanceCountsFromItems(ctx.projectRunItems?.(summary));
+      const targetCounts = provenanceCountsFromItems(ctx.projectTargetItems?.(summary));
+      const counts = { ...runCounts };
+      Object.entries(targetCounts).forEach(([origin, count]) => {
+        counts[origin] = (counts[origin] || 0) + count;
+      });
+      const originSources = Object.keys(counts);
+      const selectedCounts = Object.fromEntries(
+        Object.entries(draft.selection || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]),
+      );
+      return {
+        redaction_mode: draft.export?.redaction_mode || 'redacted',
+        include_private_notes: !!draft.export?.include_private_notes,
+        selected_entity_ids: draft.selection || {},
+        provenance: {
+          schema_version: originSources.length ? 1 : '',
+          kind: 'engagement_report',
+          build: {
+            redaction_mode: draft.export?.redaction_mode || 'redacted',
+            include_private_notes: !!draft.export?.include_private_notes,
+            selected_entity_ids: draft.selection || {},
+            selected_entity_counts: selectedCounts,
+          },
+          sources: {
+            project_links: originSources.length
+              ? { origin_sources: originSources, counts_by_origin: counts }
+              : { origin_sources: [], note: 'Source provenance is not present in this project view.' },
+          },
+          privacy: {
+            redaction_mode: draft.export?.redaction_mode || 'redacted',
+            private_notes_included: !!draft.export?.include_private_notes,
+          },
+        },
+      };
+    }
+
+    function renderProvenance(st, host, summary) {
+      if (typeof ctx.projectProvenanceSummaryElement !== 'function') return;
+      const section = ctx.projectProvenanceSummaryElement(reportProvenanceManifest(st, summary), {
+        fallbackKind: 'engagement_report',
+        title: 'Provenance',
+      });
+      section.classList.add('project-report-panel');
+      host.appendChild(section);
+    }
+
     function renderSelection(st, host, projectId, summary) {
       const section = document.createElement('section');
       section.className = 'project-report-panel project-report-selection';
@@ -798,6 +857,7 @@
       renderMetadata(st, editor);
       renderSections(st, editor);
       renderExportPrefs(st, editor);
+      renderProvenance(st, editor, summary);
       if (ensureFullSelectionItems(projectId, summary)) {
         renderSelection(st, editor, projectId, summary);
       } else {

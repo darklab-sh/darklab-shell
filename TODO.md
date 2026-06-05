@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Richer package/export provenance implementation plan](#richer-packageexport-provenance-implementation-plan)
   - [Audit log surface implementation plan](#audit-log-surface-implementation-plan)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -31,68 +30,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
-
-### Richer package/export provenance implementation plan
-
-Improve package and report handoff metadata so exported work explains where evidence came from, how it was selected, and what context should survive import/export loops. Land the provenance schema ahead of the report builder where practical, but keep reports able to consume provenance as optional input with clean fallbacks.
-
-**Goal and boundaries**
-- Make package manifests and reports show clear source context for targets, findings, artifacts, runs, imports, labels, notes, and package builds.
-- Add explicit target references when selected findings rely on derived relationships that are not obvious in the finding text.
-- Preserve source and curation hints so labels, notes, targets, findings, and packages survive a handoff/round-trip with less manual repair — without ever auto-writing project data on import.
-
-**Foundations to reuse (already in the codebase)**
-- Manifest builder: `evidence_manifest_from_summary` in `services/projects/packages.py` already emits `package_format_version`, `selected_entity_ids`, `preset`, `options`, and `links` — the provenance block slots in here.
-- Manifest writer/format: `package_archive.py` writes `manifest.json` with a top-level `format`/`package_format_version`; bump the format and add a versioned parser/normalizer so old packages still render with a consistent "not recorded" provenance shape.
-- Link origin sources: `project_links.source`, `project_links.source_detail`, and `PROJECT_LINK_SOURCES` in `core.database` are the source of truth for project-link provenance. Atlas import provenance is a separate path through `atlas_entity_import_links` / `atlas_finding_import_occurrences` and `v0027_atlas_import_sources`.
-- Redaction/private-note handling: route provenance through the same package helpers used by the report builder, because source commands, target values, import source names, labels, and note status can disclose sensitive context even when the finding body is redacted.
-
-**Decisions and risks**
-- Do not invent a parallel origin enum. Map the persisted `PROJECT_LINK_SOURCES` values into the manifest provenance shape: `manual`, `active_project`, `auto_command`, `auto_input_file`, `auto_promote_rule`, `package_flow`, and `migration`.
-- Keep project-link origin provenance separate from Atlas import provenance. Atlas import details come from the import-source tables, not from a synthetic `import` project-link source.
-- Keep the first slice manifest-only for import hints. Emit enough context for a future preview/apply flow, but do not build package re-import or auto-rehydration behavior in v2.2.
-- Ship stored relationship confidence in the first slice. The column is data-backed and at least some writers use non-default values; defer only new scoring logic or prominent confidence UI that would imply the values are fully calibrated.
-- Expose one normalized provenance shape to the API, package preview, and report builder so consumers do not each branch on manifest version details.
-
-**Phase P1 — Manifest provenance schema**
-- Define a versioned provenance block in `packages.py` carrying per-item source context for targets, findings, artifacts, runs, imports, labels, notes, and the package build itself.
-  - Source run ids and redaction-safe run commands where those dimensions were captured.
-  - Import source ids and external tool format (from `atlas_import_sources`) when safe to expose.
-  - Project-link origin mapped from `PROJECT_LINK_SOURCES`: `manual`, `active_project`, `auto_command`, `auto_input_file`, `auto_promote_rule` (with rule id/details), `package_flow`, and `migration`.
-  - Labels and notes included-vs-excluded status without leaking excluded private note bodies.
-  - Target relationship source, source detail/reason, and stored confidence.
-  - Package build settings: redaction mode, preset/template id, and selected entity ids.
-- Bump `package_format_version`, add an explicit normalizer branch for the prior format, and record the schema change in a manifest-format note in `ARCHITECTURE.md`.
-
-**Phase P2 — Serializer provenance fields**
-- Normalize or add provenance fields in the project serializers (`queries.py`, `links.py`, `metadata.py`, `findings.py`, `targets.py`) before changing any browser display, so the manifest and UI read from one source.
-- Map existing `project_links.source`, `source_detail`, and `confidence` onto the provenance block's origin/source-detail/confidence fields. This is a serializer task, not a schema migration.
-- Keep Atlas import provenance serializers separate: read source tool, file hash, and `source_detail_json` from the Atlas import-source/link tables instead of treating imports as project-link origins.
-
-**Phase P3 — Target and finding references**
-- Add richer target context to package/report finding rows: redaction-safe target value, target type, relationship source/reason, source run, and linked entity when known.
-- When a finding references a host/domain/URL indirectly, surface the target relationship in the manifest and report instead of relying on the raw line alone.
-- Keep references compact in UI rows and detailed in manifest/report output; feed the same structure into the report builder so both tell one story.
-
-**Phase P4 — Round-trip / import hints**
-- Add an import-hint block describing how a future import should recreate labels, notes, target relationships, source links, package metadata, and finding review state.
-- Keep this phase to emitted hints and warnings only. Package re-import preview/apply stays a later implementation and must reuse the Atlas import preview/apply pattern before it writes project data.
-- Emit warnings when package data is redacted, private notes are excluded, or source runs/artifacts are no longer available.
-
-**Phase P5 — Browser surface**
-- Update the package preview and manifest viewer (`project_packages.js`) to show a concise provenance summary above the raw JSON.
-- Add compact "source"/"provenance" chips only where they explain package rows without crowding the project UI (reuse `project_shared_ui.js`); put fuller detail in the manifest/provenance summary.
-- Feed the same provenance summary into the report-builder display.
-
-**Phase P6 — Validation and docs**
-- Pytest: manifest schema and provenance fields; target relationship serialization; redaction/private-note exclusion; redacted provenance does not leak original commands/targets; backward compatibility (older-format manifests still read and normalize); `PROJECT_LINK_SOURCES` mapping; Atlas import provenance stays separate from project-link origin.
-- Vitest: package preview/manifest provenance rendering; older-manifest "not recorded" display; report-builder provenance display.
-- Playwright: create a package from project data and verify the visible provenance summary plus the manifest JSON.
-- Docs: API/OpenAPI (`blueprints/api_v1.py`) for manifest schema/version changes and any payload fields; `ARCHITECTURE.md` manifest-schema note; `CHANGELOG.md`; release drafts.
-
-**Cut line**
-- v2.2 target (full-featured): manifest provenance fields; project-link origin mapped from existing `source`/`source_detail` values; Atlas import provenance kept on its own path; target references with stored confidence in package/report output; package-preview provenance summary; format-version bump with backward-compatible normalization; import hints emitted but not applied; full tests.
-- Later: package re-import preview/apply; cross-package lineage; richer confidence scoring; package comparison.
 
 ### Audit log surface implementation plan
 
@@ -187,10 +124,8 @@ These are possible future improvements, split by whether they look worth carryin
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
-- **Richer target references in package exports.**
-  - Useful when selected findings rely on derived relationships that are not directly visible in the finding text.
-- **Richer provenance metadata and round-trip import hints.**
-  - Helps labels, notes, targets, findings, and packages survive export/import workflows with less manual repair.
+- **Package re-import preview/apply.**
+  - Worth scoping once package handoff archives are used regularly. It should reuse the Atlas import preview/apply pattern and the package manifest import hints before it writes project data.
 - **Revisit PTY transport after real usage.**
   - The current Redis-brokered SSE plus POST endpoints keep deployment simple, but WebSockets may be worth it if latency, throughput, or bidirectional control becomes a real limitation.
 - **Split `pty.js` and `pty_service.py` if PTY work grows again.**

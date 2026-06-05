@@ -227,6 +227,8 @@ export async function loadAppFns({
     <div id="project-package-manifest-overlay" class="u-hidden">
       <div id="project-package-manifest-modal">
         <button class="project-package-manifest-close"></button>
+        <div id="project-package-manifest-summary"></div>
+        <pre id="project-package-manifest-json"></pre>
       </div>
     </div>
     <div id="project-package-wizard-overlay" class="u-hidden">

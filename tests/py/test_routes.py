@@ -5583,6 +5583,89 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         package = json.loads(resp.data)["package"]
         assert package["manifest"]["preset"] == "customer_handoff"
+        legacy_manifest = {
+            "format": 1,
+            "package_format_version": 1,
+            "project": {
+                "id": project["id"],
+                "name": project["name"],
+                "slug": project.get("slug", ""),
+            },
+            "counts": {"runs": 0, "findings": 0, "artifacts": 0, "targets": 0},
+            "selected_entity_ids": {
+                "run_ids": [],
+                "transcript_run_ids": [],
+                "finding_ids": [],
+                "artifact_ids": [],
+                "target_ids": [],
+            },
+            "preset": "custom",
+            "options": {"manifest_json": True},
+            "redaction_mode": "raw",
+            "include_private_notes": False,
+            "include_artifacts": False,
+        }
+        legacy_package_id = f"pkg_legacy_{uuid.uuid4().hex[:12]}"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO evidence_packages "
+                "(id, session_id, project_id, name, description, redaction_mode, "
+                "include_artifacts, manifest, status, created, updated) "
+                "VALUES (?, ?, ?, ?, '', 'raw', 0, ?, 'draft', ?, ?)",
+                (
+                    legacy_package_id,
+                    session_id,
+                    project["id"],
+                    "Legacy manifest",
+                    json.dumps(legacy_manifest),
+                    "2026-06-05T00:00:00Z",
+                    "2026-06-05T00:00:00Z",
+                ),
+            )
+            conn.commit()
+        legacy_resp = client.get(
+            f"/projects/{project['id']}/packages/{legacy_package_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert legacy_resp.status_code == 200
+        legacy_package = json.loads(legacy_resp.data)["package"]
+        assert legacy_package["manifest"]["package_format_version"] == 1
+        assert legacy_package["manifest"]["provenance"]["schema_version"] == 1
+        assert legacy_package["manifest"]["provenance"]["sources"]["project_links"]["origin_sources"] == []
+        assert "not recorded" in legacy_package["manifest"]["provenance"]["sources"]["project_links"]["note"]
+        assert legacy_package["manifest"]["provenance"]["privacy"]["redaction_mode"] == "raw"
+        assert legacy_package["manifest"]["import_hints"]["schema_version"] == 1
+        assert legacy_package["manifest"]["import_hints"]["summary"]["source_links"] == "not_recorded"
+        assert legacy_package["manifest"]["import_hints"]["warnings"][0]["code"] == "legacy_manifest"
+
+        legacy_unknown_manifest = dict(legacy_manifest)
+        legacy_unknown_manifest.pop("redaction_mode", None)
+        legacy_unknown_package_id = f"pkg_legacy_unknown_{uuid.uuid4().hex[:12]}"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO evidence_packages "
+                "(id, session_id, project_id, name, description, redaction_mode, "
+                "include_artifacts, manifest, status, created, updated) "
+                "VALUES (?, ?, ?, ?, '', 'raw', 0, ?, 'draft', ?, ?)",
+                (
+                    legacy_unknown_package_id,
+                    session_id,
+                    project["id"],
+                    "Legacy manifest without redaction",
+                    json.dumps(legacy_unknown_manifest),
+                    "2026-06-05T00:00:01Z",
+                    "2026-06-05T00:00:01Z",
+                ),
+            )
+            conn.commit()
+        unknown_resp = client.get(
+            f"/projects/{project['id']}/packages/{legacy_unknown_package_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert unknown_resp.status_code == 200
+        unknown_package = json.loads(unknown_resp.data)["package"]
+        assert unknown_package["manifest"]["provenance"]["build"]["redaction_mode"] == "unknown"
+        assert unknown_package["manifest"]["provenance"]["privacy"]["redaction_mode"] == "unknown"
 
     def test_package_creation_rejects_unknown_preset(self):
         client = get_client()
@@ -6086,6 +6169,7 @@ class TestProjectRoutes:
             client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
         )
         assert {item["entity_id"] for item in links["links"]} == {run_id, baseline_run_id}
+        assert all("provenance" not in item for item in links["links"])
 
         label_resp = client.post(
             f"/entities/run/{run_id}/labels",
@@ -6458,7 +6542,8 @@ class TestProjectRoutes:
         assert package["redaction_mode"] == "raw"
         assert [item["label"] for item in package["labels"]] == ["handoff"]
         assert package["note"]["body"] == "Package review note"
-        assert package["manifest"]["package_format_version"] == 1
+        assert package["manifest"]["package_format_version"] == 2
+        assert package["manifest"]["format"] == 2
         assert package["manifest"]["counts"]["runs"] == 1
         assert package["manifest"]["counts"]["findings"] == 1
         assert package["manifest"]["counts"]["artifacts"] == 2
@@ -6480,6 +6565,60 @@ class TestProjectRoutes:
         assert package["manifest"]["estimated_archive"]["raw_artifact_bytes"] == 0
         assert package["manifest"]["estimated_archive"]["skipped_artifact_count_estimate"] == 2
         assert package["manifest"]["estimated_archive"]["selected_transcript_count"] == 1
+        assert package["manifest"]["provenance"]["schema_version"] == 1
+        assert package["manifest"]["provenance"]["kind"] == "evidence_package"
+        assert package["manifest"]["provenance"]["build"]["selected_entity_ids"]["run_ids"] == [run_id]
+        assert package["manifest"]["provenance"]["build"]["selected_entity_counts"]["artifact_ids"] == 2
+        assert package["manifest"]["provenance"]["sources"]["project_links"] == {
+            "origin_sources": ["manual"],
+            "counts_by_origin": {"manual": 2},
+        }
+        assert package["manifest"]["provenance"]["privacy"] == {
+            "redaction_mode": "raw",
+            "private_notes_included": True,
+        }
+        assert package["manifest"]["runs"][0]["provenance"]["origin"] == "manual"
+        assert package["manifest"]["runs"][0]["provenance"]["confidence"] == 1.0
+        assert package["manifest"]["targets"][0]["provenance"]["origin"] == "manual"
+        assert package["manifest"]["targets"][0]["provenance"]["source_detail"] == {}
+        target_reference = package["manifest"]["findings"][0]["target_references"][0]
+        assert target_reference["target_id"] == evidence_target["id"]
+        assert target_reference["type"] == "domain"
+        assert target_reference["value"] == "darklab.sh"
+        assert target_reference["source_run_id"] == run_id
+        assert target_reference["relationship_source"] == "manual"
+        assert target_reference["confidence"] == 1.0
+        import_hints = package["manifest"]["import_hints"]
+        assert import_hints["kind"] == "evidence_package_import_hints"
+        assert import_hints["mode"] == "preview_only"
+        assert import_hints["selected_entity_ids"]["run_ids"] == [run_id]
+        assert import_hints["package_metadata"]["archive_paths"]["labels"] == "metadata/labels.json"
+        assert import_hints["package_metadata"]["archive_paths"]["notes"] == "notes/entity-notes.json"
+        assert import_hints["source_links"] == [
+            {
+                "entity_type": "run",
+                "entity_id": run_id,
+                "source": "manual",
+                "confidence": 1.0,
+                "review_state": "confirmed",
+            },
+            {
+                "entity_type": "atlas_entity",
+                "entity_id": evidence_target["id"],
+                "source": "manual",
+                "confidence": 1.0,
+                "review_state": "confirmed",
+            },
+        ]
+        assert import_hints["target_relationships"][0]["finding_id"] == f"fnd_{run_id}"
+        assert import_hints["target_relationships"][0]["target_id"] == evidence_target["id"]
+        assert import_hints["finding_review_state"][0]["review_state"] == "important"
+        import_hint_warnings = {
+            (warning["code"], warning.get("entity_id")): warning
+            for warning in import_hints["warnings"]
+        }
+        assert import_hint_warnings[("artifact_not_available", f"rfa_{run_id}")]["status"] == "changed"
+        assert import_hint_warnings[("artifact_not_available", f"rfa_{baseline_run_id}")]["status"] == "missing"
         package_label_resp = client.post(
             f"/entities/package/{package['id']}/labels",
             json={"label": "handoff"},
@@ -6582,8 +6721,13 @@ class TestProjectRoutes:
             run_text = archive.read(f"runs/{run_id}.txt").decode("utf-8")
             skipped_items = json.loads(archive.read("skipped-items.json"))
         assert downloaded_manifest["package"]["id"] == package["id"]
+        assert downloaded_manifest["format"] == 2
+        assert downloaded_manifest["provenance"]["schema_version"] == 1
         assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
         assert downloaded_manifest["manifest"]["counts"]["artifacts"] == 2
+        assert downloaded_manifest["manifest"]["import_hints"]["target_relationships"][0]["target_id"] == (
+            evidence_target["id"]
+        )
         assert downloaded_manifest["transcripts"][0]["run_id"] == run_id
         assert downloaded_manifest["transcripts"][0]["archive_path"] == f"runs/{run_id}.html"
         assert downloaded_manifest["transcripts"][0]["lines"][0]["line_index"] == 0
@@ -6593,6 +6737,8 @@ class TestProjectRoutes:
         assert findings_json["count"] == 1
         assert findings_json["findings"][0]["raw_line"] == "443/tcp open https"
         assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
+        assert findings_json["findings"][0]["target_references"][0]["value"] == "darklab.sh"
+        assert findings_json["findings"][0]["target_references"][0]["source_run_id"] == run_id
         assert findings_json["findings"][0]["triage"] == {
             "id": triage_payload["triage"]["id"],
             "session_id": session_id,
@@ -6610,6 +6756,8 @@ class TestProjectRoutes:
         )
         assert "# Findings" in findings_md
         assert "443/tcp open https" in findings_md
+        assert "domain: darklab.sh" in findings_md
+        assert "manual, run " in findings_md
         assert "Remediation: Patch TLS config for darklab.sh." in findings_md
         assert "Verification steps: Re-run nmap -sV darklab.sh." in findings_md
         assert "Verification notes: Internal ticket APP-123." in findings_md
@@ -6627,6 +6775,7 @@ class TestProjectRoutes:
         assert "darklab.sh" in targets_md
         assert "Primary external target" in targets_md
         assert "Related Findings" in targets_md
+        assert "domain: darklab.sh" in index_html
         assert "[click](javascript:alert(1))" not in targets_md
         assert r"\[click\]\(javascript:alert\(1\)\)" in targets_md
         assert labels_json["count"] == 5
@@ -7894,6 +8043,15 @@ class TestProjectRoutes:
         assert package["manifest"]["estimated_archive"]["redacted_artifact_count_estimate"] == 1
         assert "note" not in package["manifest"]["project"]
         assert "Project private note" not in json.dumps(package["manifest"])
+        target_reference = package["manifest"]["findings"][0]["target_references"][0]
+        assert target_reference["target_id"] == target_id
+        assert target_reference["type"] == "domain"
+        assert "value" not in target_reference
+        assert {warning["code"] for warning in package["manifest"]["import_hints"]["warnings"]} == {
+            "redacted_package",
+            "private_notes_excluded",
+        }
+        assert package["manifest"]["import_hints"]["notes"]["included"] is False
         assert "Bearer abc123" not in json.dumps(package)
         assert "secret.darklab.sh" not in json.dumps(package)
         assert "192.168.1.5" not in json.dumps(package)
@@ -7934,6 +8092,10 @@ class TestProjectRoutes:
             assert findings_json["findings"][0]["triage"]["verification_status"] == "ready_to_verify"
             assert "[host-redacted]" in findings_json["findings"][0]["triage"]["remediation"]
             assert "[ip-redacted]" in findings_json["findings"][0]["triage"]["verification_steps"]
+            archived_reference = findings_json["findings"][0]["target_references"][0]
+            assert archived_reference["target_id"] == target_id
+            assert archived_reference["type"] == "domain"
+            assert "value" not in archived_reference
             package_text = "\n".join(
                 archive.read(name).decode("utf-8")
                 for name in (
@@ -8272,9 +8434,16 @@ class TestProjectRoutes:
             names = set(archive.namelist())
             assert names == {"manifest.json", "report.md", "report.html"}
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            assert manifest["format_version"] == 2
             assert manifest["generated_by"]["app_name"] == "darklab_shell"
             assert manifest["generated_by"]["version"]
             assert manifest["redaction_mode"] == "redacted"
+            assert manifest["provenance"]["schema_version"] == 1
+            assert manifest["provenance"]["kind"] == "engagement_report"
+            assert manifest["provenance"]["build"]["redaction_mode"] == "redacted"
+            assert manifest["provenance"]["build"]["selection_modes"]["run_ids"] == "all"
+            assert manifest["provenance"]["build"]["selected_entity_ids"]["run_ids"] == []
+            assert manifest["provenance"]["privacy"]["private_notes_included"] is False
             report_md = archive.read("report.md").decode("utf-8")
             report_html = archive.read("report.html").decode("utf-8")
             assert "# Report Scope Readout" in report_md
@@ -8499,6 +8668,8 @@ class TestProjectRoutes:
         assert "High (1)" in report_text
         assert "[host-redacted]" in report_text
         assert "[ip-redacted]" in report_text
+        assert "domain: [host-redacted]" not in report_text
+        assert target_id in report_text
         assert "Patch https://[host-redacted]" in report_text
         assert "Authorization: Bearer [redacted]" in report_text
         assert "secret.darklab.sh" not in report_text
@@ -8517,6 +8688,7 @@ class TestProjectRoutes:
         assert raw_preview_resp.status_code == 200
         raw_preview = raw_preview_resp.get_json()["preview"]
         raw_report_text = raw_preview["markdown"] + raw_preview["html"]
+        assert "domain: secret.darklab.sh" in raw_report_text
         assert "secret.darklab.sh" in raw_report_text
         assert "192.168.1.5" in raw_report_text
         assert "Bearer abc123" in raw_report_text

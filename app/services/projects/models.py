@@ -14,6 +14,7 @@ from services.projects.contracts import (
     PROJECT_STATUSES,
     ProjectWorkspaceError,
 )
+from services.projects.provenance import project_link_provenance
 from services.projects.utils import trim_text
 
 
@@ -27,6 +28,10 @@ def _public_source_detail(source_detail):
         for key, value in detail.items()
         if key != PROJECT_TARGET_SOURCE_DETAIL_FLAG
     }
+
+
+def _row_optional(row, key, default=None):
+    return row[key] if key in row.keys() else default
 
 
 def row_to_project(row):
@@ -46,7 +51,7 @@ def row_to_project(row):
     }
 
 
-def row_to_project_run(row):
+def row_to_project_run(row, *, include_provenance=False):
     if not row:
         return None
     item = {
@@ -72,13 +77,24 @@ def row_to_project_run(row):
         item["full_output_byte_size"] = int(row["output_artifact_byte_size"] or 0)
     if "output_artifact_line_count" in keys:
         item["full_output_line_count"] = int(row["output_artifact_line_count"] or 0)
+    if include_provenance:
+        item["provenance"] = project_link_provenance(
+            row["link_source"],
+            source_detail=_row_optional(row, "link_source_detail"),
+            confidence=_row_optional(row, "link_confidence"),
+            review_state=_row_optional(row, "link_review_state"),
+            link_id=_row_optional(row, "link_id"),
+            entity_type="run",
+            entity_id=row["id"],
+            created=row["created"],
+        )
     return item
 
 
-def row_to_link(row):
+def row_to_link(row, *, include_provenance=False):
     if not row:
         return None
-    return {
+    item = {
         "id": row["id"],
         "project_id": row["project_id"],
         "entity_type": row["entity_type"],
@@ -86,6 +102,18 @@ def row_to_link(row):
         "source": row["source"],
         "created": row["created"],
     }
+    if include_provenance:
+        item["provenance"] = project_link_provenance(
+            row["source"],
+            source_detail=_row_optional(row, "source_detail"),
+            confidence=_row_optional(row, "confidence"),
+            review_state=_row_optional(row, "review_state"),
+            link_id=row["id"],
+            entity_type=row["entity_type"],
+            entity_id=row["entity_id"],
+            created=row["created"],
+        )
+    return item
 
 
 def entity_note_body(entity):
@@ -95,7 +123,7 @@ def entity_note_body(entity):
     return str(note.get("body") or "").strip()
 
 
-def row_to_target(row):
+def row_to_target(row, *, include_provenance=False):
     if not row:
         return None
     if "canonical_value" in row.keys():
@@ -104,7 +132,7 @@ def row_to_target(row):
             if "source_detail" in row.keys()
             else {}
         )
-        return {
+        item = {
             "id": row["id"],
             "project_id": row["project_id"] if "project_id" in row.keys() else "",
             "type": row["type"],
@@ -135,8 +163,20 @@ def row_to_target(row):
             "created": row["created"],
             "updated": row["updated"] if "updated" in row.keys() else row["last_seen_at"] or row["created"],
         }
+        if include_provenance:
+            item["provenance"] = project_link_provenance(
+                _row_optional(row, "source", "manual"),
+                source_detail=source_detail,
+                confidence=_row_optional(row, "confidence"),
+                review_state=_row_optional(row, "review_state"),
+                link_id=_row_optional(row, "link_id"),
+                entity_type="atlas_entity",
+                entity_id=row["id"],
+                created=_row_optional(row, "created"),
+            )
+        return item
     source_detail = dialect_for_backend(DB_BACKEND).decode_json_dict(row["source_detail"])
-    return {
+    item = {
         "id": row["id"],
         "project_id": row["project_id"],
         "type": row["type"],
@@ -152,6 +192,18 @@ def row_to_target(row):
         "created": row["created"],
         "updated": row["updated"],
     }
+    if include_provenance:
+        item["provenance"] = project_link_provenance(
+            row["source"],
+            source_detail=source_detail,
+            confidence=row["confidence"],
+            review_state=row["review_state"],
+            link_id=_row_optional(row, "link_id"),
+            entity_type="atlas_entity",
+            entity_id=row["id"],
+            created=row["created"],
+        )
+    return item
 
 
 def normalize_project_payload(data, *, partial=False):

@@ -135,6 +135,52 @@
   overflow-wrap: anywhere;
 }
 
+.project-package-manifest-summary {
+  margin: 0 0 10px;
+}
+
+.project-provenance-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.project-provenance-summary h3 {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.project-provenance-summary-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.project-provenance-summary-row {
+  display: grid;
+  grid-template-columns: minmax(92px, max-content) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.project-provenance-summary-row strong {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 
 
 .project-target-editor-form {
@@ -2581,12 +2627,16 @@ button.project-explorer-item:focus-visible,
   flex-wrap: wrap;
   gap: 5px;
   margin-top: 7px;
+  min-width: 0;
 }
 
 
 
 .project-explorer-metadata-chip.badge {
+  flex: 0 1 auto;
+  justify-content: flex-start;
   max-width: 180px;
+  min-width: 0;
   min-height: 20px;
   overflow: hidden;
   padding: 2px 7px;
@@ -4032,6 +4082,15 @@ body.mobile-terminal-mode .project-entity-editor-modal .modal-actions {
     min-height: 0;
     margin: 0 14px calc(14px + env(safe-area-inset-bottom, 0));
     overscroll-behavior: contain;
+  }
+
+  body.mobile-terminal-mode .project-package-manifest-summary {
+    margin: 0 14px 10px;
+  }
+
+  body.mobile-terminal-mode .project-provenance-summary-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
 

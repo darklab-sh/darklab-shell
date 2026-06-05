@@ -19,7 +19,10 @@ function loadReportModule(globals = {}) {
   }
   Object.assign(globalThis, sandbox)
   const reportApi = fromDomScripts(
-    ['app/static/js/features/projects/project_report.js'],
+    [
+      'app/static/js/features/projects/project_shared_ui.js',
+      'app/static/js/features/projects/project_report.js',
+    ],
     { document, window },
     'globalThis.DarklabProjectReport',
   )
@@ -27,6 +30,7 @@ function loadReportModule(globals = {}) {
 }
 
 function makeContext(apiFetch = vi.fn(), overrides = {}) {
+  const sharedUi = globalThis.DarklabProjectSharedUi?.createProjectSharedUiController?.({})
   return {
     apiFetch,
     getSelectedProjectId: vi.fn(() => 'proj_1'),
@@ -48,14 +52,25 @@ function makeContext(apiFetch = vi.fn(), overrides = {}) {
     setProjectWorkspaceMessage: vi.fn(),
     downloadUrlAsAttachment: vi.fn(),
     logClientError: vi.fn(),
+    projectProvenanceSummaryElement: sharedUi?.projectProvenanceSummaryElement,
     ...overrides,
   }
 }
 
 const summary = {
   project: { id: 'proj_1', name: 'Acme workspace' },
-  runs: [{ id: 'run_1', command: 'nmap example.test', started: '2026-06-04T10:00:00Z' }],
-  targets: [{ id: 'target_1', value: 'example.test', type: 'domain' }],
+  runs: [{
+    id: 'run_1',
+    command: 'nmap example.test',
+    started: '2026-06-04T10:00:00Z',
+    provenance: { origin: 'manual', confidence: 1.0 },
+  }],
+  targets: [{
+    id: 'target_1',
+    value: 'example.test',
+    type: 'domain',
+    provenance: { origin: 'manual', confidence: 1.0 },
+  }],
   artifacts: [{ id: 'artifact_1', display_name: 'evidence.txt', workspace_path: 'reports/evidence.txt' }],
 }
 
@@ -64,6 +79,7 @@ describe('project report controller', () => {
     vi.restoreAllMocks()
     document.body.replaceChildren()
     delete globalThis.DarklabProjectReport
+    delete globalThis.DarklabProjectSharedUi
     delete globalThis.activeTeamScopeCan
     delete globalThis.teamScopeDeniedMessage
     delete globalThis.enhanceAppSelects
@@ -99,6 +115,32 @@ describe('project report controller', () => {
     expect(container.querySelector('[data-project-report-template]')).toBeNull()
     expect(container.querySelector('[data-project-report-action="preview"]').textContent).toBe('Preview')
     expect(container.querySelector('[data-project-report-action="export"]').textContent).toBe('Export archive')
+    expect(container.querySelector('.project-provenance-summary')?.textContent).toContain('manual (2)')
+
+    const sharedUi = globalThis.DarklabProjectSharedUi?.createProjectSharedUiController?.({})
+    const legacySummary = sharedUi.projectProvenanceSummary(
+      {
+        package_format_version: 1,
+        provenance: {
+          schema_version: 1,
+          sources: {
+            project_links: {
+              origin_sources: [],
+              note: 'Project-link origin details were not recorded in this older package.',
+            },
+          },
+        },
+      },
+      { fallbackKind: 'evidence_package' },
+    )
+    const sourceChip = legacySummary.chips.find(chip => chip.label.startsWith('source:'))
+    expect(sourceChip.label).toBe('source: not recorded')
+    expect(sourceChip.title).toContain('older package')
+    const row = sharedUi.itemRow({ title: 'Legacy package', chips: legacySummary.chips })
+    const renderedChips = Array.from(row.querySelectorAll('.project-explorer-metadata-chip[title]'))
+    expect(renderedChips.map(chip => chip.textContent)).toEqual(['provenance', 'source: not recorded'])
+    expect(renderedChips[0].title).toContain('evidence package')
+    expect(renderedChips[1].title).toContain('older package')
   })
 
   it('shows template choices only when more than one template is configured', async () => {

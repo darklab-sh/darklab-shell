@@ -71,6 +71,7 @@
   const projectTargetSubmitButton = document.getElementById('project-target-submit');
   const projectPackageManifestOverlay = document.getElementById('project-package-manifest-overlay');
   const projectPackageManifestTitle = document.getElementById('project-package-manifest-title');
+  const projectPackageManifestSummary = document.getElementById('project-package-manifest-summary');
   const projectPackageManifestJson = document.getElementById('project-package-manifest-json');
   const projectPackageWizardOverlay = document.getElementById('project-package-wizard-overlay');
   const projectPackageWizardBody = document.getElementById('project-package-wizard-body');
@@ -1436,6 +1437,7 @@
       EntityMetadataClient,
       manifestOverlay: projectPackageManifestOverlay,
       manifestTitle: projectPackageManifestTitle,
+      manifestSummary: projectPackageManifestSummary,
       manifestJson: projectPackageManifestJson,
       wizardOverlay: projectPackageWizardOverlay,
       wizardBody: projectPackageWizardBody,
@@ -1456,6 +1458,8 @@
       entityLabelValues: _entityLabelValues,
       entityNoteBody: _entityNoteBody,
       entityMetadataChips: _entityMetadataChips,
+      projectProvenanceSummary: _projectProvenanceSummary,
+      projectProvenanceSummaryElement: _projectProvenanceSummaryElement,
       formatDate: _formatProjectDate,
       formatBytes: _formatProjectBytes,
       makeProjectButton: _makeProjectButton,
@@ -1498,6 +1502,7 @@
       loadProjectFindings: _loadProjectFindings,
       projectArtifactDetail: _projectArtifactDetail,
       formatDate: _formatProjectDate,
+      projectProvenanceSummaryElement: _projectProvenanceSummaryElement,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
@@ -2557,6 +2562,14 @@
 
   function _entityMetadataChipClass(kind = 'label') {
     return _projectSharedUiController().entityMetadataChipClass(kind);
+  }
+
+  function _projectProvenanceSummary(manifest, options) {
+    return _projectSharedUiController().projectProvenanceSummary(manifest, options);
+  }
+
+  function _projectProvenanceSummaryElement(manifest, options) {
+    return _projectSharedUiController().projectProvenanceSummaryElement(manifest, options);
   }
 
   function _appendProjectLabelChips(parent, project, { className = 'project-label-chips' } = {}) {

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,572
+- behavior tests: 3,574
 - docs/inventory meta-tests: 34
-- `pytest`: 2004 (1970 behavior + 34 meta)
+- `pytest`: 2006 (1972 behavior + 34 meta)
 - `vitest`: 1343
 - `playwright`: 260
-- total: 3,607
+- total: 3,609
 
 This document is organized in two parts:
 
@@ -968,6 +968,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_auto_promote_rule_apply_reuses_project_link_idempotency` | Verifies Atlas auto-promote apply reuses project-link deduplication and records rule source details. |
+| `TestDatabaseInit.test_project_link_provenance_maps_known_sources_and_bounds_source_detail` | Verifies project-link provenance maps every registered source and only serializes bounded, whitelisted source-detail keys. |
+| `TestDatabaseInit.test_finding_target_references_avoid_substring_fallback_matches` | Verifies finding target-reference fallback matching uses target tokens instead of unsafe substrings. |
 | `TestDatabaseInit.test_auto_promote_create_obeys_project_rule_quota` | Verifies Project auto-promote rule creation stops at the configured per-project rule quota. |
 | `TestDatabaseInit.test_auto_promote_rule_promotes_pending_auto_discovered_project_target` | Verifies Atlas auto-promote apply confirms matching pending auto-discovered Project targets. |
 | `TestDatabaseInit.test_auto_promote_rule_preview_filters_by_source_command_root` | Verifies auto-promote previews can restrict matches to entities seen behind a specific command root. |

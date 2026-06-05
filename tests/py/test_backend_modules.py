@@ -47,6 +47,7 @@ from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQ
 import services.projects.workspace as project_workspace
 import services.projects.auto_promote as project_auto_promote
 import services.projects.package_presets as package_presets
+import services.projects.provenance as project_provenance
 import services.reports.storage as report_storage
 import services.reports.templates as report_templates
 import app as shell_app
@@ -16235,6 +16236,110 @@ SQL syntax error near q</response>
         detail = json.loads(rows[0]["source_detail"])
         assert detail["rule_id"] == rule["id"]
         assert detail["rule_name"] == "Alpha domains"
+        provenance = project_provenance.project_link_provenance(
+            "auto_promote_rule",
+            source_detail=detail,
+            confidence=1.0,
+            review_state="confirmed",
+        )
+        assert provenance["origin"] == "auto_promote_rule"
+        assert provenance["source_detail"] == {
+            "match_mode": "exact",
+            "rule_id": rule["id"],
+            "target_entity_kind": "domain",
+        }
+        assert "rule_name" not in provenance["source_detail"]
+        assert "pattern" not in provenance["source_detail"]
+
+    def test_project_link_provenance_maps_known_sources_and_bounds_source_detail(self):
+        source_detail = {
+            "candidate_count": 12,
+            "match_mode": "domain_suffix",
+            "rule_id": "par_123",
+            "target_entity_kind": "domain",
+            "rule_name": "Internal domains",
+            "pattern": "secret.internal.example",
+            "raw_command": "nmap secret.internal.example",
+            "notes": "Private operator note",
+            "source_category": "scan",
+            "oversized_reason": "x" * 240,
+        }
+
+        for source in sorted(database.PROJECT_LINK_SOURCES):
+            provenance = project_provenance.project_link_provenance(
+                source,
+                source_detail=source_detail,
+                confidence=1.5,
+                review_state="confirmed",
+            )
+            assert provenance["origin"] == source
+            assert provenance["confidence"] == 1.0
+            assert provenance["review_state"] == "confirmed"
+            assert provenance["source_detail"] == {
+                "candidate_count": 12,
+                "match_mode": "domain_suffix",
+                "rule_id": "par_123",
+                "source_category": "scan",
+                "target_entity_kind": "domain",
+            }
+
+        unknown = project_provenance.project_link_provenance("import", source_detail=source_detail)
+        assert unknown["origin"] == "unknown"
+        assert "rule_name" not in unknown["source_detail"]
+        assert "pattern" not in unknown["source_detail"]
+        assert "raw_command" not in unknown["source_detail"]
+        assert "notes" not in unknown["source_detail"]
+
+    def test_finding_target_references_avoid_substring_fallback_matches(self):
+        findings = [
+            {
+                "id": "f-ip-substring",
+                "raw_line": "Observed service on 10.0.0.10",
+                "title": "IP substring should not attach",
+            },
+            {
+                "id": "f-ip-token",
+                "raw_line": "Observed service on http://10.0.0.1:8080",
+                "title": "IP token should attach",
+            },
+            {
+                "id": "f-domain-prefix",
+                "raw_line": "notexample.com returned a finding",
+                "title": "Domain prefix should not attach",
+            },
+            {
+                "id": "f-domain-subdomain",
+                "raw_line": "www.example.com returned a finding",
+                "title": "Subdomain should not attach to the apex",
+            },
+            {
+                "id": "f-domain-url",
+                "raw_line": "https://example.com/login returned a finding",
+                "title": "Domain token should attach inside a URL",
+            },
+            {
+                "id": "f-explicit",
+                "raw_line": "Finding text does not mention the target",
+                "target_ids": ["target-domain"],
+            },
+        ]
+        targets = [
+            {"id": "target-ip", "type": "ip", "value": "10.0.0.1"},
+            {"id": "target-domain", "type": "domain", "value": "example.com"},
+        ]
+
+        project_provenance.attach_finding_target_references(findings, targets)
+        references_by_id = {
+            finding["id"]: [reference["target_id"] for reference in finding["target_references"]]
+            for finding in findings
+        }
+
+        assert references_by_id["f-ip-substring"] == []
+        assert references_by_id["f-ip-token"] == ["target-ip"]
+        assert references_by_id["f-domain-prefix"] == []
+        assert references_by_id["f-domain-subdomain"] == []
+        assert references_by_id["f-domain-url"] == ["target-domain"]
+        assert references_by_id["f-explicit"] == ["target-domain"]
 
     def test_auto_promote_create_obeys_project_rule_quota(self):
         with tempfile.TemporaryDirectory() as tmp:

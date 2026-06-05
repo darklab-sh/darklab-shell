@@ -938,10 +938,15 @@ test.describe('project workspace modal', () => {
     await linkExternalRunToOpenProject(page, testInfo)
 
     await switchProjectTab(page, 'packages')
+    const packagePresetsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET' && url.pathname === '/projects/package-presets'
+    })
     await page.locator('[data-project-action="package-wizard-open"]').click()
     const wizard = page.locator('#project-package-wizard-overlay')
     await expect(wizard).toHaveClass(/\bopen\b/)
     await expect(wizard.locator('.project-package-step.is-active')).toContainText('Preset')
+    expect((await packagePresetsResponse).ok()).toBe(true)
     await page.locator('[data-project-package-field="labels"]').fill('handoff, e2e')
     await page.locator('[data-project-package-field="notes"]').fill('Package notes from Playwright')
 
@@ -965,6 +970,7 @@ test.describe('project workspace modal', () => {
     const packageRow = page.locator('.project-explorer-item').filter({ hasText: 'Browser evidence' }).first()
     await expect(packageRow).toBeVisible()
     await expect(packageRow).toContainText('handoff')
+    await expect(packageRow).toContainText('source: manual')
     await expect(packageRow).toContainText('note')
 
     await packageRow.locator('[data-project-action="package-edit"]').click()
@@ -979,7 +985,9 @@ test.describe('project workspace modal', () => {
 
     await packageRow.locator('[data-project-action="package-manifest"]').click()
     await expect(page.locator('#project-package-manifest-overlay')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#project-package-manifest-json')).toContainText('"package_format_version": 1')
+    await expect(page.locator('#project-package-manifest-summary')).toContainText('Provenance summary')
+    await expect(page.locator('#project-package-manifest-summary')).toContainText('manual')
+    await expect(page.locator('#project-package-manifest-json')).toContainText('"package_format_version": 2')
     await expect(page.locator('#project-package-manifest-json')).toContainText('"runs": 1')
     await page.locator('.project-package-manifest-close').click()
     await expect(page.locator('#project-package-manifest-overlay')).not.toHaveClass(/\bopen\b/)

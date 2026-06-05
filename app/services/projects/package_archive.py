@@ -62,6 +62,7 @@ from services.projects.package_rendering import (
     _render_package_run_html,
 )
 from services.projects.packages import (
+    EVIDENCE_PACKAGE_FORMAT_VERSION as _EVIDENCE_PACKAGE_FORMAT_VERSION,
     evidence_manifest_from_summary as _evidence_manifest_from_summary,
     normalize_evidence_package_payload as _normalize_evidence_package_payload,
     package_archive_name as _package_archive_name,
@@ -304,10 +305,11 @@ def build_evidence_package_archive(
     if package_notes:
         export_package["note"] = package_notes[0]
     export_manifest = {
-        "format": 1,
+        "format": _EVIDENCE_PACKAGE_FORMAT_VERSION,
         "generated_at": generated_at,
         "package": export_package,
         "manifest": render_manifest,
+        "provenance": render_manifest.get("provenance") if isinstance(render_manifest, dict) else {},
     }
     max_compressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
     max_uncompressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_uncompressed_mb", 500, cfg=cfg)
@@ -830,7 +832,12 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
 
 def create_evidence_package(session_id, project_id, data, *, team_id=""):
     payload = _normalize_evidence_package_payload(data)
-    summary = get_project_summary(session_id, project_id, team_id=team_id)
+    summary = get_project_summary(
+        session_id,
+        project_id,
+        team_id=team_id,
+        include_provenance=True,
+    )
     if summary is None:
         return None
     summary["artifacts"] = _list_all_project_artifacts(session_id, project_id, team_id=team_id) or []

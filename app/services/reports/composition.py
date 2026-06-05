@@ -11,7 +11,12 @@ from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import list_project_findings
 from services.projects.metadata import _finding_triage_by_id
-from services.projects.packages import redact_package_value, redacted_artifact_derivative_reason
+from services.projects.packages import (
+    redact_package_value,
+    redacted_artifact_derivative_reason,
+    strip_target_reference_values,
+)
+from services.projects.provenance import attach_finding_target_references
 from services.projects.queries import list_project_artifacts, list_project_runs
 from services.projects.targets import list_project_targets
 from services.workspace.files import WorkspaceError, read_owner_workspace_text_file
@@ -48,8 +53,20 @@ def _findings_page(session_id: str, project_id: str, offset: int, *, team_id: st
 
 
 def _all_project_inputs(session_id: str, project_id: str, *, team_id: str = "") -> dict[str, list[dict[str, Any]]]:
-    runs_page = list_project_runs(session_id, project_id, limit=_REPORT_PAGE_LIMIT, team_id=team_id)
-    targets_page = list_project_targets(session_id, project_id, limit=_REPORT_PAGE_LIMIT, team_id=team_id)
+    runs_page = list_project_runs(
+        session_id,
+        project_id,
+        limit=_REPORT_PAGE_LIMIT,
+        team_id=team_id,
+        include_provenance=True,
+    )
+    targets_page = list_project_targets(
+        session_id,
+        project_id,
+        limit=_REPORT_PAGE_LIMIT,
+        team_id=team_id,
+        include_provenance=True,
+    )
     findings_page = _findings_page(session_id, project_id, 0, team_id=team_id)
     artifacts_page = list_project_artifacts(session_id, project_id, {}, limit=_REPORT_PAGE_LIMIT, team_id=team_id)
     return {
@@ -250,6 +267,7 @@ def compose_report_context(
                 limit=_REPORT_PAGE_LIMIT,
                 offset=offset,
                 team_id=team_id,
+                include_provenance=True,
             ),
         ),
         "targets": _selected_items(
@@ -264,6 +282,7 @@ def compose_report_context(
                 limit=_REPORT_PAGE_LIMIT,
                 offset=offset,
                 team_id=team_id,
+                include_provenance=True,
             ),
         ),
         "findings": _selected_items(
@@ -297,6 +316,7 @@ def compose_report_context(
     }
     if session_id:
         _attach_full_finding_triage(session_id, selected["findings"], team_id=team_id)
+    attach_finding_target_references(selected["findings"], all_inputs["targets"])
     selected["artifacts"], artifact_warnings = _attach_artifact_previews(
         session_id,
         selected["artifacts"],
@@ -319,5 +339,6 @@ def compose_report_context(
         context = _strip_notes(context)
     rules = report_redaction_rules(context.get("export"), cfg=cfg)
     if rules:
+        context = strip_target_reference_values(context)
         context = redact_package_value(deepcopy(context), rules)
     return context if isinstance(context, dict) else {}

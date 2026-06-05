@@ -53,7 +53,7 @@ def get_report_draft_on_conn(conn, session_id: str, project_id: str, *, team_id:
     owner_sql, owner_params = _report_owner_where(session_id, team_id=team_id)
     row = conn.execute(
         "SELECT id, session_id, team_id, project_id, draft, report_format_version, created, updated "
-        "FROM project_reports WHERE " + owner_sql + " AND project_id = ?",  # nosec B608
+        "FROM project_reports WHERE " + owner_sql + " AND project_id = ?",  # nosec
         (*owner_params, str(project_id or "").strip()),
     ).fetchone()
     return row_to_report_draft(row)

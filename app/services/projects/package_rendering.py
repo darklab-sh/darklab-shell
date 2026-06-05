@@ -138,6 +138,7 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 <section class="card">
 <table data-sort-table="findings"><thead><tr>
 <th><button class="table-sort" type="button" data-sort-key="finding">Finding</button></th>
+<th>Targets</th>
 <th><button class="table-sort" type="button" data-sort-key="severity">Severity</button></th>
 <th><button class="table-sort" type="button" data-sort-key="status">Status</button></th>
 <th><button class="table-sort" type="button" data-sort-key="run">Run</button></th>
@@ -155,6 +156,17 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 <a href="{{ finding.href }}">{{ finding.label }}</a>
 {% else -%}
 {{ finding.label }}
+{% endif -%}
+</td>
+<td>
+{% if finding.targets -%}
+<div class="chips">
+{% for target in finding.targets -%}
+<span class="chip">{{ target }}</span>
+{% endfor -%}
+</div>
+{% else -%}
+<span class="muted">No target reference</span>
 {% endif -%}
 </td>
 <td>{{ finding.severity }}</td>
@@ -175,7 +187,7 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 </tr>
 {% endfor -%}
 {% else -%}
-<tr><td colspan="5" class="muted">No selected findings.</td></tr>
+<tr><td colspan="6" class="muted">No selected findings.</td></tr>
 {% endif -%}
 </tbody></table>
 </section>
@@ -282,6 +294,31 @@ def _package_markdown_link(label, href):
     safe_label = _package_markdown_text(label) or "link"
     safe_href = str(href or "").replace(")", "%29").replace(" ", "%20")
     return f"[{safe_label}]({safe_href})" if safe_href else safe_label
+
+
+def _package_target_reference_label(reference):
+    if not isinstance(reference, dict):
+        return ""
+    target_type = str(reference.get("type") or "target")
+    value = str(reference.get("value") or reference.get("target_id") or "")
+    source = str(reference.get("relationship_source") or "")
+    source_run = str(reference.get("source_run_id") or "")
+    label = f"{target_type}: {value}" if value else target_type
+    details = [item for item in (source, f"run {_package_short_id(source_run)}" if source_run else "") if item]
+    return f"{label} ({', '.join(details)})" if details else label
+
+
+def _package_finding_target_reference_labels(finding):
+    references = finding.get("target_references") if isinstance(finding, dict) else None
+    labels = [
+        _package_target_reference_label(reference)
+        for reference in references
+        if isinstance(reference, dict)
+    ] if isinstance(references, list) else []
+    labels = [label for label in labels if label]
+    if labels:
+        return labels
+    return _package_finding_target_ids(finding)
 
 
 def _package_output_entry(item) -> dict[str, object]:
@@ -394,7 +431,7 @@ def _package_run_text_bytes(entries, redaction_rules=None):
 
 def _package_css():
     return (
-        "/* darklab shell evidence package CSS snapshot: package_format_version=1 */\n"
+        "/* darklab shell evidence package CSS snapshot: package_format_version=2 */\n"
         + _font_face_css(embed=True)
         + "\n"
         + """
@@ -711,6 +748,7 @@ def _render_package_index_html(
             "href": finding_href,
             "label": finding.get("title") or finding.get("raw_line") or "",
             "title": finding.get("title") or finding.get("raw_line") or "",
+            "targets": _package_finding_target_reference_labels(finding),
             "severity": finding.get("severity") or "info",
             "status": finding.get("review_state") or "new",
             "run": _package_short_id(finding.get("run_id")),
@@ -847,7 +885,10 @@ def _render_package_readme(
         lines.append("- No selected runs.")
     lines.extend(["", "## Findings", ""])
     if findings:
-        lines.extend(["| Finding | Severity | Status | Run | Evidence |", "| --- | --- | --- | --- | --- |"])
+        lines.extend([
+            "| Finding | Targets | Severity | Status | Run | Evidence |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ])
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
@@ -856,6 +897,7 @@ def _render_package_readme(
             finding_label = finding.get("title") or finding.get("raw_line") or finding.get("id")
             lines.append(
                 f"| {_package_markdown_link(finding_label, href)} "
+                f"| {_package_markdown_text('; '.join(_package_finding_target_reference_labels(finding)))} "
                 f"| {_package_markdown_text(finding.get('severity') or 'info')} "
                 f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
                 f"| {_package_markdown_code(_package_short_id(run_id))} "
@@ -966,7 +1008,10 @@ def _package_findings_markdown_bytes(manifest, run_pages):
         "",
     ]
     if findings:
-        lines.extend(["| Finding | Severity | Status | Run | Evidence |", "| --- | --- | --- | --- | --- |"])
+        lines.extend([
+            "| Finding | Targets | Severity | Status | Run | Evidence |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ])
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
@@ -975,6 +1020,7 @@ def _package_findings_markdown_bytes(manifest, run_pages):
             finding_label = finding.get("title") or finding.get("raw_line") or finding.get("id")
             lines.append(
                 f"| {_package_markdown_link(finding_label, href)} "
+                f"| {_package_markdown_text('; '.join(_package_finding_target_reference_labels(finding)))} "
                 f"| {_package_markdown_text(finding.get('severity') or 'info')} "
                 f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
                 f"| {_package_markdown_code(_package_short_id(run_id))} "
@@ -999,9 +1045,9 @@ def _package_findings_markdown_bytes(manifest, run_pages):
                 f"- Review state: {_package_markdown_code(finding.get('review_state') or 'new')}",
                 f"- Source line: {_package_markdown_code(source_line)}",
             ])
-            target_ids = _package_finding_target_ids(finding)
-            if target_ids:
-                lines.append("- Targets: " + ", ".join(_package_markdown_code(target_id) for target_id in target_ids))
+            target_labels = _package_finding_target_reference_labels(finding)
+            if target_labels:
+                lines.append("- Targets: " + "; ".join(_package_markdown_text(label) for label in target_labels))
             raw_line = str(finding.get("raw_line") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
             if raw_line:
                 lines.extend(["", "```text", raw_line.replace("```", "`\u200b``"), "```"])

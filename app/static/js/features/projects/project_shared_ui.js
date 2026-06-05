@@ -103,6 +103,181 @@
       return `project-explorer-metadata-chip badge ${tone}`;
     }
 
+    function readableToken(value) {
+      return String(value || '')
+        .trim()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ');
+    }
+
+    function pluralize(label, count) {
+      return `${count} ${label}${count === 1 ? '' : 's'}`;
+    }
+
+    function selectedEntityCountParts(counts) {
+      const source = counts && typeof counts === 'object' ? counts : {};
+      const entries = [
+        ['run', source.run_ids ?? source.runs],
+        ['finding', source.finding_ids ?? source.findings],
+        ['artifact', source.artifact_ids ?? source.artifacts],
+        ['target', source.target_ids ?? source.targets],
+      ];
+      return entries
+        .map(([label, value]) => pluralize(label, Math.max(0, Number(value || 0))))
+        .join(', ');
+    }
+
+    function selectedCountsFromIds(selectedEntityIds) {
+      const source = selectedEntityIds && typeof selectedEntityIds === 'object' ? selectedEntityIds : {};
+      return Object.fromEntries(
+        Object.entries(source).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]),
+      );
+    }
+
+    function provenanceOrigins(projectLinks) {
+      if (!projectLinks || typeof projectLinks !== 'object') return '';
+      const counts = projectLinks.counts_by_origin && typeof projectLinks.counts_by_origin === 'object'
+        ? projectLinks.counts_by_origin
+        : {};
+      const origins = Array.isArray(projectLinks.origin_sources) ? projectLinks.origin_sources : Object.keys(counts);
+      return { counts, origins };
+    }
+
+    function provenanceOriginSummary(projectLinks) {
+      const linkOrigins = provenanceOrigins(projectLinks);
+      if (!linkOrigins) return '';
+      const { counts, origins } = linkOrigins;
+      const parts = origins
+        .map((origin) => {
+          const normalized = String(origin || '').trim();
+          if (!normalized) return '';
+          const count = Number(counts[normalized] || 0);
+          return count > 0 ? `${readableToken(normalized)} (${count})` : readableToken(normalized);
+        })
+        .filter(Boolean);
+      if (parts.length) return parts.join(', ');
+      return projectLinks.note ? String(projectLinks.note) : '';
+    }
+
+    function provenanceOriginChip(projectLinks) {
+      const linkOrigins = provenanceOrigins(projectLinks);
+      const detail = provenanceOriginSummary(projectLinks);
+      if (!linkOrigins) {
+        return {
+          label: 'source: not recorded',
+          title: 'Project-link origin details were not recorded.',
+        };
+      }
+      const { counts, origins } = linkOrigins;
+      const recordedOrigins = origins.map(origin => String(origin || '').trim()).filter(Boolean);
+      if (!recordedOrigins.length) {
+        return {
+          label: 'source: not recorded',
+          title: detail || 'Project-link origin details were not recorded.',
+        };
+      }
+      if (recordedOrigins.length === 1) {
+        const origin = recordedOrigins[0];
+        const count = Number(counts[origin] || 0);
+        return {
+          label: `source: ${readableToken(origin)}`,
+          title: detail || (count > 0 ? `${readableToken(origin)} (${count})` : readableToken(origin)),
+        };
+      }
+      return {
+        label: `source: ${recordedOrigins.length} types`,
+        title: detail || recordedOrigins.map(readableToken).join(', '),
+      };
+    }
+
+    function packageImportWarningSummary(importHints) {
+      const warnings = importHints && Array.isArray(importHints.warnings) ? importHints.warnings : [];
+      if (!warnings.length) return 'none';
+      const counts = new Map();
+      warnings.forEach((warning) => {
+        const code = readableToken(warning && warning.code || 'warning') || 'warning';
+        counts.set(code, (counts.get(code) || 0) + 1);
+      });
+      return Array.from(counts.entries())
+        .map(([code, count]) => count > 1 ? `${code} (${count})` : code)
+        .join(', ');
+    }
+
+    function projectProvenanceSummary(manifest, { fallbackKind = 'export' } = {}) {
+      const source = manifest && typeof manifest === 'object' ? manifest : {};
+      const provenance = source.provenance && typeof source.provenance === 'object' ? source.provenance : {};
+      const build = provenance.build && typeof provenance.build === 'object' ? provenance.build : {};
+      const privacy = provenance.privacy && typeof provenance.privacy === 'object' ? provenance.privacy : {};
+      const sources = provenance.sources && typeof provenance.sources === 'object' ? provenance.sources : {};
+      const importHints = source.import_hints && typeof source.import_hints === 'object' ? source.import_hints : null;
+      const rows = [];
+      const schema = provenance.schema_version
+        ? `v${provenance.schema_version} ${readableToken(provenance.kind || fallbackKind)}`
+        : 'not recorded';
+      rows.push({ label: 'Schema', value: schema });
+      const redaction = build.redaction_mode || privacy.redaction_mode || source.redaction_mode;
+      const preset = build.preset || source.preset || build.template_id || source.template_id;
+      const privateNotes = Object.prototype.hasOwnProperty.call(privacy, 'private_notes_included')
+        ? privacy.private_notes_included
+        : source.include_private_notes;
+      rows.push({
+        label: 'Build',
+        value: [
+          preset ? readableToken(preset) : '',
+          redaction ? readableToken(redaction) : '',
+          privateNotes === undefined ? '' : (privateNotes ? 'private notes included' : 'private notes excluded'),
+        ].filter(Boolean).join(', ') || 'not recorded',
+      });
+      const selectedCounts = build.selected_entity_counts && typeof build.selected_entity_counts === 'object'
+        ? build.selected_entity_counts
+        : selectedCountsFromIds(build.selected_entity_ids || source.selected_entity_ids);
+      rows.push({ label: 'Selected', value: selectedEntityCountParts(selectedCounts) || 'not recorded' });
+      rows.push({
+        label: 'Source links',
+        value: provenanceOriginSummary(sources.project_links) || 'not recorded',
+      });
+      if (importHints) {
+        rows.push({
+          label: 'Import hints',
+          value: `${readableToken(importHints.mode || 'preview only')}; warnings: ${packageImportWarningSummary(importHints)}`,
+        });
+      }
+      const hasRecordedProvenance = schema !== 'not recorded'
+        || rows.some(row => row.label !== 'Schema' && row.value && row.value !== 'not recorded');
+      const chips = [];
+      chips.push({
+        label: 'provenance',
+        kind: hasRecordedProvenance ? 'success' : 'label',
+        title: hasRecordedProvenance ? schema : 'Provenance was not recorded in this package format.',
+      });
+      const origin = provenanceOriginChip(sources.project_links);
+      if (origin) chips.push({ ...origin, kind: 'label' });
+      return { rows, chips, hasRecordedProvenance };
+    }
+
+    function projectProvenanceSummaryElement(manifest, options = {}) {
+      const summary = projectProvenanceSummary(manifest, options);
+      const section = document.createElement('section');
+      section.className = 'project-provenance-summary';
+      const heading = document.createElement('h3');
+      heading.textContent = options.title || 'Provenance summary';
+      section.appendChild(heading);
+      const rows = document.createElement('div');
+      rows.className = 'project-provenance-summary-rows';
+      summary.rows.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'project-provenance-summary-row';
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        const value = document.createElement('strong');
+        value.textContent = item.value || 'not recorded';
+        row.append(label, value);
+        rows.appendChild(row);
+      });
+      section.appendChild(rows);
+      return section;
+    }
+
     function entityTitleForEditor(entityType, entity) {
       if (entityType === 'project') {
         return String(entity && (entity.name || entity.slug || entity.id) || 'Project');
@@ -275,6 +450,7 @@
           const chipEl = document.createElement('span');
           chipEl.className = entityMetadataChipClass(chip.kind);
           chipEl.textContent = String(chip.label || '');
+          if (chip.title) chipEl.title = String(chip.title);
           chipWrap.appendChild(chipEl);
         });
         main.appendChild(chipWrap);
@@ -350,6 +526,8 @@
       itemRow,
       makeButton,
       metaRow,
+      projectProvenanceSummary,
+      projectProvenanceSummaryElement,
       runById,
       runItems,
       shortRunId,
