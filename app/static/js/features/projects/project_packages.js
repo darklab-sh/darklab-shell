@@ -111,11 +111,16 @@
       const packageId = String(pkg && pkg.id || '');
       const summary = summaryFor(projectId);
       if (!packageId || !summary || !Array.isArray(summary.packages)) return;
-      summary.packages = summary.packages.map(item => (
-        String(item && item.id || '') === packageId
-          ? { ...item, ...pkg }
-          : item
-      ));
+      let replaced = false;
+      summary.packages = summary.packages.map((item) => {
+        if (String(item && item.id || '') !== packageId) return item;
+        replaced = true;
+        return { ...item, ...pkg };
+      });
+      if (!replaced) summary.packages = [
+        { ...pkg },
+        ...summary.packages,
+      ];
     }
 
     function selectableArtifactItems(summary) {
@@ -1448,6 +1453,7 @@
       mergePackageIntoSummary(projectId, created.package);
       ctx.setWorkspaceTab?.('packages');
       ctx.setProjectWorkspaceMessage?.('Package created.');
+      ctx.renderProjectExplorer?.();
     }
 
     function waitForPackageJobPoll() {

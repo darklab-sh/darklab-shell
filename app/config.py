@@ -322,6 +322,7 @@ def load_config(conf_dir=None):
         "evidence_package_max_uncompressed_mb": 500,
         "evidence_package_max_artifacts": 100,
         "package_presets_file":       "package_presets.yaml",
+        "report_templates_file":      "report_templates.yaml",
         "evidence_package_download_rate_limit_per_minute": 10,
         "evidence_package_download_rate_limit_per_second": 2,
         "notifications": {

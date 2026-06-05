@@ -1479,6 +1479,39 @@
     return projectPackagesController;
   }
 
+  let projectReportController = null;
+
+  function _projectReportController() {
+    if (projectReportController) return projectReportController;
+    const factory = global.DarklabProjectReport && global.DarklabProjectReport.createProjectReportController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectReport is unavailable');
+    projectReportController = factory({
+      apiFetch,
+      getSelectedProjectId: projectWorkspaceState.selectedId,
+      selectedProject: _selectedProject,
+      projectSummary: _projectSummary,
+      projectRunItems: _projectRunItems,
+      projectArtifactItems: _projectArtifactItems,
+      loadAllProjectArtifacts: _loadAllProjectArtifacts,
+      projectTargetItems: _projectTargetItems,
+      projectFindingItems: _projectFindingItems,
+      loadProjectFindings: _loadProjectFindings,
+      projectArtifactDetail: _projectArtifactDetail,
+      formatDate: _formatProjectDate,
+      makeProjectButton: _makeProjectButton,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      emptyProjectPanel: _emptyProjectPanel,
+      renderProjectExplorer: _renderProjectExplorer,
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      downloadUrlAsAttachment: _downloadUrlAsAttachment,
+      showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
+      logClientError: (message, err) => {
+        if (typeof logClientError === 'function') logClientError(message, err);
+      },
+    });
+    return projectReportController;
+  }
+
   let projectFiltersController = null;
 
   function _projectFiltersController() {
@@ -1820,6 +1853,7 @@
       renderProjectMobile: _renderProjectMobile,
       renderProjectPackages: _renderProjectPackages,
       renderProjectPackageWizardModal: _renderProjectPackageWizardModal,
+      renderProjectReport: _renderProjectReport,
       renderProjectRuns: _renderProjectRuns,
       scheduleProjectFilterSortDividerSync: _scheduleProjectFilterSortDividerSync,
       selectedProject: _selectedProject,
@@ -2091,6 +2125,7 @@
       renderProjectMobileTabs: _renderProjectMobileTabs,
       renderProjectMobileEntitiesTab: (projectId, summary) => _projectEntitiesController().renderMobileEntitiesTab(projectId, summary),
       renderProjectMobilePackagesTab: (projectId, summary) => _projectPackagesController().renderMobilePackagesTab(projectId, summary),
+      renderProjectMobileReportTab: (projectId, summary) => _projectReportController().renderMobileReportTab(projectId, summary),
       setProjectMobileView: _setProjectMobileView,
       loadProjectFindings: _loadProjectFindings,
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
@@ -2230,6 +2265,7 @@
       openProjectTargetEditor: _openProjectTargetEditor,
       packagesController: _projectPackagesController,
       previewProjectArtifact: _previewProjectArtifact,
+      reportController: _projectReportController,
       projectArtifactItems: _projectArtifactItems,
       projectArtifactPagination: _projectArtifactPagination,
       projectDisplayName: _projectDisplayName,
@@ -2988,8 +3024,8 @@
     _projectMobileShellController().renderMobile();
   }
 
-  function _renderProjectHeader(project, summary) {
-    return _projectNavigationController().renderProjectHeader(project, summary);
+  function _renderProjectHeader(project, summary, options = {}) {
+    return _projectNavigationController().renderProjectHeader(project, summary, options);
   }
 
   function _focusProjectWorkspaceTab(tabId) {
@@ -3030,6 +3066,10 @@
 
   function _renderProjectPackages(container, projectId, summary) {
     _projectPackagesController().renderPackages(container, projectId, summary);
+  }
+
+  function _renderProjectReport(container, projectId, summary) {
+    _projectReportController().renderReport(container, projectId, summary);
   }
 
   function _renderProjectExplorer() {

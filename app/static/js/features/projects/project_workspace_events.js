@@ -155,11 +155,13 @@
 
     async function handleInput(event) {
       if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
+      if (ctx.reportController?.().handleInput(event)) return;
       ctx.packagesController?.().handleInput(event);
     }
 
     async function handleChange(event) {
       if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
+      if (ctx.reportController?.().handleChange(event)) return;
       if (ctx.packagesController?.().handleChange(event)) return;
       const findingViewModeControl = event.target.closest?.('[data-project-finding-view-mode]');
       if (findingViewModeControl) {
@@ -391,8 +393,15 @@
       ctx.closeProjectFilterMenus();
     }
 
+    function handlePointerDown(event) {
+      const tabBtn = event.target.closest?.('[data-project-tab]');
+      if (!tabBtn) return;
+      event.preventDefault();
+    }
+
     async function handleClick(event) {
       if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
+      if (await ctx.reportController?.().handleClick(event)) return;
       if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
       if (mobileDetailTab) {
@@ -665,6 +674,10 @@
         event.preventDefault();
         await ctx.flushProjectNotesAutosave();
         const nextTab = tabBtn.dataset.projectTab || 'details';
+        if (nextTab === workspaceTab()) {
+          ctx.focusProjectWorkspaceTab?.(nextTab);
+          return;
+        }
         ctx.setWorkspaceTab(nextTab);
         if (nextTab !== 'details') ctx.closeProjectTargetEditor();
         ctx.closeProjectEntityEditor();
@@ -1237,6 +1250,8 @@
         void handleDocumentPickerClick(event);
       });
       document.addEventListener('click', handleDocumentFilterMenuClick, true);
+      ctx.projectWorkspaceModal?.addEventListener('pointerdown', handlePointerDown);
+      ctx.projectWorkspaceModal?.addEventListener('mousedown', handlePointerDown);
       ctx.projectWorkspaceModal?.addEventListener('click', (event) => {
         void handleClick(event);
       });
@@ -1248,6 +1263,7 @@
       handleChange,
       handleClick,
       handleInput,
+      handlePointerDown,
     };
   }
 

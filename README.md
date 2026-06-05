@@ -477,6 +477,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── config.yaml             # Application configuration (see CONFIGURATION.md)
 │   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
 │   │   ├── package_presets.yaml    # Evidence package preset catalog used by the package wizard
+│   │   ├── report_templates.yaml   # Engagement report template catalog used by Project reports
 │   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── themes/                 # Built-in theme definitions (one YAML per theme — apricot_sand, charcoal_amber, darklab_obsidian, etc.)
@@ -521,7 +522,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0025_team_scope_workspace_metadata.py # Postgres team-owned workspace-file metadata
 │   │   │   ├── v0026_project_auto_promote_rules.py # Postgres Project auto-promote rules
 │   │   │   ├── v0027_atlas_import_sources.py # Postgres Atlas import draft, batch, and source-link tables
-│   │   │   └── v0028_finding_triage_details.py # Postgres finding remediation and verification table
+│   │   │   ├── v0028_finding_triage_details.py # Postgres finding remediation and verification table
+│   │   │   └── v0029_project_reports.py # Postgres Project report draft table
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -689,6 +691,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
 │   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
 │   │   │   └── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
+│   │   ├── reports/
+│   │   │   ├── __init__.py     # Public report helper exports
+│   │   │   ├── composition.py  # Report composition context helpers
+│   │   │   ├── export.py       # Report archive bundle helpers
+│   │   │   ├── jobs.py         # Async report archive export job helpers
+│   │   │   ├── models.py       # Report draft, section, selection, and export preference models
+│   │   │   ├── redaction.py    # Report redaction-rule wrapper
+│   │   │   ├── rendering.py    # Report Markdown and HTML rendering helpers
+│   │   │   ├── storage.py      # Owner-scoped report draft persistence helpers
+│   │   │   └── templates.py    # Config-backed report template catalog loader
 │   │   ├── runs/
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
@@ -855,6 +867,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
 │   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
 │   │       │   │   ├── project_packages.js # Evidence package rows, manifest preview, wizard, and download helpers
+│   │       │   │   ├── project_report.js # Project Report tab editor, preview, export, and print/PDF helpers
 │   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
 │   │       │   │   ├── project_shared_ui.js # Shared Project formatting, metadata chips, rows, and button helpers
 │   │       │   │   ├── project_target_validation.js # Project target editor copy and value validation helpers
@@ -962,6 +975,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   ├── notifications.md       # Outbound notification channels, payloads, retries, and setup guide
 │   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
+│   ├── release-drafts/
+│   │   ├── v2.2-merge-request.md # Draft v2.2 merge request summary
+│   │   └── v2.2-release-notes.md # Draft v2.2 release notes
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 │   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
@@ -1063,6 +1079,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── notification_channels.test.js # Options Notifications tab refresh, editor validation, and channel action coverage
     │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
     │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
+    │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
     │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
     │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage
     │       ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery

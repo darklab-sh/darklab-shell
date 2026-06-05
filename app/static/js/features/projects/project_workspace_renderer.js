@@ -7,10 +7,34 @@
   function createProjectWorkspaceRendererController(context) {
     const ctx = context || {};
 
+    function tabsScrollState(body) {
+      const strip = body?.querySelector?.('.project-explorer-tabs');
+      if (!strip) return { left: 0, pinnedRight: false };
+      const left = Math.max(0, Number(strip.scrollLeft || 0));
+      const maxLeft = Math.max(0, Number(strip.scrollWidth || 0) - Number(strip.clientWidth || 0));
+      const active = strip.querySelector('.project-explorer-tab.is-active');
+      const activeLeft = Number(active?.offsetLeft || 0);
+      const activeRight = activeLeft + Number(active?.offsetWidth || 0);
+      const viewRight = left + Number(strip.clientWidth || 0);
+      const activeLastVisible = !!active && !active.nextElementSibling && activeLeft >= left && activeRight <= viewRight;
+      return {
+        left,
+        pinnedRight: maxLeft > 0 && (left >= maxLeft - 2 || activeLastVisible),
+      };
+    }
+
+    function restoreTabsScrollState(tabs, state) {
+      const strip = tabs?.querySelector?.('.project-explorer-tabs');
+      if (!strip || !state) return;
+      const maxLeft = Math.max(0, Number(strip.scrollWidth || 0) - Number(strip.clientWidth || 0));
+      strip.scrollLeft = state.pinnedRight ? maxLeft : Math.max(0, Number(state.left || 0));
+    }
+
     function renderExplorer() {
       const body = ctx.projectExplorerBody;
       if (!body) return;
       const currentTab = ctx.workspaceTab();
+      const previousTabsScroll = tabsScrollState(body);
       body.classList.toggle('project-explorer-body-details', currentTab === 'details');
       body.replaceChildren();
       ctx.ensureSelectedProject();
@@ -30,13 +54,16 @@
         ctx.setWorkspaceTab('details');
       }
       const projectId = String(project.id || '');
-      const [header, tabs] = ctx.renderProjectHeader(project, summary);
+      const [header, tabs] = ctx.renderProjectHeader(project, summary, {
+        initialTabsScrollLeft: previousTabsScroll.left,
+      });
       const activeTab = ctx.workspaceTab();
       const filterBar = ['runs', 'entities', 'findings', 'artifacts'].includes(activeTab)
         ? ctx.renderProjectFilterBar(projectId, summary)
         : null;
       body.append(header);
       body.appendChild(tabs);
+      restoreTabsScrollState(tabs, previousTabsScroll);
       if (filterBar) body.appendChild(filterBar);
       const content = document.createElement('div');
       content.className = 'project-explorer-tab-panel';
@@ -48,6 +75,7 @@
       else if (activeTab === 'findings') ctx.renderProjectFindings(content, projectId, summary);
       else if (activeTab === 'artifacts') ctx.renderProjectArtifacts(content, projectId, summary);
       else if (activeTab === 'packages') ctx.renderProjectPackages(content, projectId, summary);
+      else if (activeTab === 'report') ctx.renderProjectReport(content, projectId, summary);
       body.appendChild(content);
       ctx.enhanceAppSelects?.(content);
       if (filterBar) ctx.enhanceAppSelects?.(filterBar);

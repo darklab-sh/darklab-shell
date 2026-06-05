@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,553
+- behavior tests: 3,572
 - docs/inventory meta-tests: 34
-- `pytest`: 1996 (1962 behavior + 34 meta)
-- `vitest`: 1332
-- `playwright`: 259
-- total: 3,587
+- `pytest`: 2004 (1970 behavior + 34 meta)
+- `vitest`: 1343
+- `playwright`: 260
+- total: 3,607
 
 This document is organized in two parts:
 
@@ -505,6 +505,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPackagePresetCatalog.test_package_preset_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator package preset overrides log a warning and fall back to the shipped catalog. |
 | `TestPackagePresetCatalog.test_package_preset_loader_caps_display_lengths_and_default_labels` | Verifies package preset display text and default labels are bounded. |
 | `TestPackagePresetCatalog.test_package_preset_loader_rejects_too_many_presets` | Verifies package preset catalogs reject more entries than the configured catalog cap. |
+| `TestReportTemplateCatalog.test_default_report_template_sections_match_plan` | Verifies the shipped report template catalog keeps the planned report section order. |
+| `TestReportTemplateCatalog.test_report_template_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator report template overrides log a warning and fall back to the shipped catalog. |
+| `TestReportTemplateCatalog.test_report_draft_storage_handles_scope_and_conflicts` | Verifies report draft storage keeps personal/team drafts separate and rejects stale saves. |
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
 | `TestDatabaseBackend.test_postgres_pool_preserves_pgoptions_when_disabling_jit` | Verifies the Postgres pool preserves caller-provided connection options while adding the app's default JIT setting. |
@@ -1545,6 +1548,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
 | `TestProjectRoutes.test_evidence_package_download_job_builds_and_downloads_archive` | Verifies polled evidence package archive jobs report completion and download the completed ZIP. |
+| `TestProjectRoutes.test_project_report_routes_save_preview_and_export_archive` | Verifies project report draft load/save, stale-save conflicts, date-range validation, preview rendering, and async markdown/HTML archive downloads. |
+| `TestProjectRoutes.test_project_report_export_job_reports_size_limit_failures` | Verifies report archive jobs surface configured size-limit failures as failed jobs and block download tickets with a 413 response. |
+| `TestProjectRoutes.test_project_report_preview_resolves_manual_selection_beyond_first_page` | Verifies report preview resolves explicitly selected project rows beyond the first service page instead of treating them as unknown. |
+| `TestProjectRoutes.test_project_report_markdown_escapes_table_cells` | Verifies report Markdown table cells escape pipes and backslashes so commands and targets do not corrupt table layout. |
+| `TestProjectRoutes.test_project_report_preview_composes_redacted_project_content` | Verifies report previews compose selected runs, targets, findings, and text artifacts while redacting sensitive values and hiding private notes. |
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
@@ -2977,6 +2985,22 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
 
+#### `project_report.test.js`
+
+| Test | Description |
+| --- | --- |
+| `loads the draft and renders the report editor with preview/export actions` | Verifies that the Report tab loads a saved draft, renders metadata and selection controls, and exposes preview and archive export actions. |
+| `shows template choices only when more than one template is configured` | Verifies that the Report tab hides the template selector for the single shipped default and renders it when multiple configured templates exist. |
+| `saves with the loaded updated token and the current draft fields` | Verifies that explicit Save sends the optimistic concurrency token and the current report draft. |
+| `clears stale preview output and confirms dirty reloads when editing report metadata` | Verifies that editing report metadata clears the rendered preview, disables Print/PDF until the preview is refreshed, and asks before Reload saved discards unsaved edits. |
+| `keeps include-all selection dynamic when editing metadata` | Verifies that editing report metadata does not freeze default include-all selections to the currently rendered checkbox rows. |
+| `loads full finding and artifact lists before rendering report selections` | Verifies that the Report tab loads full finding and artifact lists before rendering selection checkboxes. |
+| `blocks view-only team members from save/raw controls without blocking preview or export` | Verifies that view-only team members cannot save drafts or switch sensitive export preferences, while default preview/export stays available. |
+| `shows stale-save conflicts as report errors` | Verifies that report draft save conflicts surface as in-tab errors instead of reporting a successful save. |
+| `reorders sections and preserves explicit empty selections` | Verifies section move controls, selection empty states, and explicit None/All selection state in the report editor. |
+| `exports through the archive job and downloads through a ticket URL` | Verifies that report archive export starts the async job, polls completion, requests a download ticket, and starts the attachment download. |
+| `prints the current preview through the browser print flow` | Verifies that the Print/PDF action opens the rendered preview HTML and invokes the browser print flow. |
+
 #### `pty.test.js`
 
 | Test | Description |
@@ -4152,6 +4176,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `opens a prefilled Project auto-promote rule from Atlas` | Verifies that Atlas can hand the current filtered view to Projects and open a prefilled auto-promote rule editor in a live browser. |
 | `imports a small Nuclei JSONL file into Atlas from the browser` | Verifies that the Atlas import modal can preview and apply a small Nuclei JSONL file in a live browser. |
 | `creates, edits, downloads, and deletes a project evidence package` | Verifies that the Projects modal package wizard creates a linked-run evidence package with labels/notes, and that package edit, manifest, download, and delete actions work in a live browser. |
+| `builds a project report preview and export archive` | Verifies that the Projects modal Report tab can edit metadata, save a draft, preview linked evidence, exercise Print/PDF, and download the report archive in a live browser. |
 | `edits finding and artifact metadata and previews project artifacts` | Verifies that seeded project findings and run artifacts can be edited, previewed, downloaded, filtered by source run, and unlinked through the Projects modal in a live browser. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
 | `navigates nested file output folders and exposes viewer actions` | Verifies that the workspace modal displays nested output paths as folders and exposes actions in the file viewer header. |

@@ -6,6 +6,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.2] — Unreleased
+
+### Added
+
+- **Engagement report foundation** — Project reports now have an owner-scoped draft table, a shipped `report_templates.yaml` catalog with an operator `report_templates_file` override, project report load/save/preview routes, async markdown/HTML export jobs with download tickets, and a focused `services.reports` backend package for draft models, storage, template loading, redaction, project-data composition, rendering, and export helpers. The Projects modal also has a Report tab for editing report metadata, including Date range guidance and validation for the expected `YYYY-MM-DD to YYYY-MM-DD` format, toggling/reordering sections, selecting included runs/targets/findings/artifacts, explicitly saving drafts, previewing rendered HTML, exporting the markdown/HTML archive, and opening the preview through the browser Print/PDF flow. Rendered reports show a subtle generated-by line with the app name, app version, generated timestamp, and redaction mode, and report archives record the same provenance in `manifest.json`. The template selector stays hidden for the single shipped default and appears when multiple operator-configured templates are available. View-only team members can preview and export the default readable report while save/raw/private-note controls stay locked. Report selection now preserves explicit None/All choices separately from the default include-all draft state, loads full finding/artifact lists before rendering selection controls, keeps default include-all dynamic while operators edit metadata, clears stale rendered previews when the draft changes, asks before Reload saved discards unsaved edits, resolves manual server-side selections beyond the first bounded service page, and escapes Markdown table cells so pipes/backslashes in commands or targets do not corrupt the `.md` artifact. Eleven Vitest cases in `tests/js/unit/project_report.test.js` cover draft rendering, explicit Save with optimistic concurrency, stale preview invalidation, dirty reload confirmation, include-all selection behavior, full-list loading, conflict messaging, section reorder/selection edge cases, template selector visibility, view-only gating, archive job downloads, and browser Print/PDF wiring; focused route coverage exercises report export size-limit failures, date-range validation, manual selections beyond the first service page, and Markdown table escaping; and Playwright covers the live Report tab save, preview, print/PDF, and archive download flow.
+
+---
+
 ## [2.1] — 2026-06-03
 
 ### Added

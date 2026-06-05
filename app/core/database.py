@@ -793,6 +793,18 @@ def _create_project_workspace_schema(conn):
             updated           TEXT NOT NULL
         )
     """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS project_reports (
+            id                    TEXT PRIMARY KEY,
+            session_id            TEXT NOT NULL,
+            team_id               TEXT NOT NULL DEFAULT '',
+            project_id            TEXT NOT NULL,
+            draft                 {_json_column_sql("{}")},
+            report_format_version INTEGER NOT NULL DEFAULT 1,
+            created               TEXT NOT NULL,
+            updated               TEXT NOT NULL
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -1237,6 +1249,20 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_session_project "
         "ON evidence_packages (session_id, project_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_reports_project_updated "
+        "ON project_reports (project_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_reports_personal_unique "
+        "ON project_reports (session_id, project_id) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_reports_team_unique "
+        "ON project_reports (team_id, project_id) "
+        "WHERE team_id != ''"
     )
 
 

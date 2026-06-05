@@ -7,6 +7,8 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Richer package/export provenance implementation plan](#richer-packageexport-provenance-implementation-plan)
+  - [Audit log surface implementation plan](#audit-log-surface-implementation-plan)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -30,7 +32,136 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Richer package/export provenance implementation plan
+
+Improve package and report handoff metadata so exported work explains where evidence came from, how it was selected, and what context should survive import/export loops. Land the provenance schema ahead of the report builder where practical, but keep reports able to consume provenance as optional input with clean fallbacks.
+
+**Goal and boundaries**
+- Make package manifests and reports show clear source context for targets, findings, artifacts, runs, imports, labels, notes, and package builds.
+- Add explicit target references when selected findings rely on derived relationships that are not obvious in the finding text.
+- Preserve source and curation hints so labels, notes, targets, findings, and packages survive a handoff/round-trip with less manual repair — without ever auto-writing project data on import.
+
+**Foundations to reuse (already in the codebase)**
+- Manifest builder: `evidence_manifest_from_summary` in `services/projects/packages.py` already emits `package_format_version`, `selected_entity_ids`, `preset`, `options`, and `links` — the provenance block slots in here.
+- Manifest writer/format: `package_archive.py` writes `manifest.json` with a top-level `format`/`package_format_version`; bump the format and add a versioned parser/normalizer so old packages still render with a consistent "not recorded" provenance shape.
+- Link origin sources: `project_links.source`, `project_links.source_detail`, and `PROJECT_LINK_SOURCES` in `core.database` are the source of truth for project-link provenance. Atlas import provenance is a separate path through `atlas_entity_import_links` / `atlas_finding_import_occurrences` and `v0027_atlas_import_sources`.
+- Redaction/private-note handling: route provenance through the same package helpers used by the report builder, because source commands, target values, import source names, labels, and note status can disclose sensitive context even when the finding body is redacted.
+
+**Decisions and risks**
+- Do not invent a parallel origin enum. Map the persisted `PROJECT_LINK_SOURCES` values into the manifest provenance shape: `manual`, `active_project`, `auto_command`, `auto_input_file`, `auto_promote_rule`, `package_flow`, and `migration`.
+- Keep project-link origin provenance separate from Atlas import provenance. Atlas import details come from the import-source tables, not from a synthetic `import` project-link source.
+- Keep the first slice manifest-only for import hints. Emit enough context for a future preview/apply flow, but do not build package re-import or auto-rehydration behavior in v2.2.
+- Ship stored relationship confidence in the first slice. The column is data-backed and at least some writers use non-default values; defer only new scoring logic or prominent confidence UI that would imply the values are fully calibrated.
+- Expose one normalized provenance shape to the API, package preview, and report builder so consumers do not each branch on manifest version details.
+
+**Phase P1 — Manifest provenance schema**
+- Define a versioned provenance block in `packages.py` carrying per-item source context for targets, findings, artifacts, runs, imports, labels, notes, and the package build itself.
+  - Source run ids and redaction-safe run commands where those dimensions were captured.
+  - Import source ids and external tool format (from `atlas_import_sources`) when safe to expose.
+  - Project-link origin mapped from `PROJECT_LINK_SOURCES`: `manual`, `active_project`, `auto_command`, `auto_input_file`, `auto_promote_rule` (with rule id/details), `package_flow`, and `migration`.
+  - Labels and notes included-vs-excluded status without leaking excluded private note bodies.
+  - Target relationship source, source detail/reason, and stored confidence.
+  - Package build settings: redaction mode, preset/template id, and selected entity ids.
+- Bump `package_format_version`, add an explicit normalizer branch for the prior format, and record the schema change in a manifest-format note in `ARCHITECTURE.md`.
+
+**Phase P2 — Serializer provenance fields**
+- Normalize or add provenance fields in the project serializers (`queries.py`, `links.py`, `metadata.py`, `findings.py`, `targets.py`) before changing any browser display, so the manifest and UI read from one source.
+- Map existing `project_links.source`, `source_detail`, and `confidence` onto the provenance block's origin/source-detail/confidence fields. This is a serializer task, not a schema migration.
+- Keep Atlas import provenance serializers separate: read source tool, file hash, and `source_detail_json` from the Atlas import-source/link tables instead of treating imports as project-link origins.
+
+**Phase P3 — Target and finding references**
+- Add richer target context to package/report finding rows: redaction-safe target value, target type, relationship source/reason, source run, and linked entity when known.
+- When a finding references a host/domain/URL indirectly, surface the target relationship in the manifest and report instead of relying on the raw line alone.
+- Keep references compact in UI rows and detailed in manifest/report output; feed the same structure into the report builder so both tell one story.
+
+**Phase P4 — Round-trip / import hints**
+- Add an import-hint block describing how a future import should recreate labels, notes, target relationships, source links, package metadata, and finding review state.
+- Keep this phase to emitted hints and warnings only. Package re-import preview/apply stays a later implementation and must reuse the Atlas import preview/apply pattern before it writes project data.
+- Emit warnings when package data is redacted, private notes are excluded, or source runs/artifacts are no longer available.
+
+**Phase P5 — Browser surface**
+- Update the package preview and manifest viewer (`project_packages.js`) to show a concise provenance summary above the raw JSON.
+- Add compact "source"/"provenance" chips only where they explain package rows without crowding the project UI (reuse `project_shared_ui.js`); put fuller detail in the manifest/provenance summary.
+- Feed the same provenance summary into the report-builder display.
+
+**Phase P6 — Validation and docs**
+- Pytest: manifest schema and provenance fields; target relationship serialization; redaction/private-note exclusion; redacted provenance does not leak original commands/targets; backward compatibility (older-format manifests still read and normalize); `PROJECT_LINK_SOURCES` mapping; Atlas import provenance stays separate from project-link origin.
+- Vitest: package preview/manifest provenance rendering; older-manifest "not recorded" display; report-builder provenance display.
+- Playwright: create a package from project data and verify the visible provenance summary plus the manifest JSON.
+- Docs: API/OpenAPI (`blueprints/api_v1.py`) for manifest schema/version changes and any payload fields; `ARCHITECTURE.md` manifest-schema note; `CHANGELOG.md`; release drafts.
+
+**Cut line**
+- v2.2 target (full-featured): manifest provenance fields; project-link origin mapped from existing `source`/`source_detail` values; Atlas import provenance kept on its own path; target references with stored confidence in package/report output; package-preview provenance summary; format-version bump with backward-compatible normalization; import hints emitted but not applied; full tests.
+- Later: package re-import preview/apply; cross-package lineage; richer confidence scoring; package comparison.
+
+### Audit log surface implementation plan
+
+Add an operator-visible audit trail for consequential actions so team/project work can be reviewed without reconstructing events from structured logs. Team-Mode (v2.1) raised the stakes here: with multiple users sharing scope, "who shared / toggled redaction / deleted / built a package or report" is now an operational and compliance need.
+
+**Goal and boundaries**
+- Store durable audit events for actions that change data, reveal/share data, or affect evidence handoff.
+- Provide a plain, fast viewer: event list, filters, detail drawer, and CSV/JSON export.
+- Keep details safe by construction: no secret values, no raw private-note bodies, no full command output, and no raw bearer/session tokens.
+
+**Foundations to reuse (already in the codebase)**
+- Retention precedent: `notifications.events.retention_days` already keeps "delivery audit rows" with a configurable prune (migration `v0009`); mirror its retention + startup-cleanup shape (also see `permalink_retention_days` startup pruning).
+- Scope precedent: the `session_id` + `team_id` scoping and conditional indexes from `finding_triage_details` (`v0028`).
+- Diag surface precedent: `/diag` and its JSON sub-routes (`/diag/classifier-inspector`, `/diag/classifier-drift`) in `blueprints/assets.py`, gated by `_require_diag_access`; `templates/diag.html` + `static/css/diag.css` for the viewer.
+- Actor/context helpers: the `Capability`/role data in `services/teams/capabilities.py` and `get_log_session_id`/request-id helpers in `core/helpers.py`.
+- Existing audit-like surfaces: notification delivery rows are already durable and owner-scoped; secret audit helpers currently emit log-only structured events.
+
+**Decisions and risks**
+- `/diag/audit` is the operator-wide first surface. It is IP-gated by `_require_diag_access` and may query across personal/team scopes; any later Options/team-owner surface must use separate capability-gated routes and owner-scoped queries.
+- Because `/diag/audit` is operator-wide and IP-gated, every team's activity is visible to anyone with diag access. That fits single-operator self-hosting, but it is not appropriate for multi-tenant hosting until owner-scoped routes exist.
+- Use fail-closed same-transaction recording for destructive/compliance-sensitive events such as deletes, shares/exports, secret changes, and team permission changes. Use best-effort post-commit recording for routine curation events such as label edits or finding review moves so an audit hiccup does not block low-risk product work.
+- Details payloads are allowlist-based per event type. Record stable ids, counts, changed field names, redaction mode, safe labels, and result status; never store raw private notes, secret values, full command output, raw tokens, or full sensitive request bodies.
+- Recorder allowlist validation should be defensive: unknown detail keys are dropped or moved to a safe `omitted_detail_keys` count instead of raising for routine best-effort events, while fail-closed event types may reject invalid details before commit.
+- Keep the new operational audit stream distinct from existing notification delivery history. For notification actions, record configuration changes and high-level references in `audit_events`, while delivery attempt history stays in `notification_events`.
+- Route existing log-only secret audit emitters through the new recorder once the table exists, preserving their safe naming behavior without copying secret values.
+- Use correlation ids for multi-step actions. Async package/report jobs should share a job/correlation id across start, completion, failure, ticket issuance, and any tracked ticket redemption event.
+
+**Phase A1 — Data model and recorder service**
+- Add the next audit migration (placeholder name: `v0030_audit_events`) plus the parallel SQLite bootstrap.
+  - Columns: `id`, owner `session_id`, `team_id`, actor (session/team-member id and display name when available), `event_type`, `target_type`, `target_id`, `project_id`, `request_id`, `correlation_id`, optional `job_id`, `created` timestamp, IP/user-agent summary, and a bounded JSON `details` payload.
+  - Indexes: personal scope by `(session_id, created)` where `team_id = ''`, team scope by `(team_id, created)` where `team_id != ''`, plus `(event_type, created)`, `(project_id, created)`, `(target_type, target_id, created)`, and `(correlation_id)`.
+- Add `app/services/audit/` with:
+  - `models.py` — event-type and target-type enums, with each event type carrying its recording mode (`fail_closed` or `best_effort`) so call sites do not choose policy ad hoc.
+  - `recorder.py` — a `record_event(...)` helper that accepts an active DB connection for same-transaction writes, trims/bounds the JSON payload, validates details against per-event allowlists, and strips unsafe values.
+  - `queries.py` — paginated, filtered reads.
+  - `retention.py` — cleanup keyed on `audit_retention_days`, run at startup and periodically from the app's normal background/worker path so long-running deployments continue pruning.
+- Config: `audit_log_enabled` (default on) and `audit_retention_days` (sensible default, e.g. 90; `0` = unlimited).
+
+**Phase A2 — Instrumentation at completed-action boundaries**
+- For fail-closed synchronous mutations, record events in the same transaction after the mutation succeeds and before commit. For best-effort curation events, record after commit and log recorder failures without rolling back the user action. For async jobs, record start/completion/failure at job-state transitions.
+- Cover, by category:
+  - Destructive: history delete, snapshot delete, file delete, project unlink/delete, package delete, finding delete/suppression.
+  - Share/export: snapshot create, redaction toggle/use, package/report build, export preview, download-ticket issuance, and ticket redemption where the shared ticket flow exposes enough context.
+  - Secrets and integrations: secret create/replace/delete/rotation, notification channel changes, and future ticketing/webhook config changes.
+  - Team and scope: team create/join/invite/revoke/archive/reactivate, role changes, and scope changes that lead to writes.
+  - Curation: finding review changes, remediation/verification edits, label/note changes, project link/unlink, and target changes.
+- For async package/report builds, record start and completion/failure events with the job id, correlation id, and safe artifact metadata (hook into `package_jobs.py` and the report export job).
+- Add helper wrappers where repeated project-metadata mutations already share code (`services/projects/metadata.py`).
+
+**Phase A3 — Routes and viewer**
+- Add `/diag/audit` read route(s) with pagination, filters, and CSV/JSON export; gate with `_require_diag_access` for the operator-wide first version.
+- Filters: event type, actor, project, target type, date range, and team/personal scope.
+- Detail drawer showing the safe JSON details plus cross-links back to project/history/package/report surfaces when resolvable.
+- Keep query helpers able to run owner-scoped reads so a later Options/team-owner view can reuse the same service without inheriting `/diag`'s cross-scope access.
+
+**Phase A4 — Validation and docs**
+- Pytest: table-driven event-type recording-mode coverage; fail-closed event creation in the same transaction as successful mutations; rollback does not leave orphan audit rows; best-effort curation events do not roll back product writes on recorder failure; owner-scoped and operator-wide reads; details allowlist/redaction; pagination and filtering; startup and periodic retention cleanup; async build start/complete/failure correlation; notification/secret audit integration boundaries.
+- Vitest: viewer filters, row rendering, detail drawer, and empty/error states.
+- Playwright: perform a project/finding/package action and verify it appears in the audit viewer.
+- Docs: `CONFIGURATION.md` (retention/enable settings); `ARCHITECTURE.md` (audit-event ownership, transaction, access, and details-safety rules); `CHANGELOG.md`; release drafts.
+
+**Cut line**
+- v2.2 target (full-featured): table, recorder, and queries; fail-closed same-transaction audit writes for destructive/compliance-sensitive mutations; best-effort audit writes for routine curation; correlated package/report/share/export job events; audit records for delete/project-link/finding-review actions; a `/diag` operator-wide viewer with filters and CSV/JSON export; startup plus periodic retention; full tests.
+- Later: team-member actor display names everywhere; webhook/ticketing audit events; richer cross-links; an Options-surface viewer for team owners.
+
+**Sequencing across the three v2.2 plans**
+- The report builder foundation has landed. Provenance should still expose one normalized shape that reports can consume when available.
+- Wire audit instrumentation after the remaining provenance/package pieces where practical so it can cover report, package, share, and export actions consistently.
+- Migration identifiers in these plans are placeholders. Assign final migration numbers at merge time so the provenance, report, and audit branches do not collide if they land in a different order.
 
 ---
 
@@ -139,17 +270,12 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Gotchas: iOS Safari requires the user to install the PWA before push works; document this in CONFIGURATION.md.
 
 ### Engagement report builder
-- Turn a project workspace into a styled markdown/PDF engagement report — methodology, scope, targets, findings table, remediation notes, screenshots. Evidence packages today are raw bundles; this is the narrative deliverable a customer reads.
-- **Entry-level scope:**
-  - One-click "Generate report" from a project, with an editable cover page (engagement name, dates, operator, contact).
-  - Sections auto-populated from project data: targets, findings grouped by severity, included runs (with permalinks), artifacts.
-  - Output formats: markdown source plus rendered HTML and PDF, reusing the existing export pipeline.
-  - Operator-editable section templates in a new `app/conf/report_templates.yaml`.
-- **Architecture:**
-  - New `app/services/reports/` service composing project-workspace data with existing finding/run/artifact serializers; templating via Jinja autoescape.
-  - Adds `GET/POST /projects/<id>/report` to `app/blueprints/projects.py`.
-  - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
-  - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
+- The Project Report tab now covers the base narrative-report flow. Future polish can make reports feel more portable and customer-ready:
+  - Add report-created run links or permalinks where needed, carrying the report's redaction mode and showing the `permalink_retention_days` caveat in preview/export metadata.
+  - Feed richer package/export provenance into the report once that plan lands, especially source run/import context and target relationships.
+  - Tune artifact embedding/listing once provenance and report-created run links are available; screenshot galleries and richer binary handling can stay later work.
+  - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
+  - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
 
 ### Native ticketing integrations
 - From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.

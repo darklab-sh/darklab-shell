@@ -128,6 +128,10 @@ const PROJECT_PACKAGES_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_packages.js'),
   'utf8',
 )
+const PROJECT_REPORT_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_report.js'),
+  'utf8',
+)
 const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
@@ -491,6 +495,7 @@ function loadShellChrome({
       ${FINDINGS_BOARD_MODAL_SRC}
       ${PROJECT_ARTIFACTS_SRC}
       ${PROJECT_PACKAGES_SRC}
+      ${PROJECT_REPORT_SRC}
       ${SHELL_CHROME_SRC}
     `,
   )(
@@ -837,6 +842,46 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-4')).toContain('4 artifacts')
     expect(rowText('project-4')).toContain('5 packages')
     expect(rowText('project-4')).not.toContain('99 entities')
+    const desktopTabsWrap = document.querySelector('.project-explorer-tabs-wrap')
+    const desktopTabs = document.querySelector('.project-explorer-tabs')
+    expect(desktopTabsWrap?.classList.contains('tab-strip-wrap')).toBe(true)
+    expect(desktopTabsWrap?.contains(desktopTabs)).toBe(true)
+    const projectTabsScrollLeft = desktopTabsWrap.querySelector('[data-project-tabs-scroll="left"]')
+    const projectTabsScrollRight = desktopTabsWrap.querySelector('[data-project-tabs-scroll="right"]')
+    expect(projectTabsScrollLeft.textContent).toBe('')
+    expect(projectTabsScrollRight.textContent).toBe('')
+    let projectTabsScrollLeftValue = 0
+    Object.defineProperty(desktopTabs, 'clientWidth', { configurable: true, get: () => 120 })
+    Object.defineProperty(desktopTabs, 'scrollWidth', { configurable: true, get: () => 420 })
+    Object.defineProperty(desktopTabs, 'scrollLeft', {
+      configurable: true,
+      get: () => projectTabsScrollLeftValue,
+      set: value => { projectTabsScrollLeftValue = value },
+    })
+    desktopTabs.scrollBy = vi.fn(({ left }) => {
+      projectTabsScrollLeftValue += left
+      desktopTabs.dispatchEvent(new Event('scroll'))
+    })
+    desktopTabs.dispatchEvent(new Event('scroll'))
+    expect(projectTabsScrollLeft.classList.contains('u-hidden')).toBe(false)
+    expect(projectTabsScrollRight.classList.contains('u-hidden')).toBe(false)
+    expect(projectTabsScrollLeft.disabled).toBe(true)
+    expect(projectTabsScrollRight.disabled).toBe(false)
+    projectTabsScrollRight.click()
+    expect(desktopTabs.scrollBy).toHaveBeenCalled()
+    projectTabsScrollLeftValue = 240
+    document.querySelector('[data-project-tab="report"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-tab="report"]').classList.contains('is-active')).toBe(true)
+    expect(document.querySelector('.project-explorer-tabs').scrollLeft).toBe(240)
+    const activeReportTab = document.querySelector('[data-project-tab="report"]')
+    const activeReportTabs = document.querySelector('.project-explorer-tabs')
+    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, cancelable: true })
+    activeReportTab.dispatchEvent(pointerDown)
+    expect(pointerDown.defaultPrevented).toBe(true)
+    activeReportTab.click()
+    await tick()
+    expect(document.querySelector('.project-explorer-tabs')).toBe(activeReportTabs)
     expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (3 · 2 new · 1 high)')
     expect(orderedProjectIds()).toEqual(['project-1', 'project-4', 'project-2', 'project-3'])
 
@@ -4569,6 +4614,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1'])
     expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
     expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('handoff')
     expect(document.getElementById('project-explorer-body').textContent).toContain('note')
 
     document.querySelector('[data-project-tab="runs"]').click()

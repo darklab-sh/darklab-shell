@@ -286,6 +286,11 @@
 # Server default if unset: package_presets.yaml
 # package_presets_file: package_presets.yaml
 #
+# Engagement report template catalog. Relative paths are resolved from app/conf,
+# and invalid operator overrides fall back to the shipped report templates.
+# Server default if unset: report_templates.yaml
+# report_templates_file: report_templates.yaml
+#
 # Evidence package download/build rate limits use the shared limiter and are
 # tighter than normal command/project writes because archive construction can
 # read many workspace files.

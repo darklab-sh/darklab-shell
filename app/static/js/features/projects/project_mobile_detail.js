@@ -670,6 +670,7 @@
       else if (ctx.projectWorkspaceTab() === 'findings') ctx.projectMobileDetailBody.appendChild(renderFindingsTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'artifacts') ctx.projectMobileDetailBody.appendChild(renderArtifactsTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'packages') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobilePackagesTab(projectId, summary));
+      else if (ctx.projectWorkspaceTab() === 'report') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileReportTab(projectId, summary));
     }
 
     function renderDetail() {

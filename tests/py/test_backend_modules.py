@@ -47,6 +47,8 @@ from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQ
 import services.projects.workspace as project_workspace
 import services.projects.auto_promote as project_auto_promote
 import services.projects.package_presets as package_presets
+import services.reports.storage as report_storage
+import services.reports.templates as report_templates
 import app as shell_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
@@ -2771,6 +2773,121 @@ class TestPackagePresetCatalog:
             package_presets.normalize_package_preset_catalog({"presets": raw_presets})
 
 
+class TestReportTemplateCatalog:
+    def setup_method(self):
+        report_templates.clear_report_template_catalog_cache()
+
+    def teardown_method(self):
+        report_templates.clear_report_template_catalog_cache()
+
+    def test_default_report_template_sections_match_plan(self):
+        catalog = report_templates.load_report_template_catalog({
+            "report_templates_file": str(REPO_ROOT / "app" / "conf" / "report_templates.yaml"),
+        })
+
+        templates = {template["id"]: template for template in catalog.templates}
+        assert list(templates) == ["standard"]
+        assert [section["type"] for section in templates["standard"]["sections"]] == [
+            "cover",
+            "executive_summary",
+            "scope_targets",
+            "methodology",
+            "findings_by_severity",
+            "included_runs",
+            "artifacts",
+            "appendix",
+        ]
+
+    def test_report_template_loader_falls_back_to_defaults_for_bad_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report_templates.yaml"
+            path.write_text(textwrap.dedent("""
+            templates:
+              - id: broken
+                sections:
+                  - type: nope
+            """))
+
+            with mock.patch.object(report_templates.log, "warning") as warning:
+                catalog = report_templates.load_report_template_catalog({"report_templates_file": str(path)})
+
+        assert catalog.source_path.endswith("app/conf/report_templates.yaml")
+        assert [template["id"] for template in catalog.templates] == ["standard"]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("REPORT_TEMPLATES_OVERRIDE_INVALID",)
+        assert warning.call_args.kwargs["extra"]["path"] == str(path)
+
+    def test_report_draft_storage_handles_scope_and_conflicts(self, tmp_path):
+        db_path = str(tmp_path / "reports.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            database.db_init()
+            saved = report_storage.save_report_draft(
+                "session-report",
+                "project-1",
+                {"metadata": {"engagement_name": "June assessment", "date_range": "2026-06-01 to 2026-06-05"}},
+            )
+            assert saved["draft"]["metadata"]["engagement_name"] == "June assessment"
+            assert saved["draft"]["metadata"]["date_range"] == "2026-06-01 to 2026-06-05"
+
+            with pytest.raises(ProjectWorkspaceError, match="YYYY-MM-DD to YYYY-MM-DD"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-date-format",
+                    {"metadata": {"date_range": "June 1 - June 5"}},
+                )
+
+            with pytest.raises(ProjectWorkspaceError, match="invalid calendar date"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-date-value",
+                    {"metadata": {"date_range": "2026-06-31 to 2026-07-01"}},
+                )
+
+            with pytest.raises(ProjectWorkspaceError, match="on or after"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-date-order",
+                    {"metadata": {"date_range": "2026-06-05 to 2026-06-01"}},
+                )
+
+            updated = report_storage.save_report_draft(
+                "session-report",
+                "project-1",
+                {"metadata": {"engagement_name": "Final report"}},
+                expected_updated=saved["updated"],
+            )
+            assert updated["draft"]["metadata"]["engagement_name"] == "Final report"
+
+            with pytest.raises(report_storage.ReportDraftConflict):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-1",
+                    {"metadata": {"engagement_name": "Missing update token"}},
+                )
+
+            with pytest.raises(report_storage.ReportDraftConflict):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-1",
+                    {"metadata": {"engagement_name": "Stale report"}},
+                    expected_updated=saved["updated"],
+                )
+
+            team_saved = report_storage.save_report_draft(
+                "session-report",
+                "project-1",
+                {"metadata": {"engagement_name": "Team report"}},
+                team_id="team-1",
+            )
+            assert team_saved["team_id"] == "team-1"
+            personal_draft = report_storage.get_report_draft("session-report", "project-1")
+            team_draft = report_storage.get_report_draft("session-report", "project-1", team_id="team-1")
+            assert personal_draft is not None
+            assert team_draft is not None
+            assert personal_draft["id"] == updated["id"]
+            assert team_draft["id"] == team_saved["id"]
+
+
 class TestDatabaseBackend:
     def test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect(self):
         assert database_backend.configured_database_backend({}) == database_backend.DatabaseBackend.SQLITE
@@ -2792,6 +2909,7 @@ class TestDatabaseBackend:
             'ON CONFLICT("session_id", "name") DO UPDATE SET '
             '"value" = excluded."value", "updated" = excluded."updated"'
         )
+        assert sqlite3.IntegrityError in database_backend.integrity_error_types(database_backend.DatabaseBackend.SQLITE)
 
     def test_postgres_backend_exposes_dialect_and_pool_settings(self, monkeypatch):
         monkeypatch.delenv("PGOPTIONS", raising=False)
@@ -2827,6 +2945,7 @@ class TestDatabaseBackend:
             False,
             "-c jit=off",
         )
+        assert sqlite3.IntegrityError in database_backend.integrity_error_types(database_backend.DatabaseBackend.POSTGRES)
         with pytest.raises(database_backend.DatabaseBackendError, match="SQLite-specific SQL"):
             database_backend.require_sqlite_backend(cfg, "db_connect")
 
@@ -3176,6 +3295,7 @@ class TestPostgresMigrations:
         "entity_notes",
         "finding_triage_details",
         "evidence_packages",
+        "project_reports",
     )
 
     @staticmethod
@@ -3253,6 +3373,7 @@ class TestPostgresMigrations:
             "0026",
             "0027",
             "0028",
+            "0029",
         ]
         for table_name in (
             "runs",
@@ -3295,6 +3416,7 @@ class TestPostgresMigrations:
             "entity_notes",
             "finding_triage_details",
             "evidence_packages",
+            "project_reports",
         ):
             assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
         assert "JSONB NOT NULL DEFAULT" in sql
@@ -14715,6 +14837,7 @@ class TestDatabaseInit:
             "entity_notes",
             "finding_triage_details",
             "evidence_packages",
+            "project_reports",
         }.issubset(tables)
         assert "project_targets" not in tables
         assert "finding_targets" not in tables
@@ -14916,6 +15039,7 @@ class TestDatabaseInit:
                     "atlas_entity_import_links",
                     "atlas_finding_import_occurrences",
                     "evidence_packages",
+                    "project_reports",
                 )
             }
             conn.close()
@@ -14934,6 +15058,7 @@ class TestDatabaseInit:
         assert column_types["atlas_entity_import_links"]["source_detail_json"] == "TEXT"
         assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
+        assert column_types["project_reports"]["draft"] == "TEXT"
 
     def test_atlas_import_source_helpers_are_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -16821,6 +16946,7 @@ SQL syntax error near q</response>
                 row[1] for row in conn.execute("PRAGMA index_list('finding_triage_details')").fetchall()
             }
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
+            report_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_reports')").fetchall()}
             conn.close()
 
         assert "idx_projects_session_status_updated" in project_indexes
@@ -16866,6 +16992,9 @@ SQL syntax error near q</response>
         assert "idx_finding_triage_details_team_unique" in finding_triage_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
+        assert "idx_project_reports_project_updated" in report_indexes
+        assert "idx_project_reports_personal_unique" in report_indexes
+        assert "idx_project_reports_team_unique" in report_indexes
 
     def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
         conn = sqlite3.connect(":memory:")
