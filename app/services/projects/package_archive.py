@@ -901,8 +901,20 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         raise ProjectWorkspaceError("could not allocate a package id")
 
 
-def delete_evidence_package(session_id, project_id, package_id, *, team_id=""):
-    with db_connect() as conn:
+def delete_evidence_package(session_id, project_id, package_id, *, team_id="", conn=None):
+    if conn is None:
+        with db_connect() as opened:
+            deleted = delete_evidence_package(
+                session_id,
+                project_id,
+                package_id,
+                team_id=team_id,
+                conn=opened,
+            )
+            if deleted:
+                opened.commit()
+            return deleted
+    else:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         package_owner_sql = ""
         package_params = [*project_owner_params, project_id, package_id]
@@ -935,5 +947,4 @@ def delete_evidence_package(session_id, project_id, package_id, *, team_id=""):
             "DELETE FROM evidence_packages WHERE " + delete_where,  # nosec
             delete_params,
         )
-        conn.commit()
     return result.rowcount > 0

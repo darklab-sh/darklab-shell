@@ -8,6 +8,7 @@ from dataclasses import fields
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
 import app as shell_app
@@ -72,6 +73,36 @@ def _ai_assist_count_for_run(run_id: str) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT COUNT(*) FROM ai_run_assists WHERE run_id = ?", (run_id,)).fetchone()
     return int(row[0] if row else 0)
+
+
+def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict[str, Any]]:
+    where: list[str] = []
+    params: list[str] = []
+    if target_id:
+        where.append("target_id = ?")
+        params.append(target_id)
+    if event_type:
+        where.append("event_type = ?")
+        params.append(event_type)
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT event_type, target_type, target_id, team_id, actor_member_id, actor_role, details "
+            "FROM audit_events" + where_sql + " ORDER BY created, id",
+            params,
+        ).fetchall()
+    return [
+        {
+            "event_type": row[0],
+            "target_type": row[1],
+            "target_id": row[2],
+            "team_id": row[3],
+            "actor_member_id": row[4],
+            "actor_role": row[5],
+            "details": json.loads(row[6] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 def _create_project(client, token, *, name="API Project"):
@@ -653,6 +684,23 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
             headers=_headers(recovery_token),
             json={"code": rotated_code, "display_name": "Recovered owner"},
         )
+        recovered_members = json.loads(recovered.data)["members"]
+        recovered_owner = next(item for item in recovered_members if item["display_name"] == "Recovered owner")
+        removed = client.delete(
+            f"/api/v1/teams/{team_id}/members/{operator_member['id']}",
+            headers=_headers(owner_token),
+        )
+        archived = client.patch(
+            f"/api/v1/teams/{team_id}",
+            headers=_headers(owner_token),
+            json={"status": "archived"},
+        )
+        reactivated = client.patch(
+            f"/api/v1/teams/{team_id}",
+            headers=_headers(owner_token),
+            json={"status": "active"},
+        )
+        left = client.post(f"/api/v1/teams/{team_id}/leave", headers=_headers(recovery_token))
 
     assert created.status_code == 201
     assert payload["team"]["member"]["role"] == "owner"
@@ -676,7 +724,15 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert rotated.status_code == 200
     assert json.loads(rotated.data)["recovery_code"].startswith("trec_")
     assert recovered.status_code == 200
-    assert any(item["display_name"] == "Recovered owner" for item in json.loads(recovered.data)["members"])
+    assert recovered_owner["role"] == "owner"
+    assert removed.status_code == 200
+    assert json.loads(removed.data)["removed"] is True
+    assert archived.status_code == 200
+    assert json.loads(archived.data)["team"]["status"] == "archived"
+    assert reactivated.status_code == 200
+    assert json.loads(reactivated.data)["team"]["status"] == "active"
+    assert left.status_code == 200
+    assert json.loads(left.data)["removed"] is True
     team_actions = [
         call.kwargs["extra"]
         for call in mock_info.call_args_list
@@ -690,6 +746,10 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
         "invite_revoke",
         "recovery_rotate",
         "recovery_redeem",
+        "member_remove",
+        "update",
+        "update",
+        "leave",
     ]
     assert {event["source"] for event in team_actions} == {"api_v1"}
     assert team_actions[0]["team_id"] == team_id
@@ -698,6 +758,39 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert team_actions[3]["actor_member_id"] == payload["team"]["member"]["id"]
     assert team_actions[3]["target_member_id"] == operator_member["id"]
     assert team_actions[4]["target_invite_id"] == invite_payload["id"]
+    audit_rows = _audit_event_rows(target_id=team_id)
+    assert [row["event_type"] for row in audit_rows] == [
+        "team.create",
+        "team.invite",
+        "team.join",
+        "team.role_change",
+        "team.revoke",
+        "team.recovery_rotate",
+        "team.recovery_redeem",
+        "team.member_remove",
+        "team.archive",
+        "team.reactivate",
+        "team.leave",
+    ]
+    assert {row["target_type"] for row in audit_rows} == {"team"}
+    assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
+    assert audit_rows[2]["details"]["kind"] == "invite"
+    assert audit_rows[3]["details"] == {
+        "source": "api_v1",
+        "target_member_id": operator_member["id"],
+        "from_role": "operator",
+        "to_role": "admin",
+    }
+    assert audit_rows[6]["details"]["kind"] == "recovery"
+    assert audit_rows[6]["details"]["target_member_id"] == recovered_owner["id"]
+    assert audit_rows[7]["details"]["target_member_id"] == operator_member["id"]
+    assert audit_rows[8]["details"]["status"] == "archived"
+    assert audit_rows[9]["details"]["status"] == "active"
+    assert audit_rows[10]["details"]["target_member_id"] == recovered_owner["id"]
+    audit_rows_json = json.dumps(audit_rows)
+    assert recovery_code not in audit_rows_json
+    assert rotated_code not in audit_rows_json
+    assert invite_payload["code"] not in audit_rows_json
     rejected = [
         call.kwargs["extra"]
         for call in mock_warning.call_args_list
@@ -1999,6 +2092,19 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     assert fires["fires"][0]["status"] == "fired"
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
+    audit_rows = _audit_event_rows(target_id=schedule["id"])
+    assert [row["event_type"] for row in audit_rows] == [
+        "schedule.create",
+        "schedule.update",
+        "schedule.run_now",
+        "schedule.delete",
+    ]
+    assert {row["target_type"] for row in audit_rows} == {"schedule"}
+    assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
+    assert audit_rows[1]["details"]["changed_fields"] == ["enabled", "label"]
+    assert audit_rows[2]["details"]["run_id"] == "run_api_schedule"
+    assert audit_rows[3]["details"]["deleted_count"] == 1
+    assert "echo scheduled api" not in json.dumps(audit_rows)
 
     team_owner = _token(client)
     team_viewer = _token(client)
@@ -2039,6 +2145,13 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
     assert json.loads(team_deleted.data) == {"removed": True}
+    team_audit_rows = _audit_event_rows(target_id=team_schedule["id"])
+    assert [row["event_type"] for row in team_audit_rows] == [
+        "schedule.create",
+        "schedule.run_now",
+        "schedule.delete",
+    ]
+    assert {row["details"]["source"] for row in team_audit_rows} == {"api_v1"}
 
 
 def test_api_v1_schedules_reject_invalid_body_and_disallowed_command(monkeypatch):
@@ -2185,6 +2298,23 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert accepted["baseline_run_id"] == "run_api_watcher"
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
+    audit_rows = _audit_event_rows(target_id=watcher["id"])
+    assert [row["event_type"] for row in audit_rows] == [
+        "watcher.create",
+        "watcher.pause",
+        "watcher.resume",
+        "watcher.run_now",
+        "watcher.accept_baseline",
+        "watcher.delete",
+    ]
+    assert {row["target_type"] for row in audit_rows} == {"watcher"}
+    assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
+    assert audit_rows[0]["details"]["baseline_run_id"] == baseline_run_id
+    assert audit_rows[1]["details"]["reason"] == "operator check"
+    assert audit_rows[3]["details"]["run_id"] == "run_api_watcher"
+    assert audit_rows[4]["details"]["baseline_run_id"] == "run_api_watcher"
+    assert audit_rows[5]["details"]["deleted_count"] == 1
+    assert "nmap -sV darklab.sh" not in json.dumps(audit_rows)
 
     team_owner = _token(client)
     team_viewer = _token(client)
@@ -2235,6 +2365,13 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
     assert json.loads(team_deleted.data) == {"removed": True}
+    team_audit_rows = _audit_event_rows(target_id=team_watcher["id"])
+    assert [row["event_type"] for row in team_audit_rows] == [
+        "watcher.create",
+        "watcher.run_now",
+        "watcher.delete",
+    ]
+    assert {row["details"]["source"] for row in team_audit_rows} == {"api_v1"}
 
 
 def test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline(monkeypatch):

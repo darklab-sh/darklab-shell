@@ -7,6 +7,8 @@ from typing import Any
 
 from core.database import db_connect
 from core.helpers import get_log_session_id
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.notifications.models import is_durable_session_token
@@ -119,6 +121,37 @@ def _team_log_fields(
         fields["reason"] = reason
     fields.update({key: value for key, value in extra.items() if value is not None})
     return fields
+
+
+def _record_team_audit(
+    event_type: AuditEventType,
+    *,
+    session_id: str,
+    team_id: str,
+    actor: dict[str, Any] | None = None,
+    actor_member_id: str = "",
+    actor_role: str = "",
+    actor_display_name: str = "",
+    details: dict[str, Any] | None = None,
+    conn=None,
+) -> None:
+    actor_member_id = actor_member_id or str((actor or {}).get("id") or "")
+    actor_role = actor_role or str((actor or {}).get("role") or "")
+    actor_display_name = actor_display_name or str(
+        (actor or {}).get("display_name") or (actor or {}).get("name") or ""
+    )
+    record_event(
+        event_type,
+        target_id=team_id,
+        session_id=session_id,
+        team_id=team_id,
+        actor_session_id=session_id,
+        actor_member_id=actor_member_id,
+        actor_role=actor_role,
+        actor_display_name=actor_display_name,
+        details={"source": "terminal_builtin", **(details or {})},
+        conn=conn,
+    )
 
 
 def _log_team_action(
@@ -246,6 +279,15 @@ def _create(parts: list[str], session_id: str) -> list[dict[str, object]]:
             display_name=display_name,
         )
         detail = storage.team_detail(conn, team["id"], current_session_token=session_id)
+        _record_team_audit(
+            AuditEventType.TEAM_CREATE,
+            session_id=session_id,
+            team_id=team["id"],
+            actor_member_id=team.get("creator_member_id", ""),
+            actor_role="owner",
+            details={"role": "owner"},
+            conn=conn,
+        )
         conn.commit()
     _log_team_action(
         "create",
@@ -310,6 +352,14 @@ def _invite_create(parts: list[str], session_id: str, team_id: str) -> list[dict
             created_by_member_id=actor["id"],
             label=label,
         )
+        _record_team_audit(
+            AuditEventType.TEAM_INVITE,
+            session_id=session_id,
+            team_id=team_id,
+            actor=actor,
+            details={"target_invite_id": invite["id"], "role": role},
+            conn=conn,
+        )
         conn.commit()
     _log_team_action(
         "invite_create",
@@ -337,6 +387,15 @@ def _invite_revoke(parts: list[str], session_id: str, team_id: str) -> list[dict
         if not invite or str(invite["team_id"] or "") != team_id:
             raise TeamNotFound("Team invite not found")
         removed = storage.revoke_team_invite(conn, invite_id)
+        if removed:
+            _record_team_audit(
+                AuditEventType.TEAM_REVOKE,
+                session_id=session_id,
+                team_id=team_id,
+                actor=actor,
+                details={"target_invite_id": invite_id, "kind": "invite"},
+                conn=conn,
+            )
         conn.commit()
     _log_team_action(
         "invite_revoke",
@@ -361,6 +420,16 @@ def _join(parts: list[str], session_id: str) -> list[dict[str, object]]:
             display_name=display_name,
         )
         detail = storage.team_detail(conn, member["team_id"], current_session_token=session_id)
+        _record_team_audit(
+            AuditEventType.TEAM_JOIN,
+            session_id=session_id,
+            team_id=member["team_id"],
+            actor_member_id=member["id"],
+            actor_role=str(member.get("role") or ""),
+            actor_display_name=str(member.get("display_name") or ""),
+            details={"target_member_id": member["id"], "role": str(member.get("role") or ""), "kind": "invite"},
+            conn=conn,
+        )
         conn.commit()
     _log_team_action(
         "invite_redeem",
@@ -380,6 +449,15 @@ def _leave(parts: list[str], session_id: str, team_id: str) -> list[dict[str, ob
     with db_connect() as conn:
         actor = _actor(conn, ref, session_id)
         removed = storage.soft_remove_team_member(conn, actor["id"])
+        if removed:
+            _record_team_audit(
+                AuditEventType.TEAM_LEAVE,
+                session_id=session_id,
+                team_id=ref,
+                actor=actor,
+                details={"target_member_id": actor["id"], "role": str(actor.get("role") or "")},
+                conn=conn,
+            )
         conn.commit()
     _log_team_action("leave", session_id=session_id, team_id=ref, actor=actor)
     return [output_line(f"team: left {ref}" if removed else f"team: not a member of {ref}", "builtin-success")]
@@ -393,6 +471,14 @@ def _recovery_rotate(parts: list[str], session_id: str, team_id: str) -> list[di
         actor = _actor(conn, ref, session_id)
         require_capability(actor["role"], Capability.MANAGE_RECOVERY)
         recovery = storage.rotate_team_recovery_code(conn, team_id=ref, created_by_member_id=actor["id"])
+        _record_team_audit(
+            AuditEventType.TEAM_RECOVERY_ROTATE,
+            session_id=session_id,
+            team_id=ref,
+            actor=actor,
+            details={"target_recovery_id": recovery["id"]},
+            conn=conn,
+        )
         conn.commit()
     _log_team_action(
         "recovery_rotate",

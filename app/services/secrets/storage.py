@@ -9,6 +9,8 @@ from typing import Any
 
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.secrets.vault import decrypt_secret, encrypt_secret
 from services.secrets.audit import emit_secret_event
 
@@ -149,21 +151,60 @@ def upsert_secret(
     *,
     audit_session_id: str = "",
     team_id: str = "",
+    audit_fields: dict[str, Any] | None = None,
 ) -> tuple[dict, bool]:
     with db_connect() as conn:
         metadata, created = upsert_secret_with_connection(conn, session_token, name, value, consumer_envs)
+        event_type = AuditEventType.SECRET_CREATE if created else AuditEventType.SECRET_UPDATE
+        record_event(
+            event_type,
+            target_id=str(metadata["name"]),
+            details={
+                "secret_name": str(metadata["name"]),
+                "consumer_envs": metadata["consumer_envs"],
+                "is_new_secret": created,
+            },
+            conn=conn,
+            **(audit_fields or {
+                "session_id": audit_session_id or session_token,
+                "actor_session_id": audit_session_id or session_token,
+                "team_id": team_id,
+            }),
+        )
         conn.commit()
     emit_secret_upsert_audit(session_token, metadata, created, audit_session_id=audit_session_id, team_id=team_id)
     return metadata, created
 
 
-def delete_secret(session_token: str, name: str) -> bool:
+def delete_secret(
+    session_token: str,
+    name: str,
+    *,
+    audit_session_id: str = "",
+    team_id: str = "",
+    audit_fields: dict[str, Any] | None = None,
+) -> bool:
     normalized_name = normalize_secret_name(name)
     with db_connect() as conn:
         cur = conn.execute(
             "DELETE FROM secrets WHERE session_token = ? AND name = ?",
             (session_token, normalized_name),
         )
+        if cur.rowcount > 0:
+            record_event(
+                AuditEventType.SECRET_DELETE,
+                target_id=normalized_name,
+                details={
+                    "secret_name": normalized_name,
+                    "deleted_count": int(cur.rowcount or 0),
+                },
+                conn=conn,
+                **(audit_fields or {
+                    "session_id": audit_session_id or session_token,
+                    "actor_session_id": audit_session_id or session_token,
+                    "team_id": team_id,
+                }),
+            )
         conn.commit()
     return cur.rowcount > 0
 
@@ -196,7 +237,13 @@ def get_secret_value_for_env(
     return None
 
 
-def rewrap_session_secrets(session_token: str, *, audit_session_id: str = "", team_id: str = "") -> int:
+def rewrap_session_secrets(
+    session_token: str,
+    *,
+    audit_session_id: str = "",
+    team_id: str = "",
+    audit_fields: dict[str, Any] | None = None,
+) -> int:
     """Re-encrypt all secrets for a session under the currently active key."""
     with db_connect() as conn:
         rows = conn.execute(
@@ -214,6 +261,17 @@ def rewrap_session_secrets(session_token: str, *, audit_session_id: str = "", te
                 (ciphertext, nonce, now, session_token, row["name"]),
             )
             updated += 1
+        record_event(
+            AuditEventType.SECRET_ROTATE,
+            target_id="",
+            details={"updated_count": updated, "count": updated},
+            conn=conn,
+            **(audit_fields or {
+                "session_id": audit_session_id or session_token,
+                "actor_session_id": audit_session_id or session_token,
+                "team_id": team_id,
+            }),
+        )
         conn.commit()
     emit_secret_event("VAULT_KEY_ROTATION_COMPLETED", audit_session_id or session_token, count=updated, team_id=team_id)
     return updated

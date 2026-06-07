@@ -11,6 +11,9 @@ from config import CFG
 from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
+from services.audit.context import request_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.teams import storage
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import (
@@ -92,6 +95,59 @@ def _actor_log_fields(actor: dict[str, Any] | None) -> dict[str, Any]:
         "actor_member_id": str(actor.get("id") or ""),
         "actor_role": str(actor.get("role") or ""),
     }
+
+
+def _actor_audit_fields(
+    session_token: str,
+    *,
+    team_id: str = "",
+    actor: dict[str, Any] | None = None,
+    actor_member_id: str = "",
+    actor_role: str = "",
+    actor_display_name: str = "",
+) -> dict[str, Any]:
+    actor_member_id = actor_member_id or str((actor or {}).get("id") or "")
+    actor_role = actor_role or str((actor or {}).get("role") or "")
+    actor_display_name = actor_display_name or str(
+        (actor or {}).get("display_name") or (actor or {}).get("name") or ""
+    )
+    return {
+        "session_id": session_token,
+        "actor_session_id": session_token,
+        "team_id": team_id,
+        "actor_member_id": actor_member_id,
+        "actor_role": actor_role,
+        "actor_display_name": actor_display_name,
+        **request_audit_fields(request),
+    }
+
+
+def _record_team_audit(
+    event_type: AuditEventType,
+    *,
+    session_token: str,
+    team_id: str,
+    actor: dict[str, Any] | None = None,
+    actor_member_id: str = "",
+    actor_role: str = "",
+    actor_display_name: str = "",
+    details: dict[str, Any] | None = None,
+    conn=None,
+) -> None:
+    record_event(
+        event_type,
+        target_id=team_id,
+        details={"source": "browser", **(details or {})},
+        conn=conn,
+        **_actor_audit_fields(
+            session_token,
+            team_id=team_id,
+            actor=actor,
+            actor_member_id=actor_member_id,
+            actor_role=actor_role,
+            actor_display_name=actor_display_name,
+        ),
+    )
 
 
 def _team_log_fields(
@@ -191,6 +247,15 @@ def session_teams_create():
                 display_name=str(data.get("display_name") or ""),
             )
             detail = storage.team_detail(conn, team["id"], current_session_token=session_token)
+            _record_team_audit(
+                AuditEventType.TEAM_CREATE,
+                session_token=session_token,
+                team_id=team["id"],
+                actor_member_id=team.get("creator_member_id", ""),
+                actor_role="owner",
+                details={"role": "owner"},
+                conn=conn,
+            )
             conn.commit()
         _log_team_event(
             "create",
@@ -242,6 +307,20 @@ def session_teams_update(team_id):
             if status == "archived":
                 paused = pause_team_watchers_and_schedules(conn, team_id, reason="team_archived")
             detail = storage.team_detail(conn, team_id, current_session_token=session_token)
+            event_type = AuditEventType.TEAM_ARCHIVE if status == "archived" else AuditEventType.TEAM_REACTIVATE
+            _record_team_audit(
+                event_type,
+                session_token=session_token,
+                team_id=team_id,
+                actor=actor,
+                details={
+                    "status": team["status"],
+                    "to_state": team["status"],
+                    "paused_watchers": paused["watchers"],
+                    "paused_schedules": paused["schedules"],
+                },
+                conn=conn,
+            )
             conn.commit()
         if status == "archived":
             log.info(
@@ -298,6 +377,14 @@ def session_teams_invites_create(team_id):
                 max_uses=int(data.get("max_uses") or 1),
                 label=str(data.get("label") or ""),
             )
+            _record_team_audit(
+                AuditEventType.TEAM_INVITE,
+                session_token=session_token,
+                team_id=team_id,
+                actor=actor,
+                details={"target_invite_id": invite["id"], "role": role},
+                conn=conn,
+            )
             conn.commit()
         _log_team_event(
             "invite_create",
@@ -324,6 +411,15 @@ def session_teams_invites_revoke(team_id, invite_id):
             storage.require_active_team(conn, team_id)
             require_capability(actor["role"], Capability.MANAGE_INVITES)
             removed = storage.revoke_team_invite(conn, invite_id)
+            if removed:
+                _record_team_audit(
+                    AuditEventType.TEAM_REVOKE,
+                    session_token=session_token,
+                    team_id=team_id,
+                    actor=actor,
+                    details={"target_invite_id": invite_id, "kind": "invite"},
+                    conn=conn,
+                )
             conn.commit()
         _log_team_event(
             "invite_revoke",
@@ -363,6 +459,16 @@ def session_teams_join():
                 display_name=str(data.get("display_name") or ""),
             )
             detail = storage.team_detail(conn, member["team_id"], current_session_token=session_token)
+            _record_team_audit(
+                AuditEventType.TEAM_JOIN,
+                session_token=session_token,
+                team_id=member["team_id"],
+                actor_member_id=member["id"],
+                actor_role=str(member.get("role") or ""),
+                actor_display_name=str(member.get("display_name") or ""),
+                details={"target_member_id": member["id"], "role": str(member.get("role") or ""), "kind": "invite"},
+                conn=conn,
+            )
             conn.commit()
         _log_team_event(
             "invite_redeem",
@@ -404,6 +510,21 @@ def session_teams_members_update(team_id, member_id):
                 role=new_role if "role" in data else None,
                 display_name=str(data.get("display_name")) if "display_name" in data else None,
             )
+            if not member:
+                raise TeamNotFound("Team member not found")
+            if "role" in data and str(target["role"] or "") != str(member["role"] or ""):
+                _record_team_audit(
+                    AuditEventType.TEAM_ROLE_CHANGE,
+                    session_token=session_token,
+                    team_id=team_id,
+                    actor=actor,
+                    details={
+                        "target_member_id": member_id,
+                        "from_role": str(target["role"] or ""),
+                        "to_role": str(member["role"] or ""),
+                    },
+                    conn=conn,
+                )
             conn.commit()
         _log_team_event(
             "member_update",
@@ -443,6 +564,15 @@ def session_teams_members_remove(team_id, member_id):
             elif actor["id"] != member_id:
                 require_capability(actor["role"], Capability.MANAGE_MEMBERS)
             removed = storage.soft_remove_team_member(conn, member_id)
+            if removed:
+                _record_team_audit(
+                    AuditEventType.TEAM_MEMBER_REMOVE,
+                    session_token=session_token,
+                    team_id=team_id,
+                    actor=actor,
+                    details={"target_member_id": member_id, "role": str(target["role"] or "")},
+                    conn=conn,
+                )
             conn.commit()
         _log_team_event(
             "member_remove",
@@ -474,6 +604,15 @@ def session_teams_leave(team_id):
         with db_connect() as conn:
             actor = _actor_membership(conn, team_id, session_token)
             removed = storage.soft_remove_team_member(conn, actor["id"])
+            if removed:
+                _record_team_audit(
+                    AuditEventType.TEAM_LEAVE,
+                    session_token=session_token,
+                    team_id=team_id,
+                    actor=actor,
+                    details={"target_member_id": actor["id"], "role": str(actor.get("role") or "")},
+                    conn=conn,
+                )
             conn.commit()
         _log_team_event("leave", session_token=session_token, team_id=team_id, actor=actor)
         return jsonify({"removed": removed})
@@ -497,6 +636,14 @@ def session_teams_recovery_rotate(team_id):
                 conn,
                 team_id=team_id,
                 created_by_member_id=actor["id"],
+            )
+            _record_team_audit(
+                AuditEventType.TEAM_RECOVERY_ROTATE,
+                session_token=session_token,
+                team_id=team_id,
+                actor=actor,
+                details={"target_recovery_id": recovery["id"]},
+                conn=conn,
             )
             conn.commit()
         _log_team_event(
@@ -535,6 +682,20 @@ def session_teams_recovery_redeem():
                 display_name=str(data.get("display_name") or ""),
             )
             detail = storage.team_detail(conn, member["team_id"], current_session_token=session_token)
+            _record_team_audit(
+                AuditEventType.TEAM_RECOVERY_REDEEM,
+                session_token=session_token,
+                team_id=member["team_id"],
+                actor_member_id=member["id"],
+                actor_role=str(member.get("role") or ""),
+                actor_display_name=str(member.get("display_name") or ""),
+                details={
+                    "target_member_id": member["id"],
+                    "role": str(member.get("role") or ""),
+                    "kind": "recovery",
+                },
+                conn=conn,
+            )
             conn.commit()
         _log_team_event(
             "recovery_redeem",

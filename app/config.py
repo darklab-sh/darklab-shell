@@ -165,6 +165,9 @@ def load_config(conf_dir=None):
         "database_pool_max":          5,
         "database_postgres_jit":       False,
         "permalink_retention_days":   365,
+        "audit_log_enabled":          True,
+        "audit_retention_days":       90,
+        "audit_export_max_rows":      10000,
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
@@ -503,8 +506,16 @@ def load_config(conf_dir=None):
         "ai_feature_summary",
         "ai_feature_next_commands",
         "ai_feature_run_suggestions",
+        "audit_log_enabled",
     ):
         defaults[key] = _coerce_bool_value(defaults.get(key), bool(defaults[key]))
+    defaults["audit_retention_days"] = _coerce_int_value(
+        defaults.get("audit_retention_days"),
+        90,
+        minimum=0,
+    )
+    audit_export_max_rows = _coerce_int_value(defaults.get("audit_export_max_rows"), 10000, minimum=1)
+    defaults["audit_export_max_rows"] = min(audit_export_max_rows, 200000)
     for key, fallback, minimum in (
         ("ai_connect_timeout_seconds", 5, 1),
         ("ai_timeout_seconds", 120, 1),

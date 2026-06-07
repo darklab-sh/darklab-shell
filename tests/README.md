@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,574
+- behavior tests: 3,612
 - docs/inventory meta-tests: 34
-- `pytest`: 2006 (1972 behavior + 34 meta)
-- `vitest`: 1343
-- `playwright`: 260
-- total: 3,609
+- `pytest`: 2036 (2002 behavior + 34 meta)
+- `vitest`: 1349
+- `playwright`: 261
+- total: 3,646
 
 This document is organized in two parts:
 
@@ -379,7 +379,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_history_is_token_scoped_and_uses_page_envelope` | Verifies history list responses are token-scoped and use the shared pagination envelope. |
 | `test_api_v1_history_honors_team_scope_header` | Verifies API history and run detail routes use the explicit team scope header while preserving personal isolation. |
 | `test_api_v1_team_viewers_cannot_run_commands_or_mutate_project_links` | Verifies API team viewers cannot start team-scoped runs or mutate team project links while operators can link team runs. |
-| `test_api_v1_team_routes_manage_members_invites_and_recovery` | Verifies API team routes create teams, expose capability lists, manage invites and roles, rotate recovery codes, redeem recovery into an owner, roll back failed initial recovery-code creation, and emit team audit events. |
+| `test_api_v1_team_routes_manage_members_invites_and_recovery` | Verifies API team routes create teams, expose capability lists, manage invites and roles, remove/leave members, archive/reactivate teams, rotate recovery codes, redeem recovery into an owner, roll back failed initial recovery-code creation, and emit bounded team audit events without one-time codes. |
 | `test_api_v1_archived_team_rejects_invite_and_recovery_redeem` | Verifies archived teams reject API invite and recovery-code redemption without adding late members. |
 | `test_api_v1_team_project_readers_include_cross_member_entities_and_findings` | Verifies API team Project readers include linked entities and findings created by another team member's team-owned run. |
 | `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output/ranged-output reads work for the owner and hide cross-session runs behind 404. |
@@ -399,10 +399,10 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_run_start_rewrites_workspace_root_output_paths` | Verifies API-started runs rewrite leading-slash workspace output paths before spawning commands. |
 | `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies active-run lists, run streams, wait requests, and cancel requests are scoped to the owning token. |
 | `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
-| `test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped` | Verifies schedule API CRUD, manual run-now, fire audit rows, cross-session 404 behavior, and team viewer read-only role gates. |
+| `test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped` | Verifies schedule API CRUD, manual run-now, fire audit rows, automation audit rows without raw command text, cross-session 404 behavior, and team viewer read-only role gates. |
 | `test_api_v1_schedules_reject_invalid_body_and_disallowed_command` | Verifies schedule API creates reject non-object bodies and commands that fail command policy. |
 | `test_api_v1_schedule_create_normalizes_string_false_enabled` | Verifies schedule API create treats string `"false"` as disabled instead of truthy. |
-| `test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped` | Verifies watcher API CRUD, manual run-now, accept-baseline, fire audit rows, cross-session 404 behavior, and team viewer read-only role gates. |
+| `test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped` | Verifies watcher API CRUD, pause/resume, manual run-now, accept-baseline, fire audit rows, automation audit rows without raw command text, cross-session 404 behavior, and team viewer read-only role gates. |
 | `test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline` | Verifies watcher API creates reject non-object bodies, hidden baselines, first-run commands that fail policy, and commands that fail command policy. |
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
 | `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
@@ -576,9 +576,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestNotificationsPhase0.test_notification_channel_ids_use_full_uuid_hex` | Verifies notification channel ids use the same full UUID hex length as notification event ids. |
 | `TestNotificationsPhase0.test_notification_helpers_do_not_import_blueprints` | Verifies notification service helpers stay independent from Flask blueprint modules. |
 | `TestNotificationsPhase0.test_notification_channels_require_durable_session_tokens` | Verifies outbound notification channels reject anonymous session ids and require durable session tokens. |
-| `TestNotificationsPhase0.test_notify_builtin_lists_mutes_tests_events_and_deletes_channel` | Verifies the terminal `notify` built-in can list, inspect, mute, test, audit, unmute, and delete a vault-backed channel. |
+| `TestNotificationsPhase0.test_notify_builtin_lists_mutes_tests_events_and_deletes_channel` | Verifies the terminal `notify` built-in can list, inspect, mute, test, audit, unmute, and delete a vault-backed channel while recording config-change audit rows without webhook URLs. |
 | `TestNotificationsPhase0.test_notify_builtin_keeps_secret_channel_creation_in_options` | Verifies terminal `notify create` keeps secret-valued channel setup in Options instead of accepting secrets in shell history. |
-| `TestNotificationsPhase0.test_team_builtin_creates_invites_joins_and_rotates_recovery` | Verifies the terminal `team` built-in can create a team, create an invite, join from another token, list members, and rotate recovery codes. |
+| `TestNotificationsPhase0.test_team_builtin_creates_invites_joins_and_rotates_recovery` | Verifies the terminal `team` built-in can create a team, create an invite, join from another token, list members, rotate recovery codes, and emit bounded team audit events without one-time codes. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_prefers_fts_for_output_scope` | Verifies SQLite history search still prefers FTS for output-capable searches with indexable terms. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_falls_back_to_like_for_short_terms` | Verifies SQLite history search falls back to substring `LIKE` for short terms that FTS trigram tokenization cannot match. |
 | `TestRunHistorySearchClauses.test_sqlite_command_scope_searches_command_only` | Verifies command-scoped history search only matches the command text. |
@@ -941,6 +941,18 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPermalinkErrorPage.test_includes_app_name` | Checks includes app name handling. |
 | `TestPermalinkErrorPage.test_mentions_retention_when_configured` | Checks that mentions retention when configured. |
 | `TestPermalinkErrorPage.test_no_retention_mention_when_unlimited` | Checks that no retention mention when unlimited. |
+| `TestAuditEvents.test_recorder_hashes_session_identity_and_bounds_details` | Verifies audit recording stores hashed session identity, safe actor labels, and bounded allowlisted details. |
+| `TestAuditEvents.test_fail_closed_events_reject_unknown_detail_keys` | Verifies fail-closed audit events reject unallowlisted detail keys, leave no partial rows, and log structured blocked-audit context on recorder failure. |
+| `TestAuditEvents.test_disabled_audit_log_noops_without_writes` | Verifies disabling audit logging makes the recorder a no-op while product writes can continue. |
+| `TestAuditEvents.test_retention_prunes_old_rows_and_disabled_warning_is_once` | Verifies audit retention removes expired rows and the disabled-audit warning logs only once. |
+| `TestAuditEvents.test_event_registry_covers_policy_for_every_event_type` | Verifies every audit event type has a registry policy, target type, and centralized recording mode. |
+| `TestAuditEvents.test_build_audit_reason_codes_do_not_copy_raw_errors` | Verifies package and report build audit details store stable reason codes instead of raw failure strings. |
+| `TestAuditEvents.test_run_now_audit_details_do_not_copy_last_error` | Verifies schedule and watcher run-now audit details avoid copying stale last-error text. |
+| `TestAuditEvents.test_same_transaction_rollback_removes_fail_closed_audit_row` | Verifies fail-closed audit rows roll back with their product mutation when the shared transaction rolls back. |
+| `TestAuditEvents.test_best_effort_recorder_failure_logs_sanitized_fallback` | Verifies best-effort audit recorder failures emit only sanitized fallback log details. |
+| `TestAuditEvents.test_best_effort_shared_connection_failure_rolls_back_only_savepoint` | Verifies failed best-effort audit inserts on shared connections roll back only the audit savepoint. |
+| `TestAuditEvents.test_list_events_filters_owner_scope_and_paginates` | Verifies audit queries can filter by owner session scope, include full same-day date ranges, and paginate newest-first results. |
+| `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
 | `TestDatabaseInit.test_json_bearing_schema_columns_use_sqlite_json_type` | Verifies JSON-bearing schema columns keep SQLite's `TEXT` storage type through the backend dialect helper. |
@@ -1471,11 +1483,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHealthRoute.test_status_degraded_when_db_fails` | Checks that status degraded when database fails. |
 | `TestHealthRoute.test_status_ok_when_redis_pings_successfully` | Checks that status ok when Redis pings successfully. |
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
-| `TestSecretsRoutes.test_session_secrets_crud_never_returns_value` | Verifies session secret create, list, rotate, and delete routes return metadata only and never echo stored values. |
+| `TestSecretsRoutes.test_session_secrets_crud_never_returns_value` | Verifies session secret create, list, rotate, and delete routes return metadata-only responses and audit rows without echoing stored values. |
 | `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
 | `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
 | `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
-| `TestAtlasImportRoutes.test_preview_and_apply_import_without_creating_history_run` | Verifies Atlas import preview/apply creates imported Atlas records and import provenance without creating a History run, while over-quota Project linking is rejected. |
+| `TestAtlasImportRoutes.test_preview_and_apply_import_without_creating_history_run` | Verifies Atlas import preview/apply creates imported Atlas records, import provenance, and high-level apply audit rows without creating a History run, while over-quota Project linking is rejected. |
 | `TestAtlasImportRoutes.test_create_project_targets_only_reports_target_entity_side_effects` | Verifies target-only Atlas import apply creates the backing Atlas entity and import source while reporting Project target counts separately from generic Project link counts. |
 | `TestAtlasImportRoutes.test_create_project_targets_quota_rejects_without_partial_import_rows` | Verifies target-creation quota failures return a structured import error without leaving partial Atlas import batches, source links, findings, entities, or project targets. |
 | `TestAtlasImportRoutes.test_apply_updates_existing_scan_records_and_preserves_import_provenance` | Verifies duplicate import rows update existing scan-discovered Atlas rows, preserve import source provenance, and recompute aggregate occurrence counts. |
@@ -1483,12 +1495,14 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasImportRoutes.test_reimport_preserves_operator_edited_remediation` | Verifies re-importing scanner remediation fills empty triage details without overwriting operator-edited remediation on the same finding. |
 | `TestAtlasImportRoutes.test_apply_rejects_digest_mismatch_and_stale_or_invalid_previews` | Verifies Atlas import preview/apply rejects unsupported formats, expired drafts, digest mismatches, and configured finding limits. |
 | `TestTeamRoutes.test_team_atlas_import_apply_requires_option_specific_capabilities` | Verifies team-scoped Atlas import apply requires the project-mutation capability when finding import would create linked entities. |
-| `TestTeamRoutes.test_team_create_list_and_detail` | Verifies team creation, list, detail, capability lists, one-time recovery-code response shapes, and recovery-code failure rollback for durable session tokens. |
+| `TestTeamRoutes.test_team_create_list_and_detail` | Verifies team creation, list, detail, capability lists, one-time recovery-code response shapes, recovery-code failure rollback, and bounded creation audit events for durable session tokens. |
 | `TestTeamRoutes.test_team_browser_read_routes_have_dedicated_token_limit` | Verifies browser team-management read routes use the dedicated per-token team read limit. |
 | `TestTeamRoutes.test_active_team_scope_uses_explicit_team_secrets_for_providers_and_commands` | Verifies active team scope uses explicit team secrets for provider readiness and command env injection while keeping personal secrets separate and role-gating writes. |
-| `TestTeamRoutes.test_team_invite_join_role_update_and_revoke` | Verifies invite creation, one-use invite redemption, role update, capability denial, admin invite creation, and invite revocation. |
-| `TestTeamRoutes.test_team_owner_guard_and_recovery_redeem` | Verifies last-owner leave protection, one-use recovery-code redemption into a second owner, and replacement-owner leave blocking. |
-| `TestTeamRoutes.test_archived_team_rejects_invite_and_recovery_redeem` | Verifies archived teams reject browser invite and recovery-code redemption without adding late members or consuming codes. |
+| `TestTeamRoutes.test_team_invite_join_role_update_and_revoke` | Verifies invite creation, one-use invite redemption, role update, capability denial, admin invite creation, invite revocation, member removal, and bounded team audit events without invite codes. |
+| `TestTeamRoutes.test_team_role_change_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed team role-change audit failures roll back the role mutation. |
+| `TestTeamRoutes.test_team_owner_guard_and_recovery_redeem` | Verifies last-owner leave protection, one-use recovery-code redemption into a second owner, replacement-owner leave blocking, and bounded recovery/role/leave audit events without recovery codes. |
+| `TestTeamRoutes.test_team_recovery_rotate_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed recovery-code rotation audit failures roll back recovery-code changes. |
+| `TestTeamRoutes.test_archived_team_rejects_invite_and_recovery_redeem` | Verifies archived teams reject browser invite and recovery-code redemption without adding late members or consuming codes, then reactivate cleanly and emit archive/reactivate audit events. |
 | `TestTeamRoutes.test_active_team_scope_isolates_history_runs_and_recent_values` | Verifies active team scope isolates history, Run Details, recent values, and client-side saved runs from personal scope. |
 | `TestTeamRoutes.test_history_bulk_delete_and_clear_respect_active_team_scope` | Verifies single-run delete, bulk-delete, and clear-history actions use the active personal/team scope and reject team viewers before deleting shared history. |
 | `TestTeamRoutes.test_team_viewers_cannot_run_commands_or_mutate_projects_and_findings` | Verifies team viewers cannot start team-scoped runs, mutate team projects/packages, or change team finding metadata while operators can, while read-only project helpers remain available. |
@@ -1506,14 +1520,17 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestTeamRoutes.test_active_team_scope_shares_atlas_reads_for_team_runs` | Verifies active team scope shares Atlas reads for team-owned source runs while keeping personal Atlas rows isolated. |
 | `TestTeamRoutes.test_active_team_scope_shares_atlas_metadata_and_targets` | Verifies active team scope shares Atlas labels, notes, finding review, intel refresh, and project targets across team members while keeping personal scope isolated. |
 | `TestNotificationChannelRoutes.test_notification_channels_require_durable_session_tokens` | Verifies browser notification-channel routes require durable session tokens. |
-| `TestNotificationChannelRoutes.test_notification_channel_crud_masks_secret_values` | Verifies notification-channel create, list, update, and kind-lock routes return masked metadata while preserving vault-backed secret references. |
+| `TestNotificationChannelRoutes.test_notification_channel_crud_masks_secret_values` | Verifies notification-channel create, list, update, and kind-lock routes return masked metadata while preserving vault-backed secret references and recording config-change audit rows without secret values. |
 | `TestNotificationChannelRoutes.test_notification_channel_create_rolls_back_secret_when_row_insert_fails` | Verifies notification-channel secret writes roll back with the channel row when creation fails. |
-| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload while recording a config-change audit row. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_targets_requested_channel` | Verifies a channel test send targets only the requested notification channel. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_reports_delivery_failure_status` | Verifies a channel test send reports the persisted retry/failure status instead of showing queued success only. |
 | `TestNotificationChannelRoutes.test_notification_event_audit_route_lists_session_channel_deliveries` | Verifies the browser notification delivery audit route returns only the active session's channel events. |
 | `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
-| `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses and removes all channel-owned vault secrets. |
+| `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses, removes all channel-owned vault secrets, and records a config-change audit row without secret values. |
+| `TestProjectRoutes.test_project_package_and_link_routes_record_audit_events` | Verifies project link/unlink and package create/delete routes record bounded audit events. |
+| `TestProjectRoutes.test_project_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed project-delete audit failures roll back the project deletion. |
+| `TestProjectRoutes.test_package_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed package-delete audit failures roll back the package deletion. |
 | `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
 | `TestProjectRoutes.test_project_targets_list_supports_pagination_type_search_and_auto_filter` | Verifies the project target list supports paging, type filters, search, and the auto-discovered target review filter. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
@@ -1549,9 +1566,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
-| `TestProjectRoutes.test_evidence_package_download_job_builds_and_downloads_archive` | Verifies polled evidence package archive jobs report completion and download the completed ZIP. |
-| `TestProjectRoutes.test_project_report_routes_save_preview_and_export_archive` | Verifies project report draft load/save, stale-save conflicts, date-range validation, preview rendering, and async markdown/HTML archive downloads. |
-| `TestProjectRoutes.test_project_report_export_job_reports_size_limit_failures` | Verifies report archive jobs surface configured size-limit failures as failed jobs and block download tickets with a 413 response. |
+| `TestProjectRoutes.test_evidence_package_download_job_builds_and_downloads_archive` | Verifies polled evidence package archive jobs report completion, share queued/complete audit correlation, and download the completed ZIP. |
+| `TestProjectRoutes.test_project_report_routes_save_preview_and_export_archive` | Verifies project report draft load/save, stale-save conflicts, date-range validation, preview rendering, async markdown/HTML archive downloads, and queued/complete audit correlation. |
+| `TestProjectRoutes.test_project_report_export_job_reports_size_limit_failures` | Verifies report archive jobs surface configured size-limit failures, share queued/failed audit correlation, and block download tickets with a 413 response. |
 | `TestProjectRoutes.test_project_report_preview_resolves_manual_selection_beyond_first_page` | Verifies report preview resolves explicitly selected project rows beyond the first service page instead of treating them as unknown. |
 | `TestProjectRoutes.test_project_report_markdown_escapes_table_cells` | Verifies report Markdown table cells escape pipes and backslashes so commands and targets do not corrupt table layout. |
 | `TestProjectRoutes.test_project_report_preview_composes_redacted_project_content` | Verifies report previews compose selected runs, targets, findings, and text artifacts while redacting sensitive values and hiding private notes. |
@@ -1562,6 +1579,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
 | `TestStatusRoute.test_uptime_is_non_negative_integer` | Uptime is a non-negative integer count of seconds since app boot. |
 | `TestStatusRoute.test_db_ok_when_sqlite_available` | `db` is `"ok"` when SQLite responds. |
+| `TestStatusRoute.test_status_runs_periodic_audit_retention_when_db_available` | Verifies `/status` invokes periodic audit retention when the database is available. |
+| `TestStatusRoute.test_status_keeps_db_ok_when_periodic_audit_retention_fails` | Verifies `/status` logs periodic audit retention failures without marking the database down. |
 | `TestStatusRoute.test_db_down_when_sqlite_fails` | `db` is `"down"` when SQLite raises. |
 | `TestStatusRoute.test_redis_none_when_not_configured` | `redis` is `"none"` when Redis is not configured. |
 | `TestStatusRoute.test_redis_ok_when_ping_succeeds` | `redis` is `"ok"` when a configured client pings successfully. |
@@ -1654,6 +1673,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestDiagRoute.test_honors_forwarded_for_header_from_trusted_proxy` | Checks that honors forwarded for header from trusted proxy. |
 | `TestDiagRoute.test_ignores_forwarded_for_header_from_untrusted_proxy` | Checks that ignores forwarded for header from untrusted proxy. |
 | `TestDiagRoute.test_diag_viewed_logged_on_success` | Checks that diagnostics viewed logged on success. |
+| `TestDiagRoute.test_audit_route_requires_diag_access` | Verifies the audit-log diagnostics route uses the same IP-gated diagnostics access control. |
+| `TestDiagRoute.test_audit_html_lists_events_and_disabled_banner` | Verifies `/diag/audit` renders real audit row, scope, details, filter, event-hint, and disabled-warning markup. |
+| `TestDiagRoute.test_audit_json_filters_by_human_actor_and_event` | Verifies `/diag/audit?format=json` filters by event type, human-facing actor label, team, target type, and date-only ranges. |
+| `TestDiagRoute.test_audit_json_keeps_run_permalink_target_links` | Verifies audit JSON keeps valid run target links while leaving non-app-surface targets unlinked. |
+| `TestDiagRoute.test_audit_csv_export_marks_truncation` | Verifies audit CSV export respects the configured row cap and adds a truncation marker. |
+| `TestDiagRoute.test_audit_csv_export_streams_from_page_iterator` | Verifies audit CSV export streams rows from the paged audit iterator. |
+| `TestDiagRoute.test_audit_json_export_prompts_download` | Verifies audit JSON export returns a downloadable file response and reports capped, truncated filtered payloads. |
 | `TestDiagRoute.test_html_response_contains_expected_content` | Checks that HTML response contains expected content. |
 | `TestDiagRoute.test_top_command_cells_are_keyboard_expandable` | Checks that Top Commands cells render as accessible toggle buttons (`tabindex=0`, `role=button`, `aria-expanded=false`) with a delegated tap handler so mobile operators can read the full command without `title=` hover. |
 | `TestDiagRoute.test_top_command_cells_render_full_untruncated_command` | Checks that the 48-char server-side `truncate` is gone — full command text reaches the DOM so the JS expand handler can show it. |
@@ -1710,12 +1736,12 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasRoutes.test_run_delete_can_prune_curated_project_reachable_atlas_rows_when_requested` | Verifies the explicit curated cleanup option can delete single-source Atlas rows that are project-reachable. |
 | `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove non-curated sibling entities from the same source run. |
 | `TestAtlasRoutes.test_run_retaining_atlas_cleanup_detaches_sources_and_recalculates_rows` | Verifies source-run Atlas cleanup keeps the run transcript while detaching links, pruning disposable rows, and recalculating shared counts. |
-| `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings while reporting missing ids. |
+| `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings, report missing ids, and record entity deletion audit rows. |
 | `TestAtlasRoutes.test_atlas_read_and_write_routes_are_session_scoped` | Verifies Atlas read, write, refresh, delete, and project-link routes do not reveal or mutate another session's Atlas data. |
 | `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
 | `TestAtlasRoutes.test_refresh_intel_can_offload_provider_payload_and_restore_detail` | Verifies oversized Atlas intel payloads can be offloaded, restored in entity detail, and cleaned up with the entity. |
 | `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
-| `TestAtlasRoutes.test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links` | Verifies Atlas suppression hides entities and findings by default while preserving review, project-link, and export access through the suppressed view. |
+| `TestAtlasRoutes.test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links` | Verifies Atlas suppression hides entities and findings by default, records entity suppression audit rows, and preserves review, project-link, and export access through the suppressed view. |
 | `TestAtlasRoutes.test_atlas_saved_views_roundtrip_and_stay_session_scoped` | Verifies saved Atlas views can be created, listed, updated, deleted, and kept isolated to the owning session. |
 | `TestAtlasRoutes.test_unscoped_findings_flow_through_atlas_projects_and_run_routes` | Verifies unscoped findings share one review state across Atlas, Projects, and source-run finding routes. |
 | `TestAtlasRoutes.test_run_findings_route_returns_deduped_findings_with_occurrence_count` | Verifies source-run finding routes return deduped findings plus occurrence totals for large repeated findings. |
@@ -1726,12 +1752,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasRoutes.test_exports_entities_as_csv_and_jsonl_with_metadata` | Verifies Atlas entity exports include labels, notes, project names, and provider names in CSV and JSONL formats. |
 | `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
-| `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
+| `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations, including write/delete audit rows without file contents and best-effort write persistence when audit recording fails. |
+| `TestWorkspaceRoutes.test_workspace_delete_records_fail_closed_audit_before_deleting_file` | Verifies fail-closed workspace delete audit failures leave the file in place. |
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
 | `TestWorkspaceRoutes.test_workspace_file_routes_include_and_maintain_generic_metadata` | Verifies that workspace file list/read responses expose generic labels and notes, and that move/delete operations keep path metadata in sync. |
-| `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
+| `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders with a directory-create audit row. |
 | `TestWorkspaceRoutes.test_info_and_delete_folder_recursively` | Verifies that the Files API reports folder file counts and deletes nested folder contents through the same validated delete endpoint. |
-| `TestWorkspaceRoutes.test_move_file_and_folder_paths` | Verifies that the Files API can move files into folders, rename folders while moving, and move files back to the workspace root. |
+| `TestWorkspaceRoutes.test_move_file_and_folder_paths` | Verifies that the Files API can move files into folders, rename folders while moving, move files back to the workspace root, and record move audit rows without file contents. |
 | `TestWorkspaceRoutes.test_move_rejects_invalid_paths_and_recursive_folder_moves` | Verifies that workspace moves reject path escapes, existing file destinations, and moving a folder into itself. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths` | Verifies that route writes reject traversal, absolute, and backslash paths. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths_on_read_delete_and_download` | Verifies that workspace read, delete, and download routes reject traversal, absolute, and backslash file names before touching disk. |
@@ -1810,7 +1837,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryRoute.test_compare_history_runs_handles_invalid_requests_and_identical_runs` | Verifies run comparison rejects invalid request combinations and returns a no-change payload for identical completed runs. |
 | `TestHistoryRoute.test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint` | Verifies that run comparison treats matching finding text as unchanged even when findings are recorded in different order with different run-scoped fingerprints. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
-| `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
+| `TestShareRoute.test_post_creates_snapshot` | Verifies snapshot create, redaction, and delete routes record bounded audit events. |
 | `TestShareRoute.test_post_can_offload_large_snapshot_content_and_restore_it` | Verifies oversized snapshot bodies can be offloaded, restored through the share API, and deleted with the snapshot. |
 | `TestShareRoute.test_post_does_not_link_snapshot_to_source_run_project` | Verifies snapshots created from project-associated runs are not linked back to that project. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
@@ -2036,32 +2063,32 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 
 | Test | Description |
 | --- | --- |
-| `TestSchedulesRoutes.test_schedule_crud_for_current_session` | Verifies current-session schedule create, list, detail, update, delete, cadence normalization, and enabled-state shaping through the browser routes. |
+| `TestSchedulesRoutes.test_schedule_crud_for_current_session` | Verifies current-session schedule create, list, detail, update, delete, cadence normalization, enabled-state shaping, and bounded automation audit rows through the browser routes. |
 | `TestSchedulesRoutes.test_schedule_routes_hide_cross_session_rows` | Verifies schedules are session-isolated and cross-session detail, fire-list, patch, and delete attempts return 404. |
 | `TestSchedulesRoutes.test_schedule_routes_scope_team_owned_rows_and_fires` | Verifies team-owned schedules stay out of personal scope, reject non-member access, preserve team ownership on manual fire audit rows, and keep team viewers read-only. |
 | `TestSchedulesRoutes.test_schedule_preview_returns_next_three_fires` | Verifies the browser preview route returns three next-fire timestamps for a cadence preset and timezone, and rejects custom cron cadences faster than every five minutes. |
 | `TestSchedulesRoutes.test_schedule_preview_requires_durable_session_token` | Verifies the preview route requires a durable session token just like schedule writes. |
 | `TestSchedulesRoutes.test_schedule_create_rejects_disallowed_command` | Verifies schedule creation rejects commands that fail the shared command policy. |
 | `TestSchedulesRoutes.test_schedule_patch_revalidates_changed_command` | Verifies schedule updates re-run command validation when the command changes. |
-| `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire, exposes the fire audit route, and advances schedule metadata without depending on the scheduler worker. |
+| `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire and automation audit row, exposes the fire audit route, and advances schedule metadata without depending on the scheduler worker. |
 | `TestSchedulesRoutes.test_schedule_fire_links_completed_run_in_history` | Verifies a fired schedule's completed run appears in History with a scheduled badge and originating schedule id. |
 | `TestSchedulesRoutes.test_active_history_skips_scheduled_runs_unless_requested` | Verifies scheduled active runs stay out of the default reload-recovery list while remaining available to inclusive Status Monitor active-run reads. |
 | `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
 | `TestSchedulesRoutes.test_schedule_create_and_patch_normalize_edge_inputs` | Verifies browser schedule routes normalize disabled string booleans, trim labels, reject invalid timezones and blank commands, and preserve paused schedules during cadence updates. |
 | `TestSchedulesRoutes.test_schedule_fires_pagination_bounds` | Verifies schedule fire audit pagination returns stable limits, offsets, totals, has-more flags, and newest-first rows. |
-| `TestWatchersRoutes.test_watcher_routes_crud_and_cascade_owned_schedule` | Verifies browser watcher create/list/pause/resume/delete behavior, cross-session isolation, and owned-schedule cascade cleanup. |
+| `TestWatchersRoutes.test_watcher_routes_crud_and_cascade_owned_schedule` | Verifies browser watcher create/list/pause/resume/delete behavior, cross-session isolation, owned-schedule cascade cleanup, and bounded automation audit rows. |
 | `TestWatchersRoutes.test_watcher_routes_scope_team_owned_baselines_and_fires` | Verifies team-owned watchers use team-owned baselines, stay out of personal scope, reject non-member access, preserve team ownership on fire audit rows, and keep team viewers read-only. |
 | `TestWatchersRoutes.test_archiving_team_pauses_team_schedules_and_watchers` | Verifies archiving a team pauses its standalone schedules, watchers, and watcher-owned schedules without moving them to personal scope. |
 | `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs, rejects unfinished current-session baselines, and allows first-run baseline creation. |
-| `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire and clears changed-state counters. |
-| `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates audit rows only for the selected watcher even when another watcher has the same command. |
-| `TestWatchBuiltin.test_watch_builtin_create_list_info_and_state_changes` | Verifies the terminal watch command creates, lists, inspects, pauses, resumes, and deletes current-session watchers and owned schedules. |
+| `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire, clears changed-state counters, and records the baseline-acceptance audit row. |
+| `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates fire and automation audit rows only for the selected watcher even when another watcher has the same command. |
+| `TestWatchBuiltin.test_watch_builtin_create_list_info_and_state_changes` | Verifies the terminal watch command creates, lists, inspects, pauses, resumes, deletes current-session watchers and owned schedules, and records bounded automation audit rows. |
 | `TestWatchBuiltin.test_watch_builtin_validates_baseline_and_command_policy` | Verifies the terminal watch command rejects missing, unfinished, and disallowed-command baselines before persistence, and creates pending first-run watchers. |
-| `TestWatchBuiltin.test_watch_builtin_run_records_fire_and_accepts_latest_baseline` | Verifies the terminal watch run subcommand records watcher fire audit rows and accept promotes the latest watcher run as baseline. |
+| `TestWatchBuiltin.test_watch_builtin_run_records_fire_and_accepts_latest_baseline` | Verifies the terminal watch run subcommand records watcher fire and automation audit rows, and accept promotes the latest watcher run as baseline. |
 | `TestWatchBuiltin.test_watch_builtin_requires_durable_session_token` | Verifies the terminal watch command requires a persistent session token. |
-| `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
+| `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, deletes current-session schedules, and records bounded automation audit rows. |
 | `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
-| `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire and advances schedule metadata. |
+| `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire, records the manual-run automation audit row, and advances schedule metadata. |
 | `TestScheduleBuiltin.test_schedule_builtin_requires_durable_session_token` | Verifies the terminal schedule command requires a persistent session token. |
 
 #### `test_session_routes.py`
@@ -2074,6 +2101,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSessionTokenGenerate.test_token_length` | Checks that the generated token is 36 characters long (`tok_` + 32 hex chars). |
 | `TestSessionTokenGenerate.test_token_persisted_in_db` | Checks that the new token is written to the `session_tokens` table. |
 | `TestSessionTokenGenerate.test_multiple_calls_return_different_tokens` | Checks that successive calls return distinct tokens. |
+| `TestSessionTokenGenerate.test_records_audit_event_without_raw_token` | Verifies token generation records a session-token audit row with only masked and hashed token identity. |
 | `TestSessionTokenVerify.test_verify_returns_true_for_issued_token` | Checks that `/session/token/verify` returns `exists: true` for a freshly issued token. |
 | `TestSessionTokenVerify.test_verify_returns_false_for_unknown_tok_token` | Checks that a `tok_`-prefixed token never stored in the DB returns `exists: false`. |
 | `TestSessionTokenVerify.test_verify_returns_true_for_uuid` | Checks that UUID anonymous sessions are always considered valid (return `exists: true`) even without a DB entry. |
@@ -2089,6 +2117,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSessionMigrate.test_migrates_runs` | Checks that run history rows are reassigned from the old session ID to the new one. |
 | `TestSessionMigrate.test_migrates_snapshots` | Checks that snapshot rows are reassigned from the old session ID to the new one. |
 | `TestSessionMigrate.test_returns_correct_counts` | Checks that the response `migrated_runs` and `migrated_snapshots` counts match the actual rows moved. |
+| `TestSessionMigrate.test_records_audit_event_without_raw_tokens` | Verifies session migration records a fail-closed audit row with migration counts and no raw source or destination token values. |
 | `TestSessionMigrate.test_does_not_migrate_other_sessions` | Checks that rows belonging to an unrelated session are not touched. |
 | `TestSessionMigrate.test_migrates_starred_commands` | Checks that starred commands are moved from the old session to the new one during migration. |
 | `TestSessionMigrate.test_migrate_returns_migrated_stars_count` | Checks that the response includes a `migrated_stars` count. |
@@ -2147,6 +2176,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSessionTokenRevoke.test_rejects_uuid_format` | Checks that revoking a UUID-format token is rejected with 400. |
 | `TestSessionTokenRevoke.test_rejects_missing_token_field` | Checks that a 400 is returned when the `token` field is absent from the revoke request. |
 | `TestSessionTokenRevoke.test_can_revoke_own_current_token` | Checks that revoking the caller's own active token (passed in both body and header) is permitted. |
+| `TestSessionTokenRevoke.test_records_audit_event_without_raw_token` | Verifies token revocation records a fail-closed audit row without storing the raw token value. |
 | `TestSessionTokenRevoke.test_second_revoke_returns_404` | Checks that attempting to revoke an already-revoked token returns 404. |
 
 #### `test_validation.py`
@@ -2620,6 +2650,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | Test | Description |
 | --- | --- |
 | `app/templates/diag.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator diagnostics page — currently emits no button-like elements, so the assertion short-circuits clean and pins that state (any future button added to `/diag` must go through a primitive or an allowlist entry). |
+| `app/templates/diag_audit.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator audit-log viewer so its filter, pagination, and export controls keep using shared button primitives. |
 | `app/templates/index.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the main app template — the surface that owns the desktop rail, tab bar, terminal chrome, mobile hamburger/recents sheets, and the five app-level modals. The bulk of the exception fixture exists because of this file. |
 | `app/templates/permalink.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink viewer — the `toggle-ln` / `toggle-ts` / `copy-txt` / `perm-save-btn` row uses `.btn .btn-secondary .btn-compact` directly, and the `save-txt` / `save-html` / `save-pdf` entries inside the save menu are covered by the `[data-action^="save-"]` exception. |
 | `app/templates/permalink_base.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink layout base — currently emits no button-like elements; pins that state. |
@@ -2661,6 +2692,15 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reads APP_CONFIG from the server-rendered bootstrap JSON` | Verifies that `config.js` initializes `APP_CONFIG` from the inline JSON emitted by the Flask index route. |
 | `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
 | `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
+
+#### `diag_audit.test.js`
+
+| Test | Description |
+| --- | --- |
+| `keeps the filter and export controls in the real template` | Verifies the real audit viewer template keeps the expected filter fields and CSV/JSON export links. |
+| `keeps the audit table columns in the real template` | Verifies the real audit viewer template keeps the table columns and row cell classes used by the diagnostics UI. |
+| `keeps the native details drawer in the real template` | Verifies the real audit viewer template keeps the native details/summary/pre structure for audit details. |
+| `keeps disabled, empty, and pagination states in the real template` | Verifies the real audit viewer template keeps disabled-audit, empty-result, pagination, and export-cap states. |
 
 #### `export_pdf.test.js`
 
@@ -3314,6 +3354,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `hides project artifacts and raw package artifact inclusion when Files are disabled` | Verifies the Projects modal hides the Artifacts tab/run artifact jump chips and prevents configured package presets from including raw artifacts when Files are unavailable. |
 | `opens a finding source run at the recorded line` | Verifies that project finding rows show target/review metadata, update review state without opening the run, and restore the source run at the persisted finding line number when clicked. |
 | `reorders project findings when the sort control changes` | Verifies that Projects modal finding sort modes visibly reorder finding rows by severity, target, and newest run. |
+| `loads Findings Board project data with a separate cap for each review column` | Verifies that the Findings Board loads each Project review column with its own page cap so a large New column does not hide reviewed, false-positive, or follow-up findings. |
 | `locks finding review dropdowns and board dragging for view-only team members` | Verifies that view-only team scope disables Projects select mode, finding review controls, and Findings Board drag/drop triage. |
 | `refreshes an open Projects modal after a cross-tab project broadcast` | Verifies that a project-workspace storage broadcast refreshes an already-open Projects modal. |
 
@@ -4172,6 +4213,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `desktop Status Monitor loads dashboard endpoints together without route stubs` | Verifies that the Status Monitor opens against real dashboard endpoints for status, workspace files, history stats, and history insights. |
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
+| `records project actions in the diagnostics audit viewer` | Verifies that a live project-link action appears in `/diag/audit` with the filtered row, detail JSON, and export links. |
 | `creates an active project, manages targets, and edits linked run metadata` | Verifies that the Projects modal can create and activate a project, persist project labels/notes, add/edit/delete targets, link the last run, and save linked-run metadata in a live browser. |
 | `creates, previews, applies, and shows an Atlas auto-promote rule` | Verifies that the Projects modal can preview, create, refresh, apply, and display an Atlas auto-promote rule and its promoted entity in a live browser. |
 | `refreshes an open project when a run stream auto-promotes an Atlas entity` | Verifies that a live command stream can auto-promote a matching Atlas entity and refresh an already-open Projects modal without a page reload. |

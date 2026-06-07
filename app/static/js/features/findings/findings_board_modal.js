@@ -24,6 +24,12 @@
   ]);
   const COLUMN_LIMIT = 200;
   const PAGE_LIMIT = 200;
+  const COLUMN_STATE_QUERIES = Object.freeze([
+    { column: 'new', states: ['new'] },
+    { column: 'reviewed', states: ['reviewed', 'important'] },
+    { column: 'false_positive', states: ['false_positive'] },
+    { column: 'needs_followup', states: ['needs_followup'] },
+  ]);
   const LINE_OPEN_EVENT = 'app:findings-board-open-run';
 
   const state = {
@@ -37,6 +43,7 @@
     findings: [],
     total: 0,
     hasMore: false,
+    columnTotals: null,
     draggedId: '',
   };
 
@@ -148,6 +155,27 @@
   function findingById(findingId) {
     const normalized = String(findingId || '');
     return state.findings.find(finding => String(finding && finding.id || '') === normalized) || null;
+  }
+
+  function endpointUrl(endpoint = '') {
+    return new URL(String(endpoint || ''), global.location?.origin || 'http://localhost');
+  }
+
+  function endpointPath(url) {
+    return `${url.pathname}${url.search || ''}`;
+  }
+
+  function hasReviewStateFilter(endpoint = '') {
+    return endpointUrl(endpoint).searchParams.has('review_state');
+  }
+
+  function endpointWithReviewState(endpoint = '', reviewState = '') {
+    const url = endpointUrl(endpoint);
+    url.searchParams.delete('review_state');
+    url.searchParams.set('review_state', String(reviewState || 'new'));
+    url.searchParams.set('limit', String(PAGE_LIMIT));
+    url.searchParams.set('offset', '0');
+    return endpointPath(url);
   }
 
   function setFindingReviewState(findingId, reviewState) {
@@ -374,7 +402,15 @@
       return;
     }
     const columns = boardApi().boardColumnsFromFindings
-      ? boardApi().boardColumnsFromFindings(state.findings, { limit: COLUMN_LIMIT }).columns
+      ? boardApi().boardColumnsFromFindings(state.findings, { limit: COLUMN_LIMIT }).columns.map((column) => {
+          if (!state.columnTotals || typeof state.columnTotals !== 'object') return column;
+          const total = Number(state.columnTotals[column.state] ?? column.total ?? 0);
+          return {
+            ...column,
+            total,
+            truncated: total > column.cards.length || !!column.truncated,
+          };
+        })
       : [];
     const board = document.createElement('div');
     board.className = 'project-finding-board findings-board-grid';
@@ -383,22 +419,72 @@
     bodyEl.appendChild(board);
   }
 
+  async function fetchFindings(endpoint) {
+    const resp = await api()(endpoint, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  }
+
+  function applySinglePage(data = {}) {
+    state.findings = Array.isArray(data.findings) ? data.findings : [];
+    state.total = Number(data.total || state.findings.length || 0);
+    state.hasMore = !!data.has_more;
+    state.columnTotals = null;
+  }
+
+  async function loadSinglePageFindings() {
+    const data = await fetchFindings(state.endpoint);
+    applySinglePage(data);
+  }
+
+  async function loadColumnPageFindings() {
+    const requests = COLUMN_STATE_QUERIES.flatMap(({ column, states }) => (
+      states.map(reviewState => ({ column, endpoint: endpointWithReviewState(state.endpoint, reviewState) }))
+    ));
+    const pages = await Promise.all(requests.map(async request => ({
+      ...request,
+      data: await fetchFindings(request.endpoint),
+    })));
+    const seenIds = new Set();
+    const findings = [];
+    const columnTotals = COLUMN_STATE_QUERIES.reduce((acc, item) => {
+      acc[item.column] = 0;
+      return acc;
+    }, {});
+    let total = 0;
+    let hasMore = false;
+    pages.forEach(({ column, data }) => {
+      const rows = Array.isArray(data.findings) ? data.findings : [];
+      const pageTotal = Number(data.total || rows.length || 0);
+      columnTotals[column] = Number(columnTotals[column] || 0) + pageTotal;
+      total += pageTotal;
+      hasMore = hasMore || !!data.has_more;
+      rows.forEach((finding) => {
+        const findingId = String(finding && finding.id || '');
+        if (findingId && seenIds.has(findingId)) return;
+        if (findingId) seenIds.add(findingId);
+        findings.push(finding);
+      });
+    });
+    state.findings = findings;
+    state.total = total;
+    state.hasMore = hasMore;
+    state.columnTotals = columnTotals;
+  }
+
   async function loadFindings() {
     if (!state.endpoint) return;
     setBusy(true);
     showMessage('');
     render();
     try {
-      const resp = await api()(state.endpoint, { cache: 'no-store' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      state.findings = Array.isArray(data.findings) ? data.findings : [];
-      state.total = Number(data.total || state.findings.length || 0);
-      state.hasMore = !!data.has_more;
+      if (hasReviewStateFilter(state.endpoint)) await loadSinglePageFindings();
+      else await loadColumnPageFindings();
     } catch (err) {
       state.findings = [];
       state.total = 0;
       state.hasMore = false;
+      state.columnTotals = null;
       showMessage(err && err.message ? err.message : 'Could not load findings.', 'error');
       if (typeof global.logClientError === 'function') global.logClientError('failed to load findings board', err);
     } finally {
@@ -491,6 +577,7 @@
     state.findings = [];
     state.total = 0;
     state.hasMore = false;
+    state.columnTotals = null;
     show();
     await loadFindings();
     return true;

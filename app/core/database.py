@@ -225,6 +225,7 @@ def _create_schema(conn):
     """)
     _create_secrets_schema(conn)
     _create_notification_schema(conn)
+    _create_audit_schema(conn)
     _create_schedule_schema(conn)
     _create_watcher_schema(conn)
     _create_ai_assist_schema(conn)
@@ -363,6 +364,34 @@ def _create_notification_schema(conn):
                 )
             ),
             CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
+        )
+    """)
+
+
+def _create_audit_schema(conn):
+    """Create operational audit-event storage."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id                  TEXT PRIMARY KEY,
+            owner_session_hash  TEXT NOT NULL DEFAULT '',
+            team_id             TEXT NOT NULL DEFAULT '',
+            actor_session_hash  TEXT NOT NULL DEFAULT '',
+            actor_session_label TEXT NOT NULL DEFAULT '',
+            actor_member_id     TEXT NOT NULL DEFAULT '',
+            actor_role          TEXT NOT NULL DEFAULT '',
+            actor_display_name  TEXT NOT NULL DEFAULT '',
+            event_type          TEXT NOT NULL,
+            target_type         TEXT NOT NULL,
+            target_id           TEXT NOT NULL DEFAULT '',
+            project_id          TEXT NOT NULL DEFAULT '',
+            request_id          TEXT NOT NULL DEFAULT '',
+            correlation_id      TEXT NOT NULL DEFAULT '',
+            job_id              TEXT NOT NULL DEFAULT '',
+            details_version     INTEGER NOT NULL DEFAULT 1,
+            created             TEXT NOT NULL,
+            client_ip           TEXT NOT NULL DEFAULT '',
+            user_agent          TEXT NOT NULL DEFAULT '',
+            details             {_json_column_sql("{}")}
         )
     """)
 
@@ -915,6 +944,40 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_events_run "
         "ON notification_events (run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_personal_created "
+        "ON audit_events (owner_session_hash, created DESC) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_team_created "
+        "ON audit_events (team_id, created DESC) "
+        "WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_actor_member_created "
+        "ON audit_events (actor_member_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_actor_session_created "
+        "ON audit_events (actor_session_hash, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_type_created "
+        "ON audit_events (event_type, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_project_created "
+        "ON audit_events (project_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_target_created "
+        "ON audit_events (target_type, target_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_correlation "
+        "ON audit_events (correlation_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_session_run_variant "
@@ -1881,6 +1944,10 @@ def _migrate_schema(conn):
         _create_notification_schema(conn)
     except SQLiteOperationalError:
         pass
+    try:
+        _create_audit_schema(conn)
+    except SQLiteOperationalError:
+        pass
     for stmt in (
         "ALTER TABLE notification_channels ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE notification_events ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
@@ -2194,6 +2261,10 @@ def db_init():
             )
             _populate_run_output_summary(conn)
             _prune_retention(conn)
+            from services.audit.retention import prune_events, warn_if_disabled  # noqa: PLC0415
+
+            warn_if_disabled()
+            prune_events(conn=conn)
             conn.commit()
         return
     with _db_init_lock():
@@ -2206,6 +2277,10 @@ def db_init():
                 conn.execute("INSERT INTO runs_fts(runs_fts) VALUES ('rebuild')")
             _populate_run_output_summary(conn)
             _prune_retention(conn)
+            from services.audit.retention import prune_events, warn_if_disabled  # noqa: PLC0415
+
+            warn_if_disabled()
+            prune_events(conn=conn)
             conn.commit()
 
 

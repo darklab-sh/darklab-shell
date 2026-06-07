@@ -113,6 +113,16 @@
 # Server default if unset: 365
 # permalink_retention_days: 365
 
+# Audit event storage. When disabled, audit recording is a no-op and product
+# writes continue without audit rows. The app logs that tradeoff once at startup.
+# Audit rows are pruned on startup and periodically after the configured number
+# of days; set audit_retention_days to 0 for unlimited retention.
+# audit_export_max_rows caps future audit export/viewer downloads.
+# Server defaults if unset: true, 90, 10000
+# audit_log_enabled: true
+# audit_retention_days: 90
+# audit_export_max_rows: 10000
+
 # Optional filesystem offload thresholds for large text bodies stored under
 # data_dir/body-store. Set to 0 to keep the current all-inline database shape.
 # Values accept bytes or strings like 512kb / 2mb.

@@ -99,8 +99,14 @@ def update_project(session_id, project_id, data, *, team_id=""):
     return get_project(session_id, project_id, team_id=team_id)
 
 
-def delete_project(session_id, project_id, *, team_id=""):
-    with db_connect() as conn:
+def delete_project(session_id, project_id, *, team_id="", conn=None):
+    if conn is None:
+        with db_connect() as opened:
+            deleted = delete_project(session_id, project_id, team_id=team_id, conn=opened)
+            if deleted:
+                opened.commit()
+            return deleted
+    else:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT id FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
@@ -161,5 +167,4 @@ def delete_project(session_id, project_id, *, team_id=""):
             "DELETE FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
             (*owner_params, project_id),
         )
-        conn.commit()
     return True

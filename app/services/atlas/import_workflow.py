@@ -787,6 +787,8 @@ def _applied_draft_response(conn, session_id: str, draft_id: str, *, team_id: st
         "ok": True,
         "batch_id": str(batch["id"] or ""),
         "counts": _decode_json_dict(conn, batch["counts_json"]),
+        "format_id": str(batch["format_id"] or ""),
+        "source_tool": str(batch["source_tool"] or ""),
         "already_applied": True,
     }
 
@@ -1343,7 +1345,13 @@ def _apply_atlas_import_impl(
             **_safe_count_fields(counts),
         },
     )
-    return {"ok": True, "batch_id": batch_id, "counts": counts}
+    return {
+        "ok": True,
+        "batch_id": batch_id,
+        "counts": counts,
+        "format_id": draft_format_id,
+        "source_tool": str(draft["source_tool"] or ""),
+    }
 
 
 def apply_atlas_import(

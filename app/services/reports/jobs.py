@@ -14,6 +14,8 @@ import time
 
 from config import CFG, resolve_data_dir
 from core.helpers import get_log_session_id
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.queries import get_project
 
@@ -189,6 +191,61 @@ def discard_report_export_job(job_id, *, archive=True):
             pass
 
 
+def _audit_failure_reason(status, error=""):
+    if str(status or "").strip().lower() != "failed":
+        return ""
+    normalized = str(error or "").strip().lower()
+    if "project not found" in normalized:
+        return "project_not_found"
+    if "invalid job id" in normalized:
+        return "invalid_job_id"
+    if "too large" in normalized or "size limit" in normalized:
+        return "size_limit"
+    return "export_failed"
+
+
+def _audit_log_extra(job, *, details):
+    return {
+        "job_id": str(job.get("id") or ""),
+        "project_id": str(job.get("project_id") or ""),
+        "team_id": str(job.get("team_id") or ""),
+        "actor_member_id": str(job.get("actor_member_id") or ""),
+        **dict(details),
+    }
+
+
+def _record_job_audit(job, *, status, error="", archive_bytes=0, metrics=None):
+    details = {
+        "project_id": str(job.get("project_id") or ""),
+        "job_id": str(job.get("id") or ""),
+        "status": status,
+    }
+    reason = _audit_failure_reason(status, error)
+    if reason:
+        details["reason"] = reason
+    if archive_bytes:
+        details["archive_bytes"] = int(archive_bytes)
+    if isinstance(metrics, dict):
+        for key in ("run_count", "finding_count", "artifact_count", "target_count"):
+            if key in metrics:
+                details[key] = int(metrics.get(key) or 0)
+    try:
+        record_event(
+            AuditEventType.REPORT_BUILD,
+            target_id=str(job.get("project_id") or ""),
+            project_id=str(job.get("project_id") or ""),
+            job_id=str(job.get("id") or ""),
+            correlation_id=str(job.get("id") or ""),
+            session_id=str(job.get("session_id") or ""),
+            actor_session_id=str(job.get("session_id") or ""),
+            team_id=str(job.get("team_id") or ""),
+            actor_member_id=str(job.get("actor_member_id") or ""),
+            details=details,
+        )
+    except Exception:
+        log.exception("REPORT_EXPORT_AUDIT_FAILED", extra=_audit_log_extra(job, details=details))
+
+
 def _run_job(job_id, cfg_snapshot):
     job = _read_job(job_id)
     if not isinstance(job, dict):
@@ -216,6 +273,7 @@ def _run_job(job_id, cfg_snapshot):
             team_id=str(job.get("team_id") or ""),
         )
         if project is None:
+            _record_job_audit(job, status="failed", error="project not found")
             _update("failed", "not_found", "Project not found.", error="project not found", error_status=404)
             return
         archive = build_report_export_archive(
@@ -238,6 +296,7 @@ def _run_job(job_id, cfg_snapshot):
             "error_status": 413,
             "error": str(exc),
         })
+        _record_job_audit(job, status="failed", error=str(exc))
         _update("failed", "failed", str(exc), error=str(exc), error_status=413)
         return
     except Exception as exc:
@@ -249,10 +308,12 @@ def _run_job(job_id, cfg_snapshot):
             "job_id": job_id,
             "error": str(exc),
         })
+        _record_job_audit(job, status="failed", error=str(exc))
         _update("failed", "failed", "Report export failed.", error=str(exc), error_status=500)
         return
     destination = _archive_path(job_id)
     if destination is None:
+        _record_job_audit(job, status="failed", error="invalid job id")
         _update("failed", "failed", "Report export failed.", error="invalid job id", error_status=500)
         return
     os.replace(archive["path"], destination)
@@ -278,6 +339,7 @@ def _run_job(job_id, cfg_snapshot):
         archive_bytes=archive_bytes,
         metrics=metrics,
     )
+    _record_job_audit(job, status="complete", archive_bytes=archive_bytes, metrics=metrics)
 
 
 def start_report_export_job(session_id, project_id, draft, *, cfg=None, team_id="", actor_member_id=""):

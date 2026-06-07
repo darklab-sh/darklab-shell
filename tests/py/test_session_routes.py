@@ -3,15 +3,36 @@ Tests for session token routes: /session/token/generate and /session/migrate.
 """
 import json
 import sqlite3
+import uuid
 
 import app as shell_app
 from core.database import DB_PATH
+from services.teams.storage import token_hash
 import services.workspace.files as workspace
 
 
 def get_client():
     shell_app.app.config["TESTING"] = True
     return shell_app.app.test_client()
+
+
+def _audit_event_rows(event_type):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT event_type, target_type, target_id, details "
+            "FROM audit_events WHERE event_type = ? ORDER BY created, id",
+            (event_type,),
+        ).fetchall()
+    return [
+        {
+            "event_type": row["event_type"],
+            "target_type": row["target_type"],
+            "target_id": row["target_id"],
+            "details": json.loads(row["details"] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 # ── /session/token/generate ───────────────────────────────────────────────────
@@ -54,6 +75,19 @@ class TestSessionTokenGenerate:
         t1 = json.loads(client.get("/session/token/generate").data)["session_token"]
         t2 = json.loads(client.get("/session/token/generate").data)["session_token"]
         assert t1 != t2
+
+    def test_records_audit_event_without_raw_token(self):
+        client = get_client()
+        source_session = str(uuid.uuid4())
+        data = json.loads(client.get("/session/token/generate", headers={"X-Session-ID": source_session}).data)
+        token = data["session_token"]
+        token_events = [
+            row for row in _audit_event_rows("session_token.generate")
+            if row["details"].get("session_hash") == token_hash(token)
+        ]
+        assert len(token_events) == 1
+        assert token_events[0]["target_type"] == "session_token"
+        assert token not in json.dumps(token_events)
 
 
 # ── /session/token/verify ─────────────────────────────────────────────────────
@@ -371,6 +405,32 @@ class TestSessionMigrate:
         data = json.loads(resp.data)
         assert data["migrated_runs"] == 2
         assert data["migrated_snapshots"] == 1
+
+    def test_records_audit_event_without_raw_tokens(self):
+        client = get_client()
+        from_id = str(uuid.uuid4())
+        to_id = json.loads(client.get("/session/token/generate", headers={"X-Session-ID": from_id}).data)["session_token"]
+        self._seed_runs(from_id, count=2)
+        self._seed_snapshots(from_id, count=1)
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        assert resp.status_code == 200
+        migration_events = [
+            row for row in _audit_event_rows("session.migrate")
+            if row["details"].get("destination_session_hash") == token_hash(to_id)
+        ]
+        assert len(migration_events) == 1
+        details = migration_events[0]["details"]
+        assert migration_events[0]["target_type"] == "session_token"
+        assert details["source_session_hash"] == token_hash(from_id)
+        assert details["migration_counts"]["migrated_runs"] == 2
+        assert details["migration_counts"]["migrated_snapshots"] == 1
+        assert from_id not in json.dumps(migration_events)
+        assert to_id not in json.dumps(migration_events)
 
     def test_does_not_migrate_other_sessions(self):
         client = get_client()
@@ -1484,6 +1544,24 @@ class TestSessionTokenRevoke:
             headers={"X-Session-ID": token},
         )
         assert resp.status_code == 200
+
+    def test_records_audit_event_without_raw_token(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        resp = client.post(
+            "/session/token/revoke",
+            json={"token": token},
+            headers={"X-Session-ID": token},
+        )
+        assert resp.status_code == 200
+        revoke_events = [
+            row for row in _audit_event_rows("session_token.revoke")
+            if row["details"].get("session_hash") == token_hash(token)
+        ]
+        assert len(revoke_events) == 1
+        assert revoke_events[0]["target_type"] == "session_token"
+        assert revoke_events[0]["details"]["revoked_current"] is True
+        assert token not in json.dumps(revoke_events)
 
     def test_second_revoke_returns_404(self):
         """Once revoked, the same token cannot be revoked again."""

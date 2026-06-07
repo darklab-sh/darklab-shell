@@ -417,6 +417,9 @@ def execute_builtin_command(
     if root == "team":
         result = _run_builtin_team(command, session_id, team_id=team_id, team_role=team_role)
         return result, 0
+    if root == "notify":
+        result = _run_builtin_notify(command, session_id, team_id=team_id, team_role=team_role)
+        return result, 0
     result = handler(command, session_id)
     if isinstance(result, tuple):
         return result

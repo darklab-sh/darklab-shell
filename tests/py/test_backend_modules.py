@@ -3275,6 +3275,7 @@ class TestPostgresMigrations:
         "secrets",
         "notification_channels",
         "notification_events",
+        "audit_events",
         "schedules",
         "schedule_fires",
         "watchers",
@@ -3375,6 +3376,7 @@ class TestPostgresMigrations:
             "0027",
             "0028",
             "0029",
+            "0030",
         ]
         for table_name in (
             "runs",
@@ -3396,6 +3398,7 @@ class TestPostgresMigrations:
             "secrets",
             "notification_channels",
             "notification_events",
+            "audit_events",
             "schedules",
             "schedule_fires",
             "watchers",
@@ -5701,6 +5704,32 @@ class TestNotificationsPhase0:
 
         deleted_lines, _ = builtin_commands.execute_builtin_command(f"notify delete {channel_id}", "tok_notifications")
         assert "deleted" in "\n".join(str(line.get("text", "")) for line in deleted_lines)
+        with database.db_connect() as audit_conn:
+            audit_rows = audit_conn.execute(
+                "SELECT event_type, target_type, target_id, details "
+                "FROM audit_events WHERE target_id = ? ORDER BY created, id",
+                (channel_id,),
+            ).fetchall()
+        audit_payloads = [
+            {
+                "event_type": row["event_type"],
+                "target_type": row["target_type"],
+                "target_id": row["target_id"],
+                "details": json.loads(row["details"] or "{}"),
+            }
+            for row in audit_rows
+        ]
+        assert [row["event_type"] for row in audit_payloads] == [
+            "notification.config_change",
+            "notification.config_change",
+            "notification.config_change",
+            "notification.config_change",
+        ]
+        assert {row["target_type"] for row in audit_payloads} == {"notification"}
+        assert [row["details"]["action"] for row in audit_payloads] == ["update", "test", "update", "delete"]
+        assert {row["details"]["source"] for row in audit_payloads} == {"terminal_builtin"}
+        assert audit_payloads[1]["details"]["count"] == 1
+        assert "https://hooks.example.test/darklab" not in json.dumps(audit_payloads)
 
     def test_notify_builtin_keeps_secret_channel_creation_in_options(self, monkeypatch, tmp_path):
         conn = self._notification_db(monkeypatch, tmp_path)
@@ -5831,6 +5860,36 @@ class TestNotificationsPhase0:
         assert code_match.group(1) not in team_actions_json
         assert create_recovery_match.group(1) not in team_actions_json
         assert rotate_recovery_match.group(1) not in team_actions_json
+        with database.db_connect() as conn:
+            audit_rows = conn.execute(
+                "SELECT event_type, target_type, target_id, actor_role, details "
+                "FROM audit_events WHERE target_id = ? ORDER BY created, id",
+                (team_id,),
+            ).fetchall()
+        audit_payloads = [
+            {
+                "event_type": row["event_type"],
+                "target_type": row["target_type"],
+                "target_id": row["target_id"],
+                "actor_role": row["actor_role"],
+                "details": json.loads(row["details"] or "{}"),
+            }
+            for row in audit_rows
+        ]
+        assert [row["event_type"] for row in audit_payloads] == [
+            "team.create",
+            "team.invite",
+            "team.join",
+            "team.recovery_rotate",
+        ]
+        assert {row["target_type"] for row in audit_payloads} == {"team"}
+        assert {row["details"]["source"] for row in audit_payloads} == {"terminal_builtin"}
+        assert audit_payloads[2]["details"]["kind"] == "invite"
+        assert audit_payloads[3]["details"]["target_recovery_id"].startswith("trec_")
+        audit_json = json.dumps(audit_payloads)
+        assert code_match.group(1) not in audit_json
+        assert create_recovery_match.group(1) not in audit_json
+        assert rotate_recovery_match.group(1) not in audit_json
         rejected = [
             call.kwargs["extra"]
             for call in mock_warning.call_args_list
@@ -14749,6 +14808,561 @@ class TestPermalinkErrorPage:
 
 # ── database init and pruning ─────────────────────────────────────────────────
 
+class TestAuditEvents:
+    def _audit_conn(self):
+        tmp = tempfile.TemporaryDirectory()
+        db_path = os.path.join(tmp.name, "audit.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0, "audit_retention_days": 0}):
+                database.db_init()
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return tmp, conn
+
+    def test_recorder_hashes_session_identity_and_bounds_details(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditEventFilters, list_events
+        from services.audit.recorder import record_event
+        from services.teams.storage import token_hash
+
+        tmp, conn = self._audit_conn()
+        try:
+            event_id = record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_secret_value",
+                team_id="team-1",
+                actor_member_id="tmem_1",
+                actor_role="operator",
+                actor_display_name="Casey",
+                target_id="finding-1",
+                project_id="project-1",
+                details={"review_state": "confirmed", "raw_payload": "not stored"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            payload = list_events(AuditEventFilters(actor_member_id="tmem_1"), conn=conn)
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id
+        assert len(payload["events"]) == 1
+        event = payload["events"][0]
+        assert event["owner_session_hash"] == token_hash("tok_secret_value")
+        assert event["actor_session_hash"] == token_hash("tok_secret_value")
+        assert event["actor_session_label"] == "tok_secr********"
+        assert event["actor_role"] == "operator"
+        assert event["actor_display_name"] == "Casey"
+        assert event["target_type"] == "finding"
+        assert event["details"]["review_state"] == "confirmed"
+        assert event["details"]["omitted_detail_keys"] == 1
+        assert "raw_payload" not in event["details"]
+
+    def test_fail_closed_events_reject_unknown_detail_keys(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import AuditRecordError, record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            with pytest.raises(AuditRecordError):
+                record_event(
+                    AuditEventType.SECRET_CREATE,
+                    session_id="tok_secret_value",
+                    target_id="OPENAI_API_KEY",
+                    details={"secret_value": "nope"},
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                )
+            row = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()
+            conn.execute("DROP TABLE audit_events")
+            with mock.patch("services.audit.recorder.log.warning") as warning:
+                with pytest.raises(AuditRecordError):
+                    record_event(
+                        AuditEventType.SECRET_CREATE,
+                        session_id="tok_secret_value",
+                        target_id="OPENAI_API_KEY",
+                        project_id="proj_1",
+                        correlation_id="corr_1",
+                        job_id="job_1",
+                        details={"secret_name": "OPENAI_API_KEY", "source": "test"},
+                        conn=conn,
+                        cfg={"audit_log_enabled": True},
+                    )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert row["count"] == 0
+        warning.assert_called_once()
+        assert warning.call_args.args == ("AUDIT_EVENT_RECORD_BLOCKED",)
+        extra = warning.call_args.kwargs["extra"]
+        assert extra["event_type"] == "secret.create"
+        assert extra["target_type"] == "secret"
+        assert extra["target_id"] == "OPENAI_API_KEY"
+        assert extra["project_id"] == "proj_1"
+        assert extra["correlation_id"] == "corr_1"
+        assert extra["job_id"] == "job_1"
+        assert extra["recording_mode"] == "fail_closed"
+        assert extra["details"] == {"secret_name": "OPENAI_API_KEY", "source": "test"}
+        assert "tok_secret_value" not in json.dumps(extra)
+
+    def test_disabled_audit_log_noops_without_writes(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            event_id = record_event(
+                AuditEventType.SECRET_CREATE,
+                session_id="tok_secret_value",
+                target_id="OPENAI_API_KEY",
+                conn=conn,
+                cfg={"audit_log_enabled": False},
+            )
+            row = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id is None
+        assert row["count"] == 0
+
+    def test_retention_prunes_old_rows_and_disabled_warning_is_once(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+        from services.audit import retention
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_secret_value",
+                target_id="old",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-05-01T00:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_secret_value",
+                target_id="new",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-05T00:00:00+00:00",
+            )
+            pruned = retention.prune_events(
+                conn=conn,
+                now="2026-06-06T00:00:00+00:00",
+                cfg={"audit_retention_days": 30},
+            )
+            rows = conn.execute("SELECT target_id FROM audit_events ORDER BY target_id").fetchall()
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert pruned == 1
+        assert [row["target_id"] for row in rows] == ["new"]
+
+        retention._disabled_warning_emitted = False
+        with mock.patch.object(retention.log, "warning") as warning:
+            retention.warn_if_disabled({"audit_log_enabled": False})
+            retention.warn_if_disabled({"audit_log_enabled": False})
+        assert warning.call_count == 1
+
+    def test_event_registry_covers_policy_for_every_event_type(self):
+        from services.audit.models import AuditEventType, AuditTargetType, RecordingMode, event_spec
+
+        for event_type in AuditEventType:
+            spec = event_spec(event_type)
+            assert spec.event_type == event_type
+            assert isinstance(spec.target_type, AuditTargetType)
+            assert spec.recording_mode in {RecordingMode.FAIL_CLOSED, RecordingMode.BEST_EFFORT}
+            assert "source" in spec.allowed_detail_keys
+
+        assert event_spec(AuditEventType.FILE_DELETE).recording_mode == RecordingMode.FAIL_CLOSED
+        assert event_spec(AuditEventType.FILE_WRITE).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.FILE_MOVE).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.PACKAGE_BUILD).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.REPORT_BUILD).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.SECRET_CREATE).recording_mode == RecordingMode.FAIL_CLOSED
+        assert event_spec(AuditEventType.FINDING_REVIEW_CHANGE).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.SESSION_TOKEN_REVOKE).target_type == AuditTargetType.SESSION_TOKEN
+        for team_event in (
+            AuditEventType.TEAM_CREATE,
+            AuditEventType.TEAM_JOIN,
+            AuditEventType.TEAM_INVITE,
+            AuditEventType.TEAM_REVOKE,
+            AuditEventType.TEAM_MEMBER_REMOVE,
+            AuditEventType.TEAM_LEAVE,
+            AuditEventType.TEAM_ARCHIVE,
+            AuditEventType.TEAM_REACTIVATE,
+            AuditEventType.TEAM_ROLE_CHANGE,
+            AuditEventType.TEAM_RECOVERY_ROTATE,
+            AuditEventType.TEAM_RECOVERY_REDEEM,
+        ):
+            assert event_spec(team_event).recording_mode == RecordingMode.FAIL_CLOSED
+
+    def test_build_audit_reason_codes_do_not_copy_raw_errors(self):
+        import services.projects.package_jobs as package_jobs
+        import services.reports.jobs as report_jobs
+
+        package_job = {
+            "id": "epj_0123456789abcdef01234567",
+            "session_id": "tok_package",
+            "project_id": "proj_1",
+            "package_id": "pkg_1",
+            "team_id": "team_1",
+            "actor_member_id": "tmem_1",
+        }
+        report_job = {
+            "id": "rpj_0123456789abcdef01234567",
+            "session_id": "tok_report",
+            "project_id": "proj_1",
+            "team_id": "team_1",
+            "actor_member_id": "tmem_1",
+        }
+        raw_error = "Traceback: /tmp/customer/acme.env token=secret exceeded size limit"
+        metrics = {"run_count": 2, "finding_count": 3, "artifact_count": 4, "target_count": 5}
+
+        with mock.patch.object(package_jobs, "record_event") as package_record:
+            package_jobs._record_job_audit(
+                package_job,
+                status="failed",
+                error=raw_error,
+                archive_bytes=123,
+                metrics=metrics,
+            )
+        with mock.patch.object(report_jobs, "record_event") as report_record:
+            report_jobs._record_job_audit(
+                report_job,
+                status="failed",
+                error=raw_error,
+                archive_bytes=456,
+                metrics=metrics,
+            )
+
+        package_details = package_record.call_args.kwargs["details"]
+        report_details = report_record.call_args.kwargs["details"]
+        assert package_details["reason"] == "size_limit"
+        assert report_details["reason"] == "size_limit"
+        assert raw_error not in json.dumps(package_details)
+        assert raw_error not in json.dumps(report_details)
+        assert package_details["archive_bytes"] == 123
+        assert report_details["archive_bytes"] == 456
+        assert package_details["run_count"] == 2
+        assert report_details["target_count"] == 5
+
+        with mock.patch.object(package_jobs, "record_event", side_effect=RuntimeError(raw_error)):
+            with mock.patch.object(package_jobs.log, "exception") as package_log:
+                package_jobs._record_job_audit(
+                    package_job,
+                    status="failed",
+                    error=raw_error,
+                    archive_bytes=123,
+                    metrics=metrics,
+                )
+        with mock.patch.object(report_jobs, "record_event", side_effect=RuntimeError(raw_error)):
+            with mock.patch.object(report_jobs.log, "exception") as report_log:
+                report_jobs._record_job_audit(
+                    report_job,
+                    status="failed",
+                    error=raw_error,
+                    archive_bytes=456,
+                    metrics=metrics,
+                )
+        package_extra = package_log.call_args.kwargs["extra"]
+        report_extra = report_log.call_args.kwargs["extra"]
+        assert package_log.call_args.args == ("PACKAGE_BUILD_AUDIT_FAILED",)
+        assert report_log.call_args.args == ("REPORT_EXPORT_AUDIT_FAILED",)
+        assert package_extra["job_id"] == package_job["id"]
+        assert package_extra["project_id"] == "proj_1"
+        assert package_extra["package_id"] == "pkg_1"
+        assert package_extra["team_id"] == "team_1"
+        assert package_extra["actor_member_id"] == "tmem_1"
+        assert package_extra["status"] == "failed"
+        assert package_extra["reason"] == "size_limit"
+        assert package_extra["archive_bytes"] == 123
+        assert package_extra["run_count"] == 2
+        assert report_extra["job_id"] == report_job["id"]
+        assert report_extra["project_id"] == "proj_1"
+        assert report_extra["team_id"] == "team_1"
+        assert report_extra["actor_member_id"] == "tmem_1"
+        assert report_extra["status"] == "failed"
+        assert report_extra["reason"] == "size_limit"
+        assert report_extra["archive_bytes"] == 456
+        assert report_extra["target_count"] == 5
+        assert "customer" not in json.dumps(package_extra)
+        assert "customer" not in json.dumps(report_extra)
+
+    def test_run_now_audit_details_do_not_copy_last_error(self):
+        from services.audit.automation import record_watcher_event, run_now_details
+        from services.audit.models import AuditEventType
+
+        details = run_now_details(
+            "fire_failed",
+            fired_at="2026-06-06T12:00:00+00:00",
+            run_id="",
+            last_error="broker failed while reading /tmp/customer/acme.env",
+        )
+        success_details = run_now_details(
+            "fired",
+            fired_at="2026-06-06T12:01:00+00:00",
+            run_id="run_1",
+            last_error="stale old failure",
+        )
+
+        assert details == {
+            "status": "fire_failed",
+            "fired_at": "2026-06-06T12:00:00+00:00",
+            "run_id": "",
+            "reason": "fire_failed",
+        }
+        assert "customer" not in json.dumps(details)
+        assert success_details == {
+            "status": "fired",
+            "fired_at": "2026-06-06T12:01:00+00:00",
+            "run_id": "run_1",
+            "reason": "",
+        }
+        watcher = SimpleNamespace(
+            id="wch_1",
+            schedule_id="sch_1",
+            baseline_run_id="run_base",
+            last_run_id="run_1",
+            state="changed",
+            state_reason="raw failure while reading /tmp/customer/acme.env",
+            label="Nightly",
+        )
+        with mock.patch("services.audit.automation.record_event") as record:
+            record_watcher_event(
+                AuditEventType.WATCHER_RUN_NOW,
+                watcher,
+                audit_fields={"session_id": "tok_1"},
+                source="test",
+                details=success_details,
+            )
+        assert record.call_args.kwargs["details"]["reason"] == ""
+        assert "customer" not in json.dumps(record.call_args.kwargs["details"])
+
+    def test_same_transaction_rollback_removes_fail_closed_audit_row(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            conn.execute("CREATE TABLE product_actions (id TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            conn.commit()
+            conn.execute("INSERT INTO product_actions (id, value) VALUES (?, ?)", ("action-1", "delete"))
+            event_id = record_event(
+                AuditEventType.PROJECT_DELETE,
+                session_id="tok_delete",
+                target_id="project-rollback",
+                details={"deleted_count": 1, "source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+            )
+            conn.rollback()
+            audit_count = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()["count"]
+            product_count = conn.execute("SELECT COUNT(*) AS count FROM product_actions").fetchone()["count"]
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id
+        assert audit_count == 0
+        assert product_count == 0
+
+    def test_best_effort_recorder_failure_logs_sanitized_fallback(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            conn.execute("DROP TABLE audit_events")
+            with mock.patch("services.audit.recorder.log.warning") as warning:
+                event_id = record_event(
+                    AuditEventType.FINDING_REVIEW_CHANGE,
+                    session_id="tok_best_effort",
+                    target_id="finding-best-effort",
+                    details={"review_state": "triaged", "raw_payload": "secret body"},
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id is None
+        warning.assert_called_once()
+        assert warning.call_args.args == ("AUDIT_EVENT_RECORD_FAILED",)
+        extra = warning.call_args.kwargs["extra"]
+        assert extra["event_type"] == "finding.review_change"
+        assert extra["details"] == {"review_state": "triaged", "omitted_detail_keys": 1}
+        assert "secret body" not in json.dumps(extra)
+
+    def test_best_effort_shared_connection_failure_rolls_back_only_savepoint(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        class PostgresLikeConn:
+            def __init__(self):
+                self.poisoned = False
+                self.statements: list[str] = []
+
+            def execute(self, sql, params=()):
+                normalized = " ".join(str(sql).strip().upper().split())
+                if normalized.startswith("SAVEPOINT"):
+                    self.statements.append("SAVEPOINT")
+                    return None
+                if normalized.startswith("INSERT INTO AUDIT_EVENTS"):
+                    self.statements.append("AUDIT_INSERT")
+                    self.poisoned = True
+                    raise RuntimeError("audit insert failed")
+                if normalized.startswith("ROLLBACK TO SAVEPOINT"):
+                    self.statements.append("ROLLBACK_TO_SAVEPOINT")
+                    self.poisoned = False
+                    return None
+                if normalized.startswith("RELEASE SAVEPOINT"):
+                    self.statements.append("RELEASE_SAVEPOINT")
+                    return None
+                if self.poisoned:
+                    raise RuntimeError("current transaction is aborted")
+                self.statements.append("PRODUCT_WRITE")
+                return None
+
+        conn = PostgresLikeConn()
+        with mock.patch("services.audit.recorder.log.warning") as warning:
+            event_id = record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_best_effort",
+                target_id="finding-best-effort",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+            )
+        conn.execute("INSERT INTO product_actions (id) VALUES (?)", ("action-1",))
+
+        assert event_id is None
+        warning.assert_called_once()
+        assert conn.statements == [
+            "SAVEPOINT",
+            "AUDIT_INSERT",
+            "ROLLBACK_TO_SAVEPOINT",
+            "RELEASE_SAVEPOINT",
+            "PRODUCT_WRITE",
+        ]
+
+    def test_list_events_filters_owner_scope_and_paginates(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditEventFilters, list_events
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-owner-old",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_other",
+                target_id="finding-other",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-owner-new",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:02+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-owner-next-day",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-07T00:00:00+00:00",
+            )
+            first_page = list_events(AuditEventFilters(session_id="tok_owner"), conn=conn, limit=1)
+            second_page = list_events(AuditEventFilters(session_id="tok_owner"), conn=conn, limit=1, offset=1)
+            same_day = list_events(
+                AuditEventFilters(
+                    session_id="tok_owner",
+                    target_type="finding",
+                    date_from="2026-06-06",
+                    date_to="2026-06-06",
+                ),
+                conn=conn,
+                limit=10,
+            )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert [event["target_id"] for event in first_page["events"]] == ["finding-owner-next-day"]
+        assert first_page["has_more"] is True
+        assert [event["target_id"] for event in second_page["events"]] == ["finding-owner-new"]
+        assert second_page["has_more"] is True
+        assert [event["target_id"] for event in same_day["events"]] == [
+            "finding-owner-new",
+            "finding-owner-old",
+        ]
+
+    def test_periodic_retention_guard_runs_once_per_interval(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+        from services.audit import retention
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_retention",
+                target_id="old",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-05-01T00:00:00+00:00",
+            )
+            retention._last_retention_check_monotonic = 0.0
+            first = retention.maybe_prune_events(
+                conn=conn,
+                now="2026-06-06T00:00:00+00:00",
+                monotonic_now=retention.AUDIT_RETENTION_CHECK_INTERVAL_SECONDS + 1,
+                cfg={"audit_retention_days": 30},
+            )
+            second = retention.maybe_prune_events(
+                conn=conn,
+                now="2026-06-07T00:00:00+00:00",
+                monotonic_now=retention.AUDIT_RETENTION_CHECK_INTERVAL_SECONDS + 2,
+                cfg={"audit_retention_days": 30},
+            )
+            remaining = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()["count"]
+        finally:
+            retention._last_retention_check_monotonic = 0.0
+            conn.close()
+            tmp.cleanup()
+
+        assert first == 1
+        assert second == 0
+        assert remaining == 0
+
+
 class TestDatabaseInit:
     def _fresh_db(self, tmp):
         """Return a path to a new empty DB file in tmp."""
@@ -14839,6 +15453,7 @@ class TestDatabaseInit:
             "finding_triage_details",
             "evidence_packages",
             "project_reports",
+            "audit_events",
         }.issubset(tables)
         assert "project_targets" not in tables
         assert "finding_targets" not in tables
@@ -15041,6 +15656,7 @@ class TestDatabaseInit:
                     "atlas_finding_import_occurrences",
                     "evidence_packages",
                     "project_reports",
+                    "audit_events",
                 )
             }
             conn.close()
@@ -15060,6 +15676,7 @@ class TestDatabaseInit:
         assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
         assert column_types["project_reports"]["draft"] == "TEXT"
+        assert column_types["audit_events"]["details"] == "TEXT"
 
     def test_atlas_import_source_helpers_are_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -17052,6 +17669,7 @@ SQL syntax error near q</response>
             }
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
             report_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_reports')").fetchall()}
+            audit_indexes = {row[1] for row in conn.execute("PRAGMA index_list('audit_events')").fetchall()}
             conn.close()
 
         assert "idx_projects_session_status_updated" in project_indexes
@@ -17100,6 +17718,14 @@ SQL syntax error near q</response>
         assert "idx_project_reports_project_updated" in report_indexes
         assert "idx_project_reports_personal_unique" in report_indexes
         assert "idx_project_reports_team_unique" in report_indexes
+        assert "idx_audit_events_personal_created" in audit_indexes
+        assert "idx_audit_events_team_created" in audit_indexes
+        assert "idx_audit_events_actor_member_created" in audit_indexes
+        assert "idx_audit_events_actor_session_created" in audit_indexes
+        assert "idx_audit_events_type_created" in audit_indexes
+        assert "idx_audit_events_project_created" in audit_indexes
+        assert "idx_audit_events_target_created" in audit_indexes
+        assert "idx_audit_events_correlation" in audit_indexes
 
     def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
         conn = sqlite3.connect(":memory:")

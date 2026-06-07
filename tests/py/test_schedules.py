@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import sqlite3
 import unittest.mock as mock
+from typing import Any
 
 import app as shell_app
 from core.database import db_init, db_connect
@@ -56,6 +58,34 @@ def _create_schedule(client, token: str, **payload):
         **payload,
     }
     return client.post("/schedules", headers={"X-Session-ID": token}, json=body)
+
+
+def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict[str, Any]]:
+    where: list[str] = []
+    params: list[str] = []
+    if target_id:
+        where.append("target_id = ?")
+        params.append(target_id)
+    if event_type:
+        where.append("event_type = ?")
+        params.append(event_type)
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT event_type, target_type, target_id, details FROM audit_events"
+            + where_sql
+            + " ORDER BY created, id",
+            params,
+        ).fetchall()
+    return [
+        {
+            "event_type": row["event_type"],
+            "target_type": row["target_type"],
+            "target_id": row["target_id"],
+            "details": json.loads(row["details"] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 def _create_team(token: str, *, name: str = "Automation Team") -> str:
@@ -141,6 +171,17 @@ class TestSchedulesRoutes:
         assert deleted.get_json()["removed"] is True
         listed_after_delete = client.get("/schedules", headers={"X-Session-ID": token})
         assert listed_after_delete.get_json()["schedules"] == []
+        audit_rows = _audit_event_rows(target_id=schedule["id"])
+        assert [row["event_type"] for row in audit_rows] == [
+            "schedule.create",
+            "schedule.update",
+            "schedule.delete",
+        ]
+        assert {row["target_type"] for row in audit_rows} == {"schedule"}
+        assert {row["details"]["source"] for row in audit_rows} == {"browser"}
+        assert audit_rows[1]["details"]["changed_fields"] == ["enabled", "label"]
+        assert audit_rows[2]["details"]["deleted_count"] == 1
+        assert "ping -c 1 darklab.sh" not in json.dumps(audit_rows)
 
     def test_schedule_routes_hide_cross_session_rows(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -330,6 +371,10 @@ class TestSchedulesRoutes:
         assert fires_payload["total"] == 1
         assert fires_payload["fires"][0]["schedule_id"] == schedule_id
         assert fires_payload["fires"][0]["status"] == "fired"
+        audit_rows = _audit_event_rows(target_id=schedule_id)
+        assert [row["event_type"] for row in audit_rows] == ["schedule.create", "schedule.run_now"]
+        assert audit_rows[1]["details"]["status"] == "fired"
+        assert audit_rows[1]["details"]["run_id"] == "run_schedule_now"
 
     def test_schedule_fire_links_completed_run_in_history(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch
@@ -558,6 +603,17 @@ class TestWatchersRoutes:
         assert resumed.get_json()["watcher"]["schedule"]["enabled"] is True
         assert deleted.status_code == 200
         assert deleted.get_json()["removed"] is True
+        audit_rows = _audit_event_rows(target_id=watcher["id"])
+        assert [row["event_type"] for row in audit_rows] == [
+            "watcher.create",
+            "watcher.pause",
+            "watcher.resume",
+            "watcher.delete",
+        ]
+        assert {row["target_type"] for row in audit_rows} == {"watcher"}
+        assert {row["details"]["source"] for row in audit_rows} == {"browser"}
+        assert audit_rows[0]["details"]["baseline_run_id"] == "run_watcher_baseline"
+        assert audit_rows[-1]["details"]["deleted_count"] == 1
         with db_connect() as conn:
             watcher_count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE id = ?", (watcher["id"],)).fetchone()
             schedule_count = conn.execute(
@@ -767,6 +823,9 @@ class TestWatchersRoutes:
         assert payload["state"] == "ok"
         assert payload["state_reason"] == ""
         assert payload["consecutive_changed"] == 0
+        audit_rows = _audit_event_rows(target_id=watcher_id)
+        assert [row["event_type"] for row in audit_rows] == ["watcher.create", "watcher.accept_baseline"]
+        assert audit_rows[1]["details"]["baseline_run_id"] == "run_accept_latest"
 
     def test_watcher_run_now_keeps_same_command_fire_audits_separate(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch
@@ -800,6 +859,10 @@ class TestWatchersRoutes:
         assert first_fires.get_json()["fires"][0]["watcher_id"] == first["id"]
         assert second_fires.status_code == 200
         assert second_fires.get_json()["total"] == 0
+        audit_rows = _audit_event_rows(target_id=first["id"])
+        assert [row["event_type"] for row in audit_rows] == ["watcher.create", "watcher.run_now"]
+        assert audit_rows[1]["details"]["status"] == "fired"
+        assert audit_rows[1]["details"]["run_id"].startswith("run_fire_")
 
 
 class TestWatchBuiltin:
@@ -855,6 +918,17 @@ class TestWatchBuiltin:
             schedule_count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
         assert watcher_count["count"] == 0
         assert schedule_count["count"] == 0
+        audit_rows = _audit_event_rows(target_id=watcher_id)
+        assert [row["event_type"] for row in audit_rows] == [
+            "watcher.create",
+            "watcher.pause",
+            "watcher.resume",
+            "watcher.delete",
+        ]
+        assert {row["details"]["source"] for row in audit_rows} == {"terminal_builtin"}
+        assert audit_rows[0]["details"]["baseline_run_id"] == baseline_run_id
+        assert audit_rows[-1]["details"]["deleted_count"] == 1
+        assert "nmap -sV darklab.sh" not in json.dumps(audit_rows)
 
     def test_watch_builtin_validates_baseline_and_command_policy(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -925,6 +999,14 @@ class TestWatchBuiltin:
             baseline_row = conn.execute("SELECT baseline_run_id, state FROM watchers WHERE id = ?", (watcher_id,)).fetchone()
         assert baseline_row["baseline_run_id"].startswith("run_fire_")
         assert baseline_row["state"] == "ok"
+        audit_rows = _audit_event_rows(target_id=watcher_id)
+        assert [row["event_type"] for row in audit_rows] == [
+            "watcher.create",
+            "watcher.run_now",
+            "watcher.accept_baseline",
+        ]
+        assert audit_rows[1]["details"]["run_id"].startswith("run_fire_")
+        assert audit_rows[2]["details"]["baseline_run_id"].startswith("run_fire_")
 
     def test_watch_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -985,6 +1067,16 @@ class TestScheduleBuiltin:
         with db_connect() as conn:
             count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
         assert count["count"] == 0
+        audit_rows = _audit_event_rows(target_id=schedule_id)
+        assert [row["event_type"] for row in audit_rows] == [
+            "schedule.create",
+            "schedule.update",
+            "schedule.update",
+            "schedule.delete",
+        ]
+        assert {row["details"]["source"] for row in audit_rows} == {"terminal_builtin"}
+        assert audit_rows[-1]["details"]["deleted_count"] == 1
+        assert "ping -c 1 darklab.sh" not in json.dumps(audit_rows)
 
     def test_schedule_builtin_rejects_disallowed_command(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -1025,6 +1117,10 @@ class TestScheduleBuiltin:
             "status": "fired",
             "reason": "started scheduled run",
         }
+        audit_rows = _audit_event_rows(target_id=schedule_id)
+        assert [row["event_type"] for row in audit_rows] == ["schedule.create", "schedule.run_now"]
+        assert audit_rows[1]["details"]["status"] == "fired"
+        assert audit_rows[1]["details"]["run_id"] == "run_builtin_schedule"
 
     def test_schedule_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)

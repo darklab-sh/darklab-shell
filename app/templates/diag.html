@@ -31,7 +31,10 @@
       <h1 class="diag-header-title">{{ app_name }}</h1>
       <span class="diag-header-meta">operator diagnostics</span>
     </div>
-    <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+    <div class="diag-header-actions">
+      <a href="/diag/audit" class="btn btn-secondary btn-compact diag-nav-btn">audit log</a>
+      <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+    </div>
   </header>
   <div class="diag-status-bar">
     <span class="diag-live-indicator diag-refreshed-at" aria-live="polite">

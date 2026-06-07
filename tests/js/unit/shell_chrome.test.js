@@ -588,6 +588,7 @@ function loadShellChrome({
     bindDismissible,
     bindMobileSheet,
     projectFindingsData: global.DarklabProjectFindingsData,
+    openFindingsBoard: global.openFindingsBoard,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
@@ -5126,6 +5127,59 @@ describe('shell chrome project workspace', () => {
       },
     )
     expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('loads Findings Board project data with a separate cap for each review column', async () => {
+    const newFindings = Array.from({ length: 200 }, (_, index) => ({
+      id: `finding-new-${index}`,
+      title: `New issue ${index}`,
+      review_state: 'new',
+    }))
+    const reviewedFinding = {
+      id: 'finding-reviewed-after-cap',
+      title: 'Reviewed issue after the New page',
+      review_state: 'reviewed',
+    }
+    const apiFetch = vi.fn((url) => {
+      const target = new URL(String(url), 'http://localhost')
+      if (!target.pathname.startsWith('/projects/project-1/findings')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }
+      const reviewState = target.searchParams.get('review_state')
+      const payload = {
+        new: { findings: newFindings, total: 1001, limit: 200, offset: 0, has_more: true },
+        reviewed: { findings: [reviewedFinding], total: 1, limit: 200, offset: 0, has_more: false },
+        important: { findings: [], total: 0, limit: 200, offset: 0, has_more: false },
+        false_positive: { findings: [], total: 0, limit: 200, offset: 0, has_more: false },
+        needs_followup: { findings: [], total: 0, limit: 200, offset: 0, has_more: false },
+      }[reviewState] || { findings: newFindings, total: 1002, limit: 200, offset: 0, has_more: true }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openFindingsBoard({
+      source: 'project-workspace',
+      projectId: 'project-1',
+      projectName: 'Large Project',
+    })
+    await tick()
+
+    const requestUrls = apiFetch.mock.calls.map(([url]) => String(url))
+    expect(requestUrls).toEqual(expect.arrayContaining([
+      '/projects/project-1/findings?limit=200&offset=0&review_state=new',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=reviewed',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=important',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=false_positive',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=needs_followup',
+    ]))
+    const columns = Array.from(document.querySelectorAll('#findings-board-body .project-finding-board-column'))
+    const reviewedColumn = columns.find(column => (
+      column.querySelector('.project-finding-board-column-header h3')?.textContent === 'Reviewed'
+    ))
+    expect(reviewedColumn?.querySelector('.project-finding-board-column-count')?.textContent).toBe('1')
+    expect(reviewedColumn?.textContent).toContain('Reviewed issue after the New page')
+    expect(document.getElementById('findings-board-subtitle').textContent)
+      .toContain('1,002 findings · showing first 201')
   })
 
   it('locks finding review dropdowns and board dragging for view-only team members', async () => {

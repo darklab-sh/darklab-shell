@@ -7,13 +7,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Audit log surface implementation plan](#audit-log-surface-implementation-plan)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
-  - [Audit log surface](#audit-log-surface)
   - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
   - [Run comparison enhancements](#run-comparison-enhancements)
@@ -31,74 +29,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Audit log surface implementation plan
-
-Add an operator-visible audit trail for consequential actions so team/project work can be reviewed without reconstructing events from structured logs. Team-Mode (v2.1) raised the stakes here: with multiple users sharing scope, "who shared / toggled redaction / deleted / built a package or report" is now an operational and compliance need.
-
-**Goal and boundaries**
-- Store durable audit events for actions that change data, reveal/share data, or affect evidence handoff.
-- Provide a plain, fast viewer: event list, filters, detail drawer, and CSV/JSON export.
-- Keep details safe by construction: no secret values, no raw private-note bodies, no full command output, and no raw bearer/session tokens.
-
-**Foundations to reuse (already in the codebase)**
-- Retention precedent: `notifications.events.retention_days` already keeps "delivery audit rows" with a configurable prune (migration `v0009`); mirror its retention + startup-cleanup shape (also see `permalink_retention_days` startup pruning).
-- Scope precedent: the `session_id` + `team_id` scoping and conditional indexes from `finding_triage_details` (`v0028`).
-- Diag surface precedent: `/diag` and its JSON sub-routes (`/diag/classifier-inspector`, `/diag/classifier-drift`) in `blueprints/assets.py`, gated by `_require_diag_access`; `templates/diag.html` + `static/css/diag.css` for the viewer.
-- Actor/context helpers: the `Capability`/role data in `services/teams/capabilities.py` and `get_log_session_id`/request-id helpers in `core/helpers.py`.
-- Existing audit-like surfaces: notification delivery rows are already durable and owner-scoped; secret audit helpers currently emit log-only structured events.
-
-**Decisions and risks**
-- `/diag/audit` is the operator-wide first surface. It is IP-gated by `_require_diag_access` and may query across personal/team scopes; any later Options/team-owner surface must use separate capability-gated routes and owner-scoped queries.
-- Because `/diag/audit` is operator-wide and IP-gated, every team's activity is visible to anyone with diag access. That fits single-operator self-hosting, but it is not appropriate for multi-tenant hosting until owner-scoped routes exist.
-- Use fail-closed same-transaction recording for destructive/compliance-sensitive events such as deletes, shares/exports, secret changes, and team permission changes. Use best-effort post-commit recording for routine curation events such as label edits or finding review moves so an audit hiccup does not block low-risk product work.
-- Details payloads are allowlist-based per event type. Record stable ids, counts, changed field names, redaction mode, safe labels, and result status; never store raw private notes, secret values, full command output, raw tokens, or full sensitive request bodies.
-- Recorder allowlist validation should be defensive: unknown detail keys are dropped or moved to a safe `omitted_detail_keys` count instead of raising for routine best-effort events, while fail-closed event types may reject invalid details before commit.
-- Keep the new operational audit stream distinct from existing notification delivery history. For notification actions, record configuration changes and high-level references in `audit_events`, while delivery attempt history stays in `notification_events`.
-- Route existing log-only secret audit emitters through the new recorder once the table exists, preserving their safe naming behavior without copying secret values.
-- Use correlation ids for multi-step actions. Async package/report jobs should share a job/correlation id across start, completion, failure, ticket issuance, and any tracked ticket redemption event.
-
-**Phase A1 — Data model and recorder service**
-- Add the next audit migration (placeholder name: `v0030_audit_events`) plus the parallel SQLite bootstrap.
-  - Columns: `id`, owner `session_id`, `team_id`, actor (session/team-member id and display name when available), `event_type`, `target_type`, `target_id`, `project_id`, `request_id`, `correlation_id`, optional `job_id`, `created` timestamp, IP/user-agent summary, and a bounded JSON `details` payload.
-  - Indexes: personal scope by `(session_id, created)` where `team_id = ''`, team scope by `(team_id, created)` where `team_id != ''`, plus `(event_type, created)`, `(project_id, created)`, `(target_type, target_id, created)`, and `(correlation_id)`.
-- Add `app/services/audit/` with:
-  - `models.py` — event-type and target-type enums, with each event type carrying its recording mode (`fail_closed` or `best_effort`) so call sites do not choose policy ad hoc.
-  - `recorder.py` — a `record_event(...)` helper that accepts an active DB connection for same-transaction writes, trims/bounds the JSON payload, validates details against per-event allowlists, and strips unsafe values.
-  - `queries.py` — paginated, filtered reads.
-  - `retention.py` — cleanup keyed on `audit_retention_days`, run at startup and periodically from the app's normal background/worker path so long-running deployments continue pruning.
-- Config: `audit_log_enabled` (default on) and `audit_retention_days` (sensible default, e.g. 90; `0` = unlimited).
-
-**Phase A2 — Instrumentation at completed-action boundaries**
-- For fail-closed synchronous mutations, record events in the same transaction after the mutation succeeds and before commit. For best-effort curation events, record after commit and log recorder failures without rolling back the user action. For async jobs, record start/completion/failure at job-state transitions.
-- Cover, by category:
-  - Destructive: history delete, snapshot delete, file delete, project unlink/delete, package delete, finding delete/suppression.
-  - Share/export: snapshot create, redaction toggle/use, package/report build, export preview, download-ticket issuance, and ticket redemption where the shared ticket flow exposes enough context.
-  - Secrets and integrations: secret create/replace/delete/rotation, notification channel changes, and future ticketing/webhook config changes.
-  - Team and scope: team create/join/invite/revoke/archive/reactivate, role changes, and scope changes that lead to writes.
-  - Curation: finding review changes, remediation/verification edits, label/note changes, project link/unlink, and target changes.
-- For async package/report builds, record start and completion/failure events with the job id, correlation id, and safe artifact metadata (hook into `package_jobs.py` and the report export job).
-- Add helper wrappers where repeated project-metadata mutations already share code (`services/projects/metadata.py`).
-
-**Phase A3 — Routes and viewer**
-- Add `/diag/audit` read route(s) with pagination, filters, and CSV/JSON export; gate with `_require_diag_access` for the operator-wide first version.
-- Filters: event type, actor, project, target type, date range, and team/personal scope.
-- Detail drawer showing the safe JSON details plus cross-links back to project/history/package/report surfaces when resolvable.
-- Keep query helpers able to run owner-scoped reads so a later Options/team-owner view can reuse the same service without inheriting `/diag`'s cross-scope access.
-
-**Phase A4 — Validation and docs**
-- Pytest: table-driven event-type recording-mode coverage; fail-closed event creation in the same transaction as successful mutations; rollback does not leave orphan audit rows; best-effort curation events do not roll back product writes on recorder failure; owner-scoped and operator-wide reads; details allowlist/redaction; pagination and filtering; startup and periodic retention cleanup; async build start/complete/failure correlation; notification/secret audit integration boundaries.
-- Vitest: viewer filters, row rendering, detail drawer, and empty/error states.
-- Playwright: perform a project/finding/package action and verify it appears in the audit viewer.
-- Docs: `CONFIGURATION.md` (retention/enable settings); `ARCHITECTURE.md` (audit-event ownership, transaction, access, and details-safety rules); `CHANGELOG.md`; release drafts.
-
-**Cut line**
-- v2.2 target (full-featured): table, recorder, and queries; fail-closed same-transaction audit writes for destructive/compliance-sensitive mutations; best-effort audit writes for routine curation; correlated package/report/share/export job events; audit records for delete/project-link/finding-review actions; a `/diag` operator-wide viewer with filters and CSV/JSON export; startup plus periodic retention; full tests.
-- Later: team-member actor display names everywhere; webhook/ticketing audit events; richer cross-links; an Options-surface viewer for team owners.
-
-**Sequencing across the three v2.2 plans**
-- The report builder foundation has landed. Provenance should still expose one normalized shape that reports can consume when available.
-- Wire audit instrumentation after the remaining provenance/package pieces where practical so it can cover report, package, share, and export actions consistently.
-- Migration identifiers in these plans are placeholders. Assign final migration numbers at merge time so the provenance, report, and audit branches do not collide if they land in a different order.
+No open TODOs are currently tracked.
 
 ---
 
@@ -142,11 +73,6 @@ No research items are currently tracked.
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
-
-### Audit log surface
-- Add a queryable audit table for consequential actions such as delete, share, redaction toggle, secret create/replace, project link, suppression, and evidence package build.
-- Add an audit viewer on `/diag` or inside Options so operators can inspect what happened without reconstructing it from structured logs after the fact.
-- Many engagement contracts require this kind of operator-visible trail, so this would make compliance and post-engagement review easier.
 
 ### Workflows v2 — playbooks with parameters
 - Evolve workflows from saved command lists into reusable runbooks.

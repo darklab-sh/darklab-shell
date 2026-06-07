@@ -12,7 +12,11 @@ from werkzeug.exceptions import BadRequest
 
 from config import CFG
 from extensions import limiter
+from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.download_tickets import (
     DOWNLOAD_TICKET_MAX_AGE_SECONDS,
     DownloadTicketError,
@@ -258,6 +262,16 @@ def _project_actor_member_id(session_id, team_id):
     except RequestScopeError:
         return ""
     return str((scope.member or {}).get("id") or "")
+
+
+def _project_audit_fields(session_id, team_id):
+    scope = None
+    if team_id:
+        try:
+            scope = current_request_scope(session_id, request)
+        except RequestScopeError:
+            scope = None
+    return route_audit_fields(session_id, request, scope)
 
 
 def _report_request_payload():
@@ -614,9 +628,19 @@ def projects_delete(project_id):
     session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
     if error_response:
         return error_response
-    deleted = delete_project(session_id, project_id, team_id=team_id)
-    if not deleted:
-        return _project_not_found()
+    with db_connect() as conn:
+        deleted = delete_project(session_id, project_id, team_id=team_id, conn=conn)
+        if not deleted:
+            return _project_not_found()
+        record_event(
+            AuditEventType.PROJECT_DELETE,
+            target_id=project_id,
+            project_id=project_id,
+            details={"project_id": project_id, "deleted_count": 1},
+            conn=conn,
+            **_project_audit_fields(session_id, team_id),
+        )
+        conn.commit()
     log.info("PROJECT_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -884,6 +908,19 @@ def projects_links_create(project_id):
         if result is None:
             return _project_not_found()
         counts = result.get("counts", {})
+        record_event(
+            AuditEventType.PROJECT_LINK,
+            target_id=project_id,
+            project_id=project_id,
+            details={
+                "project_id": project_id,
+                "entity_type": data.get("entity_type") or "",
+                "entity_ids": [str(entity_id or "") for entity_id in data.get("entity_ids") or []],
+                "created_count": int(counts.get("added") or 0),
+                "source": data.get("source") or "manual",
+            },
+            **_project_audit_fields(session_id, team_id),
+        )
         log.info("PROJECT_LINKS_BULK_ADDED", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
@@ -909,6 +946,19 @@ def projects_links_create(project_id):
         return _project_error_response(exc)
     if link is None:
         return _project_not_found()
+    record_event(
+        AuditEventType.PROJECT_LINK,
+        target_id=project_id,
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "entity_type": link["entity_type"],
+            "entity_id": link.get("entity_id") or "",
+            "created_count": 1,
+            "source": link["source"],
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("PROJECT_LINK_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -981,6 +1031,19 @@ def projects_links_delete(project_id):
         if result is None:
             return _project_not_found()
         counts = result.get("counts", {})
+        record_event(
+            AuditEventType.PROJECT_UNLINK,
+            target_id=project_id,
+            project_id=project_id,
+            details={
+                "project_id": project_id,
+                "entity_type": data.get("entity_type") or "",
+                "entity_ids": [str(entity_id or "") for entity_id in data.get("entity_ids") or []],
+                "deleted_count": int(counts.get("removed") or 0),
+                "source": "project_links_bulk",
+            },
+            **_project_audit_fields(session_id, team_id),
+        )
         log.info("PROJECT_LINKS_BULK_REMOVED", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
@@ -998,6 +1061,19 @@ def projects_links_delete(project_id):
         return _project_not_found()
     if not deleted:
         return _project_not_found("project link not found")
+    record_event(
+        AuditEventType.PROJECT_UNLINK,
+        target_id=project_id,
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "entity_type": data.get("entity_type") or "",
+            "entity_id": data.get("entity_id") or "",
+            "deleted_count": 1,
+            "source": "project_links",
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     body: dict[str, object] = {"ok": True}
     unlinked_entity_count = 0
     if (
@@ -1229,13 +1305,29 @@ def projects_report_export_job_create(project_id):
         team_id=team_id,
         actor_member_id=actor_member_id,
     )
+    job_id = str((job or {}).get("id") or "")
+    report_export = draft.get("export") if isinstance(draft, dict) else {}
+    record_event(
+        AuditEventType.REPORT_BUILD,
+        target_id=project_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "project_id": project_id,
+            "job_id": job_id,
+            "status": "queued",
+            "redaction_mode": str((report_export or {}).get("redaction_mode") or ""),
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("PROJECT_REPORT_EXPORT_JOB_STARTED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "team_id": team_id,
         "actor_member_id": actor_member_id,
         "project_id": project_id,
-        "job_id": str((job or {}).get("id") or ""),
+        "job_id": job_id,
     })
     return jsonify({"ok": True, "job": job}), 202
 
@@ -1328,6 +1420,19 @@ def projects_report_export_job_ticket(project_id, job_id):
         "project_id": project_id,
         "job_id": job_id,
     })
+    record_event(
+        AuditEventType.DOWNLOAD_TICKET_ISSUE,
+        target_id=job_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "kind": "project_report_job",
+            "project_id": project_id,
+            "job_id": job_id,
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     return jsonify({
         "ok": True,
         "url": f"/projects/{project_id}/report/export-jobs/{job_id}/download?ticket={ticket}",
@@ -1356,6 +1461,19 @@ def projects_packages_create(project_id):
         return _project_error_response(exc)
     if package is None:
         return _project_not_found()
+    record_event(
+        AuditEventType.PACKAGE_BUILD,
+        target_id=package["id"],
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "package_id": package["id"],
+            "status": "created",
+            "redaction_mode": package["redaction_mode"],
+            "include_artifacts": bool(package["include_artifacts"]),
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("EVIDENCE_PACKAGE_CREATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1488,6 +1606,20 @@ def projects_packages_download_job_create(project_id, package_id):
         actor_member_id=actor_member_id,
     )
     job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
+    record_event(
+        AuditEventType.PACKAGE_BUILD,
+        target_id=package_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "project_id": project_id,
+            "package_id": package_id,
+            "job_id": job_id,
+            "status": "queued",
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("EVIDENCE_PACKAGE_BUILD_JOB_STARTED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1595,6 +1727,20 @@ def projects_packages_download_job_ticket(project_id, package_id, job_id):
         "package_id": package_id,
         "job_id": job_id,
     })
+    record_event(
+        AuditEventType.DOWNLOAD_TICKET_ISSUE,
+        target_id=job_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "kind": "project_package_job",
+            "project_id": project_id,
+            "package_id": package_id,
+            "job_id": job_id,
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     return jsonify({
         "ok": True,
         "url": (
@@ -1611,9 +1757,23 @@ def projects_packages_delete(project_id, package_id):
     session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
     if error_response:
         return error_response
-    deleted = delete_evidence_package(session_id, project_id, package_id, team_id=team_id)
-    if not deleted:
-        return _project_not_found("package not found")
+    with db_connect() as conn:
+        deleted = delete_evidence_package(session_id, project_id, package_id, team_id=team_id, conn=conn)
+        if not deleted:
+            return _project_not_found("package not found")
+        record_event(
+            AuditEventType.PACKAGE_DELETE,
+            target_id=package_id,
+            project_id=project_id,
+            details={
+                "project_id": project_id,
+                "package_id": package_id,
+                "deleted_count": 1,
+            },
+            conn=conn,
+            **_project_audit_fields(session_id, team_id),
+        )
+        conn.commit()
     log.info("EVIDENCE_PACKAGE_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1736,6 +1896,18 @@ def projects_artifacts_download_ticket(project_id, artifact_id):
         "project_id": project_id,
         "artifact_id": artifact_id,
     })
+    record_event(
+        AuditEventType.DOWNLOAD_TICKET_ISSUE,
+        target_id=artifact_id,
+        project_id=project_id,
+        details={
+            "kind": "project_artifact",
+            "project_id": project_id,
+            "file_id": artifact_id,
+            "file_path": str(artifact.get("workspace_path") or ""),
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     return jsonify({
         "ok": True,
         "url": f"/projects/{project_id}/artifacts/{artifact_id}/download?ticket={ticket}",
@@ -1807,6 +1979,23 @@ def projects_findings_bulk_review_update(project_id):
         return _project_error_response(exc)
     if result is None:
         return _project_not_found()
+    updated_ids = [
+        str(item.get("finding_id") or "")
+        for item in result.get("results", [])
+        if item.get("status") == "updated"
+    ]
+    record_event(
+        AuditEventType.FINDING_REVIEW_CHANGE,
+        target_id="",
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "finding_ids": updated_ids,
+            "review_state": result["review_state"],
+            "updated_count": result["counts"]["updated"],
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("PROJECT_FINDINGS_BULK_REVIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1854,6 +2043,17 @@ def findings_review_update(finding_id):
         return _project_error_response(exc)
     if finding is None:
         return _project_not_found("finding not found")
+    record_event(
+        AuditEventType.FINDING_REVIEW_CHANGE,
+        target_id=finding_id,
+        project_id=str(finding.get("project_id") or ""),
+        details={
+            "finding_id": finding_id,
+            "review_state": finding["review_state"],
+            "updated_count": 1,
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("FINDING_REVIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),

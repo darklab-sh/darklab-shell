@@ -49,6 +49,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [External Intel](#external-intel)
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
+- [Audit Log](#audit-log)
 - [Operator Diagnostics](#operator-diagnostics)
 - [Related Docs](#related-docs)
 
@@ -419,7 +420,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
 - Atlas search matches entity values plus Atlas labels and notes, so curated metadata is as findable as values copied from command output.
 - Atlas can be scoped to one source run from Run Details or from the Atlas run filter. The filter applies across the Findings queue, entity tabs, tab counts, and entity exports until you clear the visible run chip.
-- The Atlas toolbar can import external triage files from Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL. Imports show a preview with counts, samples, and row warnings before anything is written. From a project-filtered Atlas view, you can also link imported entities to that project or create project targets from imported domains, IPs, and URLs.
+- The Atlas toolbar can import external triage files from Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL. Imports show a preview with counts, samples, and row warnings before anything is written. Applying an import writes a high-level audit row with the source tool, format, selected options, project id, row/count summary, and created/updated counts without storing imported row bodies. From a project-filtered Atlas view, you can also link imported entities to that project or create project targets from imported domains, IPs, and URLs.
 - When a team scope is active, Atlas views follow team-owned source runs. Team members can review deduplicated team-owned entities, source runs, and findings produced by shared runs, add shared labels and notes, refresh cached intel, update finding review/suppression state, and link Atlas entities into team projects without pulling in their personal Atlas rows.
 - Run Details shows the source run's Atlas entity count and includes paged entity tabs for the same entity types, so you can inspect generated hosts, domains, hashes, CVEs, and URLs without leaving the run modal.
 - Entity details page through source runs and findings when an entity appears across more rows than fit in one view, so older evidence stays reachable without loading the whole collection at once.
@@ -827,6 +828,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Delivery events keep the personal or team scope that created them, are claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted. Sent delivery audit rows are pruned after the configured retention window.
 - Webhook-style channels reject non-public destinations by default, with an operator allowlist for trusted internal receivers.
 - Delivery audit rows are available from each channel's **Deliveries** control in the Options **Notifications** tab, through `/api/v1/notification-events`, the terminal `notify events` built-in, and `darklab notify events`; the terminal built-in and CLI can also update, mute, unmute, test, and delete channels.
+- Channel create, update, delete, mute/unmute, and manual test actions are also written to the operator audit log as config-change rows. Those rows describe the action and channel metadata, but they do not store webhook URLs, bot tokens, Pushover keys, SMTP passwords, or replacement secret values.
 
 **Limits:** anonymous browser sessions cannot create outbound channels. Email channels require SMTP settings before they can be saved or tested. Channel payloads are intentionally compact and should still be sent only to destinations you trust.
 
@@ -917,6 +919,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The Files panel can create, view, edit, move, download, and delete text files owned by the active personal or team scope; JSON and JSONL/NDJSON files are pretty-printed in the read-only viewer, and open file previews can be refreshed manually or opt into auto-refresh while following appended output at the bottom. Files can also be dragged onto folder rows after confirmation.
 - Team Files live in a separate `team_*` workspace directory. The Files panel reloads when you switch personal/team scope and keeps the current folder separate per scope. Team viewers can list, read, preview, and download team files; owners, admins, and operators can also create, edit, move, and delete files. Archived teams stay readable in Files but cannot change files until reactivated.
 - The add/edit file modal includes labels and a private note for the workspace file. File rows surface existing labels/notes from the generic entity metadata store, and move/delete operations update or clear that metadata with the file so project views and package exports do not keep stale paths. Team-file labels and notes are shared with team members and stay separate from personal file metadata.
+- File writes, folder creation, and file/folder moves write best-effort audit rows with the path, destination path, file count, and byte size where applicable. Deletes keep their fail-closed audit row. Audit details do not store file contents.
 - The `file` built-in provides terminal access to the same file model through `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file move <source> <destination>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`; `file add` opens a blank file editor unless a filename is provided, `file add-dir` creates a folder, `file download <file>` starts the same browser download path as the Files panel, and `file move` moves or renames files and folders. `cd` is tracked per tab, treats the active personal/team workspace root as `/`, and causes relative commands such as `ls`, `cat`, `mv`, `rm`, and `file show` to resolve from the tab's current workspace folder. Team viewers can read through the terminal built-ins, but write commands are blocked before they open browser confirmations.
 - The `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `mv <source> <destination>`, `rm [-r|-f|-rf] <file-or-folder>`, `grep <pattern> <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `wc -l <file>`, `sort [-r|-n|-u] <file>`, and `uniq [-c] <file>` aliases map to app-native workspace operations only; they do not expose arbitrary host/container filesystem access.
 - `file list`, `ls`, `file move`, `mv`, and confirmed `file delete` support simple `*` patterns such as `file ls darklab-*`, `mv darklab-* darklab/`, and `file delete scan-*`. A `*` matches inside one path segment and does not cross `/`; moving multiple matches requires the destination to already be a folder.
@@ -1325,6 +1328,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
 - Changing the token in one tab propagates to all open tabs via the `storage` event — recent chips, starred state, history drawer, session-scoped preferences, and the options-panel masked display all refresh without a reload.
 - `session-token` subcommands are rendered client-side so token values are not sent through the normal `/runs` execution path. Successful commands are saved through the allowlisted `/run/client` history path with token-bearing arguments masked before they are stored or shown in recent-command views.
+- Token generation, revocation, and migration are written to the audit log with masked labels and hashes only. The raw token value is never stored in audit details.
 
 **Terminal commands:**
 
@@ -1398,7 +1402,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 - `commands.yaml` — dispatch gate (see [Command Allowlist](#command-allowlist)).
 - `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
-- `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag` and `/metrics`.
+- `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`, `/diag/audit`, and `/metrics`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
 **Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
@@ -1424,6 +1428,28 @@ If a session has run history, workspace files, project workspace records, user w
 
 ---
 
+## Audit Log
+
+**Purpose:** an operator-facing trail of important app actions, available from the IP-gated diagnostics area without digging through server logs.
+
+**Behavior:**
+
+- Open `/diag/audit` from an allowed operator network to review audit rows across the instance. The page uses the same `diagnostics_allowed_cidrs` gate as `/diag` and `/metrics`.
+- The viewer lists recent rows with created time, event type, actor, target, scope, and a native details drawer. Details are a safe JSON envelope with allowlisted fields such as actor context, scope, target, job/correlation ids, and bounded action metadata.
+- Filters cover event type, actor, team, project, target type, target id, correlation/job chain, date range, and page size. Event choices include short hints so rows such as `history.delete` read as run-deletion events instead of opaque codes.
+- CSV and JSON export buttons download the currently filtered result set. Exports honor `audit_export_max_rows`; when more rows match, CSV adds a truncation marker and JSON returns `truncated: true` with a short hint to narrow the filters.
+- If `audit_log_enabled` is turned off, the viewer still shows existing rows and displays a warning banner. New product actions proceed without writing new audit rows while audit logging is disabled.
+- Rows store hashed session identity, optional team/member actor context, bounded client IP, and bounded user-agent text. Treat those request fields as operator metadata that may still be sensitive in shared environments.
+- Audit rows are intentionally smaller than raw app data. File rows do not store file contents, notification rows do not store webhook URLs or secrets, session-token rows store only masked labels and hashes, and import rows store source/options/counts rather than imported bodies.
+
+**Limits:** `/diag/audit` is an operator-wide view. Anyone allowed through `diagnostics_allowed_cidrs` can see personal and team activity, actor labels, target ids, request metadata, and safe details visible to the audit table. Do not expose it broadly in multi-tenant deployments until you have a narrower owner-scoped audit surface in front of it. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
+
+**Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+
+**Related files:** `app/blueprints/assets.py` (`/diag/audit` HTML/JSON responses and exports), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `tests/py/test_routes.py` and `tests/js/unit/diag_audit.test.js` (viewer/export coverage).
+
+---
+
 ## Operator Diagnostics
 
 **Purpose:** restricted operator-only surfaces for inspecting current runtime health and scraping trendable Prometheus metrics without opening a shell session.
@@ -1431,6 +1457,7 @@ If a session has run history, workspace files, project workspace records, user w
 **Behavior:**
 
 - `/diag` provides a live operator view of the running instance and is disabled by default.
+- `/diag/audit` provides the audit-log workflow described in [Audit Log](#audit-log), using the same diagnostics allowlist.
 - The diagnostics page includes a classifier inspector near the top of the page. Paste one output line, optionally add the command context, and it shows the line's `kind`, `role`, signals, entities, command root, and target using the same backend classifier used for saved runs without rerunning the heavier diagnostics probes. An Advanced disclosure keeps the legacy line-class override available when you need to debug old transcript classes.
 - The classifier drift report samples recent saved output on demand and calls out spots where stored metadata no longer matches today's classifier, where help output produced findings/entities, or where useful-looking output stayed as plain body text. Samples can be sent straight into the one-line inspector for a closer look.
 - `/metrics` returns Prometheus text for scrape-based monitoring and uses the same IP/CIDR allowlist as `/diag`.
@@ -1485,11 +1512,11 @@ curl http://localhost:8888/metrics
 
 The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-overview.json`.
 
-**Limits:** `/diag` and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` available while hiding `/metrics`.
+**Limits:** `/diag`, `/diag/audit`, and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` and `/diag/audit` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
+**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses, `/diag/audit`, and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` and `app/templates/diag_audit.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics, audit, and logging runtime details).
 
 ---
 

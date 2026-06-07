@@ -24,6 +24,7 @@ from copy import deepcopy
 import pytest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote, urlencode
 import unittest.mock as mock
 
@@ -59,6 +60,31 @@ def _ai_assist_count_for_run(run_id: str) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT COUNT(*) FROM ai_run_assists WHERE run_id = ?", (run_id,)).fetchone()
     return int(row[0] if row else 0)
+
+
+def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict[str, Any]]:
+    where: list[str] = []
+    params: list[str] = []
+    if target_id:
+        where.append("target_id = ?")
+        params.append(target_id)
+    if event_type:
+        where.append("event_type = ?")
+        params.append(event_type)
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT event_type, target_type, target_id, project_id, job_id, correlation_id, details "
+            "FROM audit_events" + where_sql + " ORDER BY created, id",
+            params,
+        ).fetchall()
+    return [
+        {
+            **{key: row[key] for key in row.keys() if key != "details"},
+            "details": json.loads(row["details"] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -253,6 +279,15 @@ class TestSecretsRoutes:
             assert removed.status_code == 200
             assert removed.get_json()["removed"] is True
             assert client.get("/session/secrets", headers=headers).get_json()["secrets"] == []
+
+            audit_rows = _audit_event_rows(target_id="SHODAN_API_KEY")
+            assert [row["event_type"] for row in audit_rows] == [
+                "secret.create",
+                "secret.update",
+                "secret.delete",
+            ]
+            assert _audit_event_rows(event_type="secret.rotate")[0]["details"]["updated_count"] == 1
+            assert "replacement" not in json.dumps(audit_rows)
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -652,6 +687,27 @@ class TestAtlasImportRoutes:
             assert "ATLAS_IMPORT_PREVIEW_CREATED" in import_events
             assert "ATLAS_IMPORT_APPLIED" in import_events
             assert "ATLAS_IMPORT_APPLY_REPLAYED" in import_events
+            audit_rows = _audit_event_rows(target_id=applied_payload["batch_id"], event_type="import.apply")
+            assert [row["target_type"] for row in audit_rows] == ["import", "import", "import"]
+            assert [row["project_id"] for row in audit_rows] == [project_id, project_id, project_id]
+            assert [row["details"]["already_applied"] for row in audit_rows] == [False, True, True]
+            assert audit_rows[0]["details"]["source"] == "atlas"
+            assert audit_rows[0]["details"]["draft_id"] == preview_payload["draft_id"]
+            assert audit_rows[0]["details"]["batch_id"] == applied_payload["batch_id"]
+            assert audit_rows[0]["details"]["format_id"] == "generic_csv"
+            assert audit_rows[0]["details"]["source_tool"] == "External CSV"
+            assert audit_rows[0]["details"]["source_tool_key"] == "external_csv"
+            assert audit_rows[0]["details"]["options"] == {
+                "import_entities": False,
+                "import_findings": True,
+                "link_to_project": True,
+                "create_project_targets": True,
+            }
+            assert audit_rows[0]["details"]["counts"]["entities_created"] == 1
+            assert audit_rows[0]["details"]["counts"]["findings_created"] == 1
+            assert audit_rows[0]["details"]["counts"]["project_links_added"] == 1
+            assert audit_rows[0]["details"]["counts"]["project_targets_created"] == 1
+            assert csv_payload.decode() not in json.dumps(audit_rows)
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -1810,6 +1866,11 @@ class TestTeamRoutes:
             assert payload["recovery_code"].startswith("trec_")
             assert "created_by_session_token_hash" not in created.get_data(as_text=True)
             assert "code_hash" not in created.get_data(as_text=True)
+            audit_rows = _audit_event_rows(target_id=payload["team"]["id"], event_type="team.create")
+            assert len(audit_rows) == 1
+            assert audit_rows[0]["target_type"] == "team"
+            assert audit_rows[0]["details"] == {"source": "browser", "role": "owner"}
+            assert payload["recovery_code"] not in json.dumps(audit_rows)
 
             listed = client.get("/session/teams", headers={"X-Session-ID": session_id})
             assert listed.status_code == 200
@@ -2093,6 +2154,80 @@ class TestTeamRoutes:
             )
             assert revoked.status_code == 200
             assert revoked.get_json()["removed"] is True
+            removed = client.delete(
+                f"/session/teams/{team_id}/members/{operator_member['id']}",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert removed.status_code == 200
+            assert removed.get_json()["removed"] is True
+            audit_rows = _audit_event_rows(target_id=team_id)
+            assert [row["event_type"] for row in audit_rows] == [
+                "team.create",
+                "team.invite",
+                "team.join",
+                "team.role_change",
+                "team.invite",
+                "team.revoke",
+                "team.member_remove",
+            ]
+            assert audit_rows[1]["details"]["target_invite_id"] == invite_payload["id"]
+            assert audit_rows[1]["details"]["role"] == "operator"
+            assert audit_rows[2]["details"]["target_member_id"] == operator_member["id"]
+            assert audit_rows[2]["details"]["kind"] == "invite"
+            assert audit_rows[3]["details"]["from_role"] == "operator"
+            assert audit_rows[3]["details"]["to_role"] == "admin"
+            assert audit_rows[-2]["details"]["kind"] == "invite"
+            assert audit_rows[-1]["details"]["target_member_id"] == operator_member["id"]
+            assert invite_payload["code"] not in json.dumps(audit_rows)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_role_change_rolls_back_when_fail_closed_audit_fails(self, tmp_path):
+        from services.audit.recorder import AuditRecordError
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_role_audit_owner"
+            operator_token = "tok_team_role_audit_operator"
+            self._register_session_token(operator_token)
+            created = self._create_team(client, owner_token, name="Role Audit Rollback")
+            team_id = created.get_json()["team"]["id"]
+            invite = client.post(
+                f"/session/teams/{team_id}/invites",
+                headers={"X-Session-ID": owner_token},
+                json={"role": "operator", "label": "Role rollback operator"},
+            )
+            assert invite.status_code == 201
+            joined = client.post(
+                "/session/teams/join",
+                headers={"X-Session-ID": operator_token},
+                json={"code": invite.get_json()["invite"]["code"], "display_name": "Rollback operator"},
+            )
+            assert joined.status_code == 201
+            operator_member = next(
+                item for item in joined.get_json()["members"] if item["display_name"] == "Rollback operator"
+            )
+
+            with mock.patch(
+                "blueprints.teams.record_event",
+                side_effect=AuditRecordError("audit unavailable"),
+            ):
+                promoted = client.patch(
+                    f"/session/teams/{team_id}/members/{operator_member['id']}",
+                    headers={"X-Session-ID": owner_token},
+                    json={"role": "admin"},
+                )
+
+            assert promoted.status_code == 500
+            assert promoted.get_json()["error"] == "team_route_failed"
+            detail = client.get(f"/session/teams/{team_id}", headers={"X-Session-ID": owner_token})
+            assert detail.status_code == 200
+            current_member = next(
+                item for item in detail.get_json()["members"] if item["id"] == operator_member["id"]
+            )
+            assert current_member["role"] == "operator"
+            assert _audit_event_rows(target_id=team_id, event_type="team.role_change") == []
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -2167,6 +2302,64 @@ class TestTeamRoutes:
             )
             assert blocked_second_leave.status_code == 409
             assert blocked_second_leave.get_json()["error"] == "team_owner_required"
+            audit_rows = _audit_event_rows(target_id=team_id)
+            assert [row["event_type"] for row in audit_rows] == [
+                "team.create",
+                "team.recovery_redeem",
+                "team.role_change",
+                "team.leave",
+            ]
+            assert audit_rows[1]["details"]["kind"] == "recovery"
+            assert audit_rows[1]["details"]["target_member_id"] == second_owner["id"]
+            assert audit_rows[2]["details"]["from_role"] == "owner"
+            assert audit_rows[2]["details"]["to_role"] == "operator"
+            assert audit_rows[3]["details"]["target_member_id"] == owner_member_id
+            assert recovery_code not in json.dumps(audit_rows)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_recovery_rotate_rolls_back_when_fail_closed_audit_fails(self, tmp_path):
+        from services.audit.recorder import AuditRecordError
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_recovery_audit_owner"
+            created = self._create_team(client, owner_token, name="Recovery Audit Rollback")
+            team_id = created.get_json()["team"]["id"]
+            with db_connect() as conn:
+                before_rows = conn.execute(
+                    "SELECT id, rotated_at, revoked_at, used_at FROM team_recovery_codes "
+                    "WHERE team_id = ? ORDER BY created_at",
+                    (team_id,),
+                ).fetchall()
+            assert len(before_rows) == 1
+            original_recovery_id = before_rows[0]["id"]
+            assert before_rows[0]["rotated_at"] == ""
+
+            with mock.patch(
+                "blueprints.teams.record_event",
+                side_effect=AuditRecordError("audit unavailable"),
+            ):
+                rotated = client.post(
+                    f"/session/teams/{team_id}/recovery/rotate",
+                    headers={"X-Session-ID": owner_token},
+                )
+
+            assert rotated.status_code == 500
+            assert rotated.get_json()["error"] == "team_route_failed"
+            with db_connect() as conn:
+                after_rows = conn.execute(
+                    "SELECT id, rotated_at, revoked_at, used_at FROM team_recovery_codes "
+                    "WHERE team_id = ? ORDER BY created_at",
+                    (team_id,),
+                ).fetchall()
+            assert len(after_rows) == 1
+            assert after_rows[0]["id"] == original_recovery_id
+            assert after_rows[0]["rotated_at"] == ""
+            assert after_rows[0]["revoked_at"] == ""
+            assert after_rows[0]["used_at"] == ""
+            assert _audit_event_rows(target_id=team_id, event_type="team.recovery_rotate") == []
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -2280,6 +2473,23 @@ class TestTeamRoutes:
             assert recovery_member is None
             assert invite_row["use_count"] == 0
             assert recovery_row["used_at"] == ""
+            reactivated = client.patch(
+                f"/session/teams/{team_id}",
+                headers={"X-Session-ID": owner_token},
+                json={"status": "active"},
+            )
+            assert reactivated.status_code == 200
+            assert reactivated.get_json()["team"]["status"] == "active"
+            audit_rows = _audit_event_rows(target_id=team_id)
+            assert [row["event_type"] for row in audit_rows] == [
+                "team.create",
+                "team.invite",
+                "team.archive",
+                "team.reactivate",
+            ]
+            assert audit_rows[2]["details"]["status"] == "archived"
+            assert "paused_watchers" in audit_rows[2]["details"]
+            assert audit_rows[3]["details"]["status"] == "active"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -4497,6 +4707,19 @@ class TestNotificationChannelRoutes:
             assert secret_replaced.status_code == 200
             assert get_channel_secret(session_id, secret_name) == "https://replacement.example.invalid/hook"
             assert "https://replacement.example.invalid/hook" not in secret_replaced.get_data(as_text=True)
+            audit_rows = _audit_event_rows(
+                target_id=payload["id"],
+                event_type="notification.config_change",
+            )
+            assert [row["details"]["action"] for row in audit_rows] == ["create", "update", "update"]
+            assert {row["target_type"] for row in audit_rows} == {"notification"}
+            assert {row["details"]["source"] for row in audit_rows} == {"browser"}
+            assert audit_rows[0]["details"]["kind"] == "webhook"
+            assert audit_rows[1]["details"]["changed_fields"] == ["label", "config", "triggers", "muted"]
+            assert audit_rows[2]["details"]["changed_fields"] == ["label", "config", "triggers", "muted"]
+            audit_json = json.dumps(audit_rows)
+            assert "https://example.invalid/hook" not in audit_json
+            assert "https://replacement.example.invalid/hook" not in audit_json
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -4571,6 +4794,11 @@ class TestNotificationChannelRoutes:
                     (channel_id,),
                 ).fetchone()
             assert dict(row) == {"status": "sent", "attempts": 1}
+            audit_rows = _audit_event_rows(target_id=channel_id, event_type="notification.config_change")
+            assert [row["details"]["action"] for row in audit_rows] == ["create", "test"]
+            assert audit_rows[-1]["details"]["count"] == 1
+            assert audit_rows[-1]["details"]["result"] == "queued"
+            assert "https://example.invalid/hook" not in json.dumps(audit_rows)
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -4848,6 +5076,12 @@ class TestNotificationChannelRoutes:
             assert listed.get_json()["channels"] == []
             assert get_channel_secret(session_id, app_secret_name) is None
             assert get_channel_secret(session_id, user_secret_name) is None
+            audit_rows = _audit_event_rows(target_id=channel_id, event_type="notification.config_change")
+            assert [row["details"]["action"] for row in audit_rows] == ["create", "delete"]
+            assert audit_rows[-1]["details"]["kind"] == "pushover"
+            audit_json = json.dumps(audit_rows)
+            assert "app-secret" not in audit_json
+            assert "user-secret" not in audit_json
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -4914,6 +5148,96 @@ class TestProjectRoutes:
         )
         assert resp.status_code == 201
         return json.loads(resp.data)["link"]
+
+    def test_project_package_and_link_routes_record_audit_events(self):
+        client = get_client()
+        session_id = self._session_id("project-audit")
+        project = self._create_project(client, session_id, name="Audit Case")
+        run_id = self._seed_run(session_id, "nmap audit.example")
+
+        self._link_run(client, session_id, project["id"], run_id)
+        package_resp = client.post(
+            f"/projects/{project['id']}/packages",
+            json={"name": "Audit package", "redaction_mode": "redacted"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_resp.status_code == 201
+        package = json.loads(package_resp.data)["package"]
+
+        package_delete = client.delete(
+            f"/projects/{project['id']}/packages/{package['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_delete.status_code == 200
+        unlink = client.delete(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        assert unlink.status_code == 200
+
+        project_events = _audit_event_rows(target_id=project["id"])
+        assert [row["event_type"] for row in project_events] == ["project.link", "project.unlink"]
+        package_events = _audit_event_rows(target_id=package["id"])
+        assert [row["event_type"] for row in package_events] == ["package.build", "package.delete"]
+        assert package_events[0]["details"]["redaction_mode"] == "redacted"
+
+    def test_project_delete_rolls_back_when_fail_closed_audit_fails(self):
+        from services.audit.recorder import AuditRecordError
+
+        client = get_client()
+        session_id = self._session_id("project-delete-audit-failure")
+        project = self._create_project(client, session_id, name="Audit Delete Rollback")
+
+        with mock.patch.object(
+            project_routes,
+            "record_event",
+            side_effect=AuditRecordError("audit unavailable"),
+        ), pytest.raises(AuditRecordError):
+            client.delete(
+                f"/projects/{project['id']}",
+                headers={"X-Session-ID": session_id},
+            )
+
+        still_present = client.get(
+            f"/projects/{project['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert still_present.status_code == 200
+        assert json.loads(still_present.data)["project"]["id"] == project["id"]
+        assert _audit_event_rows(target_id=project["id"], event_type="project.delete") == []
+
+    def test_package_delete_rolls_back_when_fail_closed_audit_fails(self):
+        from services.audit.recorder import AuditRecordError
+
+        client = get_client()
+        session_id = self._session_id("package-delete-audit-failure")
+        project = self._create_project(client, session_id, name="Audit Package Rollback")
+        package_resp = client.post(
+            f"/projects/{project['id']}/packages",
+            json={"name": "Rollback package", "redaction_mode": "redacted"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_resp.status_code == 201
+        package = json.loads(package_resp.data)["package"]
+
+        with mock.patch.object(
+            project_routes,
+            "record_event",
+            side_effect=AuditRecordError("audit unavailable"),
+        ), pytest.raises(AuditRecordError):
+            client.delete(
+                f"/projects/{project['id']}/packages/{package['id']}",
+                headers={"X-Session-ID": session_id},
+            )
+
+        still_present = client.get(
+            f"/projects/{project['id']}/packages/{package['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert still_present.status_code == 200
+        assert json.loads(still_present.data)["package"]["id"] == package["id"]
+        assert _audit_event_rows(target_id=package["id"], event_type="package.delete") == []
 
     def _seed_run_entities(self, session_id, run_id):
         with db_connect() as conn:
@@ -8315,6 +8639,14 @@ class TestProjectRoutes:
             job = json.loads(status_resp.data)["job"]
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
+        package_audit_rows = [
+            row for row in _audit_event_rows(target_id=package["id"], event_type="package.build")
+            if row["details"].get("job_id") == job["id"]
+        ]
+        assert [row["details"]["status"] for row in package_audit_rows] == ["queued", "complete"]
+        assert {row["job_id"] for row in package_audit_rows} == {job["id"]}
+        assert {row["correlation_id"] for row in package_audit_rows} == {job["id"]}
+        assert package_audit_rows[-1]["details"]["archive_bytes"] > 0
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}/download-ticket",
@@ -8421,6 +8753,14 @@ class TestProjectRoutes:
             job = json.loads(status_resp.data)["job"]
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
+        report_audit_rows = [
+            row for row in _audit_event_rows(target_id=project["id"], event_type="report.build")
+            if row["details"].get("job_id") == job["id"]
+        ]
+        assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "complete"]
+        assert {row["job_id"] for row in report_audit_rows} == {job["id"]}
+        assert {row["correlation_id"] for row in report_audit_rows} == {job["id"]}
+        assert report_audit_rows[-1]["details"]["archive_bytes"] > 0
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/report/export-jobs/{job['id']}/download-ticket",
@@ -8477,6 +8817,14 @@ class TestProjectRoutes:
         assert job["status"] == "failed"
         assert job["error_status"] == 413
         assert "size limit" in job["error"]
+        report_audit_rows = [
+            row for row in _audit_event_rows(target_id=project["id"], event_type="report.build")
+            if row["details"].get("job_id") == job["id"]
+        ]
+        assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "failed"]
+        assert {row["job_id"] for row in report_audit_rows} == {job["id"]}
+        assert {row["correlation_id"] for row in report_audit_rows} == {job["id"]}
+        assert report_audit_rows[-1]["details"]["reason"] == "size_limit"
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/report/export-jobs/{job['id']}/download-ticket",
@@ -8870,6 +9218,24 @@ class TestStatusRoute:
         client = get_client()
         data = json.loads(client.get("/status").data)
         assert data["db"] == "ok"
+
+    def test_status_runs_periodic_audit_retention_when_db_available(self):
+        client = get_client()
+        with mock.patch("blueprints.assets.maybe_prune_events", return_value=0) as prune:
+            data = json.loads(client.get("/status").data)
+        assert data["db"] == "ok"
+        prune.assert_called_once()
+
+    def test_status_keeps_db_ok_when_periodic_audit_retention_fails(self):
+        client = get_client()
+        with mock.patch(
+            "blueprints.assets.maybe_prune_events",
+            side_effect=RuntimeError("retention failed"),
+        ), mock.patch.object(shell_assets.log, "warning") as warning:
+            data = json.loads(client.get("/status").data)
+        assert data["db"] == "ok"
+        warning.assert_called_once()
+        assert warning.call_args.args == ("AUDIT_RETENTION_PERIODIC_PRUNE_FAILED",)
 
     def test_db_down_when_sqlite_fails(self):
         client = get_client()
@@ -9271,6 +9637,42 @@ class TestDiagRoute:
         shell_app.app.config["TESTING"] = True
         # No X-Forwarded-For — we want remote_addr to be 127.0.0.1 (Werkzeug default)
         return shell_app.app.test_client()
+
+    def _record_audit_event(
+        self,
+        *,
+        event_type: str = "project.link",
+        target_type: str = "project",
+        target_id: str | None = None,
+        actor_member_id: str = "tmem_diag_audit",
+        actor_display_name: str = "Diag Operator",
+        team_id: str = "",
+        correlation_id: str = "",
+        created: str = "2026-06-06T12:00:00+00:00",
+    ) -> str:
+        from services.audit.recorder import record_event
+
+        audit_target_id = target_id or f"proj-diag-audit-{uuid.uuid4().hex}"
+        with db_connect() as conn:
+            audit_id = record_event(
+                event_type,
+                target_type=target_type,
+                target_id=audit_target_id,
+                session_id="diag-audit-owner",
+                team_id=team_id,
+                actor_member_id=actor_member_id,
+                actor_role="owner",
+                actor_display_name=actor_display_name,
+                project_id=audit_target_id if target_type == "project" else "",
+                correlation_id=correlation_id,
+                client_ip="127.0.0.1",
+                details={"project_id": audit_target_id, "source": "test"},
+                conn=conn,
+                created=created,
+            )
+            conn.commit()
+        assert audit_id
+        return audit_target_id
 
     def test_returns_404_when_cidrs_empty(self):
         client = self._allowed_client()
@@ -10214,6 +10616,263 @@ class TestDiagRoute:
         viewed_call = next(c for c in mock_info.call_args_list if c[0][0] == "DIAG_VIEWED")
         assert viewed_call[1]["extra"]["ip"] == "127.0.0.1"
 
+    def test_audit_route_requires_diag_access(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
+            resp = client.get("/diag/audit")
+        assert resp.status_code == 404
+
+    def test_audit_html_lists_events_and_disabled_banner(self):
+        team_id = f"team_diag_html_{uuid.uuid4().hex}"
+        target_id = self._record_audit_event(team_id=team_id)
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "audit_log_enabled": False,
+        }):
+            resp = client.get(f"/diag/audit?target_id={target_id}")
+        body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert "Audit logging is disabled" in body
+        assert "project.link" in body
+        assert target_id in body
+        assert f'href="/projects/{target_id}"' not in body
+        assert "Diag Operator" in body
+        assert '<form class="diag-audit-filter-form" method="get" action="/diag/audit">' in body
+        assert '<div class="diag-audit-table-wrap">' in body
+        assert '<table class="diag-table diag-audit-table">' in body
+        assert '<col class="diag-audit-col-target">' in body
+        assert '<col class="diag-audit-col-scope">' in body
+        assert '<td class="diag-audit-target">' in body
+        assert '<td class="diag-audit-scope">' in body
+        assert f'<span class="diag-muted diag-audit-team-id" title="{team_id}">· {team_id}</span>' in body
+        assert '<details class="diag-audit-details">' in body
+        assert '<summary>details</summary>' in body
+        assert '<pre>{' in body
+        assert "entity.delete - entity deletion" in body
+        assert "entity.suppress - entity suppression" in body
+        assert "history.delete - run deletion" in body
+        assert "project.link - project link" in body
+        assert "&#34;actor&#34;" in body
+        assert "&#34;scope&#34;" in body
+        assert "&#34;target&#34;" in body
+        assert "&#34;created&#34;" in body
+        assert "&#34;details&#34;" in body
+
+    def test_audit_json_filters_by_human_actor_and_event(self):
+        actor_member_id = f"tmem_diag_actor_filter_{uuid.uuid4().hex}"
+        actor_display_name = f"Filter Person {uuid.uuid4().hex}"
+        team_id = f"team_diag_date_filter_{uuid.uuid4().hex}"
+        wanted_target = self._record_audit_event(
+            event_type="project.link",
+            actor_member_id=actor_member_id,
+            actor_display_name=actor_display_name,
+            team_id=team_id,
+            created="2026-06-06T12:00:01+00:00",
+        )
+        self._record_audit_event(
+            event_type="project.link",
+            actor_member_id=actor_member_id,
+            actor_display_name=actor_display_name,
+            team_id=f"team_diag_other_{uuid.uuid4().hex}",
+            created="2026-06-06T12:00:02+00:00",
+        )
+        self._record_audit_event(
+            event_type="project.link",
+            actor_member_id=actor_member_id,
+            actor_display_name=actor_display_name,
+            team_id=team_id,
+            created="2026-06-07T00:00:00+00:00",
+        )
+        client = self._allowed_client()
+        actor_display_fragment = actor_display_name[-12:].lower()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets.log, "info") as log_info:
+                resp = client.get(
+                    "/diag/audit?format=json&event_type=project.link&session_id=diag-audit-owner"
+                    f"&team_id={quote(team_id)}&target_type=project&date_from=2026-06-06&date_to=2026-06-06"
+                    "&actor=" + quote(actor_display_fragment)
+                )
+        payload = resp.get_json()
+        assert resp.status_code == 200
+        assert [event["target_id"] for event in payload["events"]] == [wanted_target]
+        viewed_call = next(call for call in log_info.call_args_list if call.args[0] == "DIAG_AUDIT_VIEWED")
+        viewed_extra = viewed_call.kwargs["extra"]
+        assert viewed_extra["ip"] == "127.0.0.1"
+        assert viewed_extra["limit"] == 50
+        assert viewed_extra["offset"] == 0
+        assert viewed_extra["event_count"] == 1
+        assert viewed_extra["has_more"] is False
+        assert viewed_extra["filter_count"] == 7
+        assert viewed_extra["filter_keys"] == [
+            "actor",
+            "date_from",
+            "date_to",
+            "event_type",
+            "session_id",
+            "target_type",
+            "team_id",
+        ]
+        assert viewed_extra["filter_values"] == {
+            "date_from": "2026-06-06",
+            "date_to": "2026-06-06",
+            "event_type": "project.link",
+            "target_type": "project",
+            "team_id": team_id,
+        }
+        assert "diag-audit-owner" not in json.dumps(viewed_extra)
+        assert actor_display_fragment not in json.dumps(viewed_extra)
+        assert payload["events"][0]["target_href"] == ""
+        assert payload["events"][0]["project_href"] == ""
+        assert payload["events"][0]["details"]["source"] == "test"
+        details_payload = json.loads(payload["events"][0]["details_json"])
+        assert details_payload["created"] == "2026-06-06T12:00:01+00:00"
+        assert details_payload["event_type"] == "project.link"
+        assert details_payload["actor"]["display_name"] == actor_display_name
+        assert details_payload["actor"]["member_id"] == actor_member_id
+        assert details_payload["scope"]["kind"] == "team"
+        assert details_payload["scope"]["team_id"] == team_id
+        assert details_payload["target"]["id"] == wanted_target
+        assert details_payload["target"]["href"] == ""
+        assert details_payload["details"]["source"] == "test"
+
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            member_resp = client.get(
+                "/diag/audit?format=json&event_type=project.link"
+                f"&team_id={quote(team_id)}&target_type=project&date_from=2026-06-06&date_to=2026-06-06"
+                "&actor=" + quote(actor_member_id[-12:])
+            )
+        member_payload = member_resp.get_json()
+        assert member_resp.status_code == 200
+        assert [event["target_id"] for event in member_payload["events"]] == [wanted_target]
+
+    def test_audit_json_keeps_run_permalink_target_links(self):
+        run_id = f"run_diag_audit_{uuid.uuid4().hex}"
+        self._record_audit_event(
+            event_type="history.delete",
+            target_type="run",
+            target_id=run_id,
+        )
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            resp = client.get(f"/diag/audit?format=json&target_id={run_id}")
+        payload = resp.get_json()
+        assert resp.status_code == 200
+        assert [event["target_id"] for event in payload["events"]] == [run_id]
+        assert payload["events"][0]["target_href"] == f"/history/{run_id}"
+        assert payload["events"][0]["project_href"] == ""
+
+    def test_audit_csv_export_marks_truncation(self):
+        correlation_id = f"corr-diag-audit-{uuid.uuid4().hex}"
+        first_target = self._record_audit_event(
+            target_id=f"proj-diag-audit-first-{uuid.uuid4().hex}",
+            correlation_id=correlation_id,
+            created="2026-06-06T12:00:03+00:00",
+        )
+        self._record_audit_event(
+            target_id=f"proj-diag-audit-second-{uuid.uuid4().hex}",
+            correlation_id=correlation_id,
+            created="2026-06-06T12:00:04+00:00",
+        )
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "audit_export_max_rows": 1,
+        }):
+            resp = client.get(f"/diag/audit/export?correlation_id={correlation_id}")
+        body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert "text/csv" in resp.content_type
+        assert first_target in body or "proj-diag-audit-second-" in body
+        assert "__truncated__" in body
+        assert "Export capped at 1 rows" in body
+
+    def test_audit_csv_export_streams_from_page_iterator(self):
+        page_calls = []
+
+        def fake_iter_event_pages(filters, *, max_rows):
+            page_calls.append((filters, max_rows))
+            yield {
+                "events": [{
+                    "id": "aud-page-1",
+                    "created": "2026-06-06T12:00:04+00:00",
+                    "event_type": "project.link",
+                    "target_type": "project",
+                    "target_id": "proj-stream-1",
+                    "details": {"source": "test"},
+                }],
+                "truncated": False,
+            }
+            yield {
+                "events": [{
+                    "id": "aud-page-2",
+                    "created": "2026-06-06T12:00:03+00:00",
+                    "event_type": "project.delete",
+                    "target_type": "project",
+                    "target_id": "proj-stream-2",
+                    "details": {"source": "test"},
+                }],
+                "truncated": True,
+            }
+
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "audit_export_max_rows": 2,
+        }), mock.patch("blueprints.assets.iter_event_pages", side_effect=fake_iter_event_pages), mock.patch.object(
+            shell_assets.log,
+            "info",
+        ) as log_info:
+            resp = client.get("/diag/audit/export?event_type=project.link")
+            body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert len(page_calls) == 1
+        assert page_calls[0][0].event_type == "project.link"
+        assert page_calls[0][1] == 2
+        assert "aud-page-1" in body
+        assert "aud-page-2" in body
+        assert "__truncated__" in body
+        exported_call = next(call for call in log_info.call_args_list if call.args[0] == "DIAG_AUDIT_EXPORTED")
+        exported_extra = exported_call.kwargs["extra"]
+        assert exported_extra["ip"] == "127.0.0.1"
+        assert exported_extra["format"] == "csv"
+        assert exported_extra["limit"] == 2
+        assert exported_extra["event_count"] == 2
+        assert exported_extra["truncated"] is True
+        assert exported_extra["filter_count"] == 1
+        assert exported_extra["filter_keys"] == ["event_type"]
+        assert exported_extra["filter_values"] == {"event_type": "project.link"}
+
+    def test_audit_json_export_prompts_download(self):
+        correlation_id = f"corr-diag-audit-json-{uuid.uuid4().hex}"
+        self._record_audit_event(
+            target_id=f"proj-diag-audit-json-first-{uuid.uuid4().hex}",
+            correlation_id=correlation_id,
+            created="2026-06-06T12:00:03+00:00",
+        )
+        newest_target_id = self._record_audit_event(
+            target_id=f"proj-diag-audit-json-second-{uuid.uuid4().hex}",
+            correlation_id=correlation_id,
+            created="2026-06-06T12:00:04+00:00",
+        )
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "audit_export_max_rows": 1,
+        }):
+            resp = client.get(f"/diag/audit/export?format=json&correlation_id={correlation_id}")
+        payload = resp.get_json()
+        assert resp.status_code == 200
+        assert "application/json" in resp.content_type
+        assert "attachment" in resp.headers["Content-Disposition"]
+        assert "audit-events.json" in resp.headers["Content-Disposition"]
+        assert [event["target_id"] for event in payload["events"]] == [newest_target_id]
+        assert payload["limit"] == 1
+        assert payload["truncated"] is True
+        assert payload["truncation_hint"] == (
+            "Export capped at 1 rows. Narrow the filters to include older matching rows."
+        )
+
     def test_html_response_contains_expected_content(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {
@@ -10226,6 +10885,7 @@ class TestDiagRoute:
         assert "operator diagnostics" in body
         assert 'class="btn btn-secondary btn-compact diag-back-btn"' in body
         assert 'href="/"' in body
+        assert 'href="/diag/audit"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
 
@@ -11566,6 +12226,14 @@ class TestAtlasRoutes:
         assert [(row["type"], row["canonical_value"]) for row in rows] == [("cve", "CVE-2025-49113")]
         assert cve_id
         assert finding_count == 0
+        entity_delete_events = [
+            row for row in _audit_event_rows(event_type="entity.delete")
+            if domain_id in row["details"].get("entity_ids", [])
+        ]
+        assert len(entity_delete_events) == 1
+        assert entity_delete_events[0]["target_type"] == "entity"
+        assert entity_delete_events[0]["details"]["deleted_count"] == 1
+        assert entity_delete_events[0]["details"]["finding_count"] == 1
 
     def test_atlas_read_and_write_routes_are_session_scoped(self):
         client = get_client()
@@ -12116,6 +12784,11 @@ class TestAtlasRoutes:
         assert json.loads(project_summary.data)["counts"]["entities"] == 0
         assert restore_resp.status_code == 200
         assert json.loads(restore_resp.data)["counts"] == {"updated": 1, "not_found": 0}
+        entity_suppress_events = _audit_event_rows(target_id=domain_id, event_type="entity.suppress")
+        assert len(entity_suppress_events) == 1
+        assert entity_suppress_events[0]["target_type"] == "entity"
+        assert entity_suppress_events[0]["details"]["suppressed"] is True
+        assert entity_suppress_events[0]["details"]["reason"] == "too noisy"
 
     def test_atlas_saved_views_roundtrip_and_stay_session_scoped(self):
         client = get_client()
@@ -12663,27 +13336,28 @@ class TestWorkspaceRoutes:
     def test_write_list_read_delete_lifecycle(self):
         client = get_client()
         session = "workspace-lifecycle-" + uuid.uuid4().hex[:8]
+        file_path = f"{session}.txt"
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
                 headers={"X-Session-ID": session},
-                json={"path": "targets.txt", "text": "darklab.sh\n"},
+                json={"path": file_path, "text": "darklab.sh\n"},
             )
             assert created.status_code == 200
             created_data = json.loads(created.data)
-            assert created_data["file"] == {"path": "targets.txt", "size": 11}
+            assert created_data["file"] == {"path": file_path, "size": 11}
             assert created_data["workspace"]["usage"]["bytes_used"] == 11
 
             listed = json.loads(client.get("/workspace/files", headers={"X-Session-ID": session}).data)
-            assert listed["files"][0]["path"] == "targets.txt"
+            assert listed["files"][0]["path"] == file_path
             assert listed["limits"]["max_files"] == 10
 
             read = client.get(
-                "/workspace/files/read?path=targets.txt",
+                f"/workspace/files/read?path={file_path}",
                 headers={"X-Session-ID": session},
             )
             assert json.loads(read.data) == {
-                "path": "targets.txt",
+                "path": file_path,
                 "text": "darklab.sh\n",
                 "size": 11,
             }
@@ -12699,19 +13373,121 @@ class TestWorkspaceRoutes:
 
             with mock.patch("services.workspace.files.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
                 unreadable = client.get(
-                    "/workspace/files/read?path=targets.txt",
+                    f"/workspace/files/read?path={file_path}",
                     headers={"X-Session-ID": session},
                 )
             assert unreadable.status_code == 403
             assert json.loads(unreadable.data)["error"] == "workspace file is not readable"
 
             deleted = client.delete(
-                "/workspace/files?path=targets.txt",
+                f"/workspace/files?path={file_path}",
                 headers={"X-Session-ID": session},
             )
             assert deleted.status_code == 200
             deleted_files = json.loads(deleted.data)["workspace"]["files"]
-            assert "targets.txt" not in {item["path"] for item in deleted_files}
+            assert file_path not in {item["path"] for item in deleted_files}
+            audit_rows = _audit_event_rows(target_id=file_path)
+            assert [row["event_type"] for row in audit_rows] == ["file.write", "file.delete"]
+            assert [row["target_type"] for row in audit_rows] == ["file", "file"]
+            assert audit_rows[0]["details"] == {
+                "source": "workspace",
+                "action": "write",
+                "file_path": file_path,
+                "byte_size": 11,
+                "file_count": 1,
+                "status": "file",
+            }
+            assert audit_rows[1]["details"] == {
+                "source": "workspace",
+                "file_path": file_path,
+                "file_count": 1,
+                "status": "file",
+            }
+            assert "darklab.sh" not in json.dumps(audit_rows)
+
+            class FailingAuditConnection:
+                def execute(self, sql, params=()):
+                    raise RuntimeError("audit insert failed")
+
+                def commit(self):
+                    raise AssertionError("best-effort audit failure should not commit")
+
+            class ManagedAuditFailure:
+                def __init__(self, conn=None):
+                    self.conn = conn
+
+                def __enter__(self):
+                    return FailingAuditConnection(), True
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            best_effort_path = f"{session}-audit-failure.txt"
+            with mock.patch(
+                "services.audit.recorder._managed_connection",
+                side_effect=ManagedAuditFailure,
+            ), mock.patch("services.audit.recorder.log.warning") as warning:
+                best_effort_write = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": session},
+                    json={"path": best_effort_path, "text": "persisted despite audit failure\n"},
+                )
+
+            assert best_effort_write.status_code == 200
+            best_effort_read = client.get(
+                f"/workspace/files/read?path={best_effort_path}",
+                headers={"X-Session-ID": session},
+            )
+            assert best_effort_read.status_code == 200
+            assert json.loads(best_effort_read.data)["text"] == "persisted despite audit failure\n"
+            warning.assert_called_once()
+            assert warning.call_args.args == ("AUDIT_EVENT_RECORD_FAILED",)
+            warning_extra = warning.call_args.kwargs["extra"]
+            assert warning_extra["event_type"] == "file.write"
+            assert warning_extra["target_type"] == "file"
+            assert warning_extra["target_id"] == best_effort_path
+            assert warning_extra["recording_mode"] == "best_effort"
+            assert warning_extra["details"] == {
+                "source": "workspace",
+                "action": "write",
+                "file_path": best_effort_path,
+                "byte_size": 32,
+                "file_count": 1,
+                "status": "file",
+            }
+            assert "persisted despite audit failure" not in json.dumps(warning_extra)
+            assert _audit_event_rows(target_id=best_effort_path, event_type="file.write") == []
+
+    def test_workspace_delete_records_fail_closed_audit_before_deleting_file(self):
+        from services.audit.recorder import AuditRecordError
+
+        client = get_client()
+        session = "workspace-delete-audit-" + uuid.uuid4().hex[:8]
+        file_path = f"{session}.txt"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": file_path, "text": "darklab.sh\n"},
+            )
+            assert created.status_code == 200
+
+            with mock.patch(
+                "blueprints.workspace.record_event",
+                side_effect=AuditRecordError("audit unavailable"),
+            ), pytest.raises(AuditRecordError):
+                client.delete(
+                    f"/workspace/files?path={file_path}",
+                    headers={"X-Session-ID": session},
+                )
+
+            read = client.get(
+                f"/workspace/files/read?path={file_path}",
+                headers={"X-Session-ID": session},
+            )
+            assert read.status_code == 200
+            assert json.loads(read.data)["text"] == "darklab.sh\n"
+            assert _audit_event_rows(target_id=file_path, event_type="file.delete") == []
 
     def test_workspace_files_are_session_isolated(self):
         client = get_client()
@@ -12814,23 +13590,33 @@ class TestWorkspaceRoutes:
     def test_create_directory_lists_empty_folder(self):
         client = get_client()
         session = "workspace-dir-" + uuid.uuid4().hex[:8]
+        directory_path = f"reports/{session}/empty"
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/directories",
                 headers={"X-Session-ID": session},
-                json={"path": "reports/empty"},
+                json={"path": directory_path},
             )
             assert created.status_code == 200
             created_data = created.get_json()
-            assert created_data["directory"] == {"path": "reports/empty"}
-            assert {"reports", "reports/empty"} <= {
+            assert created_data["directory"] == {"path": directory_path}
+            assert {"reports", f"reports/{session}", directory_path} <= {
                 item["path"] for item in created_data["workspace"]["directories"]
             }
             assert created_data["workspace"]["usage"]["file_count"] == 0
 
             listed = client.get("/workspace/files", headers={"X-Session-ID": session})
             assert listed.status_code == 200
-            assert "reports/empty" in {item["path"] for item in listed.get_json()["directories"]}
+            assert directory_path in {item["path"] for item in listed.get_json()["directories"]}
+            audit_rows = _audit_event_rows(target_id=directory_path, event_type="file.write")
+            assert len(audit_rows) == 1
+            assert audit_rows[0]["details"] == {
+                "source": "workspace",
+                "action": "create_directory",
+                "file_path": directory_path,
+                "file_count": 0,
+                "status": "directory",
+            }
 
     def test_info_and_delete_folder_recursively(self):
         client = get_client()
@@ -12867,67 +13653,91 @@ class TestWorkspaceRoutes:
     def test_move_file_and_folder_paths(self):
         client = get_client()
         session = "workspace-move-" + uuid.uuid4().hex[:8]
+        archive_path = f"archive-{session}"
+        reports_path = f"reports-{session}"
+        one_path = f"{reports_path}/one.txt"
+        two_path = f"{reports_path}/nested/two.txt"
+        moved_one_path = f"{archive_path}/one.txt"
+        moved_reports_path = f"{archive_path}/reports-renamed"
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/directories",
                 headers={"X-Session-ID": session},
-                json={"path": "archive"},
+                json={"path": archive_path},
             )
             client.post(
                 "/workspace/files",
                 headers={"X-Session-ID": session},
-                json={"path": "reports/one.txt", "text": "one\n"},
+                json={"path": one_path, "text": "one\n"},
             )
             client.post(
                 "/workspace/files",
                 headers={"X-Session-ID": session},
-                json={"path": "reports/nested/two.txt", "text": "two\n"},
+                json={"path": two_path, "text": "two\n"},
             )
 
             moved_file = client.post(
                 "/workspace/files/move",
                 headers={"X-Session-ID": session},
-                json={"source": "reports/one.txt", "destination": "archive"},
+                json={"source": one_path, "destination": archive_path},
             )
             assert moved_file.status_code == 200
             assert moved_file.get_json()["moved"] == {
-                "source": "reports/one.txt",
-                "destination": "archive/one.txt",
+                "source": one_path,
+                "destination": moved_one_path,
                 "kind": "file",
                 "file_count": 1,
             }
             assert client.get(
-                "/workspace/files/read?path=reports/one.txt",
+                f"/workspace/files/read?path={one_path}",
                 headers={"X-Session-ID": session},
             ).status_code == 404
             assert client.get(
-                "/workspace/files/read?path=archive/one.txt",
+                f"/workspace/files/read?path={moved_one_path}",
                 headers={"X-Session-ID": session},
             ).get_json()["text"] == "one\n"
+            file_move_audit = _audit_event_rows(target_id=moved_one_path, event_type="file.move")
+            assert len(file_move_audit) == 1
+            assert file_move_audit[0]["details"] == {
+                "source": "workspace",
+                "action": "move",
+                "source_path": one_path,
+                "destination_path": moved_one_path,
+                "file_path": moved_one_path,
+                "file_count": 1,
+                "status": "file",
+            }
+            assert "one\\n" not in json.dumps(file_move_audit)
 
             moved_folder = client.post(
                 "/workspace/files/move",
                 headers={"X-Session-ID": session},
-                json={"source": "reports", "destination": "archive/reports-renamed"},
+                json={"source": reports_path, "destination": moved_reports_path},
             )
             assert moved_folder.status_code == 200
             assert moved_folder.get_json()["moved"] == {
-                "source": "reports",
-                "destination": "archive/reports-renamed",
+                "source": reports_path,
+                "destination": moved_reports_path,
                 "kind": "directory",
                 "file_count": 1,
             }
             nested = client.get(
-                "/workspace/files/read?path=archive/reports-renamed/nested/two.txt",
+                f"/workspace/files/read?path={moved_reports_path}/nested/two.txt",
                 headers={"X-Session-ID": session},
             )
             assert nested.status_code == 200
             assert nested.get_json()["text"] == "two\n"
+            folder_move_audit = _audit_event_rows(target_id=moved_reports_path, event_type="file.move")
+            assert len(folder_move_audit) == 1
+            assert folder_move_audit[0]["details"]["source_path"] == reports_path
+            assert folder_move_audit[0]["details"]["destination_path"] == moved_reports_path
+            assert folder_move_audit[0]["details"]["file_count"] == 1
+            assert folder_move_audit[0]["details"]["status"] == "directory"
 
             moved_to_root = client.post(
                 "/workspace/files/move",
                 headers={"X-Session-ID": session},
-                json={"source": "archive/one.txt", "destination": "/"},
+                json={"source": moved_one_path, "destination": "/"},
             )
             assert moved_to_root.status_code == 200
             assert moved_to_root.get_json()["moved"]["destination"] == "one.txt"
@@ -16480,15 +17290,27 @@ class TestHistoryRoute:
 class TestShareRoute:
     def test_post_creates_snapshot(self):
         client = get_client()
-        resp = client.post(
-            "/share",
-            json={"label": "test snapshot", "content": ["line1", "line2"]},
-            headers={"X-Session-ID": "test-session"}
-        )
-        assert resp.status_code == 200
-        data = json.loads(resp.data)
-        assert "id" in data
-        assert "url" in data
+        with mock.patch.dict(config.CFG, {"share_redaction_enabled": True}, clear=False):
+            resp = client.post(
+                "/share",
+                json={"label": "test snapshot", "content": ["line1", "line2"], "apply_redaction": True},
+                headers={"X-Session-ID": "test-session"}
+            )
+            assert resp.status_code == 200
+            data = json.loads(resp.data)
+            assert "id" in data
+            assert "url" in data
+
+            delete = client.delete(f"/share/{data['id']}", headers={"X-Session-ID": "test-session"})
+            assert delete.status_code == 200
+
+        audit_rows = _audit_event_rows(target_id=data["id"])
+        assert [row["event_type"] for row in audit_rows] == [
+            "snapshot.create",
+            "redaction.use",
+            "snapshot.delete",
+        ]
+        assert audit_rows[0]["details"]["safe_label"] == "test snapshot"
 
     def test_post_can_offload_large_snapshot_content_and_restore_it(self):
         from services.storage import body_store
