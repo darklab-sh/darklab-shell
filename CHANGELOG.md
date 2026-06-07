@@ -98,6 +98,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Built-in command ANSI rendering** — structured built-in rows now preserve the intended ANSI styling path through `ansi_up`, so `jobs`, `runs`, `status`, `stats`, `last`, `retention`, and system-style summaries no longer show stray `[4m`/`[0m` control fragments in the terminal.
+
 - **Audit log table fit** — team-scoped audit rows now truncate long scope and target identifiers inside the table, keep the Details column visible at normal desktop widths, and expand details rows with a self-contained JSON envelope aligned back into the table.
 
 - **Findings Board column loading** — project-scoped Findings Board refreshes now load each review column with its own page cap, so a project with hundreds of New findings no longer hides reviewed, false-positive, or follow-up items from the board.

@@ -314,6 +314,36 @@ describe('appendLine', () => {
     expect(activateFaqCommandChip).not.toHaveBeenCalled()
   })
 
+  it('renders ANSI-styled structured builtin rows through ansi_to_html', () => {
+    class TableAnsiUp {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(text) {
+        return String(text || '')
+          .replace(/\x1b\[4m([^\x1b]+)\x1b\[0m/g, '<u>$1</u>')
+          .replace(/\x1b\[36m([^\x1b]+)\x1b\[0m/g, '<span class="cyan">$1</span>')
+      }
+    }
+    const { appendLine } = loadOutputFns({
+      AnsiUpCtor: TableAnsiUp,
+      appConfig: { max_output_lines: 20 },
+    })
+
+    appendLine('  \x1b[4mrun\x1b[0m  command', 'builtin-table-header', 'tab-1')
+    appendLine('  \x1b[36mrun-abcd\x1b[0m  ping darklab.sh', 'builtin-table-row', 'tab-1')
+
+    const header = document.querySelector('.line.builtin-table-header .line-content')
+    const row = document.querySelector('.line.builtin-table-row .line-content')
+    expect(header?.textContent).toContain('run  command')
+    expect(header?.textContent).not.toContain('[4m')
+    expect(header?.querySelector('u')?.textContent).toBe('run')
+    expect(row?.textContent).toContain('run-abcd  ping darklab.sh')
+    expect(row?.textContent).not.toContain('[36m')
+    expect(row?.querySelector('.cyan')?.textContent).toBe('run-abcd')
+  })
+
   it('trims old lines and keeps rawLines in sync', () => {
     const { appendLine, _getTabs } = loadOutputFns()
 

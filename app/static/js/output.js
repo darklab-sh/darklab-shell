@@ -1222,6 +1222,10 @@ function _appendOutputInlineText(content, text) {
   });
 }
 
+function _hasAnsiControlCodes(text) {
+  return /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/.test(String(text || ''));
+}
+
 function _appendBuiltinMarkerRow(content, marker, text, textClass = '') {
   const markerEl = document.createElement('span');
   markerEl.className = 'builtin-row-marker';
@@ -1265,8 +1269,22 @@ function _appendStructuredBuiltinHelpRow(content, text) {
   return true;
 }
 
-function _appendStructuredBuiltinLine(content, text, cls) {
+function _appendStructuredBuiltinLine(content, text, cls, tabId = null) {
   const classes = String(cls || '').split(/\s+/).filter(Boolean);
+  const isStructuredBuiltin = [
+    'builtin-faq-q',
+    'builtin-faq-a',
+    'builtin-plain',
+    'builtin-table-header',
+    'builtin-table-row',
+    'builtin-help-row',
+    'builtin-catalog-item',
+  ].some(className => classes.includes(className));
+  if (!isStructuredBuiltin) return false;
+  if (_hasAnsiControlCodes(text)) {
+    _renderAnsiWithEntityTokens(content, text, [], tabId);
+    return true;
+  }
   if (classes.includes('builtin-faq-q')) {
     _appendBuiltinMarkerRow(content, 'Q', String(text || '').replace(/^Q\s+/, ''), 'builtin-faq-question-text');
     return true;
@@ -1336,7 +1354,7 @@ function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
     _appendOutputCommandChip(content, metadata.faq_command.trim(), String(text || '').trim());
   } else if (_isBuiltinNoteLine(cls)) {
     _renderAnsiWithEntityTokens(content, String(text || ''), [], tabId);
-  } else if (_appendStructuredBuiltinLine(content, text, cls)) {
+  } else if (_appendStructuredBuiltinLine(content, text, cls, tabId)) {
     // Rendered above from stable builtin output classes.
   } else if (_isPlainOutputLineEvent(event)) {
     content.textContent = text;
@@ -1590,7 +1608,7 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
     if (bodyText) content.appendChild(document.createTextNode(bodyText));
   } else if (_isBuiltinNoteLine(cls)) {
     _renderAnsiWithEntityTokens(content, text, [], tabId);
-  } else if (_appendStructuredBuiltinLine(content, text, cls)) {
+  } else if (_appendStructuredBuiltinLine(content, text, cls, tabId)) {
     // Rendered above from stable builtin output classes.
   } else if (_isPlainOutputLineEvent(event)) {
     content.textContent = text;

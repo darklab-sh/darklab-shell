@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,612
+- behavior tests: 3,613
 - docs/inventory meta-tests: 34
 - `pytest`: 2036 (2002 behavior + 34 meta)
-- `vitest`: 1349
+- `vitest`: 1350
 - `playwright`: 261
-- total: 3,646
+- total: 3,647
 
 This document is organized in two parts:
 
@@ -2944,6 +2944,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
 | `renders builtin help and FAQ rows as structured terminal content` | Verifies that help rows render plain command/description columns and FAQ rows render stable question/answer markers with inline code. |
 | `keeps automatic command chips out of command list rows` | Verifies built-in help rows, command catalog rows, and table headers stay non-clickable while commands with arguments still split into aligned columns. |
+| `renders ANSI-styled structured builtin rows through ansi_to_html` | Verifies that ANSI-styled built-in table rows use the shared renderer instead of showing raw control-code fragments. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
 | `coalesces consecutive progress rows in the live renderer while retaining raw lines` | Verifies that live progress updates replace the previous visible progress row while every emitted line stays in raw history. |
 | `coalesces batched status rows without dropping raw output history` | Verifies that batched status-line updates collapse to the newest visible row in each consecutive group while preserving raw output history. |

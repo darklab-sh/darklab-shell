@@ -315,7 +315,7 @@ def run_builtin_runs(
                 f"{_ansi_cell('started', started_width, '<', _ansi_underline)}  "
                 f"{_ansi_cell('source', source_width, '<', _ansi_underline)}  "
                 f"{_ansi_underline('command')}",
-                "builtin-help-row",
+                "builtin-table-header",
             ),
         ]
         for (
@@ -352,7 +352,7 @@ def run_builtin_runs(
                 f"{_ansi_cell(started_label, started_width, '<', _ansi_dim)}  "
                 f"{_ansi_cell(source_label, source_width, '<', _ansi_cyan)}  "
                 f"{command_text}",
-                "builtin-plain",
+                "builtin-table-row",
             ))
         lines.append(_active_status_monitor_hint())
         return lines
@@ -378,7 +378,7 @@ def run_builtin_runs(
             f"{_ansi_cell('cpu', cpu_width, '>', _ansi_underline)}  "
             f"{_ansi_cell('mem', memory_width, '>', _ansi_underline)}  "
             f"{_ansi_underline('command')}",
-            "builtin-help-row",
+            "builtin-table-header",
         ),
     ]
     for run, run_label, pid_label, elapsed_label, cpu_label, memory_label in zip(
@@ -399,7 +399,7 @@ def run_builtin_runs(
             f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
             f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
             f"{command_text}",
-            "builtin-plain",
+            "builtin-table-row",
         ))
     lines.append(_active_status_monitor_hint())
     return lines
