@@ -79,6 +79,7 @@ def _report_manifest_provenance(
     generation: dict[str, str],
     *,
     project: dict[str, Any] | None = None,
+    audit_handoff: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     normalized_draft = normalize_report_draft(draft or {})
     selection = normalized_draft.get("selection") or {}
@@ -95,7 +96,7 @@ def _report_manifest_provenance(
         if isinstance(section, dict) and section.get("enabled")
     ]
     export_prefs = normalized_draft.get("export") or {}
-    return {
+    provenance = {
         "schema_version": REPORT_ARCHIVE_PROVENANCE_SCHEMA_VERSION,
         "kind": "engagement_report",
         "build": {
@@ -121,6 +122,24 @@ def _report_manifest_provenance(
             "private_notes_included": bool(export_prefs.get("include_private_notes")),
         },
     }
+    if audit_handoff:
+        provenance["audit"] = {
+            key: str(value)
+            for key, value in audit_handoff.items()
+            if str(value or "").strip()
+        }
+    return provenance
+
+
+def _archive_audit_handoff(event_type: str, job_id: str = "") -> dict[str, str]:
+    normalized_job_id = str(job_id or "").strip()
+    if not normalized_job_id:
+        return {}
+    return {
+        "event_type": event_type,
+        "correlation_id": normalized_job_id,
+        "job_id": normalized_job_id,
+    }
 
 
 def build_report_export_archive(
@@ -133,6 +152,7 @@ def build_report_export_archive(
     cfg: dict | None = None,
     archive_dir: str | os.PathLike[str] | None = None,
     progress_callback=None,
+    build_job_id: str = "",
 ) -> dict[str, Any]:
     if progress_callback:
         progress_callback("rendering", "Rendering report")
@@ -169,6 +189,7 @@ def build_report_export_archive(
             draft,
             bundle.generation,
             project=project,
+            audit_handoff=_archive_audit_handoff("report.build", build_job_id),
         ),
     }
     if progress_callback:

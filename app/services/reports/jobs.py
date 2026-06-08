@@ -232,7 +232,7 @@ def _record_job_audit(job, *, status, error="", archive_bytes=0, metrics=None):
     try:
         record_event(
             AuditEventType.REPORT_BUILD,
-            target_id=str(job.get("project_id") or ""),
+            target_id=str(job.get("id") or ""),
             project_id=str(job.get("project_id") or ""),
             job_id=str(job.get("id") or ""),
             correlation_id=str(job.get("id") or ""),
@@ -285,6 +285,7 @@ def _run_job(job_id, cfg_snapshot):
             cfg=cfg_snapshot,
             archive_dir=str(_JOB_DIR),
             progress_callback=_progress,
+            build_job_id=str(job.get("id") or ""),
         )
     except EvidencePackageTooLarge as exc:
         log.warning("REPORT_EXPORT_JOB_TOO_LARGE", extra={

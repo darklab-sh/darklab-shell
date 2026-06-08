@@ -13,7 +13,9 @@ from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
 from services.audit.context import request_audit_fields
 from services.audit.models import AuditEventType
+from services.audit.queries import AuditEventFilters, AuditScopeError, list_scoped_events
 from services.audit.recorder import record_event
+from services.audit.retention import audit_retention_days
 from services.teams import storage
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import (
@@ -24,6 +26,8 @@ from services.teams.contracts import (
     TeamPermissionDenied,
     TeamSlugUnavailable,
 )
+from services.teams.request_scope import RequestScope
+from services.teams.scope import team_owner_context
 from services.watchers.service import pause_team_watchers_and_schedules
 
 teams_bp = Blueprint("teams", __name__)
@@ -39,6 +43,14 @@ def _team_read_route_limit():
 def _team_write_route_limit():
     limit = int(CFG.get("team_write_rate_limit_per_minute") or 30)
     return f"{limit} per minute"
+
+
+def _parse_int(value, default, *, minimum=0, maximum=100):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
 
 
 def _required_token_session():
@@ -285,6 +297,50 @@ def session_teams_detail(team_id):
         return jsonify(detail)
     except Exception as exc:
         return _log_team_exception("detail", exc, session_token=session_token, team_id=team_id, actor=actor)
+
+
+@teams_bp.route("/session/teams/<team_id>/activity", methods=["GET"])
+@limiter.limit(_team_read_route_limit, key_func=get_session_id)
+def session_teams_activity(team_id):
+    session_token, error_response = _required_token_session()
+    if error_response:
+        return error_response
+    actor = None
+    try:
+        with db_connect() as conn:
+            actor = _actor_membership(conn, team_id, session_token)
+        scope = RequestScope(
+            team_owner_context(
+                team_id,
+                actor_member_id=str(actor.get("id") or ""),
+                actor_session_id=session_token,
+            ),
+            team_id=team_id,
+            member=actor,
+            team_status=str(actor.get("team_status") or ""),
+            read_only=str(actor.get("team_status") or "") == "archived",
+        )
+        payload = list_scoped_events(
+            session_token,
+            scope,
+            AuditEventFilters(
+                event_type=str(request.args.get("event_type") or "").strip(),
+                actor=str(request.args.get("actor") or "").strip(),
+                target_type=str(request.args.get("target_type") or "").strip(),
+                target_id=str(request.args.get("target_id") or "").strip(),
+                date_from=str(request.args.get("date_from") or "").strip(),
+                date_to=str(request.args.get("date_to") or "").strip(),
+            ),
+            include_team_activity=True,
+            limit=_parse_int(request.args.get("limit"), 25, minimum=1, maximum=100),
+            offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        )
+        payload["retention_days"] = audit_retention_days(CFG)
+        return jsonify(payload)
+    except AuditScopeError as exc:
+        return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+    except Exception as exc:
+        return _log_team_exception("activity", exc, session_token=session_token, team_id=team_id, actor=actor)
 
 
 @teams_bp.route("/session/teams/<team_id>", methods=["PATCH"])

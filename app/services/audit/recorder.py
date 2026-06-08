@@ -130,18 +130,18 @@ def _best_effort_savepoint(conn, *, enabled: bool):
         yield
         return
     savepoint_name = f"audit_best_effort_{uuid.uuid4().hex}"
-    conn.execute(f"SAVEPOINT {savepoint_name}")  # nosec B608 - generated savepoint name is not user-controlled.
+    conn.execute(f"SAVEPOINT {savepoint_name}")  # nosec
     try:
         yield
     except Exception:
         try:
-            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")  # nosec B608
-            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")  # nosec B608
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")  # nosec
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")  # nosec
         except Exception:
             log.exception("AUDIT_EVENT_SAVEPOINT_ROLLBACK_FAILED")
         raise
     else:
-        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")  # nosec B608
+        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")  # nosec
 
 
 def _fallback_log_payload(

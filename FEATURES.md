@@ -954,13 +954,20 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
   - Full Archive packages select transcript HTML for every selected run by default, and the Include step has compact select-all/clear menus for transcript HTML, findings, and targets.
   - The preview shows a best-guess ZIP size, expanded content size before compression, a concise provenance summary, and optional full-text fallback files for capped transcripts.
   - Existing package rows support polled downloads, visible archive-preparation status, re-package, manifest preview with the same provenance summary above the raw JSON, delete, and metadata edit actions.
+  - Job-backed package downloads include a safe audit correlation in the manifest and README so the bundle can be tied back to the build event without exposing session-derived details.
 - The Report tab turns selected project material into a narrative engagement report.
   - Operators can edit engagement metadata, executive summary, methodology, cover notes, and date ranges; toggle and reorder shipped sections; choose included runs, targets, findings, and artifacts; save drafts; preview rendered HTML; export the markdown/HTML archive; or use browser Print/PDF.
   - Findings in report output show readable target references with target type/value when export settings allow it, source run, and relationship source when the project has that context.
   - The editor shows available source provenance before the included-item list and falls back cleanly when source details are not present in the current project view.
   - Report archives include a compact manifest with generated-by details, redaction/export choices, section choices, and selected entity ids/counts.
+  - Job-backed report exports include a safe audit correlation in the manifest, limited to the build event type, job id, and correlation id.
   - Operator-configured report templates appear as a selector when more than one template is available.
   - View-only team members can preview and download the default readable report, but they can't save drafts or switch to private-note or unredacted variants.
+- The Activity tab gives project users a scoped change trail without opening the operator-wide diagnostics view.
+  - Personal project owners and team members who can view the project can see safe rows for project-linked activity, report/package builds, finding review changes, imports, and related evidence actions.
+  - Filters for event type, actor, target type, target id, and date range keep busy projects readable, and pagination loads only the current page.
+  - Rows show time, actor, action, target, summary, and collapsed safe details. Team-viewer access stays read-only, and older rows may disappear when audit retention is configured.
+  - Metadata edit sheets show a compact Recent activity panel for the item you're editing. The panel loads a small page, then links into the filtered Activity tab when you need the broader trail.
 - Package downloads produce a capped archive with `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, finding/target JSON and Markdown exports, selected metadata/notes exports, optional raw artifacts for raw packages, and redacted text/JSON artifact derivatives for redacted packages.
   - Finding JSON and Markdown include remediation, verification steps, verification status, and target references for selected findings.
   - Verification notes follow the package's private-notes option, and redacted packages scrub remediation and verification text while omitting target-reference values before rendering JSON or Markdown.
@@ -982,7 +989,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** project, metadata, auto-promote, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/blueprints/projects.py` (project routes), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
+**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/services/audit/` (scoped activity rows and safe details), `app/blueprints/projects.py` (project routes), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/features/projects/project_activity.js` (Activity tab filters, rows, and paging), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
 
 ---
 
@@ -994,7 +1001,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - Package creation starts from the Projects modal's Packages tab. The wizard records name, description, labels, notes, redaction mode, artifact inclusion, private-note inclusion, and the selected runs, findings, artifacts, and targets. Team-owned project packages are visible to members in that team scope and keep creator context when the creator is still known.
 - Package rows show preset/redaction/size summaries, compact source/provenance chips when the manifest has source context, and offer polled downloads with visible archive-preparation status, re-package, manifest preview, metadata edit, and delete actions.
-- Downloaded archives include `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, full-text companions for capped transcripts, selected finding/target JSON and Markdown exports, selected label/private-note exports, note Markdown exports, optional raw artifacts for raw packages, and redacted text/JSON artifact derivatives for redacted packages. The manifest records the package's redaction mode, selected entity ids/counts, privacy choices, bounded build and project-link provenance, finding target references, and import hints for recreating package metadata, labels, notes, source links, target relationships, and finding review state from the archive.
+- Downloaded archives include `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, full-text companions for capped transcripts, selected finding/target JSON and Markdown exports, selected label/private-note exports, note Markdown exports, optional raw artifacts for raw packages, and redacted text/JSON artifact derivatives for redacted packages. The manifest records the package's redaction mode, selected entity ids/counts, privacy choices, bounded build and project-link provenance, safe audit correlation for job-backed downloads, finding target references, and import hints for recreating package metadata, labels, notes, source links, target relationships, and finding review state from the archive.
 - Run transcript pages and full-text companions keep the captured output intact. The manifest's transcript index omits classified progress/status/boilerplate noise so package consumers can focus on useful lines first.
 - Re-package starts from the previous manifest selection so an operator can rebuild the same bundle after project data changes.
 
@@ -1385,6 +1392,7 @@ If a session has run history, workspace files, project workspace records, user w
 - Team scope is explicit. Personal scope shows only your own data, while team scope shows team-owned runs, History, Run Details, recent values, Files, Projects, Project targets, linked-run artifacts, evidence packages, deduplicated Atlas entities and findings, Atlas labels and notes, finding review state, cached intel, workflows, schedules, watchers, notification channels and delivery history, AI assists, package builds, explicit team secrets, and provider readiness.
 - Team roles keep day-to-day collaboration simple: viewers can read shared team data, operators can run and triage, admins can manage most shared settings, and owners can manage the team itself. The server includes capability names in team responses, so browser and API clients can show actions that match what the server enforces. In view-only team scope, write, destructive, suppression, history metadata edit and delete, share snapshot, and finding-review controls are disabled before confirmation when possible, Projects select mode stays unavailable where selection only leads to write actions, Findings Board cards do not expose drag/drop triage, and stale denials explain that the current role cannot make the change.
 - Teams always keep at least one active owner. The Teams tab locks the current owner's role selector while they are the only active owner; after another owner exists, owners can step down normally.
+- Team owners and admins can open an Activity subtab in the selected team detail panel. It shows safe team-scoped audit rows for governance and shared-configuration activity, with filters, paging, collapsed details, and the same retention note used by project activity. The team overview also shows a compact Recent activity preview for that selected team.
 - Team secrets are separate from personal secrets. Personal provider keys are not inherited by teams, and team secret values stay write-only after save.
 - Archived teams stay visible for review and reactivation, but they cannot start new team-scoped work, accept invite/recovery redemption, edit members, rotate recovery codes, or dispatch stale schedules until reactivated. Schedules and watchers paused during archival stay paused until someone resumes them.
 - Team-owned Projects, Atlas rows, schedules, watchers, notification channels, workflows, AI assists, packages, and artifacts keep personal data out of the team scope while letting members work from the same shared evidence.
@@ -1444,7 +1452,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 ## Audit Log
 
-**Purpose:** an operator-facing trail of important app actions, available from the IP-gated diagnostics area without digging through server logs.
+**Purpose:** a trail of important app actions. Operators get the full IP-gated diagnostics view, while project users and team owners/admins get scoped Activity views for work they can already see.
 
 **Behavior:**
 
@@ -1455,12 +1463,14 @@ If a session has run history, workspace files, project workspace records, user w
 - If `audit_log_enabled` is turned off, the viewer still shows existing rows and displays a warning banner. New product actions proceed without writing new audit rows while audit logging is disabled.
 - Rows store hashed session identity, optional team/member actor context, bounded client IP, and bounded user-agent text. Treat those request fields as operator metadata that may still be sensitive in shared environments.
 - Audit rows are intentionally smaller than raw app data. File rows do not store file contents, notification rows do not store webhook URLs or secrets, session-token rows store only masked labels and hashes, and import rows store source/options/counts rather than imported bodies.
+- The Projects modal also exposes a scoped Activity tab. It shows safe project activity for personal project owners and team members who can view that team project, with filters and pagination but without operator-only request/session metadata. Project metadata edit sheets include a compact Recent activity panel for the current item and can jump into the filtered Activity tab.
+- Options → Teams exposes an Activity subtab for team owners and admins. It focuses on team governance and shared-configuration rows, keeps invite/recovery codes, raw tokens, session hashes, IPs, and user agents out of the browser response, and stays unavailable to operators/viewers. The selected team overview shows owners/admins a small Recent activity preview before the full subtab.
 
 **Limits:** `/diag/audit` is an operator-wide view. Anyone allowed through `diagnostics_allowed_cidrs` can see personal and team activity, actor labels, target ids, request metadata, and safe details visible to the audit table. Do not expose it broadly in multi-tenant deployments until you have a narrower owner-scoped audit surface in front of it. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
 
 **Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag/audit` HTML/JSON responses and exports), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `tests/py/test_routes.py` and `tests/js/unit/diag_audit.test.js` (viewer/export coverage).
+**Related files:** `app/blueprints/assets.py` (`/diag/audit` HTML/JSON responses and exports), `app/blueprints/projects.py` (Project Activity route), `app/blueprints/teams.py` (Team Activity route), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, scoped queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `app/static/js/features/projects/project_activity.js` (Project Activity tab), `app/static/js/features/preferences/teams_panel.js` (Team Activity subtab), `tests/py/test_routes.py`, `tests/js/unit/diag_audit.test.js`, `tests/js/unit/project_activity.test.js`, and `tests/js/unit/teams_panel.test.js` (viewer/export and scoped activity coverage).
 
 ---
 

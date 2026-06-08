@@ -87,6 +87,23 @@ def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict
     ]
 
 
+_AUDIT_PRIVATE_EXPORT_STRINGS = (
+    "actor_session_hash",
+    "actor_session_label",
+    "client_ip",
+    "destination_session_hash",
+    "owner_session_hash",
+    "session_hash",
+    "source_session_hash",
+    "user_agent",
+)
+
+
+def _assert_no_audit_private_export_strings(text: str) -> None:
+    for value in _AUDIT_PRIVATE_EXPORT_STRINGS:
+        assert value not in text
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def get_client(*, use_forwarded_for=True):
@@ -1601,6 +1618,25 @@ class TestTeamRoutes:
             json={"name": name, "display_name": "Owner"},
         )
 
+    def _join_team(self, client, owner_token, team_id, member_token, *, role="viewer", display_name="Viewer"):
+        self._register_session_token(member_token)
+        invite = client.post(
+            f"/session/teams/{team_id}/invites",
+            headers={"X-Session-ID": owner_token},
+            json={"role": role, "label": f"{display_name} invite"},
+        )
+        assert invite.status_code == 201
+        joined = client.post(
+            "/session/teams/join",
+            headers={"X-Session-ID": member_token},
+            json={"code": invite.get_json()["invite"]["code"], "display_name": display_name},
+        )
+        assert joined.status_code in {200, 201}
+        return next(
+            member for member in joined.get_json()["members"]
+            if member["display_name"] == display_name
+        )
+
     def test_team_atlas_import_apply_requires_option_specific_capabilities(self, monkeypatch, tmp_path):
         from services.teams import capabilities
         from services.teams.capabilities import Capability
@@ -2179,6 +2215,193 @@ class TestTeamRoutes:
             assert audit_rows[-2]["details"]["kind"] == "invite"
             assert audit_rows[-1]["details"]["target_member_id"] == operator_member["id"]
             assert invite_payload["code"] not in json.dumps(audit_rows)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_team_activity_route_is_owner_admin_scoped_and_safe(self, tmp_path):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        client, patchers = self._team_client(tmp_path)
+        try:
+            owner_token = "tok_team_activity_owner_" + uuid.uuid4().hex[:8]
+            admin_token = "tok_team_activity_admin_" + uuid.uuid4().hex[:8]
+            viewer_token = "tok_team_activity_viewer_" + uuid.uuid4().hex[:8]
+            outsider_token = "tok_team_activity_outsider_" + uuid.uuid4().hex[:8]
+            self._register_session_token(outsider_token)
+            created = self._create_team(client, owner_token, name="Team Activity Route")
+            assert created.status_code == 201
+            team_payload = created.get_json()["team"]
+            team_id = team_payload["id"]
+            owner_member_id = team_payload["member"]["id"]
+            admin_member = self._join_team(
+                client,
+                owner_token,
+                team_id,
+                admin_token,
+                role="admin",
+                display_name="Activity Admin",
+            )
+            viewer_member = self._join_team(
+                client,
+                owner_token,
+                team_id,
+                viewer_token,
+                role="viewer",
+                display_name="Activity Viewer",
+            )
+            with db_connect() as conn:
+                record_event(
+                    AuditEventType.TEAM_ROLE_CHANGE,
+                    session_id=owner_token,
+                    team_id=team_id,
+                    actor_member_id=owner_member_id,
+                    actor_role="owner",
+                    actor_display_name="Owner",
+                    target_id=team_id,
+                    details={
+                        "target_member_id": admin_member["id"],
+                        "from_role": "operator",
+                        "to_role": "admin",
+                    },
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                    created="2026-06-06T12:00:00+00:00",
+                )
+                record_event(
+                    AuditEventType.TEAM_ROLE_CHANGE,
+                    session_id=admin_token,
+                    team_id=team_id,
+                    actor_member_id=admin_member["id"],
+                    actor_role="admin",
+                    actor_display_name="Activity Admin",
+                    target_id=team_id,
+                    details={
+                        "target_member_id": viewer_member["id"],
+                        "from_role": "viewer",
+                        "to_role": "operator",
+                    },
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                    created="2026-06-06T12:05:00+00:00",
+                )
+                record_event(
+                    AuditEventType.NOTIFICATION_CONFIG_CHANGE,
+                    session_id=admin_token,
+                    team_id=team_id,
+                    actor_member_id=admin_member["id"],
+                    actor_role="admin",
+                    actor_display_name="Activity Admin",
+                    target_id="chn_team_activity",
+                    details={
+                        "channel_id": "chn_team_activity",
+                        "action": "update",
+                    },
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                    created="2026-06-06T12:10:00+00:00",
+                )
+                record_event(
+                    AuditEventType.TEAM_ROLE_CHANGE,
+                    session_id=owner_token,
+                    team_id="team_should_not_leak",
+                    target_id="team_should_not_leak",
+                    details={"to_role": "owner"},
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                    created="2026-06-06T12:00:01+00:00",
+                )
+                conn.commit()
+
+            owner = client.get(
+                f"/session/teams/{team_id}/activity?event_type=team.role_change"
+                "&date_from=2026-06-06&date_to=2026-06-06",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert owner.status_code == 200
+            owner_payload = owner.get_json()
+            assert [event["details"].get("to_role") for event in owner_payload["events"]] == ["operator", "admin"]
+            event_json = json.dumps(owner_payload["events"])
+            assert admin_member["id"] in event_json
+            assert viewer_member["id"] in event_json
+            assert "tok_team_activity" not in event_json
+            assert "actor_session_hash" not in event_json
+            assert "team_should_not_leak" not in event_json
+
+            actor_filtered = client.get(
+                f"/session/teams/{team_id}/activity?actor=Activity%20Admin"
+                "&date_from=2026-06-06&date_to=2026-06-06",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert actor_filtered.status_code == 200
+            actor_payload = actor_filtered.get_json()
+            assert [event["event_type"] for event in actor_payload["events"]] == [
+                "notification.config_change",
+                "team.role_change",
+            ]
+            assert {event["actor"]["display_name"] for event in actor_payload["events"]} == {"Activity Admin"}
+
+            target_filtered = client.get(
+                f"/session/teams/{team_id}/activity?target_type=notification&target_id=chn_team_activity",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert target_filtered.status_code == 200
+            target_payload = target_filtered.get_json()
+            assert [event["target"]["id"] for event in target_payload["events"]] == ["chn_team_activity"]
+            assert target_payload["events"][0]["target"]["type"] == "notification"
+
+            first_page = client.get(
+                f"/session/teams/{team_id}/activity?event_type=team.role_change"
+                "&date_from=2026-06-06&date_to=2026-06-06&limit=1",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert first_page.status_code == 200
+            first_payload = first_page.get_json()
+            assert first_payload["has_more"] is True
+            assert [event["details"].get("to_role") for event in first_payload["events"]] == ["operator"]
+            assert first_payload["limit"] == 1
+            assert first_payload["offset"] == 0
+
+            second_page = client.get(
+                f"/session/teams/{team_id}/activity?event_type=team.role_change"
+                "&date_from=2026-06-06&date_to=2026-06-06&limit=1&offset=1",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert second_page.status_code == 200
+            second_payload = second_page.get_json()
+            assert second_payload["has_more"] is False
+            assert [event["details"].get("to_role") for event in second_payload["events"]] == ["admin"]
+            assert second_payload["limit"] == 1
+            assert second_payload["offset"] == 1
+
+            empty_filtered = client.get(
+                f"/session/teams/{team_id}/activity?actor=Missing%20Actor",
+                headers={"X-Session-ID": owner_token},
+            )
+            assert empty_filtered.status_code == 200
+            empty_payload = empty_filtered.get_json()
+            assert empty_payload["events"] == []
+            assert empty_payload["has_more"] is False
+
+            admin = client.get(
+                f"/session/teams/{team_id}/activity?target_type=team",
+                headers={"X-Session-ID": admin_token},
+            )
+            assert admin.status_code == 200
+
+            viewer = client.get(
+                f"/session/teams/{team_id}/activity",
+                headers={"X-Session-ID": viewer_token},
+            )
+            assert viewer.status_code == 403
+            assert viewer.get_json()["error"] == "team_activity_forbidden"
+
+            outsider = client.get(
+                f"/session/teams/{team_id}/activity",
+                headers={"X-Session-ID": outsider_token},
+            )
+            assert outsider.status_code == 404
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5099,11 +5322,49 @@ class TestProjectRoutes:
     def teardown_method(self):
         package_presets.clear_package_preset_catalog_cache()
 
-    def _create_project(self, client, session_id, name="External Review"):
+    def _register_session_token(self, session_id):
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (session_id, datetime.now(timezone.utc).isoformat(), ""),
+            )
+            conn.commit()
+
+    def _create_team(self, client, session_id, name="Project Activity Team"):
+        self._register_session_token(session_id)
+        team_name = f"{name} {uuid.uuid4().hex[:8]}"
+        resp = client.post(
+            "/session/teams",
+            headers={"X-Session-ID": session_id},
+            json={"name": team_name, "display_name": "Owner"},
+        )
+        assert resp.status_code == 201
+        return resp.get_json()["team"]
+
+    def _join_team(self, client, owner_token, team_id, member_token, *, role="viewer", display_name="Viewer"):
+        self._register_session_token(member_token)
+        invite = client.post(
+            f"/session/teams/{team_id}/invites",
+            headers={"X-Session-ID": owner_token},
+            json={"role": role, "label": f"{display_name} invite"},
+        )
+        assert invite.status_code == 201
+        joined = client.post(
+            "/session/teams/join",
+            headers={"X-Session-ID": member_token},
+            json={"code": invite.get_json()["invite"]["code"], "display_name": display_name},
+        )
+        assert joined.status_code in {200, 201}
+        return next(
+            member for member in joined.get_json()["members"]
+            if member["display_name"] == display_name
+        )
+
+    def _create_project(self, client, session_id, name="External Review", *, headers=None):
         resp = client.post(
             "/projects",
             json={"name": name, "description": "Quarterly case folder", "color": "green"},
-            headers={"X-Session-ID": session_id},
+            headers=headers or {"X-Session-ID": session_id},
         )
         assert resp.status_code == 201
         return json.loads(resp.data)["project"]
@@ -5181,6 +5442,139 @@ class TestProjectRoutes:
         package_events = _audit_event_rows(target_id=package["id"])
         assert [row["event_type"] for row in package_events] == ["package.build", "package.delete"]
         assert package_events[0]["details"]["redaction_mode"] == "redacted"
+
+    def test_project_activity_route_lists_personal_safe_events_and_filters(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+        from services.teams.storage import token_hash
+
+        client = get_client()
+        session_id = self._session_id("project-activity")
+        project = self._create_project(client, session_id, name="Activity Case")
+
+        with db_connect() as conn:
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id=session_id,
+                target_id=project["id"],
+                project_id=project["id"],
+                details={"source": "test", "correlation_id": "corr-hidden"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id=session_id,
+                target_id="finding-activity",
+                project_id=project["id"],
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id=session_id,
+                team_id="team_should_not_leak",
+                target_id="team-row",
+                project_id=project["id"],
+                details={"source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:02+00:00",
+            )
+            conn.commit()
+
+        first_page = client.get(
+            f"/projects/{project['id']}/activity?limit=1",
+            headers={"X-Session-ID": session_id},
+        )
+        assert first_page.status_code == 200
+        first_payload = first_page.get_json()
+        assert first_payload["has_more"] is True
+        assert [event["target"]["id"] for event in first_payload["events"]] == ["finding-activity"]
+
+        filtered = client.get(
+            f"/projects/{project['id']}/activity?event_type=project.link&date_from=2026-06-06&date_to=2026-06-06",
+            headers={"X-Session-ID": session_id},
+        )
+        payload = filtered.get_json()
+        assert filtered.status_code == 200
+        assert [event["target"]["id"] for event in payload["events"]] == [project["id"]]
+        event_json = json.dumps(payload["events"])
+        assert "owner_session_hash" not in event_json
+        assert "actor_session_hash" not in event_json
+        assert "actor_session_label" not in event_json
+        assert "corr-hidden" not in event_json
+        assert "team-row" not in event_json
+        hidden_actor = client.get(
+            f"/projects/{project['id']}/activity?actor={quote(token_hash(session_id))}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert hidden_actor.status_code == 200
+        assert hidden_actor.get_json()["events"] == []
+
+    def test_project_activity_route_allows_team_viewer_for_team_project_only(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        client = get_client()
+        owner_token = "tok_project_activity_owner_" + uuid.uuid4().hex[:8]
+        viewer_token = "tok_project_activity_viewer_" + uuid.uuid4().hex[:8]
+        team = self._create_team(client, owner_token)
+        team_id = team["id"]
+        viewer_member = self._join_team(
+            client,
+            owner_token,
+            team_id,
+            viewer_token,
+            role="viewer",
+            display_name="Project Viewer",
+        )
+        team_project = self._create_project(
+            client,
+            owner_token,
+            name="Team Scoped Activity",
+            headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        )
+        foreign = self._create_project(client, "foreign-activity-owner", name="Foreign Activity Case")
+
+        with db_connect() as conn:
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id=owner_token,
+                team_id=team_id,
+                actor_member_id=viewer_member["id"],
+                actor_role="viewer",
+                actor_display_name="Project Viewer",
+                target_id=team_project["id"],
+                project_id=team_project["id"],
+                details={"source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            conn.commit()
+
+        ok = client.get(
+            f"/projects/{team_project['id']}/activity",
+            headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+        )
+        assert ok.status_code == 200
+        payload = ok.get_json()
+        assert [event["target"]["id"] for event in payload["events"]] == [team_project["id"]]
+        assert payload["events"][0]["actor"] == {
+            "display_name": "Project Viewer",
+            "member_id": viewer_member["id"],
+            "role": "viewer",
+        }
+
+        denied = client.get(
+            f"/projects/{foreign['id']}/activity",
+            headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+        )
+        assert denied.status_code == 404
 
     def test_project_delete_rolls_back_when_fail_closed_audit_fails(self):
         from services.audit.recorder import AuditRecordError
@@ -6744,6 +7138,17 @@ class TestProjectRoutes:
         )
         assert bulk_review_resp.status_code == 200
         assert json.loads(bulk_review_resp.data)["counts"] == {"updated": 1, "not_found": 2}
+        audit_rows = _audit_event_rows(target_id=f"fnd_{run_id}", event_type="finding.review_change")
+        assert len(audit_rows) == 1
+        assert audit_rows[0]["project_id"] == project["id"]
+        assert audit_rows[0]["details"]["finding_ids"] == [f"fnd_{run_id}"]
+        activity_resp = client.get(
+            f"/projects/{project['id']}/activity?event_type=finding.review_change"
+            f"&target_type=finding&target_id=fnd_{run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert activity_resp.status_code == 200
+        assert [event["target"]["id"] for event in activity_resp.get_json()["events"]] == [f"fnd_{run_id}"]
         with sqlite3.connect(DB_PATH) as conn:
             review_rows = {
                 row[0]: row[1]
@@ -7044,9 +7449,17 @@ class TestProjectRoutes:
             run_html = archive.read(f"runs/{run_id}.html").decode("utf-8")
             run_text = archive.read(f"runs/{run_id}.txt").decode("utf-8")
             skipped_items = json.loads(archive.read("skipped-items.json"))
+            package_archive_text = "\n".join(
+                archive.read(name).decode("utf-8")
+                for name in sorted(names)
+                if name.endswith((".css", ".html", ".json", ".md", ".txt"))
+            )
         assert downloaded_manifest["package"]["id"] == package["id"]
         assert downloaded_manifest["format"] == 2
         assert downloaded_manifest["provenance"]["schema_version"] == 1
+        assert "audit" not in downloaded_manifest["provenance"]
+        assert "audit" not in downloaded_manifest["manifest"]["provenance"]
+        _assert_no_audit_private_export_strings(package_archive_text)
         assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
         assert downloaded_manifest["manifest"]["counts"]["artifacts"] == 2
         assert downloaded_manifest["manifest"]["import_hints"]["target_relationships"][0]["target_id"] == (
@@ -8453,6 +8866,7 @@ class TestProjectRoutes:
         assert "Artifact private note" not in package_text
         assert "Internal verification note" not in package_text
         assert "notes/project.md" not in package_text
+        _assert_no_audit_private_export_strings(package_text)
 
     def test_project_workspace_write_quotas_return_conflict(self):
         client = get_client()
@@ -8658,8 +9072,26 @@ class TestProjectRoutes:
         assert int(download_resp.headers["Content-Length"]) > 0
         assert "attachment" in download_resp.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(download_resp.data)) as archive:
-            assert "manifest.json" in archive.namelist()
-            assert f"runs/{run_id}.html" in archive.namelist()
+            package_job_names = set(archive.namelist())
+            assert "manifest.json" in package_job_names
+            assert f"runs/{run_id}.html" in package_job_names
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            assert manifest["provenance"]["audit"] == {
+                "event_type": "package.build",
+                "correlation_id": job["id"],
+                "job_id": job["id"],
+            }
+            assert manifest["manifest"]["provenance"]["audit"]["correlation_id"] == job["id"]
+            assert "owner_session_hash" not in manifest["provenance"]["audit"]
+            assert "actor_session_label" not in manifest["provenance"]["audit"]
+            readme = archive.read("README.md").decode("utf-8")
+            assert f"- Audit correlation: `{job['id']}`" in readme
+            package_job_archive_text = "\n".join(
+                archive.read(name).decode("utf-8")
+                for name in sorted(package_job_names)
+                if name.endswith((".css", ".html", ".json", ".md", ".txt"))
+            )
+            _assert_no_audit_private_export_strings(package_job_archive_text)
         download_resp.close()
 
     def test_project_report_routes_save_preview_and_export_archive(self):
@@ -8753,11 +9185,11 @@ class TestProjectRoutes:
             job = json.loads(status_resp.data)["job"]
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
-        report_audit_rows = [
-            row for row in _audit_event_rows(target_id=project["id"], event_type="report.build")
-            if row["details"].get("job_id") == job["id"]
-        ]
+        report_audit_rows = _audit_event_rows(target_id=job["id"], event_type="report.build")
         assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "complete"]
+        assert {row["target_type"] for row in report_audit_rows} == {"report"}
+        assert {row["target_id"] for row in report_audit_rows} == {job["id"]}
+        assert {row["project_id"] for row in report_audit_rows} == {project["id"]}
         assert {row["job_id"] for row in report_audit_rows} == {job["id"]}
         assert {row["correlation_id"] for row in report_audit_rows} == {job["id"]}
         assert report_audit_rows[-1]["details"]["archive_bytes"] > 0
@@ -8784,12 +9216,55 @@ class TestProjectRoutes:
             assert manifest["provenance"]["build"]["selection_modes"]["run_ids"] == "all"
             assert manifest["provenance"]["build"]["selected_entity_ids"]["run_ids"] == []
             assert manifest["provenance"]["privacy"]["private_notes_included"] is False
+            assert manifest["provenance"]["audit"] == {
+                "event_type": "report.build",
+                "correlation_id": job["id"],
+                "job_id": job["id"],
+            }
+            assert "owner_session_hash" not in manifest["provenance"]["audit"]
+            assert "actor_session_label" not in manifest["provenance"]["audit"]
             report_md = archive.read("report.md").decode("utf-8")
             report_html = archive.read("report.html").decode("utf-8")
             assert "# Report Scope Readout" in report_md
             assert "Generated by darklab_shell v" in report_md
             assert "Generated by darklab_shell" in report_html
+            _assert_no_audit_private_export_strings(
+                "\n".join([
+                    json.dumps(manifest),
+                    report_md,
+                    report_html,
+                ])
+            )
         download_resp.close()
+
+        from services.reports.export import build_report_export_archive
+
+        with tempfile.TemporaryDirectory() as tmp:
+            direct_archive = build_report_export_archive(
+                draft,
+                project=project,
+                session_id=session_id,
+                project_id=project["id"],
+                archive_dir=tmp,
+            )
+            try:
+                with zipfile.ZipFile(direct_archive["path"]) as archive:
+                    direct_manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                    direct_report_md = archive.read("report.md").decode("utf-8")
+                    direct_report_html = archive.read("report.html").decode("utf-8")
+                assert "audit" not in direct_manifest["provenance"]
+                _assert_no_audit_private_export_strings(
+                    "\n".join([
+                        json.dumps(direct_manifest),
+                        direct_report_md,
+                        direct_report_html,
+                    ])
+                )
+            finally:
+                try:
+                    os.unlink(direct_archive["path"])
+                except OSError:
+                    pass
 
     def test_project_report_export_job_reports_size_limit_failures(self):
         client = get_client()
@@ -8817,11 +9292,11 @@ class TestProjectRoutes:
         assert job["status"] == "failed"
         assert job["error_status"] == 413
         assert "size limit" in job["error"]
-        report_audit_rows = [
-            row for row in _audit_event_rows(target_id=project["id"], event_type="report.build")
-            if row["details"].get("job_id") == job["id"]
-        ]
+        report_audit_rows = _audit_event_rows(target_id=job["id"], event_type="report.build")
         assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "failed"]
+        assert {row["target_type"] for row in report_audit_rows} == {"report"}
+        assert {row["target_id"] for row in report_audit_rows} == {job["id"]}
+        assert {row["project_id"] for row in report_audit_rows} == {project["id"]}
         assert {row["job_id"] for row in report_audit_rows} == {job["id"]}
         assert {row["correlation_id"] for row in report_audit_rows} == {job["id"]}
         assert report_audit_rows[-1]["details"]["reason"] == "size_limit"

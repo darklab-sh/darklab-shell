@@ -323,6 +323,7 @@
               .map(item => String(item.finding_id || ''))
             : findingIds;
           updatedIds.forEach(findingId => ctx.setCachedFindingReviewState(projectId, findingId, reviewState));
+          ctx.activityController?.().invalidate?.(projectId);
           selectedFindingIds().clear();
           ctx.setFindingSelectMode(false);
           ctx.renderProjectExplorer();
@@ -356,10 +357,14 @@
         ctx.renderProjectMobileDetail();
       }
       try {
-        await ctx.projectWorkspaceRequest(`/findings/${encodeURIComponent(findingId)}/review`, {
-          method: 'PUT',
-          body: JSON.stringify({ review_state: reviewState }),
+        const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/findings/review`, {
+          method: 'POST',
+          body: JSON.stringify({ finding_ids: [findingId], review_state: reviewState }),
         });
+        const result = await resp.json();
+        const updated = Number(result?.counts?.updated || 0);
+        if (!updated) throw new Error('Finding was no longer available in this project.');
+        ctx.activityController?.().invalidate?.(projectId);
         control.dataset.previousReviewState = reviewState;
       } catch (err) {
         ctx.setCachedFindingReviewState(projectId, findingId, previousReviewState);
@@ -401,6 +406,10 @@
 
     async function handleClick(event) {
       if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
+      if (
+        event.target.closest?.('[data-project-activity-action]')
+        && await ctx.activityController?.().handleClick(event)
+      ) return;
       if (await ctx.reportController?.().handleClick(event)) return;
       if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');

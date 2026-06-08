@@ -14819,6 +14819,21 @@ class TestAuditEvents:
         conn.row_factory = sqlite3.Row
         return tmp, conn
 
+    def _seed_project(self, conn, project_id, session_id, *, team_id=""):
+        conn.execute(
+            "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                project_id,
+                session_id,
+                team_id,
+                project_id,
+                project_id,
+                "2026-06-06T00:00:00+00:00",
+                "2026-06-06T00:00:00+00:00",
+            ),
+        )
+
     def test_recorder_hashes_session_identity_and_bounds_details(self):
         from services.audit.models import AuditEventType
         from services.audit.queries import AuditEventFilters, list_events
@@ -14842,12 +14857,16 @@ class TestAuditEvents:
                 created="2026-06-06T12:00:00+00:00",
             )
             payload = list_events(AuditEventFilters(actor_member_id="tmem_1"), conn=conn)
+            hash_payload = list_events(AuditEventFilters(actor=token_hash("tok_secret_value")), conn=conn)
+            label_payload = list_events(AuditEventFilters(actor="tok_secr"), conn=conn)
         finally:
             conn.close()
             tmp.cleanup()
 
         assert event_id
         assert len(payload["events"]) == 1
+        assert len(hash_payload["events"]) == 1
+        assert len(label_payload["events"]) == 1
         event = payload["events"][0]
         assert event["owner_session_hash"] == token_hash("tok_secret_value")
         assert event["actor_session_hash"] == token_hash("tok_secret_value")
@@ -15322,6 +15341,246 @@ class TestAuditEvents:
             "finding-owner-new",
             "finding-owner-old",
         ]
+
+    def test_scoped_events_personal_excludes_team_and_actor_only_rows(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditEventFilters, list_scoped_events
+        from services.audit.recorder import record_event
+        from services.teams.storage import token_hash
+
+        tmp, conn = self._audit_conn()
+        try:
+            self._seed_project(conn, "proj_personal_activity", "tok_owner")
+            self._seed_project(conn, "proj_team_activity", "tok_owner", team_id="team_same_actor")
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-personal",
+                project_id="proj_personal_activity",
+                details={
+                    "review_state": "triaged",
+                    "correlation_id": "corr_hidden",
+                    "counts": {
+                        "user_agent": "Mozilla hidden",
+                        "client_ip": "203.0.113.10",
+                        "safe": "kept",
+                        "children": [
+                            {
+                                "actor_session_label": "tok_owne********",
+                                "owner_session_hash": "owner_hash_hidden",
+                                "safe_child": "kept child",
+                            },
+                            {
+                                "job_id": "job_hidden",
+                                "correlation_id": "corr_nested_hidden",
+                                "safe_job": "kept job",
+                            },
+                        ],
+                    },
+                },
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                team_id="team_same_actor",
+                actor_member_id="tmem_same_actor",
+                actor_role="operator",
+                actor_display_name="Same Actor",
+                target_id="finding-team",
+                project_id="proj_team_activity",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_other_owner",
+                actor_session_id="tok_owner",
+                target_id="finding-actor-only",
+                project_id="proj_foreign",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:02+00:00",
+            )
+            payload = list_scoped_events(
+                "tok_owner",
+                SimpleNamespace(is_team=False),
+                conn=conn,
+                limit=10,
+            )
+            hidden_label_payload = list_scoped_events(
+                "tok_owner",
+                SimpleNamespace(is_team=False),
+                AuditEventFilters(actor="tok_owne"),
+                conn=conn,
+                limit=10,
+            )
+            hidden_hash_payload = list_scoped_events(
+                "tok_owner",
+                SimpleNamespace(is_team=False),
+                AuditEventFilters(actor=token_hash("tok_owner"), actor_session_hash=token_hash("tok_owner")),
+                conn=conn,
+                limit=10,
+            )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert [event["target"]["id"] for event in payload["events"]] == ["finding-personal"]
+        assert hidden_label_payload["events"] == []
+        assert hidden_hash_payload["events"] == []
+        event = payload["events"][0]
+        assert event["scope"] == {
+            "kind": "personal",
+            "team_id": "",
+            "project_id": "proj_personal_activity",
+        }
+        assert event["details"] == {
+            "review_state": "triaged",
+            "counts": {
+                "safe": "kept",
+                "children": [
+                    {"safe_child": "kept child"},
+                    {"safe_job": "kept job"},
+                ],
+            },
+        }
+        event_json = json.dumps(event)
+        assert "owner_session_hash" not in event_json
+        assert "actor_session_hash" not in event_json
+        assert "actor_session_label" not in event_json
+        assert "client_ip" not in event_json
+        assert "correlation_id" not in event_json
+        assert "job_id" not in event_json
+        assert "owner_hash_hidden" not in event_json
+        assert "Mozilla hidden" not in event_json
+        assert "203.0.113.10" not in event_json
+        assert "corr_hidden" not in event_json
+        assert "corr_nested_hidden" not in event_json
+
+    def test_scoped_events_team_viewer_reads_project_activity_only_for_own_team(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditScopeError, list_scoped_events
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            self._seed_project(conn, "proj_team_visible", "tok_team_owner", team_id="team_visible")
+            self._seed_project(conn, "proj_team_foreign", "tok_team_owner", team_id="team_foreign")
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id="tok_team_owner",
+                team_id="team_visible",
+                actor_member_id="tmem_viewer",
+                actor_role="viewer",
+                actor_display_name="Viewer",
+                target_id="proj_team_visible",
+                project_id="proj_team_visible",
+                details={"source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id="tok_team_owner",
+                team_id="team_foreign",
+                target_id="proj_team_foreign",
+                project_id="proj_team_foreign",
+                details={"source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            viewer_scope = SimpleNamespace(
+                is_team=True,
+                team_id="team_visible",
+                member={"role": "viewer", "id": "tmem_viewer"},
+            )
+            payload = list_scoped_events(
+                "tok_viewer",
+                viewer_scope,
+                conn=conn,
+                project_id="proj_team_visible",
+                limit=10,
+            )
+            with pytest.raises(AuditScopeError) as foreign:
+                list_scoped_events(
+                    "tok_viewer",
+                    viewer_scope,
+                    conn=conn,
+                    project_id="proj_team_foreign",
+                )
+            with pytest.raises(AuditScopeError) as broad:
+                list_scoped_events("tok_viewer", viewer_scope, conn=conn, include_team_activity=True)
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert [event["target"]["id"] for event in payload["events"]] == ["proj_team_visible"]
+        assert payload["events"][0]["actor"] == {
+            "display_name": "Viewer",
+            "member_id": "tmem_viewer",
+            "role": "viewer",
+        }
+        assert payload["events"][0]["team_id"] == "team_visible"
+        assert foreign.value.code == "project_not_found"
+        assert broad.value.code == "team_activity_forbidden"
+
+    def test_scoped_events_team_activity_is_owner_admin_only_and_team_bound(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditScopeError, list_scoped_events
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.TEAM_CREATE,
+                session_id="tok_team_owner",
+                team_id="team_activity",
+                actor_member_id="tmem_owner",
+                actor_role="owner",
+                actor_display_name="Owner",
+                target_id="team_activity",
+                details={"source": "test", "role": "owner"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.TEAM_CREATE,
+                session_id="tok_other_owner",
+                team_id="team_other_activity",
+                target_id="team_other_activity",
+                details={"source": "test", "role": "owner"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            viewer_scope = SimpleNamespace(is_team=True, team_id="team_activity", member={"role": "viewer"})
+            admin_scope = SimpleNamespace(is_team=True, team_id="team_activity", member={"role": "admin"})
+            with pytest.raises(AuditScopeError) as viewer_error:
+                list_scoped_events("tok_viewer", viewer_scope, conn=conn, include_team_activity=True)
+            payload = list_scoped_events(
+                "tok_admin",
+                admin_scope,
+                conn=conn,
+                include_team_activity=True,
+                limit=10,
+            )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert viewer_error.value.code == "team_activity_forbidden"
+        assert [event["target"]["id"] for event in payload["events"]] == ["team_activity"]
+        assert payload["events"][0]["scope"]["kind"] == "team"
+        assert payload["events"][0]["details"] == {"source": "test", "role": "owner"}
 
     def test_periodic_retention_guard_runs_once_per_interval(self):
         from services.audit.models import AuditEventType

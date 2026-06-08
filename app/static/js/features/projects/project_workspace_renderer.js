@@ -76,6 +76,7 @@
       else if (activeTab === 'artifacts') ctx.renderProjectArtifacts(content, projectId, summary);
       else if (activeTab === 'packages') ctx.renderProjectPackages(content, projectId, summary);
       else if (activeTab === 'report') ctx.renderProjectReport(content, projectId, summary);
+      else if (activeTab === 'activity') ctx.renderProjectActivity(content, projectId, summary);
       body.appendChild(content);
       ctx.enhanceAppSelects?.(content);
       if (filterBar) ctx.enhanceAppSelects?.(filterBar);

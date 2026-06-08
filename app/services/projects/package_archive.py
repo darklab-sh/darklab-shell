@@ -226,6 +226,28 @@ def _raise_if_estimated_archive_too_large(manifest, max_uncompressed_archive_byt
         raise EvidencePackageTooLarge("evidence package expanded content estimate exceeds configured size limit")
 
 
+def _archive_audit_handoff(event_type, job_id):
+    normalized_job_id = str(job_id or "").strip()
+    if not normalized_job_id:
+        return {}
+    return {
+        "event_type": event_type,
+        "correlation_id": normalized_job_id,
+        "job_id": normalized_job_id,
+    }
+
+
+def _manifest_with_audit_handoff(manifest, audit_handoff):
+    if not audit_handoff:
+        return manifest
+    updated = dict(manifest or {})
+    provenance = updated.get("provenance")
+    provenance = dict(provenance) if isinstance(provenance, dict) else {}
+    provenance["audit"] = dict(audit_handoff)
+    updated["provenance"] = provenance
+    return updated
+
+
 def build_evidence_package_archive(
     session_id,
     project_id,
@@ -235,6 +257,7 @@ def build_evidence_package_archive(
     progress_callback=None,
     archive_dir=None,
     team_id="",
+    build_job_id="",
 ):
     build_started = time.perf_counter()
     timings = {}
@@ -282,6 +305,10 @@ def build_evidence_package_archive(
         render_manifest,
         label_items,
         note_items,
+    )
+    render_manifest = _manifest_with_audit_handoff(
+        render_manifest,
+        _archive_audit_handoff("package.build", build_job_id),
     )
     render_package = {
         **package,

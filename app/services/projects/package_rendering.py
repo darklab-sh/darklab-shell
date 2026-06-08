@@ -836,6 +836,11 @@ def _render_package_readme(
     runs = manifest.get("runs") if isinstance(manifest.get("runs"), list) else []
     findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
     artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), list) else []
+    provenance_value = manifest.get("provenance")
+    provenance = provenance_value if isinstance(provenance_value, dict) else {}
+    audit_value = provenance.get("audit")
+    audit = audit_value if isinstance(audit_value, dict) else {}
+    audit_correlation_id = str(audit.get("correlation_id") or "").strip()
     lines = [
         f"# {_package_markdown_text(package.get('name') or 'Evidence package')}",
         "",
@@ -843,12 +848,16 @@ def _render_package_readme(
         f"- Generated: {_package_markdown_text(generated_at)}",
         f"- Preset: {_package_markdown_text(manifest.get('preset') or 'custom')}",
         f"- Redaction mode: {_package_markdown_text(manifest.get('redaction_mode') or 'raw')}",
+    ]
+    if audit_correlation_id:
+        lines.append(f"- Audit correlation: {_package_markdown_code(audit_correlation_id)}")
+    lines.extend([
         "",
         "## Counts",
         "",
         "| Type | Count |",
         "| --- | ---: |",
-    ]
+    ])
     for key, label in (("runs", "Runs"), ("findings", "Findings"), ("artifacts", "Artifacts"), ("targets", "Targets")):
         lines.append(f"| {label} | {_package_int(counts.get(key))} |")
     project_notes = _entity_note_body(project)

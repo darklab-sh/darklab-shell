@@ -16,7 +16,9 @@ from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
+from services.audit.queries import AuditEventFilters, AuditScopeError, list_scoped_events
 from services.audit.recorder import record_event
+from services.audit.retention import audit_retention_days
 from services.download_tickets import (
     DOWNLOAD_TICKET_MAX_AGE_SECONDS,
     DownloadTicketError,
@@ -579,6 +581,37 @@ def projects_summary(project_id):
         return error_response
     summary = get_project_summary(session_id, project_id, team_id=team_id)
     return _project_json_or_404(summary)
+
+
+@projects_bp.route("/projects/<project_id>/activity")
+def projects_activity(project_id):
+    session_id, _team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    try:
+        owner_scope = current_request_scope(session_id, request)
+        payload = list_scoped_events(
+            session_id,
+            owner_scope,
+            AuditEventFilters(
+                event_type=str(request.args.get("event_type") or "").strip(),
+                actor=str(request.args.get("actor") or "").strip(),
+                target_type=str(request.args.get("target_type") or "").strip(),
+                target_id=str(request.args.get("target_id") or "").strip(),
+                date_from=str(request.args.get("date_from") or "").strip(),
+                date_to=str(request.args.get("date_to") or "").strip(),
+            ),
+            project_id=project_id,
+            limit=_parse_int(request.args.get("limit"), 25, minimum=1, maximum=100),
+            offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        )
+        payload["retention_days"] = audit_retention_days(CFG)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    except AuditScopeError as exc:
+        return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+    return jsonify(payload)
 
 
 @projects_bp.route("/projects/package-presets")
@@ -1309,7 +1342,7 @@ def projects_report_export_job_create(project_id):
     report_export = draft.get("export") if isinstance(draft, dict) else {}
     record_event(
         AuditEventType.REPORT_BUILD,
-        target_id=project_id,
+        target_id=job_id,
         project_id=project_id,
         job_id=job_id,
         correlation_id=job_id,
@@ -1986,7 +2019,7 @@ def projects_findings_bulk_review_update(project_id):
     ]
     record_event(
         AuditEventType.FINDING_REVIEW_CHANGE,
-        target_id="",
+        target_id=updated_ids[0] if len(updated_ids) == 1 else "",
         project_id=project_id,
         details={
             "project_id": project_id,

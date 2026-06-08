@@ -98,6 +98,7 @@
           : null,
         { id: 'packages', label: 'Packages', count: clamp(counts.packages) },
         { id: 'report', label: 'Report' },
+        { id: 'activity', label: 'Activity' },
       ].filter(Boolean);
     }
 
@@ -162,6 +163,7 @@
           : null,
         { id: 'packages', label: 'Packages', count: tabCounts.packages },
         { id: 'report', label: 'Report' },
+        { id: 'activity', label: 'Activity' },
       ].filter(Boolean);
       tabItems.forEach(({ id, label, count }) => {
         const btn = document.createElement('button');

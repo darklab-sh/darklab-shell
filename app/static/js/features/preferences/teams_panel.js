@@ -3,12 +3,31 @@
   let _teams = [];
   let _detail = null;
   let _selectedTeamId = '';
+  let _activeDetailTab = 'overview';
   let _loading = false;
   let _formMode = '';
   let _oneTimeCode = null;
   let _bound = false;
+  const _activityStates = new Map();
+  const _recentActivityStates = new Map();
 
   const ROLES = Object.freeze(['owner', 'admin', 'operator', 'viewer']);
+  const TEAM_ACTIVITY_TARGET_TYPES = Object.freeze([
+    ['', 'All targets'],
+    ['team', 'Team'],
+    ['project', 'Project'],
+    ['finding', 'Finding'],
+    ['target', 'Target'],
+    ['run', 'Run'],
+    ['package', 'Package'],
+    ['report', 'Report'],
+    ['file', 'File'],
+    ['import', 'Import'],
+    ['notification', 'Notification'],
+    ['schedule', 'Schedule'],
+    ['watcher', 'Watcher'],
+    ['secret', 'Secret'],
+  ]);
 
   function _el(id) {
     return document.getElementById(id);
@@ -146,11 +165,11 @@
     return wrap;
   }
 
-  function _input(name, placeholder = '', value = '', { required = false, autocomplete = 'off' } = {}) {
+  function _input(name, placeholder = '', value = '', { required = false, autocomplete = 'off', type = 'text' } = {}) {
     const input = document.createElement('input');
     input.className = 'form-control';
     input.name = name;
-    input.type = 'text';
+    input.type = type;
     input.autocomplete = autocomplete;
     input.autocapitalize = 'none';
     input.autocorrect = 'off';
@@ -172,6 +191,20 @@
     return input;
   }
 
+  function _select(name, options, value = '') {
+    const select = document.createElement('select');
+    select.className = 'form-select';
+    select.name = name;
+    options.forEach(([optionValue, label]) => {
+      const option = document.createElement('option');
+      option.value = optionValue;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+    select.value = value || '';
+    return select;
+  }
+
   function _roleSelect(value = 'operator', { disabled = false } = {}) {
     const select = document.createElement('select');
     select.className = 'form-select';
@@ -190,6 +223,7 @@
   function _titleize(value) {
     return String(value || '')
       .replaceAll('_', ' ')
+      .replaceAll('.', ' ')
       .replace(/\b\w/g, char => char.toUpperCase());
   }
 
@@ -217,6 +251,76 @@
 
   function _actorCan(capability) {
     return _actorCapabilities().includes(String(capability || ''));
+  }
+
+  function _canViewTeamActivity() {
+    return ['owner', 'admin'].includes(_actorRole());
+  }
+
+  function _activityState(teamId) {
+    const id = String(teamId || '');
+    if (!_activityStates.has(id)) {
+      _activityStates.set(id, {
+        error: '',
+        events: [],
+        filters: {
+          event_type: '',
+          actor: '',
+          target_type: '',
+          target_id: '',
+          date_from: '',
+          date_to: '',
+        },
+        hasMore: false,
+        limit: 25,
+        loaded: false,
+        loading: false,
+        offset: 0,
+        retentionDays: 0,
+      });
+    }
+    return _activityStates.get(id);
+  }
+
+  function _recentActivityState(teamId) {
+    const id = String(teamId || '');
+    if (!_recentActivityStates.has(id)) {
+      _recentActivityStates.set(id, {
+        error: '',
+        events: [],
+        hasMore: false,
+        loaded: false,
+        loading: false,
+      });
+    }
+    return _recentActivityStates.get(id);
+  }
+
+  function _hasActivityFilters(st) {
+    return Object.values(st?.filters || {}).some(value => String(value || '').trim());
+  }
+
+  function _activityParams(st) {
+    const params = new URLSearchParams();
+    Object.entries(st.filters || {}).forEach(([key, value]) => {
+      const normalized = String(value || '').trim();
+      if (normalized) params.set(key, normalized);
+    });
+    params.set('limit', String(st.limit));
+    params.set('offset', String(st.offset));
+    return params;
+  }
+
+  function _readActivityFilters(root, st) {
+    if (!root || !st) return;
+    root.querySelectorAll('[data-team-activity-filter]').forEach((control) => {
+      st.filters[control.dataset.teamActivityFilter] = String(control.value || '').trim();
+    });
+  }
+
+  function _resetActivityFilters(st) {
+    if (!st) return;
+    Object.keys(st.filters).forEach((key) => { st.filters[key] = ''; });
   }
 
   function _activeTeamId() {
@@ -505,6 +609,319 @@
     });
   }
 
+  function _activityActorLabel(event) {
+    const actor = event?.actor && typeof event.actor === 'object' ? event.actor : {};
+    const name = String(actor.display_name || actor.member_id || '').trim();
+    const role = String(actor.role || '').trim();
+    if (name && role) return `${name} · ${role}`;
+    return name || role || 'System';
+  }
+
+  function _activityTargetLabel(event) {
+    const target = event?.target && typeof event.target === 'object' ? event.target : {};
+    const type = String(target.type || '').trim();
+    const id = String(target.id || '').trim();
+    if (type && id) return `${type}:${id}`;
+    return id || type || 'team';
+  }
+
+  function _activitySummary(details) {
+    const value = details && typeof details === 'object' ? details : {};
+    const parts = [];
+    Object.entries(value).some(([key, item]) => {
+      if (item && typeof item === 'object') return false;
+      if (item === undefined || item === null || item === '') return false;
+      parts.push(`${key.replaceAll('_', ' ')}: ${String(item)}`);
+      return parts.length >= 3;
+    });
+    return parts.join(' · ') || 'Recorded activity';
+  }
+
+  function _activityDetailValue(value) {
+    if (Array.isArray(value)) {
+      const items = value
+        .filter(item => item !== undefined && item !== null && item !== '')
+        .map(item => (item && typeof item === 'object' ? '[object]' : String(item)));
+      return items.length ? items.join(', ') : 'none';
+    }
+    if (value && typeof value === 'object') {
+      const parts = Object.entries(value)
+        .filter(([, item]) => item !== undefined && item !== null && item !== '')
+        .slice(0, 4)
+        .map(([key, item]) => `${key.replaceAll('_', ' ')}: ${item && typeof item === 'object' ? '[object]' : String(item)}`);
+      return parts.length ? parts.join(' · ') : 'not recorded';
+    }
+    if (value === undefined || value === null || value === '') return 'not recorded';
+    return String(value);
+  }
+
+  function _activityDetailsList(details) {
+    const list = _node('dl', 'options-team-activity-detail-list');
+    list.classList.add('nice-scroll');
+    const entries = details && typeof details === 'object' ? Object.entries(details) : [];
+    if (!entries.length) {
+      list.append(_node('dt', '', 'details'), _node('dd', '', 'not recorded'));
+      return list;
+    }
+    entries.forEach(([key, value]) => {
+      list.append(
+        _node('dt', '', String(key || '').replaceAll('_', ' ')),
+        _node('dd', '', _activityDetailValue(value)),
+      );
+    });
+    return list;
+  }
+
+  function _bindActivityDisclosure(toggle, panel) {
+    const disclosure = typeof global.bindDisclosure === 'function'
+      ? global.bindDisclosure(toggle, {
+        panel,
+        openClass: null,
+        hiddenClass: 'u-hidden',
+        preventFocusTheft: true,
+        clearPressStyle: true,
+      })
+      : null;
+    if (disclosure) return;
+    toggle.addEventListener('click', () => {
+      const expanded = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+      panel.classList.toggle('u-hidden', expanded);
+    });
+  }
+
+  function _renderActivityDisclosure(details, panelId) {
+    const wrap = _node('div', 'options-team-activity-details');
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'options-team-activity-details-toggle';
+    toggle.setAttribute('aria-expanded', 'false');
+    if (panelId) toggle.setAttribute('aria-controls', panelId);
+    const chev = _node('span', 'disclosure-chev', '▸');
+    chev.setAttribute('aria-hidden', 'true');
+    toggle.append(chev, _node('span', '', 'details'));
+    const list = _activityDetailsList(details);
+    list.classList.add('u-hidden');
+    if (panelId) list.id = panelId;
+    _bindActivityDisclosure(toggle, list);
+    wrap.append(toggle, list);
+    return wrap;
+  }
+
+  function _renderActivityFilters(teamId, st) {
+    const form = _node('div', 'options-team-activity-filters');
+    form.dataset.teamActivityFilters = teamId;
+    const eventType = _input('event_type', 'team.role_change', st.filters.event_type);
+    eventType.dataset.teamActivityFilter = 'event_type';
+    const actor = _input('actor', 'name or member id', st.filters.actor);
+    actor.dataset.teamActivityFilter = 'actor';
+    const targetType = _select('target_type', TEAM_ACTIVITY_TARGET_TYPES, st.filters.target_type);
+    targetType.dataset.teamActivityFilter = 'target_type';
+    const targetId = _input('target_id', 'target id', st.filters.target_id);
+    targetId.dataset.teamActivityFilter = 'target_id';
+    const from = _input('date_from', '', st.filters.date_from, { type: 'date' });
+    from.dataset.teamActivityFilter = 'date_from';
+    const to = _input('date_to', '', st.filters.date_to, { type: 'date' });
+    to.dataset.teamActivityFilter = 'date_to';
+    form.append(
+      _field('Event type', eventType),
+      _field('Actor', actor),
+      _field('Target type', targetType),
+      _field('Target id', targetId),
+      _field('From', from),
+      _field('To', to),
+    );
+    const actions = _node('div', 'options-session-token-actions options-team-field-full');
+    const apply = _button('Apply', 'activity-apply');
+    apply.dataset.teamId = teamId;
+    const clear = _button('Clear', 'activity-clear', { role: 'ghost' });
+    clear.dataset.teamId = teamId;
+    actions.append(apply, clear);
+    form.appendChild(actions);
+    return form;
+  }
+
+  function _renderActivityRows(teamId, st) {
+    if (st.loading && !st.loaded) return _node('div', 'options-team-empty', 'Loading team activity...');
+    if (st.error) {
+      const panel = _node('div', 'options-team-empty-state');
+      panel.appendChild(_node('div', 'options-team-empty', st.error));
+      const retry = _button('Retry', 'activity-retry');
+      retry.dataset.teamId = teamId;
+      panel.appendChild(retry);
+      return panel;
+    }
+    if (!st.events.length) {
+      const panel = _node('div', 'options-team-empty-state');
+      panel.appendChild(_node(
+        'div',
+        'options-team-empty',
+        _hasActivityFilters(st) ? 'No team activity matches these filters.' : 'No team activity yet.'
+      ));
+      if (!_hasActivityFilters(st) && st.retentionDays > 0) {
+        panel.appendChild(_node(
+          'div',
+          'options-team-meta',
+          `Audit rows older than ${st.retentionDays} days may no longer be available.`
+        ));
+      }
+      return panel;
+    }
+    const wrap = _node('div', 'options-team-activity-table-wrap nice-scroll');
+    const table = document.createElement('table');
+    table.className = 'options-team-activity-table';
+    const thead = document.createElement('thead');
+    const head = document.createElement('tr');
+    ['Time', 'Actor', 'Action', 'Target', 'Summary', 'Details'].forEach((label) => {
+      head.appendChild(_node('th', '', label));
+    });
+    thead.appendChild(head);
+    const tbody = document.createElement('tbody');
+    st.events.forEach((event, index) => {
+      const row = document.createElement('tr');
+      [
+        _formatDate(event.created) || String(event.created || ''),
+        _activityActorLabel(event),
+        _titleize(event.event_type),
+        _activityTargetLabel(event),
+        _activitySummary(event.details),
+      ].forEach((text) => {
+        row.appendChild(_node('td', '', text));
+      });
+      const detailsCell = document.createElement('td');
+      const safeId = String(event?.id || index).replace(/[^a-zA-Z0-9_-]/g, '-');
+      const details = _renderActivityDisclosure(event.details, `options-team-activity-details-${safeId}`);
+      detailsCell.appendChild(details);
+      row.appendChild(detailsCell);
+      tbody.appendChild(row);
+    });
+    table.append(thead, tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  function _renderActivityPager(teamId, st) {
+    const pager = _node('div', 'options-team-activity-pager');
+    const start = st.events.length ? st.offset + 1 : 0;
+    const end = st.offset + st.events.length;
+    pager.appendChild(_node('span', 'options-team-meta', st.events.length ? `${start}-${end} shown` : '0 shown'));
+    const prev = _button('Previous', 'activity-prev', { role: 'ghost' });
+    prev.dataset.teamId = teamId;
+    prev.disabled = st.loading || st.offset <= 0;
+    const next = _button('Next', 'activity-next', { role: 'ghost' });
+    next.dataset.teamId = teamId;
+    next.disabled = st.loading || !st.hasMore;
+    pager.append(prev, next);
+    return pager;
+  }
+
+  async function _loadTeamActivity(teamId, options = {}) {
+    const normalized = String(teamId || '').trim();
+    if (!normalized) return false;
+    const st = _activityState(normalized);
+    st.offset = Math.max(0, Number(options.offset ?? st.offset) || 0);
+    st.loading = true;
+    st.error = '';
+    if (options.render !== false) _renderDetail();
+    try {
+      const response = await _jsonRequest(`/session/teams/${encodeURIComponent(normalized)}/activity?${_activityParams(st).toString()}`);
+      st.events = Array.isArray(response.events) ? response.events : [];
+      st.hasMore = !!response.has_more;
+      st.limit = Math.max(1, Number(response.limit || st.limit) || st.limit);
+      st.offset = Math.max(0, Number(response.offset || 0) || 0);
+      st.retentionDays = Math.max(0, Number(response.retention_days || 0) || 0);
+      st.loaded = true;
+      return true;
+    } catch (error) {
+      st.error = error.message || 'Could not load team activity.';
+      _logTeamUiActionFailure('load_team_activity', error, { team_id: normalized });
+      return false;
+    } finally {
+      st.loading = false;
+      if (options.render !== false) _renderDetail();
+    }
+  }
+
+  async function _loadTeamRecentActivity(teamId, options = {}) {
+    const normalized = String(teamId || '').trim();
+    if (!normalized) return false;
+    const st = _recentActivityState(normalized);
+    st.loading = true;
+    st.error = '';
+    if (options.render !== false) _renderDetail();
+    const params = new URLSearchParams({
+      target_type: 'team',
+      target_id: normalized,
+      limit: '5',
+      offset: '0',
+    });
+    try {
+      const response = await _jsonRequest(`/session/teams/${encodeURIComponent(normalized)}/activity?${params.toString()}`);
+      st.events = Array.isArray(response.events) ? response.events : [];
+      st.hasMore = !!response.has_more;
+      st.loaded = true;
+      return true;
+    } catch (error) {
+      st.error = error.message || 'Could not load recent team activity.';
+      _logTeamUiActionFailure('load_team_recent_activity', error, { team_id: normalized });
+      return false;
+    } finally {
+      st.loading = false;
+      if (options.render !== false) _renderDetail();
+    }
+  }
+
+  function _renderActivity(section, teamId) {
+    const st = _activityState(teamId);
+    section.appendChild(_renderActivityFilters(teamId, st));
+    section.appendChild(_renderActivityRows(teamId, st));
+    section.appendChild(_renderActivityPager(teamId, st));
+    if (!st.loaded && !st.loading && !st.error) {
+      _loadTeamActivity(teamId).catch(error => _logTeamUiActionFailure('load_team_activity', error, { team_id: teamId }));
+    }
+  }
+
+  function _renderRecentActivity(section, teamId) {
+    const st = _recentActivityState(teamId);
+    const header = _node('div', 'options-team-section-title', 'Recent activity');
+    section.appendChild(header);
+    if (st.loading && !st.loaded) {
+      section.appendChild(_node('div', 'options-team-empty', 'Loading recent activity...'));
+    } else if (st.error) {
+      section.appendChild(_node('div', 'options-team-empty', st.error));
+    } else if (!st.events.length) {
+      section.appendChild(_node('div', 'options-team-empty', 'No recent team activity yet.'));
+    } else {
+      const list = _node('div', 'options-team-recent-activity-list');
+      st.events.slice(0, 5).forEach((event) => {
+        const row = _node('div', 'options-team-recent-activity-row panel-row');
+        const main = _node('div', 'options-team-row-main');
+        main.append(
+          _node('div', 'options-team-name', _titleize(event.event_type)),
+          _node('div', 'options-team-meta', _activitySummary(event.details))
+        );
+        row.append(
+          main,
+          _node('div', 'options-team-meta', _activityActorLabel(event)),
+          _node('div', 'options-team-meta', _formatDate(event.created) || String(event.created || ''))
+        );
+        list.appendChild(row);
+      });
+      section.appendChild(list);
+    }
+    if (st.hasMore || st.events.length) {
+      const actions = _node('div', 'options-session-token-actions');
+      const viewAll = _button('View activity', 'detail-tab', { role: 'ghost' });
+      viewAll.dataset.teamDetailTab = 'activity';
+      viewAll.dataset.teamId = teamId;
+      actions.appendChild(viewAll);
+      section.appendChild(actions);
+    }
+    if (!st.loaded && !st.loading && !st.error) {
+      _loadTeamRecentActivity(teamId).catch(error => _logTeamUiActionFailure('load_team_recent_activity', error, { team_id: teamId }));
+    }
+  }
+
   function _renderDetail() {
     const host = _el('options-team-detail');
     _clear(host);
@@ -550,17 +967,66 @@
     }
     _renderOneTimeCode(panel, team.id);
 
-    const members = _node('div', 'options-team-section');
-    _renderMembers(members);
-    panel.appendChild(members);
+    if (!_canViewTeamActivity() && _activeDetailTab === 'activity') _activeDetailTab = 'overview';
+    if (_canViewTeamActivity()) {
+      const tabs = _node('div', 'options-team-detail-tabs tab-strip');
+      tabs.setAttribute('role', 'tablist');
+      tabs.setAttribute('aria-label', 'Team detail sections');
+      [
+        ['overview', 'Overview'],
+        ['activity', 'Activity'],
+      ].forEach(([id, label]) => {
+        const active = id === _activeDetailTab;
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'options-team-detail-tab tab-strip-item';
+        tab.textContent = label;
+        tab.dataset.teamAction = 'detail-tab';
+        tab.dataset.teamDetailTab = id;
+        tab.dataset.teamId = team.id || '';
+        tab.id = `options-team-detail-tab-${id}`;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        tab.setAttribute('aria-controls', `options-team-detail-${id}`);
+        tabs.appendChild(tab);
+      });
+      panel.appendChild(tabs);
+    }
 
-    const invites = _node('div', 'options-team-section');
-    _renderInvites(invites);
-    panel.appendChild(invites);
+    if (_activeDetailTab === 'activity' && _canViewTeamActivity()) {
+      const activity = _node('div', 'options-team-section');
+      activity.id = 'options-team-detail-activity';
+      activity.setAttribute('role', 'tabpanel');
+      activity.setAttribute('aria-labelledby', 'options-team-detail-tab-activity');
+      _renderActivity(activity, team.id);
+      panel.appendChild(activity);
+    } else {
+      const overview = _node('div', 'options-team-detail-overview');
+      if (_canViewTeamActivity()) {
+        overview.id = 'options-team-detail-overview';
+        overview.setAttribute('role', 'tabpanel');
+        overview.setAttribute('aria-labelledby', 'options-team-detail-tab-overview');
+      }
+      if (_canViewTeamActivity()) {
+        const recent = _node('div', 'options-team-section');
+        _renderRecentActivity(recent, team.id);
+        overview.appendChild(recent);
+      }
 
-    const recovery = _node('div', 'options-team-section');
-    _renderRecovery(recovery);
-    panel.appendChild(recovery);
+      const members = _node('div', 'options-team-section');
+      _renderMembers(members);
+      overview.appendChild(members);
+
+      const invites = _node('div', 'options-team-section');
+      _renderInvites(invites);
+      overview.appendChild(invites);
+
+      const recovery = _node('div', 'options-team-section');
+      _renderRecovery(recovery);
+      overview.appendChild(recovery);
+      panel.appendChild(overview);
+    }
 
     host.appendChild(panel);
     const enhanceSelects = typeof enhanceAppSelects === 'function'
@@ -613,12 +1079,14 @@
   async function _loadTeamDetail(teamId) {
     const normalized = String(teamId || '').trim();
     if (!normalized) return;
+    if (_selectedTeamId !== normalized) _activeDetailTab = 'overview';
     _selectedTeamId = normalized;
     _detail = null;
     _renderDetail();
     _setBusy(true);
     try {
       _detail = await _jsonRequest(`/session/teams/${encodeURIComponent(normalized)}`);
+      _recentActivityStates.delete(normalized);
       _render();
     } catch (error) {
       _logTeamActionFailure('load_team', error, { team_id: normalized });
@@ -784,6 +1252,30 @@
         _toast('Code copied');
       } catch (_) {
         _toast('Failed to copy code', 'error');
+      }
+      return;
+    }
+    if (action === 'detail-tab') {
+      const nextTab = target.dataset.teamDetailTab || 'overview';
+      _activeDetailTab = nextTab === 'activity' && _canViewTeamActivity() ? 'activity' : 'overview';
+      _renderDetail();
+      return;
+    }
+    if (action === 'activity-apply' || action === 'activity-clear' || action === 'activity-prev'
+        || action === 'activity-next' || action === 'activity-retry') {
+      const st = _activityState(teamId);
+      if (action === 'activity-apply') {
+        _readActivityFilters(target.closest('[data-team-activity-filters]') || _el('options-team-detail'), st);
+        await _loadTeamActivity(teamId, { offset: 0 });
+      } else if (action === 'activity-clear') {
+        _resetActivityFilters(st);
+        await _loadTeamActivity(teamId, { offset: 0 });
+      } else if (action === 'activity-prev') {
+        await _loadTeamActivity(teamId, { offset: Math.max(0, st.offset - st.limit) });
+      } else if (action === 'activity-next') {
+        await _loadTeamActivity(teamId, { offset: st.offset + st.limit });
+      } else {
+        await _loadTeamActivity(teamId);
       }
       return;
     }

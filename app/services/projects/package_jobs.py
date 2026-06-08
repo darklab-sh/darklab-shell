@@ -278,6 +278,7 @@ def _run_job(job_id, cfg_snapshot):
             progress_callback=_progress,
             archive_dir=str(_JOB_DIR),
             team_id=str(job.get("team_id") or ""),
+            build_job_id=str(job.get("id") or ""),
         )
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - started)

@@ -616,9 +616,18 @@ test.describe('project workspace modal', () => {
       commands: [PROJECT_LINK_RUN_COMMAND],
     })
     await switchProjectTab(page, 'runs')
+    const activeProject = await readActiveProject(page)
+    const projectId = activeProject.project?.id || ''
+    expect(projectId).toBeTruthy()
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
+    const linkResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/links`
+    })
     await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
+    expect((await linkResponse).ok()).toBe(true)
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     const runRow = page.locator('.project-explorer-item').filter({ hasText: seededRun.command }).first()
     await expect(runRow).toBeVisible()
@@ -649,6 +658,34 @@ test.describe('project workspace modal', () => {
       'href',
       new RegExp(`/diag/audit/export\\?format=json&event_type=project\\.link&project_id=${projectId}`),
     )
+  })
+
+  test('opens Project Activity and filters project-link rows', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Activity ${Date.now()}`)
+    await linkExternalRunToOpenProject(page, testInfo)
+
+    await switchProjectTab(page, 'activity')
+    const activityRoot = page.locator('[data-project-activity-root]')
+    await expect(activityRoot).toBeVisible()
+    await expect(activityRoot.locator('.project-activity-row').first()).toContainText('Project Link', { timeout: 15_000 })
+
+    await activityRoot.locator('[data-project-activity-filter="event_type"]').fill('project.link')
+    const filtered = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname === `/projects/${projectId}/activity`
+        && url.searchParams.get('event_type') === 'project.link'
+    })
+    await activityRoot.locator('[data-project-activity-action="apply"]').click()
+    expect((await filtered).ok()).toBe(true)
+
+    const row = activityRoot.locator('.project-activity-row').first()
+    await expect(row).toContainText('Project Link')
+    await expect(row).toContainText(`project:${projectId}`)
+    await row.locator('.project-activity-details-toggle').click()
+    await expect(row.locator('.project-activity-detail-list')).toContainText('source')
+    await expect(row.locator('.project-activity-detail-list')).toContainText('manual')
   })
 
   test('creates an active project, manages targets, and edits linked run metadata', async ({ page }, testInfo) => {

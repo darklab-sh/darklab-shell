@@ -132,6 +132,10 @@ const PROJECT_REPORT_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_report.js'),
   'utf8',
 )
+const PROJECT_ACTIVITY_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_activity.js'),
+  'utf8',
+)
 const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
@@ -315,6 +319,7 @@ function loadShellChrome({
           <form id="project-entity-editor-form">
             <input id="project-entity-labels">
             <textarea id="project-entity-note"></textarea>
+            <section id="project-entity-activity"></section>
             <button class="project-entity-editor-cancel" type="button"></button>
             <button id="project-entity-submit" type="submit"></button>
           </form>
@@ -497,6 +502,8 @@ function loadShellChrome({
       ${PROJECT_ARTIFACTS_SRC}
       ${PROJECT_PACKAGES_SRC}
       ${PROJECT_REPORT_SRC}
+      ${PROJECT_ACTIVITY_SRC}
+      global.DarklabProjectActivity = window.DarklabProjectActivity;
       ${SHELL_CHROME_SRC}
     `,
   )(
@@ -600,7 +607,7 @@ function loadShellChrome({
 describe('shell chrome rail sections', () => {
   it('opens Status Monitor and Findings Board from the desktop rail nav item', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (String(url).startsWith('/atlas/findings')) {
         return Promise.resolve({
           ok: true,
@@ -1348,7 +1355,7 @@ describe('shell chrome project workspace', () => {
         labels: [{ label: 'current' }],
       },
     ]
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
@@ -1532,7 +1539,7 @@ describe('shell chrome project workspace', () => {
       pattern: 'darklab.sh',
       filters: {},
     }]
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
@@ -1709,7 +1716,8 @@ describe('shell chrome project workspace', () => {
         },
       }],
     }
-    const apiFetch = vi.fn((url) => {
+    let mobileFindingReviewState = 'triaged'
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
@@ -1718,6 +1726,19 @@ describe('shell chrome project workspace', () => {
       }
       if (url === '/projects/project-1/summary') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(summary) })
+      }
+      if (url === '/projects/project-1/findings/review' && options.method === 'POST') {
+        const payload = JSON.parse(options.body || '{}')
+        mobileFindingReviewState = String(payload.review_state || mobileFindingReviewState)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            review_state: mobileFindingReviewState,
+            counts: { updated: 1, not_found: 0 },
+            results: [{ finding_id: 'finding-1', status: 'updated' }],
+          }),
+        })
       }
       if (String(url).startsWith('/projects/project-1/findings')) {
         return Promise.resolve({
@@ -1735,7 +1756,7 @@ describe('shell chrome project workspace', () => {
               raw_line: '443/tcp open https',
               line_number: 4,
               scope: 'finding',
-              review_state: 'triaged',
+              review_state: mobileFindingReviewState,
               labels: [{ label: 'important' }],
               note: { body: 'Finding note' },
             }],
@@ -1845,9 +1866,9 @@ describe('shell chrome project workspace', () => {
       reviewSelect.dispatchEvent(new Event('change', { bubbles: true }))
       await tick()
       await tick()
-      expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/review', expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({ review_state: 'reviewed' }),
+      expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ finding_ids: ['finding-1'], review_state: 'reviewed' }),
       }))
       expect(detailBody.querySelector('.project-mobile-row-badge')?.textContent).toBe('reviewed')
       actionSheet.click()
@@ -1991,7 +2012,7 @@ describe('shell chrome project workspace', () => {
         labels: [{ label: 'baseline' }],
       }],
     }
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
@@ -3442,6 +3463,40 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ ok: true }),
         })
       }
+      if (String(url).startsWith('/projects/project-1/activity?')) {
+        const params = new URL(`https://example.test${url}`).searchParams
+        const targetType = params.get('target_type') || ''
+        const targetId = params.get('target_id') || ''
+        const events = targetType === 'finding' && targetId === 'finding-1'
+          ? [{
+              id: 'aud-finding-review',
+              created: '2026-06-06T08:16:44.000000+00:00',
+              event_type: 'finding.review_change',
+              actor: { display_name: 'nona', role: 'owner' },
+              target: { type: 'finding', id: 'finding-1' },
+              details: { review_state: 'reviewed', updated_count: 1 },
+            }]
+          : targetId === 'finding-1'
+            ? [{
+                id: 'aud-project-same-id',
+                created: '2026-06-06T08:15:44.000000+00:00',
+                event_type: 'project.link',
+                actor: { display_name: 'nona', role: 'owner' },
+                target: { type: 'project', id: 'finding-1' },
+                details: { source: 'same id should not show' },
+              }]
+            : []
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            events,
+            has_more: targetType === 'finding' && targetId === 'finding-1',
+            limit: Number(params.get('limit') || 5),
+            offset: Number(params.get('offset') || 0),
+            retention_days: 90,
+          }),
+        })
+      }
       if (url === '/projects/project-1/links' && options.method === 'DELETE') {
         const payload = JSON.parse(options.body)
         if (payload.entity_type === 'atlas_entity') {
@@ -3977,6 +4032,27 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-entity-editor-subtitle').textContent).toContain('missing security header')
     expect(document.getElementById('project-entity-labels').value).toBe('old-label')
     expect(document.getElementById('project-entity-note').value).toBe('Old finding note')
+    await vi.waitFor(() => {
+      expect(document.getElementById('project-entity-activity').textContent).toContain('Finding Review Change')
+    })
+    expect(document.getElementById('project-entity-activity').textContent).toContain('review state: reviewed')
+    expect(document.getElementById('project-entity-activity').textContent).not.toContain('same id should not show')
+    expect(document.querySelector('.project-entity-activity-row')?.classList.contains('panel-row')).toBe(true)
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/activity?target_type=finding&target_id=finding-1&limit=5&offset=0',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    document.querySelector('[data-project-entity-activity-action="open-project-activity"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
+    expect(document.querySelector('[data-project-tab="activity"]').classList.contains('is-active')).toBe(true)
+    expect(document.querySelector('[data-project-activity-filter="target_type"]').value).toBe('finding')
+    expect(document.querySelector('[data-project-activity-filter="target_id"]').value).toBe('finding-1')
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    document.querySelector('[data-project-action="edit-finding-metadata"][data-finding-id="finding-1"]').click()
+    await tick()
     document.getElementById('project-entity-labels').value = 'important, retest, Important'
     document.getElementById('project-entity-note').value = 'Needs retest'
     document.getElementById('project-entity-editor-form')
@@ -4770,9 +4846,9 @@ describe('shell chrome project workspace', () => {
     reviewControl.value = 'important'
     reviewControl.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/review', expect.objectContaining({
-      method: 'PUT',
-      body: JSON.stringify({ review_state: 'important' }),
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ finding_ids: ['finding-1'], review_state: 'important' }),
     }))
     expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
     expect(document.querySelector('.project-finding-review')?.value).toBe('important')
@@ -4912,6 +4988,19 @@ describe('shell chrome project workspace', () => {
             targets: projectTargets,
             artifacts: [],
             packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/findings/review' && options.method === 'POST') {
+        const payload = JSON.parse(options.body || '{}')
+        const authoritativeReviewState = payload.finding_ids.includes('finding-high') ? 'new' : payload.review_state
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            review_state: authoritativeReviewState,
+            counts: { updated: payload.finding_ids.length, not_found: 0 },
+            results: payload.finding_ids.map(findingId => ({ finding_id: findingId, status: 'updated' })),
           }),
         })
       }
@@ -5107,13 +5196,17 @@ describe('shell chrome project workspace', () => {
     boardReview.value = 'false_positive'
     boardReview.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-high/review', expect.objectContaining({
-      method: 'PUT',
-      body: JSON.stringify({ review_state: 'false_positive' }),
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ finding_ids: ['finding-high'], review_state: 'false_positive' }),
     }))
+    await tick()
+    expect(document.querySelector(
+      '#findings-board-body [data-findings-board-review][data-finding-id="finding-high"]',
+    )?.value).toBe('new')
 
     shell.restoreHistoryRunIntoTab.mockClear()
-    document.querySelector('#findings-board-body [data-findings-board-action="open-run"]').click()
+    document.querySelector('#findings-board-body [data-findings-board-action="open-run"][data-run-id="run-old"]').click()
     await tick()
     expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
       {

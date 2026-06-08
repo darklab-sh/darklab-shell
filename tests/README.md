@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,613
+- behavior tests: 3,633
 - docs/inventory meta-tests: 34
-- `pytest`: 2036 (2002 behavior + 34 meta)
-- `vitest`: 1350
-- `playwright`: 261
-- total: 3,647
+- `pytest`: 2042 (2008 behavior + 34 meta)
+- `vitest`: 1363
+- `playwright`: 262
+- total: 3,667
 
 This document is organized in two parts:
 
@@ -952,6 +952,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_best_effort_recorder_failure_logs_sanitized_fallback` | Verifies best-effort audit recorder failures emit only sanitized fallback log details. |
 | `TestAuditEvents.test_best_effort_shared_connection_failure_rolls_back_only_savepoint` | Verifies failed best-effort audit inserts on shared connections roll back only the audit savepoint. |
 | `TestAuditEvents.test_list_events_filters_owner_scope_and_paginates` | Verifies audit queries can filter by owner session scope, include full same-day date ranges, and paginate newest-first results. |
+| `TestAuditEvents.test_scoped_events_personal_excludes_team_and_actor_only_rows` | Verifies user-facing personal audit activity excludes team rows and actor-only rows while stripping operator-only metadata. |
+| `TestAuditEvents.test_scoped_events_team_viewer_reads_project_activity_only_for_own_team` | Verifies team viewers can read safe project activity for their team but cannot read foreign projects or broad team activity. |
+| `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
@@ -1499,6 +1502,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestTeamRoutes.test_team_browser_read_routes_have_dedicated_token_limit` | Verifies browser team-management read routes use the dedicated per-token team read limit. |
 | `TestTeamRoutes.test_active_team_scope_uses_explicit_team_secrets_for_providers_and_commands` | Verifies active team scope uses explicit team secrets for provider readiness and command env injection while keeping personal secrets separate and role-gating writes. |
 | `TestTeamRoutes.test_team_invite_join_role_update_and_revoke` | Verifies invite creation, one-use invite redemption, role update, capability denial, admin invite creation, invite revocation, member removal, and bounded team audit events without invite codes. |
+| `TestTeamRoutes.test_team_activity_route_is_owner_admin_scoped_and_safe` | Verifies the team Activity route is limited to owners/admins, denies viewers and non-members, filters team rows, and omits session-derived audit metadata. |
 | `TestTeamRoutes.test_team_role_change_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed team role-change audit failures roll back the role mutation. |
 | `TestTeamRoutes.test_team_owner_guard_and_recovery_redeem` | Verifies last-owner leave protection, one-use recovery-code redemption into a second owner, replacement-owner leave blocking, and bounded recovery/role/leave audit events without recovery codes. |
 | `TestTeamRoutes.test_team_recovery_rotate_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed recovery-code rotation audit failures roll back recovery-code changes. |
@@ -1529,6 +1533,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
 | `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses, removes all channel-owned vault secrets, and records a config-change audit row without secret values. |
 | `TestProjectRoutes.test_project_package_and_link_routes_record_audit_events` | Verifies project link/unlink and package create/delete routes record bounded audit events. |
+| `TestProjectRoutes.test_project_activity_route_lists_personal_safe_events_and_filters` | Verifies personal Project Activity returns scoped, filtered, user-safe audit rows without leaking matching team rows. |
+| `TestProjectRoutes.test_project_activity_route_allows_team_viewer_for_team_project_only` | Verifies team viewers can read safe Project Activity for their team project but cannot read foreign project activity. |
 | `TestProjectRoutes.test_project_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed project-delete audit failures roll back the project deletion. |
 | `TestProjectRoutes.test_package_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed package-delete audit failures roll back the package deletion. |
 | `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
@@ -3028,6 +3034,21 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
 
+#### `project_activity.test.js`
+
+| Test | Description |
+| --- | --- |
+| `loads and renders project activity filters, rows, and safe details` | Verifies the Project Activity tab loads scoped audit rows and renders filters, table rows, actor/action text, and collapsed safe details. |
+| `only offers target types that can appear in project scope` | Verifies the Project Activity target-type filter lists only project-scoped target types and excludes account/team-config types. |
+| `opens the related workspace object when a project target is clicked` | Verifies project-object target cells render an in-workspace jump link that opens the related tab/object via the controller hook. |
+| `keeps server-route targets as plain anchors` | Verifies run/snapshot targets keep their server-route anchor href instead of becoming in-workspace jump links. |
+| `prefers stored file path detail keys in row summaries` | Verifies Project Activity row summaries prefer stored file audit path keys even when generic details appear first. |
+| `logs project activity load failures with bounded context` | Verifies Project Activity request failures render an error and send a safe client-error signal with only the project id. |
+| `logs project Recent activity load failures with bounded target context` | Verifies object-level Recent activity request failures render an error and send a safe client-error signal with project and target ids. |
+| `ignores stale Project Activity responses that resolve out of order` | Verifies newer Project Activity requests keep their rows when an older request finishes later. |
+| `applies filters and clears them without preloading the full audit history` | Verifies Project Activity filter buttons send bounded query parameters and keep pagination offset-based. |
+| `renders empty and mobile activity states with collapsed details` | Verifies the empty/retention note and mobile stacked activity rows render with details collapsed. |
+
 #### `project_report.test.js`
 
 | Test | Description |
@@ -3524,6 +3545,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows invite statuses and only offers revoke for active invites` | Verifies that active, used, expired, and revoked invite rows render distinct statuses and only active invites expose the revoke action. |
 | `copies a newly created invite code even after the detail pane refreshes` | Verifies that newly created one-time invite codes remain copyable from the Teams panel even if the rendered copy button loses its transient code attribute. |
 | `lets the Teams tab switch back to Personal scope` | Verifies that the Options Teams panel can move from an active team scope back to Personal without opening the separate scope selector. |
+| `shows owner team activity with filters and safe details` | Verifies that owner-visible Team Activity renders rows, collapsed safe details, and filtered requests from the Options Teams panel. |
+| `keeps Team Activity hidden from non-governance roles` | Verifies that viewer-capability payloads do not expose the Team Activity subtab or trigger activity fetches. |
+| `logs failed Team Activity loads with safe client context` | Verifies Team Activity and Team Recent activity failures send safe client-error logs with only action and team id context. |
 | `surfaces failed invite creation with inline status and safe client logging` | Verifies that a denied invite creation shows the server message in the Teams panel and logs a safe client-side action failure. |
 | `surfaces failed recovery rotation with confirmation and safe client logging` | Verifies that denied recovery-code rotation goes through confirmation, shows the server message, and logs a safe client-side action failure. |
 
@@ -4215,6 +4239,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
 | `records project actions in the diagnostics audit viewer` | Verifies that a live project-link action appears in `/diag/audit` with the filtered row, detail JSON, and export links. |
+| `opens Project Activity and filters project-link rows` | Verifies that the Projects modal Activity tab opens in a live browser, filters project-link rows, and shows collapsed safe details. |
 | `creates an active project, manages targets, and edits linked run metadata` | Verifies that the Projects modal can create and activate a project, persist project labels/notes, add/edit/delete targets, link the last run, and save linked-run metadata in a live browser. |
 | `creates, previews, applies, and shows an Atlas auto-promote rule` | Verifies that the Projects modal can preview, create, refresh, apply, and display an Atlas auto-promote rule and its promoted entity in a live browser. |
 | `refreshes an open project when a run stream auto-promotes an Atlas entity` | Verifies that a live command stream can auto-promote a matching Atlas entity and refresh an already-open Projects modal without a page reload. |

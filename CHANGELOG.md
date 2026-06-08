@@ -34,7 +34,21 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Safety rules keep raw tokens, one-time invite/recovery codes, file contents, imported row bodies, raw automation command text, webhook URLs, bot tokens, SMTP passwords, and replacement secret values out of audit details.
   - `/diag/audit` filters by event, actor, team, project, target, correlation, and date; shows target-aware event hints and safe JSON details; links back to available app surfaces; and exports capped CSV/JSON downloads with truncation markers.
   - Audit retention runs at startup and periodically, and `audit_log_enabled=false` makes the recorder a no-op while logging that tradeoff once.
-  - **Test coverage:** focused backend coverage verifies the centralized event registry policy, same-transaction rollback behavior, sanitized best-effort fallback logs, owner-scoped audit pagination, periodic retention gating, and the operator diagnostics viewer/export paths. Browser coverage verifies audit viewer filters, row rendering, native details drawers, disabled/empty states, and a live project-link action appearing in `/diag/audit`.
+  - Projects now include an Activity tab that shows scoped, user-safe audit rows for personal project owners and team-scoped project viewers without exposing the operator-wide diagnostics table.
+  - Project Activity supports compact filters for event type, actor, target type, target id, and date range; offset pagination; mobile stacked rows; retention-aware empty states; and collapsed safe-details drawers.
+  - Options → Teams now includes an owner/admin Activity subtab for safe team-governance and shared-configuration rows, with filters, offset pagination, retention-aware empty states, and collapsed safe details.
+  - Project metadata edit sheets now show a compact Recent activity panel for the current item and can jump into the filtered Project Activity tab.
+  - The selected team overview now shows owners/admins a compact Recent activity panel for team-governance rows, with a jump into the full Team Activity subtab.
+  - Job-backed package and report archives now include a minimal audit handoff in their provenance with event type, job id, and correlation id. Package README files show the audit correlation so a reviewer can tie the bundle back to the build event without exposing session-derived details.
+  - **Test coverage:** focused backend coverage verifies the centralized event registry policy, same-transaction rollback behavior, sanitized best-effort fallback logs, owner-scoped audit pagination, scoped personal/team/project visibility boundaries, periodic retention gating, Project and Team Activity route access, package/report audit handoff fields, and the operator diagnostics viewer/export paths. Browser coverage verifies audit viewer filters, Project and Team Activity filters, object-level Recent activity panels, row rendering, native details drawers, disabled/empty states, mobile rows, and a live project-link action appearing in `/diag/audit`.
+
+### Fixed
+
+- **Built-in command ANSI rendering** — structured built-in rows now preserve the intended ANSI styling path through `ansi_up`, so `jobs`, `runs`, `status`, `stats`, `last`, `retention`, and system-style summaries no longer show stray `[4m`/`[0m` control fragments in the terminal.
+
+- **Audit log table fit** — team-scoped audit rows now truncate long scope and target identifiers inside the table, keep the Details column visible at normal desktop widths, and expand details rows with a self-contained JSON envelope aligned back into the table.
+
+- **Findings Board column loading** — project-scoped Findings Board refreshes now load each review column with its own page cap, so a project with hundreds of New findings no longer hides reviewed, false-positive, or follow-up items from the board.
 
 ---
 
@@ -97,12 +111,6 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Active Project HUD switcher** — the Active Project HUD chip now opens a compact searchable switcher instead of jumping straight into the Projects modal. The menu shows the current active project or `No project`, loads bounded active/MRU/search results from `/projects?mode=switcher`, lets users select or clear active-project focus without a page refresh, and keeps **Create project** plus **Open Projects** as deeper-work actions. Team viewers can select or clear focus without gaining project mutation rights, while project creation stays locked to roles that can mutate projects.
 
 ### Fixed
-
-- **Built-in command ANSI rendering** — structured built-in rows now preserve the intended ANSI styling path through `ansi_up`, so `jobs`, `runs`, `status`, `stats`, `last`, `retention`, and system-style summaries no longer show stray `[4m`/`[0m` control fragments in the terminal.
-
-- **Audit log table fit** — team-scoped audit rows now truncate long scope and target identifiers inside the table, keep the Details column visible at normal desktop widths, and expand details rows with a self-contained JSON envelope aligned back into the table.
-
-- **Findings Board column loading** — project-scoped Findings Board refreshes now load each review column with its own page cap, so a project with hundreds of New findings no longer hides reviewed, false-positive, or follow-up items from the board.
 
 - **Scope HUD menu loading state** — the desktop `SCOPE` pop-up clears its `Loading teams...` note once team choices are rendered, instead of leaving stale loading copy below the loaded menu.
 

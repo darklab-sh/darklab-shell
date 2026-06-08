@@ -81,6 +81,7 @@
   const projectEntityEditorForm = document.getElementById('project-entity-editor-form');
   const projectEntityLabelsInput = document.getElementById('project-entity-labels');
   const projectEntityNoteInput = document.getElementById('project-entity-note');
+  const projectEntityActivityRoot = document.getElementById('project-entity-activity');
   const projectEntitySubmitButton = document.getElementById('project-entity-submit');
   const projectNotesForm = document.getElementById('project-notes-form');
   const projectNotesInput = document.getElementById('project-notes-input');
@@ -1485,6 +1486,26 @@
 
   let projectReportController = null;
 
+  let projectActivityController = null;
+
+  function _projectActivityController() {
+    if (projectActivityController) return projectActivityController;
+    const factory = global.DarklabProjectActivity && global.DarklabProjectActivity.createProjectActivityController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectActivity is unavailable');
+    projectActivityController = factory({
+      projectWorkspaceRequest: _projectWorkspaceRequest,
+      projectResponseError: _projectResponseError,
+      formatDate: _formatProjectDate,
+      makeProjectButton: _makeProjectButton,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      emptyProjectPanel: _emptyProjectPanel,
+      renderProjectExplorer: _renderProjectExplorer,
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      openProjectObject: _openProjectObject,
+    });
+    return projectActivityController;
+  }
+
   function _projectReportController() {
     if (projectReportController) return projectReportController;
     const factory = global.DarklabProjectReport && global.DarklabProjectReport.createProjectReportController;
@@ -1856,6 +1877,7 @@
       renderProjectHeader: _renderProjectHeader,
       renderProjectList: _renderProjectList,
       renderProjectMobile: _renderProjectMobile,
+      renderProjectActivity: _renderProjectActivity,
       renderProjectPackages: _renderProjectPackages,
       renderProjectPackageWizardModal: _renderProjectPackageWizardModal,
       renderProjectReport: _renderProjectReport,
@@ -1902,6 +1924,7 @@
       projectMobileTabs,
       projectPackageManifestOverlay,
       projectPackageWizardOverlay,
+      projectActivityController: _projectActivityController,
       projectPackagesController: _projectPackagesController,
       projectTargetEditorOverlay,
       projectTargetsController: _projectTargetsController,
@@ -2131,6 +2154,7 @@
       renderProjectMobileEntitiesTab: (projectId, summary) => _projectEntitiesController().renderMobileEntitiesTab(projectId, summary),
       renderProjectMobilePackagesTab: (projectId, summary) => _projectPackagesController().renderMobilePackagesTab(projectId, summary),
       renderProjectMobileReportTab: (projectId, summary) => _projectReportController().renderMobileReportTab(projectId, summary),
+      renderProjectMobileActivityTab: (projectId, summary) => _projectActivityController().renderMobileActivityTab(projectId, summary),
       setProjectMobileView: _setProjectMobileView,
       loadProjectFindings: _loadProjectFindings,
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
@@ -2155,6 +2179,7 @@
       form: projectEntityEditorForm,
       labelsInput: projectEntityLabelsInput,
       noteInput: projectEntityNoteInput,
+      activityRoot: projectEntityActivityRoot,
       submitButton: projectEntitySubmitButton,
       parseLabelInput: EntityMetadataClient.parseLabelInput,
       entityTitleForEditor: _entityTitleForEditor,
@@ -2163,6 +2188,9 @@
       entityNoteBody: _entityNoteBody,
       syncEntityLabels: _syncEntityLabels,
       syncEntityNote: _syncEntityNote,
+      projectResponseError: _projectResponseError,
+      projectWorkspaceRequest: _projectWorkspaceRequest,
+      openProjectActivity: _openProjectActivity,
       refreshProjectWorkspace,
       invalidateProjectFindings: _invalidateProjectFindings,
       invalidateProjectTargetPage: projectId => _projectDetailsController().invalidateTargetPage(projectId),
@@ -2271,6 +2299,7 @@
       packagesController: _projectPackagesController,
       previewProjectArtifact: _previewProjectArtifact,
       reportController: _projectReportController,
+      activityController: _projectActivityController,
       projectArtifactItems: _projectArtifactItems,
       projectArtifactPagination: _projectArtifactPagination,
       projectDisplayName: _projectDisplayName,
@@ -3079,6 +3108,36 @@
 
   function _renderProjectPackages(container, projectId, summary) {
     _projectPackagesController().renderPackages(container, projectId, summary);
+  }
+
+  function _renderProjectActivity(container, projectId, summary) {
+    _projectActivityController().renderActivity(container, projectId, summary);
+  }
+
+  function _openProjectObject(projectId, { tab = '', targetType = '', targetId = '' } = {}) {
+    const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
+    const normalizedTab = String(tab || '').trim();
+    if (!normalizedProjectId || !normalizedTab) return;
+    if (normalizedTab === 'activity') {
+      _openProjectActivity(normalizedProjectId, { targetType, targetId });
+      return;
+    }
+    projectWorkspaceState.setTab(normalizedTab);
+    _renderProjectExplorer();
+  }
+
+  function _openProjectActivity(projectId, { targetId = '', targetType = '' } = {}) {
+    const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
+    if (!normalizedProjectId) return;
+    const st = _projectActivityController().stateFor(normalizedProjectId);
+    st.filters.target_id = String(targetId || '').trim();
+    st.filters.target_type = String(targetType || '').trim();
+    st.offset = 0;
+    st.loaded = false;
+    _closeProjectEntityEditor();
+    projectWorkspaceState.setTab('activity');
+    _renderProjectExplorer();
+    _projectActivityController().load(normalizedProjectId).catch(() => {});
   }
 
   function _renderProjectReport(container, projectId, summary) {

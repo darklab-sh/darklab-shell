@@ -505,11 +505,21 @@
     setFindingReviewState(findingId, reviewState);
     render();
     try {
-      const resp = await api()(`/findings/${encodeURIComponent(findingId)}/review`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ review_state: reviewState }),
-      });
+      const projectScoped = state.source === 'project' && state.projectId;
+      const resp = await api()(
+        projectScoped
+          ? `/projects/${encodeURIComponent(state.projectId)}/findings/review`
+          : `/findings/${encodeURIComponent(findingId)}/review`,
+        {
+          method: projectScoped ? 'POST' : 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            projectScoped
+              ? { finding_ids: [findingId], review_state: reviewState }
+              : { review_state: reviewState },
+          ),
+        },
+      );
       if (!resp.ok) {
         let message = `HTTP ${resp.status}`;
         try {
@@ -520,7 +530,13 @@
         throw new Error(message);
       }
       const data = await resp.json().catch(() => null);
-      if (data && data.finding) setFindingReviewState(findingId, data.finding.review_state || reviewState);
+      const authoritativeReviewState = data && data.finding
+        ? data.finding.review_state
+        : data?.review_state;
+      setFindingReviewState(findingId, authoritativeReviewState || reviewState);
+      if (projectScoped && data && Number(data.counts?.updated || 0) <= 0) {
+        throw new Error('Finding was no longer available in this project.');
+      }
       showMessage('');
       if (typeof global.emitUiEvent === 'function') {
         global.emitUiEvent('app:project-workspace-mutated', {
@@ -529,15 +545,14 @@
           finding_id: findingId,
         });
       }
+      render();
     } catch (err) {
       setFindingReviewState(findingId, previousReviewState || 'new');
       showMessage(err && err.message ? err.message : 'Could not update finding review state.', 'error');
       if (typeof global.logClientError === 'function') global.logClientError('failed to update findings board review state', err);
-    } finally {
       render();
     }
   }
-
   async function openFindingTriage(findingId) {
     const finding = findingById(findingId);
     if (!finding) {
