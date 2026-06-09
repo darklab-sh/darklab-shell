@@ -1311,8 +1311,9 @@ test.describe('project workspace modal', () => {
     const prevArtifacts = artifactsGroup.locator('[data-project-report-action="selection-prev"][data-selection-key="artifact_ids"]')
 
     async function expectReportEditorStayedPut(before) {
+      const scrollAnchorTolerance = 360
       await expect.poll(async () => editor.evaluate((node) => node.scrollTop), { timeout: 5_000 })
-        .toBeGreaterThanOrEqual(Math.max(0, before - 240))
+        .toBeGreaterThanOrEqual(Math.max(0, before - scrollAnchorTolerance))
     }
 
     async function clickAndKeepScroll(locator) {

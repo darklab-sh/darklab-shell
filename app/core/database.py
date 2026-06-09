@@ -159,6 +159,17 @@ def _create_schema(conn):
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS run_output_summary_status (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            attempted_at TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 1,
+            error TEXT NOT NULL DEFAULT '',
+            CHECK (status IN ('complete', 'empty', 'failed'))
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS snapshots (
             id         TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -860,6 +871,10 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS idx_run_output_summary_lookup "
         "ON run_output_summary (family, value, run_id)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_output_summary_status_status "
+        "ON run_output_summary_status (status, attempted_at)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session_created "
@@ -1387,13 +1402,18 @@ def _populate_run_output_summary(conn):
         return
     if DB_BACKEND == DatabaseBackend.SQLITE and not sqlite_table_exists(conn, "run_output_summary"):
         return
+    if DB_BACKEND == DatabaseBackend.SQLITE and not sqlite_table_exists(conn, "run_output_summary_status"):
+        return
     try:
         rows = conn.execute(
             "SELECT r.id, r.output_preview, art.rel_path "
             "FROM runs r "
             "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
             "WHERE NOT EXISTS ("
-            "SELECT 1 FROM run_output_summary s WHERE s.run_id = r.id)"
+            "SELECT 1 FROM run_output_summary s WHERE s.run_id = r.id) "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM run_output_summary_status st "
+            "WHERE st.run_id = r.id AND st.status IN ('complete', 'empty', 'failed'))"
         ).fetchall()
     except SQLiteOperationalError:
         return
@@ -1402,23 +1422,69 @@ def _populate_run_output_summary(conn):
     for row in rows:
         run_id = str(row["id"] or "")
         entries = None
+        source = ""
+        error = ""
         rel_path = str(row["rel_path"] or "").strip()
         if rel_path:
             try:
                 entries = load_full_output_entries(rel_path)
+                source = "artifact"
             except Exception:  # noqa: BLE001
-                failed += 1
+                source = "artifact"
+                error = "artifact_unreadable"
         if entries is None:
             try:
                 parsed = json.loads(str(row["output_preview"] or "[]"))
                 entries = parsed if isinstance(parsed, list) else []
+                source = "preview"
             except (TypeError, ValueError, json.JSONDecodeError):
                 failed += 1
+                _record_run_output_summary_status(
+                    conn,
+                    run_id,
+                    status="failed",
+                    source=source or "preview",
+                    error=error or "preview_unreadable",
+                )
                 entries = []
+                continue
         replace_run_output_summary(conn, run_id, entries)
+        _record_run_output_summary_status(
+            conn,
+            run_id,
+            status="complete" if entries else "empty",
+            source=source,
+            error=error,
+        )
         populated += 1
     if populated or failed:
         log.info("RUN_OUTPUT_SUMMARY_BACKFILLED", extra={"runs": populated, "failed": failed})
+
+
+def _record_run_output_summary_status(conn, run_id: str, *, status: str, source: str, error: str = "") -> None:
+    if not run_id:
+        return
+    attempted_at = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO run_output_summary_status "
+        "(run_id, status, source, attempted_at, attempts, error) "
+        "VALUES (?, ?, ?, ?, 1, ?) "
+        "ON CONFLICT(run_id) DO UPDATE SET "
+        "status = excluded.status, "
+        "source = excluded.source, "
+        "attempted_at = excluded.attempted_at, "
+        "attempts = CASE "
+        "WHEN run_output_summary_status.attempts >= 2147483647 "
+        "THEN run_output_summary_status.attempts "
+        "ELSE run_output_summary_status.attempts + 1 END, "
+        "error = excluded.error",
+        (run_id, status, source, attempted_at, _bounded_backfill_error(error)),
+    )
+
+
+def _bounded_backfill_error(error: str) -> str:
+    text = str(error or "").replace("\r", " ").replace("\n", " ").strip()
+    return text[:160]
 
 
 def _create_fts_schema(conn):
@@ -1948,6 +2014,20 @@ def _migrate_schema(conn):
         _create_audit_schema(conn)
     except SQLiteOperationalError:
         pass
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_output_summary_status (
+                run_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                attempted_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 1,
+                error TEXT NOT NULL DEFAULT '',
+                CHECK (status IN ('complete', 'empty', 'failed'))
+            )
+        """)
+    except SQLiteOperationalError:
+        pass
     for stmt in (
         "ALTER TABLE notification_channels ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE notification_events ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
@@ -2132,6 +2212,13 @@ def delete_run_artifacts(conn, run_ids):
     try:
         conn.execute(
             f"DELETE FROM run_output_summary WHERE run_id IN ({placeholders})",  # nosec
+            ids,
+        )
+    except SQLiteOperationalError:
+        pass
+    try:
+        conn.execute(
+            f"DELETE FROM run_output_summary_status WHERE run_id IN ({placeholders})",  # nosec
             ids,
         )
     except SQLiteOperationalError:

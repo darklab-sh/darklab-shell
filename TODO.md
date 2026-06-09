@@ -41,11 +41,7 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Stop retrying run-output summary backfill forever.**
-  - Startup backfills `run_output_summary` for runs with no summary rows. Legacy runs with no structured `kind`/`role`/`signal` entries can produce no rows, and runs with unreadable artifacts/previews can fail every boot, so the same runs are retried and logged on every restart.
-  - Add a durable per-run backfill status marker separate from `run_output_summary`, such as `run_output_summary_status(run_id, status, source, attempted_at, error)`.
-  - Treat successful empty summaries as complete, record bounded failed attempts, and skip already completed/empty/failed runs on normal startup.
-  - Keep a future repair path able to clear failed markers if missing artifacts are restored and an operator wants to retry.
+No technical debt items are currently tracked.
 
 ---
 

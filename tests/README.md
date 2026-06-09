@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,639
+- behavior tests: 3,641
 - docs/inventory meta-tests: 34
-- `pytest`: 2044 (2010 behavior + 34 meta)
+- `pytest`: 2046 (2012 behavior + 34 meta)
 - `vitest`: 1366
 - `playwright`: 263
-- total: 3,673
+- total: 3,675
 
 This document is organized in two parts:
 
@@ -957,6 +957,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
+| `TestDatabaseInit.test_run_output_summary_backfill_marks_empty_runs_once` | Verifies startup marks legacy runs with empty structured output as handled instead of retrying them on every restart. |
+| `TestDatabaseInit.test_run_output_summary_backfill_marks_failures_once` | Verifies startup records unreadable run-output summary backfill attempts once and skips them on the next normal pass. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
 | `TestDatabaseInit.test_json_bearing_schema_columns_use_sqlite_json_type` | Verifies JSON-bearing schema columns keep SQLite's `TEXT` storage type through the backend dialect helper. |
 | `TestDatabaseInit.test_atlas_import_source_helpers_are_idempotent` | Verifies Atlas import draft, batch, entity-link, and finding-occurrence helpers remain idempotent on repeated inserts. |

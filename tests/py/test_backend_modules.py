@@ -3438,6 +3438,7 @@ class TestPostgresMigrations:
             "0028",
             "0029",
             "0030",
+            "0031",
         ]
         for table_name in (
             "runs",
@@ -15705,6 +15706,77 @@ class TestDatabaseInit:
         assert "runs" in tables
         assert "snapshots" in tables
         assert "session_variables" in tables
+        assert "run_output_summary_status" in tables
+
+    def test_run_output_summary_backfill_marks_empty_runs_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("core.database.DB_PATH", db_path):
+                with database.db_connect() as conn:
+                    conn.execute(
+                        "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        ("run-empty-summary", "session-1", "echo hello", "2026-06-01", "[]"),
+                    )
+                    conn.commit()
+                    database._populate_run_output_summary(conn)
+                    database._populate_run_output_summary(conn)
+                    conn.commit()
+                    rows = conn.execute(
+                        "SELECT status, source, attempts, error "
+                        "FROM run_output_summary_status WHERE run_id = ?",
+                        ("run-empty-summary",),
+                    ).fetchall()
+
+        assert [dict(row) for row in rows] == [{
+            "status": "empty",
+            "source": "preview",
+            "attempts": 1,
+            "error": "",
+        }]
+
+    def test_run_output_summary_backfill_marks_failures_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("core.database.DB_PATH", db_path):
+                with database.db_connect() as conn:
+                    conn.execute(
+                        "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        ("run-failed-summary", "session-1", "cat missing", "2026-06-01", "{"),
+                    )
+                    conn.execute(
+                        "INSERT INTO run_output_artifacts (run_id, rel_path, created) VALUES (?, ?, ?)",
+                        ("run-failed-summary", "missing.jsonl.gz", "2026-06-01"),
+                    )
+                    conn.commit()
+                    with mock.patch(
+                        "core.database.load_full_output_entries",
+                        side_effect=OSError("missing artifact"),
+                    ) as load_entries:
+                        database._populate_run_output_summary(conn)
+                        database._populate_run_output_summary(conn)
+                    conn.commit()
+                    rows = conn.execute(
+                        "SELECT status, source, attempts, error "
+                        "FROM run_output_summary_status WHERE run_id = ?",
+                        ("run-failed-summary",),
+                    ).fetchall()
+                    summary_count = conn.execute(
+                        "SELECT COUNT(*) AS count FROM run_output_summary WHERE run_id = ?",
+                        ("run-failed-summary",),
+                    ).fetchone()["count"]
+
+        assert load_entries.call_count == 1
+        assert summary_count == 0
+        assert [dict(row) for row in rows] == [{
+            "status": "failed",
+            "source": "artifact",
+            "attempts": 1,
+            "error": "artifact_unreadable",
+        }]
 
     def test_creates_project_workspace_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

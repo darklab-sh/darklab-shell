@@ -35,6 +35,7 @@ from . import (
     v0028_finding_triage_details,
     v0029_project_reports,
     v0030_audit_events,
+    v0031_run_output_summary_status,
 )
 from .runner import Migration
 
@@ -69,4 +70,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0028_finding_triage_details.MIGRATION,
     v0029_project_reports.MIGRATION,
     v0030_audit_events.MIGRATION,
+    v0031_run_output_summary_status.MIGRATION,
 )

@@ -45,6 +45,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Run-output summary backfill retries** — startup now records durable status for run-output summary backfill attempts, so legacy runs with empty structured output or unreadable artifacts/previews are handled once instead of being retried and re-logged on every restart.
+  - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers. Current suite total: 2046 pytest + 1366 Vitest + 263 Playwright = **3,675 tests**.
+
 - **Report selector freshness** — report selector page loads now ignore stale responses after filter changes, so slower old requests cannot redraw older rows over newer filtered results.
 
 - **Report selector search drafts** — typing in report selector search fields now updates the draft immediately, so Preview and Export use the visible filter text even before the field loses focus.

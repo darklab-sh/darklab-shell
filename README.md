@@ -536,7 +536,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0027_atlas_import_sources.py # Postgres Atlas import draft, batch, and source-link tables
 │   │   │   ├── v0028_finding_triage_details.py # Postgres finding remediation and verification table
 │   │   │   ├── v0029_project_reports.py # Postgres Project report draft table
-│   │   │   └── v0030_audit_events.py # Postgres audit event table and indexes
+│   │   │   ├── v0030_audit_events.py # Postgres audit event table and indexes
+│   │   │   └── v0031_run_output_summary_status.py # Postgres run-output summary backfill status markers
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application

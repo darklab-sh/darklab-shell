@@ -294,6 +294,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0028",
         "0029",
         "0030",
+        "0031",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -338,6 +339,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'row_number',
                 'source_detail_json'
             ))
+            OR (table_name = 'run_output_summary_status' AND column_name IN (
+                'attempts',
+                'status'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -352,6 +357,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "atlas_import_batches",
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
+        "run_output_summary_status",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -376,6 +382,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("atlas_entity_import_links", "created_entity", "boolean"),
         ("atlas_finding_import_occurrences", "row_number", "bigint"),
         ("atlas_finding_import_occurrences", "source_detail_json", "jsonb"),
+        ("run_output_summary_status", "attempts", "integer"),
+        ("run_output_summary_status", "status", "text"),
     }
     runs_index_rows = conn.execute(
         """
