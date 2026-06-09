@@ -96,6 +96,10 @@ async function switchScopeFromSelector(page, teamId = '') {
     : menu.locator('[data-team-scope-menu-option="personal"]')
   await option.click()
   await expect(menu).toBeHidden()
+  await expect.poll(() => page.evaluate(() => {
+    const sessionId = typeof SESSION_ID === 'string' && SESSION_ID ? SESSION_ID : 'anonymous'
+    return localStorage.getItem(`active_team_id:${sessionId}`) || ''
+  })).toBe(teamId)
 }
 
 async function historyCommands(page) {

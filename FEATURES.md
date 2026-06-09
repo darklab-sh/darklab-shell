@@ -957,9 +957,10 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
   - Job-backed package downloads include a safe audit correlation in the manifest and README so the bundle can be tied back to the build event without exposing session-derived details.
 - The Report tab turns selected project material into a narrative engagement report.
   - Operators can edit engagement metadata, executive summary, methodology, cover notes, and date ranges; toggle and reorder shipped sections; choose included runs, targets, findings, and artifacts; save drafts; preview rendered HTML; export the markdown/HTML archive; or use browser Print/PDF.
+  - Included-evidence controls page through large projects instead of loading everything into one long list. All/None choices apply to the full filtered set, small hand-picked selections stay saved even when you page or filter away from them, compact summaries show saved selected or excluded ids, and oversized bulk choices stay represented as filters rather than thousands of stored ids.
   - Findings in report output show readable target references with target type/value when export settings allow it, source run, and relationship source when the project has that context.
   - The editor shows available source provenance before the included-item list and falls back cleanly when source details are not present in the current project view.
-  - Report archives include a compact manifest with generated-by details, redaction/export choices, section choices, and selected entity ids/counts.
+  - Report archives include a compact manifest with generated-by details, redaction/export choices, section choices, selected entity ids/counts, large-selection filters, bounded exclusions, and resolved build-time counts.
   - Job-backed report exports include a safe audit correlation in the manifest, limited to the build event type, job id, and correlation id.
   - Operator-configured report templates appear as a selector when more than one template is available.
   - View-only team members can preview and download the default readable report, but they can't save drafts or switch to private-note or unredacted variants.

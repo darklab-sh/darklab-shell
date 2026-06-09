@@ -99,14 +99,18 @@ function describeFetchError(err, context = 'server') {
   return SessionCore.describeFetchError(err, context);
 }
 
-function logClientError(context, err) {
+function logClientError(context, err, details = null) {
   if (typeof console !== 'undefined' && typeof console.warn === 'function') {
     console.warn(`[client] ${context}`, err);
   }
   const message = (err && typeof err.message === 'string') ? err.message : String(err || '');
+  const body = { context, message };
+  if (details && typeof details === 'object' && !Array.isArray(details)) {
+    body.details = details;
+  }
   apiFetch('/log', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ context, message }),
+    body: JSON.stringify(body),
   }).catch(() => {});
 }

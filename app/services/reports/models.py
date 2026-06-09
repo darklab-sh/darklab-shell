@@ -23,9 +23,11 @@ REPORT_SECTION_TYPES = (
     "artifacts",
     "appendix",
 )
-REPORT_SELECTION_KEYS = ("run_ids", "artifact_ids", "entity_ids", "finding_ids", "target_ids")
+REPORT_SELECTION_KEYS = ("run_ids", "artifact_ids", "finding_ids", "target_ids")
 REPORT_SELECTION_MODES = frozenset({"all", "manual"})
 REPORT_REDACTION_MODES = frozenset({"redacted", "raw"})
+REPORT_SELECTION_ID_LIMIT = 500
+REPORT_SELECTION_EXCLUSION_LIMIT = 500
 
 _SECTION_TITLES = {
     "cover": "Cover",
@@ -38,6 +40,9 @@ _SECTION_TITLES = {
     "appendix": "Appendix",
 }
 _DATE_RANGE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})$")
+_REPORT_TARGET_FILTER_TYPES = frozenset({"", "domain", "ip", "url"})
+_REPORT_FINDING_FILTER_REVIEW_STATES = frozenset({"", "new", "reviewed", "important", "false_positive", "needs_followup"})
+_REPORT_FINDING_FILTER_SEVERITIES = frozenset({"", "critical", "high", "medium", "low", "info"})
 
 
 @dataclass(frozen=True)
@@ -132,7 +137,7 @@ def _normalize_metadata(value: Any) -> dict[str, str]:
     }
 
 
-def _normalize_selection_values(values: Any) -> list[str]:
+def _normalize_selection_values(values: Any, *, limit: int | None = None, label: str = "selection") -> list[str]:
     if values in (None, ""):
         return []
     if not isinstance(values, list):
@@ -145,12 +150,82 @@ def _normalize_selection_values(values: Any) -> list[str]:
             continue
         seen.add(normalized)
         selected.append(normalized)
+        if limit is not None and len(selected) > limit:
+            raise ProjectWorkspaceError(f"report {label} values are limited to {limit} ids per section")
     return selected
 
 
 def normalize_report_selection(value: Any) -> dict[str, list[str]]:
     raw = value if isinstance(value, dict) else {}
-    return {key: _normalize_selection_values(raw.get(key)) for key in REPORT_SELECTION_KEYS}
+    target_values = raw.get("target_ids")
+    if not target_values and raw.get("entity_ids"):
+        target_values = raw.get("entity_ids")
+    return {
+        key: _normalize_selection_values(
+            target_values if key == "target_ids" else raw.get(key),
+            limit=REPORT_SELECTION_ID_LIMIT,
+            label="manual selection",
+        )
+        for key in REPORT_SELECTION_KEYS
+    }
+
+
+def normalize_report_selection_exclude_ids(value: Any) -> dict[str, list[str]]:
+    raw = value if isinstance(value, dict) else {}
+    exclusions: dict[str, list[str]] = {}
+    for key in REPORT_SELECTION_KEYS:
+        normalized = _normalize_selection_values(
+            raw.get(key),
+            limit=REPORT_SELECTION_EXCLUSION_LIMIT,
+            label="selection exclusion",
+        )
+        exclusions[key] = normalized
+    return exclusions
+
+
+def _normalize_selection_filter(key: str, value: Any) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    if key in {"run_ids", "artifact_ids"}:
+        unsupported = set(raw) - {"q"}
+        if unsupported:
+            raise ProjectWorkspaceError(f"unsupported report {key} filter: {sorted(unsupported)[0]}")
+        return {"q": _trim_text(raw.get("q"), 128)}
+    if key == "target_ids":
+        unsupported = set(raw) - {"q", "type", "auto_discovered"}
+        if unsupported:
+            raise ProjectWorkspaceError(f"unsupported report target_ids filter: {sorted(unsupported)[0]}")
+        target_type = _trim_text(raw.get("type"), 32).lower()
+        if target_type not in _REPORT_TARGET_FILTER_TYPES:
+            raise ProjectWorkspaceError("report target filter type must be domain, ip, url, or empty")
+        auto_discovered = raw.get("auto_discovered")
+        return {
+            "q": _trim_text(raw.get("q"), 128),
+            "type": target_type,
+            "auto_discovered": bool(auto_discovered) if auto_discovered is not None else False,
+        }
+    if key == "finding_ids":
+        unsupported = set(raw) - {"q", "review_state", "severity"}
+        if unsupported:
+            raise ProjectWorkspaceError(f"unsupported report finding_ids filter: {sorted(unsupported)[0]}")
+        review_state = _trim_text(raw.get("review_state"), 32).lower()
+        severity = _trim_text(raw.get("severity"), 32).lower()
+        if review_state not in _REPORT_FINDING_FILTER_REVIEW_STATES:
+            raise ProjectWorkspaceError(
+                "report finding review filter must be new, reviewed, important, false_positive, needs_followup, or empty"
+            )
+        if severity not in _REPORT_FINDING_FILTER_SEVERITIES:
+            raise ProjectWorkspaceError("report finding severity filter must be critical, high, medium, low, info, or empty")
+        return {
+            "q": _trim_text(raw.get("q"), 128),
+            "review_state": review_state,
+            "severity": severity,
+        }
+    return {}
+
+
+def normalize_report_selection_filters(value: Any) -> dict[str, dict[str, Any]]:
+    raw = value if isinstance(value, dict) else {}
+    return {key: _normalize_selection_filter(key, raw.get(key)) for key in REPORT_SELECTION_KEYS}
 
 
 def normalize_report_selection_modes(value: Any) -> dict[str, str]:
@@ -179,6 +254,8 @@ def default_report_draft() -> dict[str, Any]:
         "sections": normalize_report_sections(None),
         "selection": normalize_report_selection({}),
         "selection_modes": normalize_report_selection_modes({}),
+        "selection_filters": normalize_report_selection_filters({}),
+        "selection_exclude_ids": normalize_report_selection_exclude_ids({}),
         "export": normalize_report_export_prefs({}),
     }
 
@@ -190,5 +267,7 @@ def normalize_report_draft(value: Any) -> dict[str, Any]:
         "sections": normalize_report_sections(raw.get("sections")),
         "selection": normalize_report_selection(raw.get("selection")),
         "selection_modes": normalize_report_selection_modes(raw.get("selection_modes")),
+        "selection_filters": normalize_report_selection_filters(raw.get("selection_filters")),
+        "selection_exclude_ids": normalize_report_selection_exclude_ids(raw.get("selection_exclude_ids")),
         "export": normalize_report_export_prefs(raw.get("export")),
     }

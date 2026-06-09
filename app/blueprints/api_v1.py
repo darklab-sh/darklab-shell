@@ -2058,6 +2058,7 @@ def api_project_runs(project_id):
         project_id,
         limit=normalize_page_limit(request.args.get("limit"), 50, 100),
         offset=normalize_page_offset(request.args.get("offset")),
+        query=request.args.get("q") or "",
         team_id=owner_scope.team_id,
     )
     if runs is None:

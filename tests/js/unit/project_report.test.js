@@ -10,6 +10,16 @@ function apiResponse(payload = {}, { ok = true } = {}) {
   }
 }
 
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
 function loadReportModule(globals = {}) {
   const sandbox = {
     activeTeamScopeCan: vi.fn(() => true),
@@ -116,6 +126,33 @@ describe('project report controller', () => {
     expect(container.querySelector('[data-project-report-action="preview"]').textContent).toBe('Preview')
     expect(container.querySelector('[data-project-report-action="export"]').textContent).toBe('Export archive')
     expect(container.querySelector('.project-provenance-summary')?.textContent).toContain('manual (2)')
+
+    const renderProjectMobileDetail = vi.fn()
+    const mobileApiFetch = vi.fn(async () => apiResponse({
+      report: {
+        updated: '2026-06-04T12:30:00Z',
+        draft: { metadata: { engagement_name: 'Mobile engagement' } },
+      },
+      templates: [],
+    }))
+    const mobileController = reportApi.createProjectReportController(makeContext(mobileApiFetch, {
+      mobileView: vi.fn(() => 'detail'),
+      renderProjectMobileDetail,
+    }))
+    const mobileHost = document.createElement('div')
+    mobileHost.appendChild(mobileController.renderMobileReportTab('proj_mobile', summary))
+    expect(mobileHost.textContent).toContain('Loading report draft...')
+    await vi.waitFor(() => {
+      expect(renderProjectMobileDetail).toHaveBeenCalled()
+    })
+    const loadedMobileHost = document.createElement('div')
+    loadedMobileHost.appendChild(mobileController.renderMobileReportTab('proj_mobile', summary))
+    expect(loadedMobileHost.querySelector('[data-project-report-metadata="engagement_name"]').value).toBe('Mobile engagement')
+    expect(loadedMobileHost.querySelector('[data-project-report-selection="run_ids"]')).not.toBeNull()
+    expect(loadedMobileHost.querySelector(
+      '[data-project-report-action="selection-all"][data-selection-key="run_ids"]',
+    )).not.toBeNull()
+    expect(loadedMobileHost.querySelector('[data-project-report-action="preview"]')).not.toBeNull()
 
     const sharedUi = globalThis.DarklabProjectSharedUi?.createProjectSharedUiController?.({})
     const legacySummary = sharedUi.projectProvenanceSummary(
@@ -334,56 +371,612 @@ describe('project report controller', () => {
     }))
   })
 
-  it('loads full finding and artifact lists before rendering report selections', async () => {
+  it('renders paged report selectors without loading every finding or artifact', async () => {
     const { reportApi } = loadReportModule()
-    let findings = [{ id: 'finding_page_1', title: 'Loaded page finding', severity: 'high' }]
-    let artifacts = [{ id: 'artifact_page_1', display_name: 'page-evidence.txt' }]
-    const loadProjectFindings = vi.fn(async (_projectId, options = {}) => {
-      expect(options).toEqual(expect.objectContaining({ allPages: true }))
-      findings = [
-        ...findings,
-        { id: 'finding_page_2', title: 'Second page finding', severity: 'medium' },
-      ]
-      return findings
+    const calls = []
+    const apiFetch = vi.fn(async (url) => {
+      calls.push(String(url))
+      if (url === '/projects/proj_1/report') {
+        return apiResponse({
+          report: {
+            updated: '',
+            draft: {
+              selection: { finding_ids: ['finding_off_page'] },
+              selection_modes: { finding_ids: 'manual' },
+            },
+          },
+          templates: [],
+        })
+      }
+      if (url === '/projects/proj_1/runs?limit=50&offset=0') {
+        return apiResponse({ runs: [{ id: 'run_page_1', command: 'nmap page 1' }], total: 1, limit: 50, offset: 0 })
+      }
+      if (url === '/projects/proj_1/runs?limit=50&offset=0&q=nuclei') {
+        return apiResponse({ runs: [{ id: 'run_filtered_1', command: 'nuclei -u https://login.example' }], total: 1, limit: 50, offset: 0 })
+      }
+      if (url === '/projects/proj_1/targets?limit=50&offset=0') {
+        return apiResponse({ targets: [{ id: 'target_page_1', value: 'page.example', type: 'domain' }], total: 1, limit: 50, offset: 0 })
+      }
+      if (url === '/projects/proj_1/targets?limit=50&offset=0&q=login') {
+        return apiResponse({ targets: [{ id: 'target_filtered_1', value: 'login.example', type: 'domain' }], total: 2, limit: 50, offset: 0 })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_1', title: 'Loaded page finding', severity: 'high' }],
+          total: 75,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=50&include_group_counts=0&orphan_filter=all') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_2', title: 'Second page finding', severity: 'medium' }],
+          total: 75,
+          limit: 50,
+          offset: 50,
+        })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all&q=redirect') {
+        return apiResponse({
+          findings: [{ id: 'finding_filtered_1', title: 'Open redirect on login', severity: 'medium' }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url === '/projects/proj_1/artifacts?limit=50&offset=0') {
+        return apiResponse({
+          artifacts: [{ id: 'artifact_page_1', display_name: 'page-evidence.txt' }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url === '/projects/proj_1/artifacts?limit=50&offset=0&q=evidence') {
+        return apiResponse({
+          artifacts: [{ id: 'artifact_filtered_1', display_name: 'filtered-evidence.txt' }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      return apiResponse({})
     })
-    const loadAllProjectArtifacts = vi.fn(async () => {
-      artifacts = [
-        ...artifacts,
-        { id: 'artifact_page_2', display_name: 'second-page-evidence.txt' },
-      ]
-      return artifacts
-    })
-    const controller = reportApi.createProjectReportController(makeContext(vi.fn(async () => (
-      apiResponse({ report: { updated: '', draft: {} }, templates: [] })
-    )), {
-      projectFindingItems: vi.fn(() => findings),
-      projectArtifactItems: vi.fn(() => artifacts),
+    const loadProjectFindings = vi.fn()
+    const loadAllProjectArtifacts = vi.fn()
+    const controller = reportApi.createProjectReportController(makeContext(apiFetch, {
+      projectFindingItems: vi.fn(() => []),
+      projectArtifactItems: vi.fn(() => []),
       loadProjectFindings,
       loadAllProjectArtifacts,
     }))
     await controller.load('proj_1', { render: false })
-    const loadingContainer = document.createElement('div')
-    controller.renderReport(loadingContainer, 'proj_1', {
+    const container = document.createElement('div')
+    controller.renderReport(container, 'proj_1', {
       ...summary,
-      counts: { findings: 2, artifacts: 2 },
-      artifacts,
+      counts: { runs: 1, targets: 1, findings: 75, artifacts: 1 },
+      runs: [],
+      targets: [],
+      artifacts: [],
     })
 
-    expect(loadingContainer.textContent).toContain('Loading full report item lists...')
+    expect(container.textContent).toContain('Loading findings...')
     await vi.waitFor(() => {
-      expect(controller.stateFor('proj_1').selectionItemsLoaded).toBe(true)
+      expect(calls).toContain('/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all')
+      expect(controller.stateFor('proj_1').selectionPages.finding_ids.loaded).toBe(true)
     })
 
     const loadedContainer = document.createElement('div')
     controller.renderReport(loadedContainer, 'proj_1', {
       ...summary,
-      counts: { findings: 2, artifacts: 2 },
-      artifacts,
+      counts: { runs: 1, targets: 1, findings: 75, artifacts: 1 },
+      runs: [],
+      targets: [],
+      artifacts: [],
     })
-    expect(loadProjectFindings).toHaveBeenCalledTimes(1)
-    expect(loadAllProjectArtifacts).toHaveBeenCalledTimes(1)
-    expect(loadedContainer.textContent).toContain('Second page finding')
-    expect(loadedContainer.textContent).toContain('second-page-evidence.txt')
+    expect(loadProjectFindings).not.toHaveBeenCalled()
+    expect(loadAllProjectArtifacts).not.toHaveBeenCalled()
+    expect(loadedContainer.textContent).toContain('Loaded page finding')
+    expect(loadedContainer.textContent).not.toContain('Second page finding')
+    expect(loadedContainer.textContent).toContain('1 selected; showing 1-1 of 75.')
+    const loadedSummary = loadedContainer.querySelector('.project-report-selection-summary')
+    expect(loadedSummary?.getAttribute('aria-live')).toBe('polite')
+    expect(loadedSummary?.getAttribute('aria-atomic')).toBe('true')
+    expect(loadedContainer.textContent).toContain('Selected findings')
+    expect(loadedContainer.textContent).toContain('Not loaded yet: finding_off_page')
+    const pageFinding = loadedContainer.querySelector('[data-project-report-selection="finding_ids"][value="finding_page_1"]')
+    pageFinding.checked = true
+    controller.handleChange({ target: pageFinding })
+    expect(controller.stateFor('proj_1').draft.selection.finding_ids).toEqual(['finding_off_page', 'finding_page_1'])
+    const selectedSummary = document.createElement('div')
+    controller.renderReport(selectedSummary, 'proj_1', {
+      ...summary,
+      counts: { runs: 1, targets: 1, findings: 75, artifacts: 1 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(selectedSummary.textContent).toContain('Loaded page finding')
+    expect(selectedSummary.textContent).toContain('high')
+    expect(selectedSummary.textContent).toContain('Not loaded yet: finding_off_page')
+
+    await controller.handleClick({
+      target: loadedContainer.querySelector('[data-project-report-action="selection-next"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    const secondPage = document.createElement('div')
+    controller.renderReport(secondPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 1, targets: 1, findings: 75, artifacts: 1 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(secondPage.textContent).toContain('Second page finding')
+    expect(controller.stateFor('proj_1').draft.selection.finding_ids).toEqual(['finding_off_page', 'finding_page_1'])
+
+    const targetSearch = secondPage.querySelector('[data-project-report-selection-filter="q"][data-selection-key="target_ids"]')
+    targetSearch.value = 'login'
+    controller.handleChange({ target: targetSearch })
+    await vi.waitFor(() => {
+      expect(calls).toContain('/projects/proj_1/targets?limit=50&offset=0&q=login')
+      expect(controller.stateFor('proj_1').selectionPages.target_ids.items[0].id).toBe('target_filtered_1')
+    })
+    expect(controller.stateFor('proj_1').draft.selection_filters.target_ids).toEqual(expect.objectContaining({ q: 'login' }))
+    expect(controller.stateFor('proj_1').draft.selection_modes.target_ids).toBe('all')
+    expect(controller.stateFor('proj_1').draft.selection.target_ids).toEqual([])
+    const filteredTargets = document.createElement('div')
+    controller.renderReport(filteredTargets, 'proj_1', {
+      ...summary,
+      counts: { runs: 1, targets: 2, findings: 75, artifacts: 1 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(filteredTargets.textContent).toContain('All matching 2 selected')
+    expect(filteredTargets.textContent).toContain('login.example')
+
+    const findingSearch = filteredTargets.querySelector('[data-project-report-selection-filter="q"][data-selection-key="finding_ids"]')
+    findingSearch.value = 'redirect'
+    controller.handleInput({ target: findingSearch })
+    expect(controller.stateFor('proj_1').draft.selection_filters.finding_ids).toEqual(expect.objectContaining({ q: 'redirect' }))
+    await vi.waitFor(() => {
+      expect(calls).toContain('/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all&q=redirect')
+      expect(controller.stateFor('proj_1').selectionPages.finding_ids.items[0].id).toBe('finding_filtered_1')
+    })
+    const filteredFindings = document.createElement('div')
+    controller.renderReport(filteredFindings, 'proj_1', {
+      ...summary,
+      counts: { runs: 1, targets: 2, findings: 75, artifacts: 1 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(filteredFindings.textContent).toContain('2 selected; showing 1 available')
+    expect(filteredFindings.textContent).toContain('Open redirect on login')
+
+    const runSearch = filteredFindings.querySelector('[data-project-report-selection-filter="q"][data-selection-key="run_ids"]')
+    runSearch.value = 'nuclei'
+    controller.handleInput({ target: runSearch })
+    const artifactSearch = filteredFindings.querySelector('[data-project-report-selection-filter="q"][data-selection-key="artifact_ids"]')
+    artifactSearch.value = 'evidence'
+    controller.handleInput({ target: artifactSearch })
+    expect(controller.stateFor('proj_1').draft.selection_filters.run_ids).toEqual({ q: 'nuclei' })
+    expect(controller.stateFor('proj_1').draft.selection_filters.artifact_ids).toEqual({ q: 'evidence' })
+    await vi.waitFor(() => {
+      expect(calls).toContain('/projects/proj_1/runs?limit=50&offset=0&q=nuclei')
+      expect(calls).toContain('/projects/proj_1/artifacts?limit=50&offset=0&q=evidence')
+    })
+  })
+
+  it('ignores stale selector responses after a filter change starts a newer page load', async () => {
+    const { reportApi } = loadReportModule()
+    const staleTargets = deferred()
+    const calls = []
+    const renderProjectExplorer = vi.fn()
+    const logClientError = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      calls.push(String(url))
+      if (url === '/projects/proj_1/report') {
+        return Promise.resolve(apiResponse({ report: { updated: '', draft: {} }, templates: [] }))
+      }
+      if (url === '/projects/proj_1/targets?limit=50&offset=0') {
+        return staleTargets.promise
+      }
+      if (url === '/projects/proj_1/targets?limit=50&offset=0&q=login') {
+        return Promise.resolve(apiResponse({
+          targets: [{ id: 'target_filtered_1', value: 'login.example', type: 'domain' }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        }))
+      }
+      if (url.includes('/runs?') || url.includes('/findings?') || url.includes('/artifacts?')) {
+        return Promise.resolve(apiResponse({ runs: [], findings: [], artifacts: [], total: 0, limit: 50, offset: 0 }))
+      }
+      return Promise.resolve(apiResponse({}))
+    })
+    const controller = reportApi.createProjectReportController(makeContext(apiFetch, {
+      renderProjectExplorer,
+      logClientError,
+      projectRunItems: vi.fn(() => []),
+      projectTargetItems: vi.fn(() => []),
+      projectArtifactItems: vi.fn(() => []),
+      projectFindingItems: vi.fn(() => []),
+    }))
+    await controller.load('proj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderReport(container, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 2, findings: 0, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+
+    await vi.waitFor(() => {
+      expect(calls).toContain('/projects/proj_1/targets?limit=50&offset=0')
+    })
+    const targetSearch = container.querySelector('[data-project-report-selection-filter="q"][data-selection-key="target_ids"]')
+    targetSearch.value = 'login'
+    controller.handleChange({ target: targetSearch })
+    await vi.waitFor(() => {
+      expect(controller.stateFor('proj_1').selectionPages.target_ids.items[0].id).toBe('target_filtered_1')
+    })
+    renderProjectExplorer.mockClear()
+
+    staleTargets.resolve(apiResponse({
+      targets: [{ id: 'target_stale_1', value: 'stale.example', type: 'domain' }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(controller.stateFor('proj_1').selectionPages.target_ids.items[0].id).toBe('target_filtered_1')
+    expect(renderProjectExplorer).not.toHaveBeenCalled()
+    expect(logClientError).not.toHaveBeenCalled()
+
+    const failingLogClientError = vi.fn()
+    const failingApiFetch = vi.fn((url) => {
+      if (url === '/projects/proj_log/report') {
+        return Promise.resolve(apiResponse({ report: { updated: '', draft: {} }, templates: [] }))
+      }
+      if (url === '/projects/proj_log/runs?limit=50&offset=0&q=secret-search') {
+        return Promise.reject(new Error('network failed'))
+      }
+      return Promise.resolve(apiResponse({ targets: [], findings: [], artifacts: [], total: 0, limit: 50, offset: 0 }))
+    })
+    const failingController = reportApi.createProjectReportController(makeContext(failingApiFetch, {
+      logClientError: failingLogClientError,
+      projectRunItems: vi.fn(() => []),
+      projectTargetItems: vi.fn(() => []),
+      projectArtifactItems: vi.fn(() => []),
+      projectFindingItems: vi.fn(() => []),
+    }))
+    await failingController.load('proj_log', { render: false })
+    failingController.stateFor('proj_log').draft.selection_filters.run_ids = { q: 'secret-search' }
+    const failingContainer = document.createElement('div')
+    failingController.renderReport(failingContainer, 'proj_log', {
+      project: { id: 'proj_log', name: 'Logging project' },
+      counts: { runs: 1, targets: 0, findings: 0, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await vi.waitFor(() => {
+      expect(failingLogClientError).toHaveBeenCalledWith(
+        'failed to load report selector page',
+        expect.any(Error),
+        expect.objectContaining({
+          selection_key: 'run_ids',
+          offset: 0,
+          limit: 50,
+          filter_fields: ['q'],
+          filter_active: { q: true },
+          has_active_filter: true,
+        }),
+      )
+    })
+    expect(JSON.stringify(failingLogClientError.mock.calls[0][2])).not.toContain('secret-search')
+  })
+
+  it('keeps all-mode selections checked across pages when one item is excluded', async () => {
+    const { reportApi } = loadReportModule()
+    const apiFetch = vi.fn(async (url) => {
+      if (url === '/projects/proj_1/report') {
+        return apiResponse({ report: { updated: '', draft: {} }, templates: [] })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_1', title: 'First page finding', severity: 'high' }],
+          total: 75,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=50&include_group_counts=0&orphan_filter=all') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_2', title: 'Second page finding', severity: 'medium' }],
+          total: 75,
+          limit: 50,
+          offset: 50,
+        })
+      }
+      return apiResponse({ runs: [], targets: [], artifacts: [], total: 0, limit: 50, offset: 0 })
+    })
+    const controller = reportApi.createProjectReportController(makeContext(apiFetch, {
+      projectRunItems: vi.fn(() => []),
+      projectTargetItems: vi.fn(() => []),
+      projectArtifactItems: vi.fn(() => []),
+      projectFindingItems: vi.fn(() => []),
+    }))
+    await controller.load('proj_1', { render: false })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    controller.renderReport(container, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await vi.waitFor(() => {
+      expect(controller.stateFor('proj_1').selectionPages.finding_ids.loaded).toBe(true)
+    })
+
+    const firstPage = document.createElement('div')
+    document.body.appendChild(firstPage)
+    controller.renderReport(firstPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await controller.handleClick({
+      target: firstPage.querySelector('[data-project-report-action="selection-all"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    expect(controller.stateFor('proj_1').draft.selection_modes.finding_ids).toBe('all')
+    expect(controller.stateFor('proj_1').draft.selection_exclude_ids.finding_ids).toEqual([])
+
+    await controller.handleClick({
+      target: firstPage.querySelector('[data-project-report-action="selection-next"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    const secondPage = document.createElement('div')
+    document.body.appendChild(secondPage)
+    controller.renderReport(secondPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    const secondFinding = secondPage.querySelector('[data-project-report-selection="finding_ids"][value="finding_page_2"]')
+    expect(secondFinding.checked).toBe(true)
+    secondFinding.checked = false
+    controller.handleChange({ target: secondFinding })
+    expect(controller.stateFor('proj_1').draft.selection_modes.finding_ids).toBe('all')
+    expect(controller.stateFor('proj_1').draft.selection.finding_ids).toEqual([])
+    expect(controller.stateFor('proj_1').draft.selection_exclude_ids.finding_ids).toEqual(['finding_page_2'])
+
+    await controller.handleClick({
+      target: secondPage.querySelector('[data-project-report-action="selection-prev"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    const backToFirst = document.createElement('div')
+    document.body.appendChild(backToFirst)
+    controller.renderReport(backToFirst, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(backToFirst.querySelector('[data-project-report-selection="finding_ids"][value="finding_page_1"]').checked).toBe(true)
+    expect(backToFirst.textContent).toContain('All 74 selected')
+    expect(backToFirst.textContent).toContain('Excluded findings')
+    expect(backToFirst.textContent).toContain('Second page finding')
+    expect(backToFirst.textContent).toContain('medium')
+  })
+
+  it('reloads filter-backed all selections with exclusions and preserves them on later saves', async () => {
+    const { reportApi } = loadReportModule()
+    const calls = []
+    let savedDraft = {
+      metadata: { engagement_name: 'Saved report' },
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      calls.push([String(url), options])
+      if (url === '/projects/proj_1/report' && options.method === 'POST') {
+        savedDraft = JSON.parse(options.body).draft
+        return apiResponse({
+          report: {
+            updated: '2026-06-04T13:00:00Z',
+            draft: savedDraft,
+          },
+        })
+      }
+      if (url === '/projects/proj_1/report') {
+        return apiResponse({
+          report: {
+            updated: '2026-06-04T12:00:00Z',
+            draft: savedDraft,
+          },
+          templates: [],
+        })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_1', title: 'First page finding', severity: 'high' }],
+          total: 75,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all&q=redirect') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_1', title: 'Redirect finding page one', severity: 'high' }],
+          total: 75,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url === '/projects/proj_1/findings?limit=50&offset=50&include_group_counts=0&orphan_filter=all&q=redirect') {
+        return apiResponse({
+          findings: [{ id: 'finding_page_2', title: 'Redirect finding page two', severity: 'medium' }],
+          total: 75,
+          limit: 50,
+          offset: 50,
+        })
+      }
+      return apiResponse({ runs: [], targets: [], artifacts: [], total: 0, limit: 50, offset: 0 })
+    })
+    const controller = reportApi.createProjectReportController(makeContext(apiFetch, {
+      projectRunItems: vi.fn(() => []),
+      projectTargetItems: vi.fn(() => []),
+      projectArtifactItems: vi.fn(() => []),
+      projectFindingItems: vi.fn(() => []),
+    }))
+    await controller.load('proj_1', { render: false })
+    const firstPage = document.createElement('div')
+    document.body.appendChild(firstPage)
+    controller.renderReport(firstPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await vi.waitFor(() => {
+      expect(controller.stateFor('proj_1').selectionPages.finding_ids.loaded).toBe(true)
+    })
+    const search = firstPage.querySelector('[data-project-report-selection-filter="q"][data-selection-key="finding_ids"]')
+    search.value = 'redirect'
+    controller.handleInput({ target: search })
+    await vi.waitFor(() => {
+      expect(calls.map(([url]) => url)).toContain(
+        '/projects/proj_1/findings?limit=50&offset=0&include_group_counts=0&orphan_filter=all&q=redirect',
+      )
+      expect(controller.stateFor('proj_1').selectionPages.finding_ids.items[0].id).toBe('finding_page_1')
+    })
+    const filteredFirstPage = document.createElement('div')
+    document.body.appendChild(filteredFirstPage)
+    controller.renderReport(filteredFirstPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await controller.handleClick({
+      target: filteredFirstPage.querySelector('[data-project-report-action="selection-all"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    await controller.handleClick({
+      target: filteredFirstPage.querySelector('[data-project-report-action="selection-next"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    const filteredSecondPage = document.createElement('div')
+    document.body.appendChild(filteredSecondPage)
+    controller.renderReport(filteredSecondPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    const excludedFinding = filteredSecondPage.querySelector(
+      '[data-project-report-selection="finding_ids"][value="finding_page_2"]',
+    )
+    expect(excludedFinding.checked).toBe(true)
+    excludedFinding.checked = false
+    controller.handleChange({ target: excludedFinding })
+    await controller.handleClick({
+      target: filteredSecondPage.querySelector('[data-project-report-action="save"]'),
+      preventDefault: vi.fn(),
+    })
+    let saveBody = JSON.parse(
+      calls.find(([url, options]) => url === '/projects/proj_1/report' && options.method === 'POST')[1].body,
+    )
+    expect(saveBody.draft.selection_modes.finding_ids).toBe('all')
+    expect(saveBody.draft.selection_filters.finding_ids).toEqual(expect.objectContaining({ q: 'redirect' }))
+    expect(saveBody.draft.selection_exclude_ids.finding_ids).toEqual(['finding_page_2'])
+    expect(saveBody.draft.selection.finding_ids).toEqual([])
+
+    const reloadRoot = document.createElement('div')
+    document.body.appendChild(reloadRoot)
+    controller.renderReport(reloadRoot, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await controller.handleClick({
+      target: reloadRoot.querySelector('[data-project-report-action="reload"]'),
+      preventDefault: vi.fn(),
+    })
+    const reloadedFirstPage = document.createElement('div')
+    document.body.appendChild(reloadedFirstPage)
+    controller.renderReport(reloadedFirstPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    await vi.waitFor(() => {
+      expect(controller.stateFor('proj_1').selectionPages.finding_ids.loaded).toBe(true)
+    })
+    const loadedFirstPage = document.createElement('div')
+    document.body.appendChild(loadedFirstPage)
+    controller.renderReport(loadedFirstPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(loadedFirstPage.querySelector('[data-project-report-selection-filter="q"][data-selection-key="finding_ids"]').value)
+      .toBe('redirect')
+    expect(loadedFirstPage.querySelector('[data-project-report-selection="finding_ids"][value="finding_page_1"]').checked)
+      .toBe(true)
+    expect(loadedFirstPage.textContent).toContain('All matching 74 selected')
+
+    await controller.handleClick({
+      target: loadedFirstPage.querySelector('[data-project-report-action="selection-next"][data-selection-key="finding_ids"]'),
+      preventDefault: vi.fn(),
+    })
+    const reloadedSecondPage = document.createElement('div')
+    document.body.appendChild(reloadedSecondPage)
+    controller.renderReport(reloadedSecondPage, 'proj_1', {
+      ...summary,
+      counts: { runs: 0, targets: 0, findings: 75, artifacts: 0 },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    })
+    expect(reloadedSecondPage.querySelector('[data-project-report-selection="finding_ids"][value="finding_page_2"]').checked)
+      .toBe(false)
+
+    const nameInput = reloadedSecondPage.querySelector('[data-project-report-metadata="engagement_name"]')
+    nameInput.value = 'Renamed report'
+    controller.handleInput({ target: nameInput })
+    await controller.handleClick({
+      target: reloadedSecondPage.querySelector('[data-project-report-action="save"]'),
+      preventDefault: vi.fn(),
+    })
+    const saveCalls = calls.filter(([url, options]) => url === '/projects/proj_1/report' && options.method === 'POST')
+    saveBody = JSON.parse(saveCalls.at(-1)[1].body)
+    expect(saveBody.draft.metadata.engagement_name).toBe('Renamed report')
+    expect(saveBody.draft.selection_modes.finding_ids).toBe('all')
+    expect(saveBody.draft.selection_filters.finding_ids).toEqual(expect.objectContaining({ q: 'redirect' }))
+    expect(saveBody.draft.selection_exclude_ids.finding_ids).toEqual(['finding_page_2'])
+    expect(saveBody.draft.selection.finding_ids).toEqual([])
   })
 
   it('blocks view-only team members from save/raw controls without blocking preview or export', async () => {
@@ -475,9 +1068,15 @@ describe('project report controller', () => {
     document.body.appendChild(container)
     controller.renderReport(container, 'proj_1', { ...summary, artifacts: [] })
 
-    expect(container.textContent).toContain('No artifacts available.')
+    await vi.waitFor(() => {
+      expect(controller.stateFor('proj_1').selectionPages.artifact_ids.loaded).toBe(true)
+    })
+    const loadedContainer = document.createElement('div')
+    document.body.appendChild(loadedContainer)
+    controller.renderReport(loadedContainer, 'proj_1', { ...summary, artifacts: [] })
+    expect(loadedContainer.textContent).toContain('No artifacts available.')
     await controller.handleClick({
-      target: container.querySelector('[data-project-report-action="section-down"][data-section-index="0"]'),
+      target: loadedContainer.querySelector('[data-project-report-action="section-down"][data-section-index="0"]'),
       preventDefault: vi.fn(),
     })
     expect(controller.stateFor('proj_1').draft.sections.map(section => section.type).slice(0, 2)).toEqual([
@@ -486,7 +1085,7 @@ describe('project report controller', () => {
     ])
 
     await controller.handleClick({
-      target: container.querySelector('[data-project-report-action="selection-none"][data-selection-key="run_ids"]'),
+      target: loadedContainer.querySelector('[data-project-report-action="selection-none"][data-selection-key="run_ids"]'),
       preventDefault: vi.fn(),
     })
     let st = controller.stateFor('proj_1')
@@ -502,8 +1101,8 @@ describe('project report controller', () => {
       preventDefault: vi.fn(),
     })
     st = controller.stateFor('proj_1')
-    expect(st.draft.selection_modes.run_ids).toBe('manual')
-    expect(st.draft.selection.run_ids).toEqual(['run_1'])
+    expect(st.draft.selection_modes.run_ids).toBe('all')
+    expect(st.draft.selection.run_ids).toEqual([])
   })
 
   it('exports through the archive job and downloads through a ticket URL', async () => {

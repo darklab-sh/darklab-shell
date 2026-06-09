@@ -1237,8 +1237,8 @@
       hudProjectCell,
       hudProjectEl,
       isProjectWorkspaceOpen,
-      logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+      logClientError: (message, err, details) => {
+        if (typeof logClientError === 'function') logClientError(message, err, details);
       },
       projectDisplayName: _projectDisplayName,
       railNav,
@@ -1528,6 +1528,8 @@
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
       renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       downloadUrlAsAttachment: _downloadUrlAsAttachment,
       showConfirm: typeof showConfirm === 'function' ? showConfirm : null,

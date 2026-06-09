@@ -42,6 +42,7 @@ from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
+from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import record_run_findings
 from services.atlas.materializer import materialize_run_entities
 from services.workspace import files as workspace_files
@@ -7029,6 +7030,10 @@ class TestProjectRoutes:
                 f"/projects/{project['id']}/artifacts?limit=10&offset=0",
                 headers={"X-Session-ID": session_id},
             ).data)
+            searched_artifacts = json.loads(client.get(
+                f"/projects/{project['id']}/artifacts?limit=10&offset=0&q=run",
+                headers={"X-Session-ID": session_id},
+            ).data)
             artifact_statuses = {item["workspace_path"]: item for item in all_artifacts["artifacts"]}
             assert artifact_statuses["reports/run.txt"]["file_status"] == "available"
             assert artifact_statuses["reports/run.txt"]["file_available"] is True
@@ -7039,6 +7044,8 @@ class TestProjectRoutes:
             assert artifact_statuses["reports/old.txt"]["file_status"] == "missing"
             assert artifact_statuses["reports/old.txt"]["file_available"] is False
             assert artifact_statuses["reports/old.txt"]["current_byte_size"] is None
+            assert searched_artifacts["total"] == 1
+            assert [item["workspace_path"] for item in searched_artifacts["artifacts"]] == ["reports/run.txt"]
             preview_resp = client.get(
                 f"/projects/{project['id']}/artifacts/rfa_{run_id}/preview",
                 headers={"X-Session-ID": session_id},
@@ -7740,6 +7747,16 @@ class TestProjectRoutes:
             }),
             headers={"X-Session-ID": session_id},
         ).data)
+        search_page = json.loads(client.get(
+            f"/projects/{project['id']}/findings?"
+            + urlencode({
+                "limit": "3",
+                "offset": "0",
+                "q": "api.darklab",
+                "include_group_counts": "0",
+            }),
+            headers={"X-Session-ID": session_id},
+        ).data)
 
         assert [item["run_command"] for item in first_page["findings"]] == [
             "katana -u https://darklab.sh",
@@ -7763,6 +7780,9 @@ class TestProjectRoutes:
         assert collapsed_page_without_counts["collapsed_group_counts"] == {}
         assert collapsed_page_without_counts["group_counts"] == {"httpx https://darklab.sh": 2}
         assert collapsed_page_without_counts["group_order"] == ["httpx https://darklab.sh"]
+        assert [item["title"] for item in search_page["findings"]] == ["httpx finding 1", "httpx finding 0"]
+        assert search_page["total"] == 2
+        assert search_page["group_counts"] == {}
         assert len(page_without_count["findings"]) == 3
         assert page_without_count["total"] == 5
         assert page_without_count["has_more"] is True
@@ -9144,11 +9164,45 @@ class TestProjectRoutes:
         )
         assert stale_save.status_code == 409
 
-        preview_resp = client.post(
-            f"/projects/{project['id']}/report/preview",
-            json={},
-            headers={"X-Session-ID": session_id},
-        )
+        import services.reports.composition as report_composition
+
+        with (
+            mock.patch.object(
+                project_routes,
+                "compose_report_context",
+                wraps=project_routes.compose_report_context,
+            ) as compose_context,
+            mock.patch.object(
+                report_composition,
+                "list_project_runs",
+                wraps=report_composition.list_project_runs,
+            ) as list_report_runs,
+            mock.patch.object(
+                report_composition,
+                "list_project_targets",
+                wraps=report_composition.list_project_targets,
+            ) as list_report_targets,
+            mock.patch.object(
+                report_composition,
+                "list_project_findings",
+                wraps=report_composition.list_project_findings,
+            ) as list_report_findings,
+            mock.patch.object(
+                report_composition,
+                "list_project_artifacts",
+                wraps=report_composition.list_project_artifacts,
+            ) as list_report_artifacts,
+        ):
+            preview_resp = client.post(
+                f"/projects/{project['id']}/report/preview",
+                json={},
+                headers={"X-Session-ID": session_id},
+            )
+        assert compose_context.call_count == 1
+        assert list_report_runs.call_count == 1
+        assert list_report_targets.call_count == 1
+        assert list_report_findings.call_count == 1
+        assert list_report_artifacts.call_count == 1
         assert preview_resp.status_code == 200
         preview = json.loads(preview_resp.data)["preview"]
         assert "# Report Scope Readout" in preview["markdown"]
@@ -9167,24 +9221,101 @@ class TestProjectRoutes:
         assert bad_date_resp.status_code == 400
         assert "YYYY-MM-DD to YYYY-MM-DD" in bad_date_resp.get_json()["error"]
 
-        job_resp = client.post(
-            f"/projects/{project['id']}/report/export",
-            json={},
-            headers={"X-Session-ID": session_id},
-        )
-        assert job_resp.status_code == 202
-        job = json.loads(job_resp.data)["job"]
-        deadline = time.time() + 5
-        while job["status"] not in {"complete", "failed"} and time.time() < deadline:
-            time.sleep(0.02)
-            status_resp = client.get(
-                f"/projects/{project['id']}/report/export-jobs/{job['id']}",
+        failure_draft = deepcopy(draft)
+        failure_draft["selection"]["run_ids"] = ["missing-run"]
+        failure_draft["selection_modes"]["run_ids"] = "manual"
+        failure_draft["selection_filters"]["run_ids"] = {"q": "sensitive query"}
+        failure_draft["selection_exclude_ids"]["run_ids"] = ["excluded-run"]
+        with (
+            mock.patch.object(
+                project_routes,
+                "compose_report_context",
+                side_effect=ProjectWorkspaceError("report selection includes an unknown run item"),
+            ),
+            mock.patch("blueprints.projects.log.warning") as preview_warning,
+        ):
+            selection_error_resp = client.post(
+                f"/projects/{project['id']}/report/preview",
+                json={"draft": failure_draft},
                 headers={"X-Session-ID": session_id},
             )
-            assert status_resp.status_code == 200
-            job = json.loads(status_resp.data)["job"]
+        assert selection_error_resp.status_code == 400
+        assert selection_error_resp.get_json()["error"] == "report selection includes an unknown run item"
+        assert preview_warning.call_args.args == ("PROJECT_REPORT_PREVIEW_FAILED",)
+        assert preview_warning.call_args.kwargs["exc_info"] is True
+        warning_extra = preview_warning.call_args.kwargs["extra"]
+        assert warning_extra["project_id"] == project["id"]
+        assert warning_extra["session"]
+        assert warning_extra["selection_modes"]["run_ids"] == "manual"
+        assert warning_extra["selected_counts"]["run_ids"] == 1
+        assert warning_extra["excluded_counts"]["run_ids"] == 1
+        assert warning_extra["filter_fields"]["run_ids"] == ["q"]
+        assert warning_extra["filter_active"]["run_ids"] is True
+        assert warning_extra["exception_type"] == "ProjectWorkspaceError"
+        assert "sensitive query" not in json.dumps(warning_extra)
+
+        render_failure_draft = deepcopy(draft)
+        render_failure_draft["selection_filters"]["run_ids"] = {"q": "sensitive query"}
+        with (
+            mock.patch.object(
+                project_routes,
+                "render_report_html_from_context",
+                side_effect=RuntimeError("template exploded with sensitive query"),
+            ),
+            mock.patch("blueprints.projects.log.error") as preview_error,
+        ):
+            render_error_resp = client.post(
+                f"/projects/{project['id']}/report/preview",
+                json={"draft": render_failure_draft},
+                headers={"X-Session-ID": session_id},
+            )
+        assert render_error_resp.status_code == 500
+        assert render_error_resp.get_json()["error"] == "report preview failed"
+        assert preview_error.call_args.args == ("PROJECT_REPORT_PREVIEW_FAILED",)
+        assert preview_error.call_args.kwargs["exc_info"] is True
+        error_extra = preview_error.call_args.kwargs["extra"]
+        assert error_extra["exception_type"] == "RuntimeError"
+        assert error_extra["filter_fields"]["run_ids"] == ["q"]
+        assert "sensitive query" not in json.dumps(error_extra)
+
+        with mock.patch("services.reports.jobs.log.info") as export_info:
+            job_resp = client.post(
+                f"/projects/{project['id']}/report/export",
+                json={},
+                headers={"X-Session-ID": session_id},
+            )
+            assert job_resp.status_code == 202
+            job = json.loads(job_resp.data)["job"]
+            deadline = time.time() + 5
+            while job["status"] not in {"complete", "failed"} and time.time() < deadline:
+                time.sleep(0.02)
+                status_resp = client.get(
+                    f"/projects/{project['id']}/report/export-jobs/{job['id']}",
+                    headers={"X-Session-ID": session_id},
+                )
+                assert status_resp.status_code == 200
+                job = json.loads(status_resp.data)["job"]
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
+        assert job["metrics"]["run_count"] == 0
+        assert job["metrics"]["target_count"] == 0
+        assert job["metrics"]["finding_count"] == 0
+        assert job["metrics"]["artifact_count"] == 0
+        assert job["metrics"]["run_total"] == 0
+        assert job["metrics"]["selection_modes"]["run_ids"] == "all"
+        assert job["metrics"]["selection_excluded_counts"]["run_ids"] == 0
+        complete_call = next(
+            call for call in export_info.call_args_list
+            if call.args == ("REPORT_EXPORT_JOB_COMPLETE",)
+        )
+        complete_extra = complete_call.kwargs["extra"]
+        assert complete_extra["run_count"] == 0
+        assert complete_extra["target_count"] == 0
+        assert complete_extra["finding_count"] == 0
+        assert complete_extra["artifact_count"] == 0
+        assert complete_extra["run_total"] == 0
+        assert complete_extra["selection_modes"]["run_ids"] == "all"
+        assert complete_extra["selection_excluded_counts"]["run_ids"] == 0
         report_audit_rows = _audit_event_rows(target_id=job["id"], event_type="report.build")
         assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "complete"]
         assert {row["target_type"] for row in report_audit_rows} == {"report"}
@@ -9193,6 +9324,13 @@ class TestProjectRoutes:
         assert {row["job_id"] for row in report_audit_rows} == {job["id"]}
         assert {row["correlation_id"] for row in report_audit_rows} == {job["id"]}
         assert report_audit_rows[-1]["details"]["archive_bytes"] > 0
+        assert report_audit_rows[-1]["details"]["run_count"] == 0
+        assert report_audit_rows[-1]["details"]["target_count"] == 0
+        assert report_audit_rows[-1]["details"]["finding_count"] == 0
+        assert report_audit_rows[-1]["details"]["artifact_count"] == 0
+        assert report_audit_rows[-1]["details"]["run_total"] == 0
+        assert report_audit_rows[-1]["details"]["selection_modes"]["run_ids"] == "all"
+        assert report_audit_rows[-1]["details"]["selection_excluded_counts"]["run_ids"] == 0
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/report/export-jobs/{job['id']}/download-ticket",
@@ -9291,7 +9429,8 @@ class TestProjectRoutes:
 
         assert job["status"] == "failed"
         assert job["error_status"] == 413
-        assert "size limit" in job["error"]
+        assert job["error_code"] == "size_limit"
+        assert job["error"] == "Report export exceeded the configured size limit."
         report_audit_rows = _audit_event_rows(target_id=job["id"], event_type="report.build")
         assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "failed"]
         assert {row["target_type"] for row in report_audit_rows} == {"report"}
@@ -9307,6 +9446,53 @@ class TestProjectRoutes:
         )
         assert ticket_resp.status_code == 413
 
+    def test_project_report_export_job_uses_stable_failure_reason(self):
+        client = get_client()
+        session_id = self._session_id("project-report-failure-reason")
+        project = self._create_project(client, session_id, name="Failure Reason")
+        raw_error = "renderer leaked secret.example token=abc123"
+
+        with (
+            mock.patch(
+                "services.reports.jobs.build_report_export_archive",
+                side_effect=RuntimeError(raw_error),
+            ),
+            mock.patch("services.reports.jobs.log.error") as error_log,
+        ):
+            job_resp = client.post(
+                f"/projects/{project['id']}/report/export",
+                json={},
+                headers={"X-Session-ID": session_id},
+            )
+            assert job_resp.status_code == 202
+            job = json.loads(job_resp.data)["job"]
+            deadline = time.time() + 5
+            while job["status"] not in {"complete", "failed"} and time.time() < deadline:
+                time.sleep(0.02)
+                status_resp = client.get(
+                    f"/projects/{project['id']}/report/export-jobs/{job['id']}",
+                    headers={"X-Session-ID": session_id},
+                )
+                assert status_resp.status_code == 200
+                job = json.loads(status_resp.data)["job"]
+
+        assert job["status"] == "failed"
+        assert job["error_status"] == 500
+        assert job["error_code"] == "export_failed"
+        assert job["error"] == "Report export failed."
+        assert raw_error not in json.dumps(job)
+        assert error_log.call_args.args == ("REPORT_EXPORT_JOB_FAILED",)
+        assert error_log.call_args.kwargs["exc_info"] is True
+        error_extra = error_log.call_args.kwargs["extra"]
+        assert error_extra["reason"] == "export_failed"
+        assert error_extra["exception_type"] == "RuntimeError"
+        assert raw_error not in json.dumps(error_extra)
+
+        report_audit_rows = _audit_event_rows(target_id=job["id"], event_type="report.build")
+        assert [row["details"]["status"] for row in report_audit_rows] == ["queued", "failed"]
+        assert report_audit_rows[-1]["details"]["reason"] == "export_failed"
+        assert raw_error not in json.dumps(report_audit_rows[-1]["details"])
+
     def test_project_report_preview_resolves_manual_selection_beyond_first_page(self):
         client = get_client()
         session_id = self._session_id("project-report-manual-page")
@@ -9315,10 +9501,14 @@ class TestProjectRoutes:
         fixture_suffix = uuid.uuid4().hex[:8]
         run_rows = []
         link_rows = []
+        finding_rows = []
+        excluded_run_id = ""
         selected_run_id = ""
-        for index in range(205):
+        for index in range(505):
             run_id = f"run_report_page_{fixture_suffix}_{index:03d}"
-            if index == 204:
+            if index == 10:
+                excluded_run_id = run_id
+            if index == 504:
                 selected_run_id = run_id
             started = (base_started - timedelta(seconds=index)).isoformat()
             run_rows.append((
@@ -9339,6 +9529,18 @@ class TestProjectRoutes:
                 "manual",
                 started,
             ))
+            if index in {0, 10, 504}:
+                finding_rows.append((
+                    f"fnd_report_page_{fixture_suffix}_{index:03d}",
+                    session_id,
+                    run_id,
+                    "finding",
+                    f"Report selector redirect finding {index:03d}",
+                    f"https://example.test/redirect/{index:03d}",
+                    "medium",
+                    f"fp-report-page-{fixture_suffix}-{index:03d}",
+                    started,
+                ))
         with sqlite3.connect(DB_PATH) as conn:
             conn.executemany(
                 "INSERT INTO runs "
@@ -9351,13 +9553,19 @@ class TestProjectRoutes:
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 link_rows,
             )
+            conn.executemany(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, severity, fingerprint, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                finding_rows,
+            )
             conn.commit()
 
         default_payload = client.get(
             f"/projects/{project['id']}/report",
             headers={"X-Session-ID": session_id},
         ).get_json()
-        draft = default_payload["report"]["draft"]
+        draft = deepcopy(default_payload["report"]["draft"])
         draft["selection"]["run_ids"] = [selected_run_id]
         draft["selection_modes"]["run_ids"] = "manual"
         preview_resp = client.post(
@@ -9367,8 +9575,374 @@ class TestProjectRoutes:
         )
         assert preview_resp.status_code == 200
         preview_text = preview_resp.get_json()["preview"]["markdown"] + preview_resp.get_json()["preview"]["html"]
-        assert "echo report page run 204" in preview_text
+        assert "echo report page run 504" in preview_text
         assert "report selection includes an unknown run item" not in preview_text
+
+        finding_draft = deepcopy(default_payload["report"]["draft"])
+        finding_draft["selection"]["finding_ids"] = []
+        finding_draft["selection_modes"]["finding_ids"] = "all"
+        finding_draft["selection_filters"]["finding_ids"] = {"q": "redirect finding 504"}
+        finding_preview_resp = client.post(
+            f"/projects/{project['id']}/report/preview",
+            json={"draft": finding_draft},
+            headers={"X-Session-ID": session_id},
+        )
+        assert finding_preview_resp.status_code == 200
+        finding_preview_text = (
+            finding_preview_resp.get_json()["preview"]["markdown"]
+            + finding_preview_resp.get_json()["preview"]["html"]
+        )
+        assert "Report selector redirect finding 504" in finding_preview_text
+        assert "Report selector redirect finding 000" not in finding_preview_text
+
+        referenced_target = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "referenced.example", "source_run_id": selected_run_id},
+            headers={"X-Session-ID": session_id},
+        ).get_json()["target"]
+        selected_target = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "selected.example", "source_run_id": selected_run_id},
+            headers={"X-Session-ID": session_id},
+        ).get_json()["target"]
+        referenced_finding_id = f"fnd_report_ref_{fixture_suffix}"
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, target_id, scope, title, raw_line, severity, fingerprint, created) "
+                "VALUES (?, ?, ?, ?, 'finding', 'Reference follows finding', ?, 'medium', ?, datetime('now'))",
+                (
+                    referenced_finding_id,
+                    session_id,
+                    selected_run_id,
+                    referenced_target["id"],
+                    "referenced.example returned a finding",
+                    f"fp-report-ref-{fixture_suffix}",
+                ),
+            )
+            conn.commit()
+        reference_draft = deepcopy(default_payload["report"]["draft"])
+        reference_draft["selection"]["target_ids"] = [selected_target["id"]]
+        reference_draft["selection_modes"]["target_ids"] = "manual"
+        reference_draft["selection"]["finding_ids"] = [referenced_finding_id]
+        reference_draft["selection_modes"]["finding_ids"] = "manual"
+        reference_draft["export"]["redaction_mode"] = "raw"
+
+        from services.reports.composition import compose_report_context
+
+        reference_context = compose_report_context(
+            reference_draft,
+            project=project,
+            session_id=session_id,
+            project_id=project["id"],
+        )
+        assert [target["id"] for target in reference_context["targets"]] == [selected_target["id"]]
+        assert reference_context["findings"][0]["target_references"][0]["target_id"] == referenced_target["id"]
+        assert reference_context["findings"][0]["target_references"][0]["value"] == "referenced.example"
+
+        all_draft = deepcopy(default_payload["report"]["draft"])
+        all_draft["selection"]["run_ids"] = []
+        all_draft["selection_modes"]["run_ids"] = "all"
+        all_draft["selection_filters"]["run_ids"] = {"q": "report page run"}
+        all_draft["selection_exclude_ids"]["run_ids"] = [excluded_run_id]
+        all_preview_resp = client.post(
+            f"/projects/{project['id']}/report/preview",
+            json={"draft": all_draft},
+            headers={"X-Session-ID": session_id},
+        )
+        assert all_preview_resp.status_code == 200
+        all_preview_text = all_preview_resp.get_json()["preview"]["markdown"] + all_preview_resp.get_json()["preview"]["html"]
+        assert "echo report page run 000" in all_preview_text
+        assert "echo report page run 010" not in all_preview_text
+        assert "echo report page run 504" in all_preview_text
+
+        from services.reports.export import build_report_export_archive
+
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_result = build_report_export_archive(
+                all_draft,
+                project=project,
+                session_id=session_id,
+                project_id=project["id"],
+                archive_dir=tmp,
+            )
+            try:
+                with zipfile.ZipFile(archive_result["path"]) as archive:
+                    manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                build = manifest["provenance"]["build"]
+                assert build["selection_filters"]["run_ids"] == {"q": "report page run"}
+                assert build["selection_exclude_ids"]["run_ids"] == [excluded_run_id]
+                assert build["resolved_entity_counts"]["runs"] == 504
+            finally:
+                try:
+                    os.unlink(archive_result["path"])
+                except OSError:
+                    pass
+
+    def test_project_report_large_non_run_selector_filters_match_api_pages(self, tmp_path):
+        client = get_client()
+        session_id = self._session_id("project-report-large-non-run")
+        project = self._create_project(client, session_id, name="Large Non-Run Selection")
+        fixture_suffix = uuid.uuid4().hex[:8]
+        base_started = datetime(2026, 6, 4, 13, 0, 0, tzinfo=timezone.utc)
+        run_rows = []
+        link_rows = []
+        target_rows = []
+        target_link_rows = []
+        finding_rows = []
+        artifact_rows = []
+        artifact_expected_text: dict[str, str] = {}
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_root": str(tmp_path / "workspaces"),
+        }
+        for index in range(60):
+            started = (base_started - timedelta(seconds=index)).isoformat()
+            run_id = f"run_report_nonrun_{fixture_suffix}_{index:03d}"
+            target_id = f"ent_report_nonrun_{fixture_suffix}_{index:03d}"
+            target_value = f"selector-target-{fixture_suffix}-{index:03d}.example.test"
+            finding_id = f"fnd_report_nonrun_{fixture_suffix}_{index:03d}"
+            artifact_id = f"rfa_report_nonrun_{fixture_suffix}_{index:03d}"
+            artifact_path = f"reports/selector-artifact-{fixture_suffix}-{index:03d}.txt"
+            artifact_text = f"selector artifact body {fixture_suffix} {index:03d}\n"
+            run_rows.append((
+                run_id,
+                session_id,
+                "external",
+                "",
+                f"echo selector seed {fixture_suffix} {index:03d}",
+                started,
+                "[]",
+                0,
+            ))
+            link_rows.append((
+                f"pln_report_nonrun_{fixture_suffix}_{index:03d}",
+                project["id"],
+                "run",
+                run_id,
+                "manual",
+                started,
+            ))
+            target_rows.append((
+                target_id,
+                session_id,
+                "domain",
+                target_value,
+                f"sig-report-nonrun-{fixture_suffix}-{index:03d}",
+                started,
+                started,
+                started,
+            ))
+            target_link_rows.append((
+                f"ple_report_nonrun_{fixture_suffix}_{index:03d}",
+                project["id"],
+                "atlas_entity",
+                target_id,
+                "manual",
+                started,
+            ))
+            finding_rows.append((
+                finding_id,
+                session_id,
+                run_id,
+                target_id,
+                "finding",
+                f"Selector backend finding {fixture_suffix} {index:03d}",
+                f"selector backend raw finding {fixture_suffix} {index:03d}",
+                "medium",
+                f"fp-report-nonrun-{fixture_suffix}-{index:03d}",
+                started,
+            ))
+            artifact_rows.append((
+                artifact_id,
+                session_id,
+                run_id,
+                artifact_path,
+                f"selector-artifact-{fixture_suffix}-{index:03d}.txt",
+                "output",
+                len(artifact_text.encode("utf-8")),
+                "workspace_flag",
+                "text/plain",
+                "text",
+                hashlib.sha256(artifact_text.encode("utf-8")).hexdigest(),
+                started,
+            ))
+            artifact_expected_text[artifact_id] = artifact_text.strip()
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                resolve_workspace_path(session_id, artifact_path, shell_app.CFG, ensure_parent=True).write_text(
+                    artifact_text,
+                    encoding="utf-8",
+                )
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.executemany(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                run_rows,
+            )
+            conn.executemany(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                link_rows,
+            )
+            conn.executemany(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                target_rows,
+            )
+            conn.executemany(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                target_link_rows,
+            )
+            conn.executemany(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, target_id, scope, title, raw_line, severity, fingerprint, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                finding_rows,
+            )
+            conn.executemany(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                "content_type, preview_type, content_sha256, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                artifact_rows,
+            )
+            conn.commit()
+
+        default_payload = client.get(
+            f"/projects/{project['id']}/report",
+            headers={"X-Session-ID": session_id},
+        ).get_json()
+        selector_cases = [
+            {
+                "selection_key": "target_ids",
+                "context_key": "targets",
+                "endpoint": "targets",
+                "payload_key": "targets",
+                "filters": {"q": f"selector-target-{fixture_suffix}", "type": "domain"},
+                "query": {"q": f"selector-target-{fixture_suffix}", "type": "domain"},
+                "label": lambda item: str(item.get("value") or ""),
+            },
+            {
+                "selection_key": "finding_ids",
+                "context_key": "findings",
+                "endpoint": "findings",
+                "payload_key": "findings",
+                "filters": {
+                    "q": f"Selector backend finding {fixture_suffix}",
+                    "review_state": "new",
+                    "severity": "medium",
+                },
+                "query": {
+                    "q": f"Selector backend finding {fixture_suffix}",
+                    "review_state": "new",
+                    "severity": "medium",
+                    "orphan_filter": "all",
+                    "include_group_counts": "0",
+                },
+                "label": lambda item: str(item.get("title") or ""),
+            },
+            {
+                "selection_key": "artifact_ids",
+                "context_key": "artifacts",
+                "endpoint": "artifacts",
+                "payload_key": "artifacts",
+                "filters": {"q": f"selector-artifact-{fixture_suffix}"},
+                "query": {"q": f"selector-artifact-{fixture_suffix}"},
+                "label": lambda item: artifact_expected_text[str(item.get("id") or "")],
+            },
+        ]
+
+        from services.reports.composition import compose_report_context
+        from services.reports.export import build_report_export_archive
+
+        for case in selector_cases:
+            page_query = urlencode({"limit": 50, "offset": 0, **case["query"]}, doseq=True)
+            page_resp = client.get(
+                f"/projects/{project['id']}/{case['endpoint']}?{page_query}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert page_resp.status_code == 200
+            page_rows = page_resp.get_json()[case["payload_key"]]
+            assert len(page_rows) == 50
+            page_two_query = urlencode({"limit": 50, "offset": 50, **case["query"]}, doseq=True)
+            page_two_resp = client.get(
+                f"/projects/{project['id']}/{case['endpoint']}?{page_two_query}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert page_two_resp.status_code == 200
+            page_two_rows = page_two_resp.get_json()[case["payload_key"]]
+            assert len(page_two_rows) == 10
+            excluded_id = page_two_rows[0]["id"]
+            included_label = case["label"](page_rows[0])
+            excluded_label = case["label"](page_two_rows[0])
+            draft = deepcopy(default_payload["report"]["draft"])
+            draft["export"]["redaction_mode"] = "raw"
+            for selection_key in ("run_ids", "target_ids", "finding_ids", "artifact_ids"):
+                draft["selection"][selection_key] = []
+                draft["selection_modes"][selection_key] = "manual"
+                draft["selection_filters"][selection_key] = {}
+                draft["selection_exclude_ids"][selection_key] = []
+            draft["selection"][case["selection_key"]] = []
+            draft["selection_modes"][case["selection_key"]] = "all"
+            draft["selection_filters"][case["selection_key"]] = case["filters"]
+            draft["selection_exclude_ids"][case["selection_key"]] = [excluded_id]
+
+            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                context = compose_report_context(
+                    draft,
+                    project=project,
+                    session_id=session_id,
+                    project_id=project["id"],
+                    cfg=shell_app.CFG,
+                )
+                preview_resp = client.post(
+                    f"/projects/{project['id']}/report/preview",
+                    json={"draft": draft},
+                    headers={"X-Session-ID": session_id},
+                )
+            assert preview_resp.status_code == 200
+            context_ids = [item["id"] for item in context[case["context_key"]]]
+            assert [item["id"] for item in page_rows] == context_ids[:50]
+            assert excluded_id not in context_ids
+            assert len(context_ids) == 59
+            assert context["selection_totals"][case["context_key"]] == 60
+            preview = preview_resp.get_json()["preview"]
+            preview_text = preview["markdown"] + preview["html"]
+            assert included_label in preview_text
+            assert excluded_label not in preview_text
+
+            with tempfile.TemporaryDirectory() as tmp:
+                with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                    archive_result = build_report_export_archive(
+                        draft,
+                        project=project,
+                        session_id=session_id,
+                        project_id=project["id"],
+                        cfg=shell_app.CFG,
+                        archive_dir=tmp,
+                    )
+                try:
+                    with zipfile.ZipFile(archive_result["path"]) as archive:
+                        manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                        archive_text = (
+                            archive.read("report.md").decode("utf-8")
+                            + archive.read("report.html").decode("utf-8")
+                        )
+                finally:
+                    try:
+                        os.unlink(archive_result["path"])
+                    except OSError:
+                        pass
+            build = manifest["provenance"]["build"]
+            for filter_key, filter_value in case["filters"].items():
+                assert build["selection_filters"][case["selection_key"]][filter_key] == filter_value
+            assert build["selection_exclude_ids"][case["selection_key"]] == [excluded_id]
+            assert build["resolved_entity_counts"][case["context_key"]] == 59
+            assert included_label in archive_text
+            assert excluded_label not in archive_text
 
     def test_project_report_markdown_escapes_table_cells(self):
         client = get_client()
@@ -9642,6 +10216,13 @@ class TestClientLogRoute:
             resp = client.post("/log", json={
                 "context": "session-token set",
                 "message": "ReferenceError: global is not defined",
+                "details": {
+                    "selection_key": "run_ids",
+                    "offset": 50,
+                    "filter_fields": ["q"],
+                    "filter_active": {"q": True},
+                    "q": "sensitive search text",
+                },
             })
         assert resp.status_code == 200
         assert resp.get_json() == {"ok": True}
@@ -9650,6 +10231,13 @@ class TestClientLogRoute:
         extra = mock_warning.call_args.kwargs["extra"]
         assert extra["context"] == "session-token set"
         assert extra["client_message"] == "ReferenceError: global is not defined"
+        assert extra["client_details"] == {
+            "selection_key": "run_ids",
+            "offset": 50,
+            "filter_fields": ["q"],
+            "filter_active": {"q": True},
+        }
+        assert "sensitive search text" not in json.dumps(extra)
 
         with mock.patch.object(shell_assets.log, "debug") as mock_debug:
             debug_resp = client.post("/log", json={

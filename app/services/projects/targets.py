@@ -531,6 +531,7 @@ def list_project_targets(
             + (extra_where + " " if extra_where else "")
             + "ORDER BY e.type ASC, "
             + value_order_expr
+            + ", e.id ASC"
             + " LIMIT ? OFFSET ?",
             (*params, *filter_params, safe_limit, safe_offset),
         ).fetchall()

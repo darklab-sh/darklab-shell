@@ -29,6 +29,30 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="report-export"
 log = logging.getLogger("shell")
 
 
+_REPORT_EXPORT_ERRORS = {
+    "project_not_found": {
+        "phase": "not_found",
+        "message": "Project not found.",
+        "status": 404,
+    },
+    "size_limit": {
+        "phase": "failed",
+        "message": "Report export exceeded the configured size limit.",
+        "status": 413,
+    },
+    "invalid_job_id": {
+        "phase": "failed",
+        "message": "Report export failed.",
+        "status": 500,
+    },
+    "export_failed": {
+        "phase": "failed",
+        "message": "Report export failed.",
+        "status": 500,
+    },
+}
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -102,7 +126,7 @@ def _public_job(job):
         "created_at": job.get("created_at") or "",
         "updated_at": job.get("updated_at") or "",
     }
-    for key in ("archive_bytes", "filename", "error", "error_status"):
+    for key in ("archive_bytes", "filename", "error", "error_code", "error_status"):
         if job.get(key) not in (None, ""):
             public[key] = job.get(key)
     if isinstance(job.get("metrics"), dict):
@@ -157,6 +181,7 @@ def report_export_archive_for_job(session_id, project_id, job_id, *, team_id="")
         return {
             "status": job.get("status") or "unknown",
             "error": job.get("error") or "",
+            "error_code": job.get("error_code") or "",
             "error_status": int(job.get("error_status") or 0),
         }
     path = Path(str(job.get("archive_path") or ""))
@@ -191,17 +216,15 @@ def discard_report_export_job(job_id, *, archive=True):
             pass
 
 
-def _audit_failure_reason(status, error=""):
+def _job_error(code):
+    return dict(_REPORT_EXPORT_ERRORS.get(str(code or ""), _REPORT_EXPORT_ERRORS["export_failed"]))
+
+
+def _audit_failure_reason(status, reason=""):
     if str(status or "").strip().lower() != "failed":
         return ""
-    normalized = str(error or "").strip().lower()
-    if "project not found" in normalized:
-        return "project_not_found"
-    if "invalid job id" in normalized:
-        return "invalid_job_id"
-    if "too large" in normalized or "size limit" in normalized:
-        return "size_limit"
-    return "export_failed"
+    normalized = str(reason or "").strip().lower()
+    return normalized if normalized in _REPORT_EXPORT_ERRORS else "export_failed"
 
 
 def _audit_log_extra(job, *, details):
@@ -214,21 +237,57 @@ def _audit_log_extra(job, *, details):
     }
 
 
-def _record_job_audit(job, *, status, error="", archive_bytes=0, metrics=None):
+def _metrics_log_extra(metrics):
+    if not isinstance(metrics, dict):
+        return {}
+    extra = {}
+    for key in (
+        "run_count",
+        "target_count",
+        "finding_count",
+        "artifact_count",
+        "run_total",
+        "target_total",
+        "finding_total",
+        "artifact_total",
+    ):
+        if key in metrics:
+            extra[key] = int(metrics.get(key) or 0)
+    for key in ("selection_modes", "selection_excluded_counts"):
+        value = metrics.get(key)
+        if isinstance(value, dict):
+            extra[key] = dict(value)
+    return extra
+
+
+def _record_job_audit(job, *, status, reason="", archive_bytes=0, metrics=None):
     details = {
         "project_id": str(job.get("project_id") or ""),
         "job_id": str(job.get("id") or ""),
         "status": status,
     }
-    reason = _audit_failure_reason(status, error)
-    if reason:
-        details["reason"] = reason
+    failure_reason = _audit_failure_reason(status, reason)
+    if failure_reason:
+        details["reason"] = failure_reason
     if archive_bytes:
         details["archive_bytes"] = int(archive_bytes)
     if isinstance(metrics, dict):
-        for key in ("run_count", "finding_count", "artifact_count", "target_count"):
+        for key in (
+            "run_count",
+            "target_count",
+            "finding_count",
+            "artifact_count",
+            "run_total",
+            "target_total",
+            "finding_total",
+            "artifact_total",
+        ):
             if key in metrics:
                 details[key] = int(metrics.get(key) or 0)
+        for key in ("selection_modes", "selection_excluded_counts"):
+            value = metrics.get(key)
+            if isinstance(value, dict):
+                details[key] = dict(value)
     try:
         record_event(
             AuditEventType.REPORT_BUILD,
@@ -273,8 +332,16 @@ def _run_job(job_id, cfg_snapshot):
             team_id=str(job.get("team_id") or ""),
         )
         if project is None:
-            _record_job_audit(job, status="failed", error="project not found")
-            _update("failed", "not_found", "Project not found.", error="project not found", error_status=404)
+            error = _job_error("project_not_found")
+            _record_job_audit(job, status="failed", reason="project_not_found")
+            _update(
+                "failed",
+                error["phase"],
+                error["message"],
+                error=error["message"],
+                error_code="project_not_found",
+                error_status=error["status"],
+            )
             return
         archive = build_report_export_archive(
             job.get("draft") if isinstance(job.get("draft"), dict) else {},
@@ -288,34 +355,60 @@ def _run_job(job_id, cfg_snapshot):
             build_job_id=str(job.get("id") or ""),
         )
     except EvidencePackageTooLarge as exc:
+        error = _job_error("size_limit")
         log.warning("REPORT_EXPORT_JOB_TOO_LARGE", extra={
             "session": get_log_session_id(str(job.get("session_id") or "")),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
             "job_id": job_id,
-            "error_status": 413,
-            "error": str(exc),
+            "error_status": error["status"],
+            "reason": "size_limit",
+            "exception_type": type(exc).__name__,
         })
-        _record_job_audit(job, status="failed", error=str(exc))
-        _update("failed", "failed", str(exc), error=str(exc), error_status=413)
+        _record_job_audit(job, status="failed", reason="size_limit")
+        _update(
+            "failed",
+            error["phase"],
+            error["message"],
+            error=error["message"],
+            error_code="size_limit",
+            error_status=error["status"],
+        )
         return
     except Exception as exc:
+        error = _job_error("export_failed")
         log.error("REPORT_EXPORT_JOB_FAILED", exc_info=True, extra={
             "session": get_log_session_id(str(job.get("session_id") or "")),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
             "job_id": job_id,
-            "error": str(exc),
+            "reason": "export_failed",
+            "exception_type": type(exc).__name__,
         })
-        _record_job_audit(job, status="failed", error=str(exc))
-        _update("failed", "failed", "Report export failed.", error=str(exc), error_status=500)
+        _record_job_audit(job, status="failed", reason="export_failed")
+        _update(
+            "failed",
+            error["phase"],
+            error["message"],
+            error=error["message"],
+            error_code="export_failed",
+            error_status=error["status"],
+        )
         return
     destination = _archive_path(job_id)
     if destination is None:
-        _record_job_audit(job, status="failed", error="invalid job id")
-        _update("failed", "failed", "Report export failed.", error="invalid job id", error_status=500)
+        error = _job_error("invalid_job_id")
+        _record_job_audit(job, status="failed", reason="invalid_job_id")
+        _update(
+            "failed",
+            error["phase"],
+            error["message"],
+            error=error["message"],
+            error_code="invalid_job_id",
+            error_status=error["status"],
+        )
         return
     os.replace(archive["path"], destination)
     raw_metrics = archive.get("metrics")
@@ -329,6 +422,7 @@ def _run_job(job_id, cfg_snapshot):
         "job_id": job_id,
         "duration_ms": int((time.perf_counter() - started) * 1000),
         "archive_bytes": archive_bytes,
+        **_metrics_log_extra(metrics),
     })
     _update(
         "complete",

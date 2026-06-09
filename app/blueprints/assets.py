@@ -948,12 +948,40 @@ def client_log():
         event = "CLIENT_ERROR"
     level = str(data.get("level") or "warning").strip().lower()
     from services import metrics as app_metrics  # noqa: PLC0415
-    extra = {
+    extra: dict[str, object] = {
         "ip": get_client_ip(),
         "session": get_log_session_id(),
         "context": context,
         "client_message": message,
     }
+    details = data.get("details")
+    if isinstance(details, dict):
+        client_details: dict[str, object] = {}
+        selection_key = str(details.get("selection_key") or "")[:80]
+        if selection_key:
+            client_details["selection_key"] = selection_key
+        for key in ("offset", "limit"):
+            if key in details:
+                try:
+                    client_details[key] = max(0, int(details.get(key) or 0))
+                except (TypeError, ValueError):
+                    client_details[key] = 0
+        if isinstance(details.get("filter_fields"), list):
+            client_details["filter_fields"] = [
+                str(value or "")[:80]
+                for value in details["filter_fields"][:20]
+                if str(value or "").strip()
+            ]
+        if isinstance(details.get("filter_active"), dict):
+            client_details["filter_active"] = {
+                str(key or "")[:80]: bool(value)
+                for key, value in list(details["filter_active"].items())[:20]
+                if str(key or "").strip()
+            }
+        if "has_active_filter" in details:
+            client_details["has_active_filter"] = bool(details.get("has_active_filter"))
+        if client_details:
+            extra["client_details"] = client_details
     if level == "debug":
         log.debug(event, extra=extra)
     elif level == "error":

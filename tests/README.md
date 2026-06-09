@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,633
+- behavior tests: 3,639
 - docs/inventory meta-tests: 34
-- `pytest`: 2042 (2008 behavior + 34 meta)
-- `vitest`: 1363
-- `playwright`: 262
-- total: 3,667
+- `pytest`: 2044 (2010 behavior + 34 meta)
+- `vitest`: 1366
+- `playwright`: 263
+- total: 3,673
 
 This document is organized in two parts:
 
@@ -1575,7 +1575,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_evidence_package_download_job_builds_and_downloads_archive` | Verifies polled evidence package archive jobs report completion, share queued/complete audit correlation, and download the completed ZIP. |
 | `TestProjectRoutes.test_project_report_routes_save_preview_and_export_archive` | Verifies project report draft load/save, stale-save conflicts, date-range validation, preview rendering, async markdown/HTML archive downloads, and queued/complete audit correlation. |
 | `TestProjectRoutes.test_project_report_export_job_reports_size_limit_failures` | Verifies report archive jobs surface configured size-limit failures, share queued/failed audit correlation, and block download tickets with a 413 response. |
+| `TestProjectRoutes.test_project_report_export_job_uses_stable_failure_reason` | Verifies report export jobs expose stable failure reasons without copying raw exception text into job status, log extras, or audit details. |
 | `TestProjectRoutes.test_project_report_preview_resolves_manual_selection_beyond_first_page` | Verifies report preview resolves explicitly selected project rows beyond the first service page instead of treating them as unknown. |
+| `TestProjectRoutes.test_project_report_large_non_run_selector_filters_match_api_pages` | Verifies report preview and archive export resolve filtered All selections, page-two exclusions, selector API ordering, and archive provenance for targets, findings, and artifacts beyond the first page. |
 | `TestProjectRoutes.test_project_report_markdown_escapes_table_cells` | Verifies report Markdown table cells escape pipes and backslashes so commands and targets do not corrupt table layout. |
 | `TestProjectRoutes.test_project_report_preview_composes_redacted_project_content` | Verifies report previews compose selected runs, targets, findings, and text artifacts while redacting sensitive values and hiding private notes. |
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
@@ -3058,7 +3060,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `saves with the loaded updated token and the current draft fields` | Verifies that explicit Save sends the optimistic concurrency token and the current report draft. |
 | `clears stale preview output and confirms dirty reloads when editing report metadata` | Verifies that editing report metadata clears the rendered preview, disables Print/PDF until the preview is refreshed, and asks before Reload saved discards unsaved edits. |
 | `keeps include-all selection dynamic when editing metadata` | Verifies that editing report metadata does not freeze default include-all selections to the currently rendered checkbox rows. |
-| `loads full finding and artifact lists before rendering report selections` | Verifies that the Report tab loads full finding and artifact lists before rendering selection checkboxes. |
+| `renders paged report selectors without loading every finding or artifact` | Verifies that the Report tab renders bounded selector pages, preserves off-page manual selections, stores selector filters, and pages without loading every finding or artifact. |
+| `ignores stale selector responses after a filter change starts a newer page load` | Verifies that stale report selector responses do not overwrite newer filtered results or trigger extra renders. |
+| `keeps all-mode selections checked across pages when one item is excluded` | Verifies that All-mode report selections use exclusions so clearing one item on a later page does not clear selected rows on other pages. |
+| `reloads filter-backed all selections with exclusions and preserves them on later saves` | Verifies that filter-backed All selections and page-two exclusions survive draft save/reload and later metadata-only saves. |
 | `blocks view-only team members from save/raw controls without blocking preview or export` | Verifies that view-only team members cannot save drafts or switch sensitive export preferences, while default preview/export stays available. |
 | `shows stale-save conflicts as report errors` | Verifies that report draft save conflicts surface as in-tab errors instead of reporting a successful save. |
 | `reorders sections and preserves explicit empty selections` | Verifies section move controls, selection empty states, and explicit None/All selection state in the report editor. |
@@ -4247,6 +4252,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `imports a small Nuclei JSONL file into Atlas from the browser` | Verifies that the Atlas import modal can preview and apply a small Nuclei JSONL file in a live browser. |
 | `creates, edits, downloads, and deletes a project evidence package` | Verifies that the Projects modal package wizard creates a linked-run evidence package with labels/notes, and that package edit, manifest, download, and delete actions work in a live browser. |
 | `builds a project report preview and export archive` | Verifies that the Projects modal Report tab can edit metadata, save a draft, preview linked evidence, exercise Print/PDF, and download the report archive in a live browser. |
+| `keeps large report selector paging, exclusions, draft reload, and exports stable` | Verifies that the Projects modal Report tab keeps large selector paging, filter-backed All, off-page exclusions, draft reload, preview, export, and editor scroll position stable in a live browser. |
 | `edits finding and artifact metadata and previews project artifacts` | Verifies that seeded project findings and run artifacts can be edited, previewed, downloaded, filtered by source run, and unlinked through the Projects modal in a live browser. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
 | `navigates nested file output folders and exposes viewer actions` | Verifies that the workspace modal displays nested output paths as folders and exposes actions in the file viewer header. |

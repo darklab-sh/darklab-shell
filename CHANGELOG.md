@@ -15,9 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - The editor can toggle and reorder shipped sections, choose included runs/targets/findings/artifacts, save drafts explicitly with optimistic concurrency, preview rendered HTML, export a markdown/HTML archive, and use browser Print/PDF from the preview.
   - Report drafts are owner-scoped, template-aware, and backed by `services.reports`; the single shipped template stays implicit, while operator-configured template choices appear when more than one template is available.
   - Rendered reports include generated-by metadata, selected evidence summaries, redaction mode, readable finding target references when export settings allow them, and source/run relationship context when the project has it.
+  - Report preview and archive export now render from one shared composed context per request/build, and report archive provenance records selection filters, bounded exclusions, and resolved build-time counts for large-project selections.
   - View-only team members can preview and export the default readable report, while save, raw-output, and private-note controls stay locked.
-  - Selection behavior preserves explicit None/All choices, keeps default include-all dynamic while metadata changes, loads full finding/artifact lists before rendering controls, clears stale previews after edits, warns before reload discards unsaved work, resolves manual selections beyond the first bounded service page, and escapes Markdown table cells.
-  - **Test coverage:** Vitest covers draft rendering, explicit Save, conflicts, stale preview invalidation, reload confirmation, include-all behavior, full-list loading, template visibility, view-only gating, archive downloads, Print/PDF wiring, and report provenance display. Backend, route, and Playwright coverage exercises archive export, size-limit failures, date-range validation, redaction, selection bounds, Markdown escaping, and the live save/preview/print/archive flow.
+  - Selection behavior uses paged runs, targets, findings, and artifacts controls with server totals, keeps explicit None/All choices dynamic across metadata edits, stores filter-backed All selections without materializing thousands of ids, supports bounded exclusions, shows compact selected/excluded ID summaries, resolves manual selections beyond the visible page, clears stale previews after edits, warns before reload discards unsaved work, and escapes Markdown table cells.
+  - **Test coverage:** Vitest covers draft rendering, explicit Save, conflicts, stale preview invalidation, reload confirmation, include-all behavior, filter-backed All reload persistence, paged selector loading, template visibility, view-only gating, archive downloads, Print/PDF wiring, and report provenance display. Backend, route, and Playwright coverage exercises archive export, size-limit failures, date-range validation, redaction, selection bounds, Markdown escaping, large run/target/finding/artifact selector resolution, the live save/preview/print/archive flow, and large-selector paging with filter-backed All, off-page exclusions, draft reload, preview, export, and scroll preservation.
 
 - **Richer package/export provenance** — Evidence package and report archives now carry compact, redaction-aware provenance that explains what was selected and how it was produced.
   - Package and report manifests use v2 archive metadata for build settings, selected entity ids/counts, redaction/private-note choices, and safe source summaries.
@@ -43,6 +44,34 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Test coverage:** focused backend coverage verifies the centralized event registry policy, same-transaction rollback behavior, sanitized best-effort fallback logs, owner-scoped audit pagination, scoped personal/team/project visibility boundaries, periodic retention gating, Project and Team Activity route access, package/report audit handoff fields, and the operator diagnostics viewer/export paths. Browser coverage verifies audit viewer filters, Project and Team Activity filters, object-level Recent activity panels, row rendering, native details drawers, disabled/empty states, mobile rows, and a live project-link action appearing in `/diag/audit`.
 
 ### Fixed
+
+- **Report selector freshness** — report selector page loads now ignore stale responses after filter changes, so slower old requests cannot redraw older rows over newer filtered results.
+
+- **Report selector search drafts** — typing in report selector search fields now updates the draft immediately, so Preview and Export use the visible filter text even before the field loses focus.
+
+- **Report finding selector search** — the report builder's Findings selector now has a bounded search field, and saved finding search filters apply consistently in Preview and Export.
+
+- **Report selected-item summaries** — manual report selections now show loaded item labels and details instead of only raw ids, with a clear fallback for saved off-page ids that have not been loaded yet.
+
+- **Report finding selector counts** — the report builder's Findings selector now uses the same orphan-finding scope as Preview and Export, so visible counts and All/All matching selections resolve the same set.
+
+- **Report artifact selector search** — artifact search in the report builder now filters the selector results through the same query path used by Preview and Export.
+
+- **Report composition query load** — report Preview and Export no longer run unused first-page selector queries before resolving the selected evidence set.
+
+- **Report finding target references** — finding rows in reports now keep their real target-reference labels even when the report's Targets selector is narrowed to a smaller set.
+
+- **Report selector accessibility** — report selector count summaries now announce selection-total changes to assistive technology.
+
+- **Report selector filters** — report selector filter detection is now explicit for boolean and text filters, reducing the chance of hidden filter-state drift.
+
+- **Report preview failure logs** — report preview composition and rendering failures now emit sanitized structured server logs with selection counts and filter activity, while keeping raw draft/search text out of log extras.
+
+- **Report export failure details** — report export jobs now expose stable failure codes and safe messages instead of copying raw exception text into job status, log extras, or audit details.
+
+- **Report export completion logs** — successful report export jobs now include safe selection counts, matched totals, selection modes, and exclusion counts in completion logs and audit details.
+
+- **Report selector failure logs** — report selector page failures now include safe paging and filter-state context in client-error logs without logging typed search text.
 
 - **Built-in command ANSI rendering** — structured built-in rows now preserve the intended ANSI styling path through `ansi_up`, so `jobs`, `runs`, `status`, `stats`, `last`, `retention`, and system-style summaries no longer show stray `[4m`/`[0m` control fragments in the terminal.
 

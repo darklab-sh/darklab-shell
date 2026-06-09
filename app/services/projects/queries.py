@@ -1247,6 +1247,8 @@ def _project_target_filter_run_ids(conn, session_id, project_id, target_ids, *, 
 def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, offset=0, team_id=""):
     filters = filters if isinstance(filters, dict) else {}
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
+    search = _trim_text(filters.get("q") or filters.get("query") or "", 128).lower()
+    search_like = f"%{search}%"
     with db_connect() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
@@ -1277,11 +1279,17 @@ def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, of
             return _project_artifact_page_payload([], 0, safe_limit, safe_offset, {})
         ordered_run_ids = sorted(candidate_run_ids)
         placeholders = ",".join("?" for _ in ordered_run_ids)
+        artifact_search_sql = (
+            "AND (? = '' OR LOWER(COALESCE(display_name, '')) LIKE ? "
+            "OR LOWER(COALESCE(workspace_path, '')) LIKE ? "
+            "OR LOWER(COALESCE(kind, '')) LIKE ?) "
+        )
         count_rows = conn.execute(
             "SELECT run_id, COUNT(*) AS count FROM run_file_artifacts "  # nosec
             f"WHERE run_id IN ({placeholders}) "  # nosec
+            + artifact_search_sql +
             "GROUP BY run_id",
-            ordered_run_ids,
+            (*ordered_run_ids, search, search_like, search_like, search_like),
         ).fetchall()
         run_counts = {str(row["run_id"] or ""): int(row["count"] or 0) for row in count_rows}
         total = sum(run_counts.values())
@@ -1291,9 +1299,12 @@ def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, of
             "r.team_id AS run_team_id "
             "FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
             f"WHERE a.run_id IN ({placeholders}) "  # nosec
+            "AND (? = '' OR LOWER(COALESCE(a.display_name, '')) LIKE ? "
+            "OR LOWER(COALESCE(a.workspace_path, '')) LIKE ? "
+            "OR LOWER(COALESCE(a.kind, '')) LIKE ?) "
             "ORDER BY a.created DESC, a.id DESC "
             "LIMIT ? OFFSET ?",
-            (*ordered_run_ids, safe_limit, safe_offset),
+            (*ordered_run_ids, search, search_like, search_like, search_like, safe_limit, safe_offset),
         ).fetchall()
         artifacts = _project_artifact_rows_to_items(session_id, conn, rows, team_id=team_id)
     return _project_artifact_page_payload(artifacts, total, safe_limit, safe_offset, run_counts)
@@ -1316,8 +1327,10 @@ def _list_all_project_artifacts(session_id, project_id, *, team_id=""):
     return artifacts
 
 
-def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="", include_provenance=False):
+def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="", include_provenance=False, query=""):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
+    search = _trim_text(query, 256).lower()
+    search_like = f"%{search}%"
     with db_connect() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
@@ -1331,8 +1344,9 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="",
             "SELECT COUNT(*) AS count "
             "FROM project_links l JOIN runs r ON r.id = l.entity_id "
             "WHERE l.project_id = ? AND l.entity_type = 'run' "
-            "AND " + run_owner_sql + " AND r.run_kind = ?",  # nosec
-            (project_id, *run_owner_params, RUN_KIND_EXTERNAL),
+            "AND " + run_owner_sql + " AND r.run_kind = ? "  # nosec
+            "AND (? = '' OR LOWER(COALESCE(r.command, '')) LIKE ? OR LOWER(r.id) LIKE ?) ",
+            (project_id, *run_owner_params, RUN_KIND_EXTERNAL, search, search_like, search_like),
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0
         rows = conn.execute(
@@ -1347,9 +1361,10 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="",
             "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
             "WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_owner_sql + " "  # nosec
             "AND r.run_kind = ? "
-            "ORDER BY r.started DESC, l.created DESC "
+            "AND (? = '' OR LOWER(COALESCE(r.command, '')) LIKE ? OR LOWER(r.id) LIKE ?) "
+            "ORDER BY r.started DESC, l.created DESC, r.id DESC, l.id DESC "
             "LIMIT ? OFFSET ?",
-            (project_id, *run_owner_params, RUN_KIND_EXTERNAL, safe_limit, safe_offset),
+            (project_id, *run_owner_params, RUN_KIND_EXTERNAL, search, search_like, search_like, safe_limit, safe_offset),
         ).fetchall()
         runs = _project_run_rows_to_items(
             conn,

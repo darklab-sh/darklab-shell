@@ -115,8 +115,9 @@ from services.reports.jobs import (
     report_export_archive_for_job,
     start_report_export_job,
 )
+from services.reports.composition import compose_report_context
 from services.reports.models import normalize_report_draft
-from services.reports.rendering import render_report_html, render_report_markdown
+from services.reports.rendering import render_report_html_from_context, render_report_markdown_from_context
 from services.reports.storage import (
     ReportDraftConflict,
     default_report_record,
@@ -209,6 +210,52 @@ def _project_json_error(message, status):
 
 def _project_not_found(message="project not found"):
     return _project_json_error(message, 404)
+
+
+def _report_preview_log_extra(session_id, team_id, project_id, draft, exc):
+    draft = draft if isinstance(draft, dict) else {}
+    raw_selection = draft.get("selection")
+    raw_selection_modes = draft.get("selection_modes")
+    raw_selection_filters = draft.get("selection_filters")
+    raw_selection_exclude_ids = draft.get("selection_exclude_ids")
+    selection = raw_selection if isinstance(raw_selection, dict) else {}
+    selection_modes = raw_selection_modes if isinstance(raw_selection_modes, dict) else {}
+    selection_filters = raw_selection_filters if isinstance(raw_selection_filters, dict) else {}
+    selection_exclude_ids = raw_selection_exclude_ids if isinstance(raw_selection_exclude_ids, dict) else {}
+    filter_fields = {}
+    filter_active = {}
+    for key, value in selection_filters.items():
+        if not isinstance(value, dict):
+            continue
+        fields = sorted(str(field) for field in value.keys())
+        filter_fields[str(key)] = fields
+        filter_active[str(key)] = any(
+            bool(item) if isinstance(item, bool) else bool(str(item or "").strip())
+            for item in value.values()
+        )
+    return {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "selection_modes": {
+            str(key): str(value or "")
+            for key, value in selection_modes.items()
+        },
+        "selected_counts": {
+            str(key): len(value)
+            for key, value in selection.items()
+            if isinstance(value, list)
+        },
+        "excluded_counts": {
+            str(key): len(value)
+            for key, value in selection_exclude_ids.items()
+            if isinstance(value, list)
+        },
+        "filter_fields": filter_fields,
+        "filter_active": filter_active,
+        "exception_type": type(exc).__name__,
+    }
 
 
 def _project_json_or_404(value, *, key=None, error="project not found"):
@@ -701,6 +748,7 @@ def projects_runs_list(project_id):
         project_id,
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        query=request.args.get("q") or "",
         team_id=team_id,
     )
     return _project_json_or_404(runs)
@@ -714,6 +762,7 @@ def projects_entities_list(project_id):
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "q": request.args.get("q") or "",
     }
     entities = list_project_entities(
         session_id,
@@ -1285,27 +1334,36 @@ def projects_report_preview(project_id):
     if permission_error:
         return permission_error
     generated_at = datetime.now(timezone.utc)
+    try:
+        context = compose_report_context(
+            draft,
+            project=project,
+            session_id=session_id,
+            project_id=project_id,
+            team_id=team_id,
+            cfg=CFG,
+        )
+        markdown = render_report_markdown_from_context(context, cfg=CFG, generated_at=generated_at)
+        html = render_report_html_from_context(context, cfg=CFG, generated_at=generated_at)
+    except ProjectWorkspaceError as exc:
+        log.warning(
+            "PROJECT_REPORT_PREVIEW_FAILED",
+            exc_info=True,
+            extra=_report_preview_log_extra(session_id, team_id, project_id, draft, exc),
+        )
+        return _project_error_response(exc)
+    except Exception as exc:
+        log.error(
+            "PROJECT_REPORT_PREVIEW_FAILED",
+            exc_info=True,
+            extra=_report_preview_log_extra(session_id, team_id, project_id, draft, exc),
+        )
+        return _project_json_error("report preview failed", 500)
     return jsonify({
         "ok": True,
         "preview": {
-            "markdown": render_report_markdown(
-                draft,
-                project=project,
-                session_id=session_id,
-                project_id=project_id,
-                team_id=team_id,
-                cfg=CFG,
-                generated_at=generated_at,
-            ),
-            "html": render_report_html(
-                draft,
-                project=project,
-                session_id=session_id,
-                project_id=project_id,
-                team_id=team_id,
-                cfg=CFG,
-                generated_at=generated_at,
-            ),
+            "markdown": markdown,
+            "html": html,
         },
     })
 
@@ -1824,6 +1882,7 @@ def projects_artifacts_list(project_id):
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "q": request.args.get("q") or "",
     }
     artifacts = list_project_artifacts(
         session_id,
@@ -1957,6 +2016,7 @@ def projects_findings_list(project_id):
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "q": request.args.get("q"),
         "review_state": request.args.getlist("review_state"),
         "scope": request.args.getlist("scope"),
         "severity": request.args.getlist("severity"),

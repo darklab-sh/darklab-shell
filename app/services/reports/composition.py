@@ -39,11 +39,89 @@ def _page_items(payload: Any, key: str) -> list[dict[str, Any]]:
     return [item for item in items if isinstance(item, dict)]
 
 
-def _findings_page(session_id: str, project_id: str, offset: int, *, team_id: str = "") -> dict[str, Any]:
+def _run_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    return {"query": str((filters or {}).get("q") or "")}
+
+
+def _target_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    raw = filters if isinstance(filters, dict) else {}
+    return {
+        "target_type": str(raw.get("type") or ""),
+        "query": str(raw.get("q") or ""),
+        "auto_discovered": bool(raw.get("auto_discovered")),
+    }
+
+
+def _finding_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    raw = filters if isinstance(filters, dict) else {}
+    return {
+        "orphan_filter": "all",
+        "include_group_counts": "0",
+        "q": str(raw.get("q") or ""),
+        "review_state": [str(raw.get("review_state") or "")] if raw.get("review_state") else [],
+        "severity": [str(raw.get("severity") or "")] if raw.get("severity") else [],
+    }
+
+
+def _artifact_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    raw = filters if isinstance(filters, dict) else {}
+    return {"q": str(raw.get("q") or "")}
+
+
+def _has_active_filter(filters: Any) -> bool:
+    if not isinstance(filters, dict):
+        return False
+    for value in filters.values():
+        if isinstance(value, bool):
+            if value:
+                return True
+            continue
+        if str(value or "").strip():
+            return True
+    return False
+
+
+def _empty_page(item_key: str, offset: int) -> dict[str, Any]:
+    return {
+        item_key: [],
+        "total": 0,
+        "limit": _REPORT_PAGE_LIMIT,
+        "offset": max(0, int(offset or 0)),
+        "has_more": False,
+    }
+
+
+def _fetch_runs_page(session_id: str, project_id: str, offset: int, *, filters=None, team_id: str = "") -> dict[str, Any]:
+    page = list_project_runs(
+        session_id,
+        project_id,
+        limit=_REPORT_PAGE_LIMIT,
+        offset=offset,
+        team_id=team_id,
+        include_provenance=True,
+        **_run_filters(filters if isinstance(filters, dict) else {}),
+    )
+    return page if isinstance(page, dict) else _empty_page("runs", offset)
+
+
+def _fetch_targets_page(session_id: str, project_id: str, offset: int, *, filters=None, team_id: str = "") -> dict[str, Any]:
+    page = list_project_targets(
+        session_id,
+        project_id,
+        limit=_REPORT_PAGE_LIMIT,
+        offset=offset,
+        team_id=team_id,
+        include_provenance=True,
+        **_target_filters(filters if isinstance(filters, dict) else {}),
+    )
+    return page if isinstance(page, dict) else _empty_page("targets", offset)
+
+
+def _fetch_findings_page(session_id: str, project_id: str, offset: int, *, filters=None, team_id: str = "") -> dict[str, Any]:
     page = list_project_findings(
         session_id,
         project_id,
-        {"orphan_filter": "all", "include_group_counts": "0"},
+        _finding_filters(filters if isinstance(filters, dict) else {}),
         limit=_REPORT_PAGE_LIMIT,
         offset=offset,
         include_total=True,
@@ -52,29 +130,24 @@ def _findings_page(session_id: str, project_id: str, offset: int, *, team_id: st
     return page if isinstance(page, dict) else {"findings": page if isinstance(page, list) else []}
 
 
-def _all_project_inputs(session_id: str, project_id: str, *, team_id: str = "") -> dict[str, list[dict[str, Any]]]:
-    runs_page = list_project_runs(
+def _fetch_artifacts_page(session_id: str, project_id: str, offset: int, *, filters=None, team_id: str = "") -> dict[str, Any]:
+    page = list_project_artifacts(
         session_id,
         project_id,
+        _artifact_filters(filters if isinstance(filters, dict) else {}),
         limit=_REPORT_PAGE_LIMIT,
+        offset=offset,
         team_id=team_id,
-        include_provenance=True,
     )
-    targets_page = list_project_targets(
-        session_id,
-        project_id,
-        limit=_REPORT_PAGE_LIMIT,
-        team_id=team_id,
-        include_provenance=True,
-    )
-    findings_page = _findings_page(session_id, project_id, 0, team_id=team_id)
-    artifacts_page = list_project_artifacts(session_id, project_id, {}, limit=_REPORT_PAGE_LIMIT, team_id=team_id)
-    return {
-        "runs": _page_items(runs_page, "runs"),
-        "targets": _page_items(targets_page, "targets"),
-        "findings": _page_items(findings_page, "findings"),
-        "artifacts": _page_items(artifacts_page, "artifacts"),
-    }
+    return page if isinstance(page, dict) else _empty_page("artifacts", offset)
+
+
+def _page_total(payload: Any, item_count: int) -> int:
+    if not isinstance(payload, dict):
+        return item_count
+    if "total" not in payload:
+        return item_count
+    return max(0, int(payload.get("total") or 0))
 
 
 def _page_has_more(payload: Any, offset: int, item_count: int) -> bool:
@@ -115,30 +188,81 @@ def _resolve_selected_items(
     return [by_id[item_id] for item_id in selected_ids]
 
 
-def _selected_items(
-    items: list[dict[str, Any]],
-    selected_ids: list[str],
+def _collect_matching_items(
     *,
     key: str,
-    include_all: bool = True,
-    item_key: str = "",
-    fetch_page=None,
-) -> list[dict[str, Any]]:
+    item_key: str,
+    fetch_page,
+    exclude_ids: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    excluded = {str(value or "") for value in (exclude_ids or []) if str(value or "")}
+    offset = 0
+    total = 0
+    while True:
+        page = fetch_page(offset)
+        if page is None:
+            raise ProjectWorkspaceError(f"report selection could not resolve {key} items")
+        rows = _page_items(page, item_key)
+        if offset == 0:
+            total = _page_total(page, len(rows))
+        for row in rows:
+            row_id = str(row.get("id") or "")
+            if not row_id or row_id in seen:
+                continue
+            seen.add(row_id)
+            if row_id not in excluded:
+                items.append(row)
+        if not rows or not _page_has_more(page, offset, len(rows)):
+            break
+        offset += len(rows)
+    return items, total
+
+
+def _resolve_report_selection(
+    *,
+    selected_ids: list[str],
+    mode: str,
+    key: str,
+    item_key: str,
+    fetch_page,
+    exclude_ids: list[str],
+    fetch_selected_page=None,
+) -> tuple[list[dict[str, Any]], int]:
+    if mode != "manual":
+        return _collect_matching_items(
+            key=key,
+            item_key=item_key,
+            fetch_page=fetch_page,
+            exclude_ids=exclude_ids,
+        )
     if not selected_ids:
-        return list(items) if include_all else []
-    by_id = {str(item.get("id") or ""): item for item in items}
-    missing = [item_id for item_id in selected_ids if item_id not in by_id]
-    if missing:
-        if fetch_page and item_key:
-            return _resolve_selected_items(
-                items,
-                selected_ids,
-                key=key,
-                item_key=item_key,
-                fetch_page=fetch_page,
-            )
-        raise ProjectWorkspaceError(f"report selection includes an unknown {key} item")
-    return [by_id[item_id] for item_id in selected_ids]
+        return [], 0
+    selected = _resolve_selected_items(
+        [],
+        selected_ids,
+        key=key,
+        item_key=item_key,
+        fetch_page=fetch_selected_page or fetch_page,
+    )
+    return selected, len(selected)
+
+
+def _target_references_need_full_project_set(
+    *,
+    selected_findings: list[dict[str, Any]],
+    target_mode: str,
+    target_filters: Any,
+    target_exclude_ids: list[str],
+) -> bool:
+    if not selected_findings:
+        return False
+    return (
+        target_mode == "manual"
+        or _has_active_filter(target_filters)
+        or bool(target_exclude_ids)
+    )
 
 
 def _strip_notes(value: Any) -> Any:
@@ -248,75 +372,122 @@ def compose_report_context(
     """Return a bounded report context ready for renderers."""
     normalized_draft = normalize_report_draft(draft or {})
     selected_project_id = str(project_id or (project or {}).get("id") or "").strip()
-    if session_id and selected_project_id:
-        all_inputs = _all_project_inputs(session_id, selected_project_id, team_id=team_id)
-    else:
-        all_inputs = {"runs": [], "targets": [], "findings": [], "artifacts": []}
     selection = normalized_draft.get("selection") or {}
     selection_modes = normalized_draft.get("selection_modes") or {}
+    selection_filters = normalized_draft.get("selection_filters") or {}
+    selection_exclude_ids = normalized_draft.get("selection_exclude_ids") or {}
+    selected_runs, run_total = _resolve_report_selection(
+        selected_ids=selection.get("run_ids") or [],
+        mode=str(selection_modes.get("run_ids") or "all"),
+        key="run",
+        item_key="runs",
+        fetch_page=lambda offset: _fetch_runs_page(
+            session_id,
+            selected_project_id,
+            offset,
+            filters=selection_filters.get("run_ids") or {},
+            team_id=team_id,
+        ),
+        exclude_ids=selection_exclude_ids.get("run_ids") or [],
+        fetch_selected_page=lambda offset: _fetch_runs_page(
+            session_id,
+            selected_project_id,
+            offset,
+            team_id=team_id,
+        ),
+    )
+    selected_targets, target_total = _resolve_report_selection(
+        selected_ids=selection.get("target_ids") or [],
+        mode=str(selection_modes.get("target_ids") or "all"),
+        key="target",
+        item_key="targets",
+        fetch_page=lambda offset: _fetch_targets_page(
+            session_id,
+            selected_project_id,
+            offset,
+            filters=selection_filters.get("target_ids") or {},
+            team_id=team_id,
+        ),
+        exclude_ids=selection_exclude_ids.get("target_ids") or [],
+        fetch_selected_page=lambda offset: _fetch_targets_page(
+            session_id,
+            selected_project_id,
+            offset,
+            team_id=team_id,
+        ),
+    )
+    selected_findings, finding_total = _resolve_report_selection(
+        selected_ids=selection.get("finding_ids") or [],
+        mode=str(selection_modes.get("finding_ids") or "all"),
+        key="finding",
+        item_key="findings",
+        fetch_page=lambda offset: _fetch_findings_page(
+            session_id,
+            selected_project_id,
+            offset,
+            filters=selection_filters.get("finding_ids") or {},
+            team_id=team_id,
+        ),
+        exclude_ids=selection_exclude_ids.get("finding_ids") or [],
+        fetch_selected_page=lambda offset: _fetch_findings_page(
+            session_id,
+            selected_project_id,
+            offset,
+            team_id=team_id,
+        ),
+    )
+    selected_artifacts, artifact_total = _resolve_report_selection(
+        selected_ids=selection.get("artifact_ids") or [],
+        mode=str(selection_modes.get("artifact_ids") or "all"),
+        key="artifact",
+        item_key="artifacts",
+        fetch_page=lambda offset: _fetch_artifacts_page(
+            session_id,
+            selected_project_id,
+            offset,
+            filters=selection_filters.get("artifact_ids") or {},
+            team_id=team_id,
+        ),
+        exclude_ids=selection_exclude_ids.get("artifact_ids") or [],
+        fetch_selected_page=lambda offset: _fetch_artifacts_page(
+            session_id,
+            selected_project_id,
+            offset,
+            team_id=team_id,
+        ),
+    )
     selected = {
-        "runs": _selected_items(
-            all_inputs["runs"],
-            selection.get("run_ids") or [],
-            key="run",
-            include_all=selection_modes.get("run_ids") != "manual",
-            item_key="runs",
-            fetch_page=lambda offset: list_project_runs(
-                session_id,
-                selected_project_id,
-                limit=_REPORT_PAGE_LIMIT,
-                offset=offset,
-                team_id=team_id,
-                include_provenance=True,
-            ),
-        ),
-        "targets": _selected_items(
-            all_inputs["targets"],
-            selection.get("target_ids") or [],
+        "runs": selected_runs,
+        "targets": selected_targets,
+        "findings": selected_findings,
+        "artifacts": selected_artifacts,
+    }
+    resolved_totals = {
+        "runs": run_total,
+        "targets": target_total,
+        "findings": finding_total,
+        "artifacts": artifact_total,
+    }
+    if session_id:
+        _attach_full_finding_triage(session_id, selected["findings"], team_id=team_id)
+    target_reference_targets = selected["targets"]
+    if _target_references_need_full_project_set(
+        selected_findings=selected["findings"],
+        target_mode=str(selection_modes.get("target_ids") or "all"),
+        target_filters=selection_filters.get("target_ids") or {},
+        target_exclude_ids=selection_exclude_ids.get("target_ids") or [],
+    ):
+        target_reference_targets, _ = _collect_matching_items(
             key="target",
-            include_all=selection_modes.get("target_ids") != "manual",
             item_key="targets",
-            fetch_page=lambda offset: list_project_targets(
-                session_id,
-                selected_project_id,
-                limit=_REPORT_PAGE_LIMIT,
-                offset=offset,
-                team_id=team_id,
-                include_provenance=True,
-            ),
-        ),
-        "findings": _selected_items(
-            all_inputs["findings"],
-            selection.get("finding_ids") or [],
-            key="finding",
-            include_all=selection_modes.get("finding_ids") != "manual",
-            item_key="findings",
-            fetch_page=lambda offset: _findings_page(
+            fetch_page=lambda offset: _fetch_targets_page(
                 session_id,
                 selected_project_id,
                 offset,
                 team_id=team_id,
             ),
-        ),
-        "artifacts": _selected_items(
-            all_inputs["artifacts"],
-            selection.get("artifact_ids") or [],
-            key="artifact",
-            include_all=selection_modes.get("artifact_ids") != "manual",
-            item_key="artifacts",
-            fetch_page=lambda offset: list_project_artifacts(
-                session_id,
-                selected_project_id,
-                {},
-                limit=_REPORT_PAGE_LIMIT,
-                offset=offset,
-                team_id=team_id,
-            ),
-        ),
-    }
-    if session_id:
-        _attach_full_finding_triage(session_id, selected["findings"], team_id=team_id)
-    attach_finding_target_references(selected["findings"], all_inputs["targets"])
+        )
+    attach_finding_target_references(selected["findings"], target_reference_targets)
     selected["artifacts"], artifact_warnings = _attach_artifact_previews(
         session_id,
         selected["artifacts"],
@@ -326,7 +497,13 @@ def compose_report_context(
         "draft": normalized_draft,
         "project": dict(project or {}),
         "counts": _compose_counts(selected),
-        "all_counts": _compose_counts(all_inputs),
+        # `all_counts` is kept as a compatibility alias for older render/context
+        # consumers. In large-selection reports it means the matched selector
+        # total before exclusions, not the full project-wide dataset size.
+        "all_counts": resolved_totals,
+        "selection_totals": resolved_totals,
+        "selection_filters": selection_filters,
+        "selection_exclude_ids": selection_exclude_ids,
         "runs": selected["runs"],
         "targets": selected["targets"],
         "findings": selected["findings"],

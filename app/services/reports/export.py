@@ -13,8 +13,13 @@ import zipfile
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.utils import cfg_mb_bytes
 
+from .composition import compose_report_context
 from .models import normalize_report_draft
-from .rendering import render_report_html, render_report_markdown, report_generation_metadata
+from .rendering import (
+    render_report_html_from_context,
+    render_report_markdown_from_context,
+    report_generation_metadata,
+)
 
 
 REPORT_ARCHIVE_FORMAT_VERSION = 2
@@ -26,6 +31,7 @@ class ReportExportBundle:
     markdown: str
     html: str
     generation: dict[str, str]
+    context: dict[str, Any]
 
 
 def build_report_export_bundle(
@@ -38,31 +44,20 @@ def build_report_export_bundle(
     cfg: dict | None = None,
 ) -> ReportExportBundle:
     generated_at = datetime.now(timezone.utc)
-    generation = report_generation_metadata(
-        {"export": (draft or {}).get("export") if isinstance(draft, dict) else {}},
-        generated_at=generated_at,
+    context = compose_report_context(
+        draft,
+        project=project,
+        session_id=session_id,
+        project_id=project_id,
+        team_id=team_id,
         cfg=cfg,
     )
+    generation = report_generation_metadata(context, generated_at=generated_at, cfg=cfg)
     return ReportExportBundle(
-        markdown=render_report_markdown(
-            draft,
-            project=project,
-            session_id=session_id,
-            project_id=project_id,
-            team_id=team_id,
-            cfg=cfg,
-            generated_at=generated_at,
-        ),
-        html=render_report_html(
-            draft,
-            project=project,
-            session_id=session_id,
-            project_id=project_id,
-            team_id=team_id,
-            cfg=cfg,
-            generated_at=generated_at,
-        ),
+        markdown=render_report_markdown_from_context(context, generated_at=generated_at, cfg=cfg),
+        html=render_report_html_from_context(context, generated_at=generated_at, cfg=cfg),
         generation=generation,
+        context=context,
     )
 
 
@@ -79,10 +74,15 @@ def _report_manifest_provenance(
     generation: dict[str, str],
     *,
     project: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
     audit_handoff: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     normalized_draft = normalize_report_draft(draft or {})
     selection = normalized_draft.get("selection") or {}
+    selection_filters = normalized_draft.get("selection_filters") or {}
+    selection_exclude_ids = normalized_draft.get("selection_exclude_ids") or {}
+    resolved_counts = (context or {}).get("counts") if isinstance(context, dict) else {}
+    resolved_counts = resolved_counts if isinstance(resolved_counts, dict) else {}
     selected_entity_ids = {
         key: list(value) if isinstance(value, list) else []
         for key, value in selection.items()
@@ -107,6 +107,18 @@ def _report_manifest_provenance(
             "selected_entity_counts": {
                 key: len(value)
                 for key, value in selected_entity_ids.items()
+            },
+            "selection_filters": {
+                key: dict(value) if isinstance(value, dict) else {}
+                for key, value in selection_filters.items()
+            },
+            "selection_exclude_ids": {
+                key: list(value) if isinstance(value, list) else []
+                for key, value in selection_exclude_ids.items()
+            },
+            "resolved_entity_counts": {
+                key: int(value or 0)
+                for key, value in resolved_counts.items()
             },
             "included_sections": included_sections,
         },
@@ -140,6 +152,38 @@ def _archive_audit_handoff(event_type: str, job_id: str = "") -> dict[str, str]:
         "correlation_id": normalized_job_id,
         "job_id": normalized_job_id,
     }
+
+
+def _report_export_metrics(
+    *,
+    byte_size: int,
+    context: dict[str, Any],
+    draft: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized_draft = normalize_report_draft(draft or {})
+    counts = context.get("counts") if isinstance(context, dict) else {}
+    counts = counts if isinstance(counts, dict) else {}
+    totals = context.get("selection_totals") if isinstance(context, dict) else {}
+    totals = totals if isinstance(totals, dict) else {}
+    exclusions = normalized_draft.get("selection_exclude_ids") or {}
+    metrics: dict[str, Any] = {
+        "archive_bytes": int(byte_size or 0),
+        "files": 3,
+        "selection_modes": dict(normalized_draft.get("selection_modes") or {}),
+        "selection_excluded_counts": {
+            key: len(value) if isinstance(value, list) else 0
+            for key, value in exclusions.items()
+        },
+    }
+    for plural_key, metric_key in (
+        ("runs", "run"),
+        ("targets", "target"),
+        ("findings", "finding"),
+        ("artifacts", "artifact"),
+    ):
+        metrics[f"{metric_key}_count"] = int(counts.get(plural_key) or 0)
+        metrics[f"{metric_key}_total"] = int(totals.get(plural_key) or 0)
+    return metrics
 
 
 def build_report_export_archive(
@@ -189,6 +233,7 @@ def build_report_export_archive(
             draft,
             bundle.generation,
             project=project,
+            context=bundle.context,
             audit_handoff=_archive_audit_handoff("report.build", build_job_id),
         ),
     }
@@ -225,8 +270,9 @@ def build_report_export_archive(
         "filename": _archive_filename(project),
         "mimetype": "application/zip",
         "byte_size": byte_size,
-        "metrics": {
-            "archive_bytes": byte_size,
-            "files": 3,
-        },
+        "metrics": _report_export_metrics(
+            byte_size=byte_size,
+            context=bundle.context,
+            draft=draft,
+        ),
     }

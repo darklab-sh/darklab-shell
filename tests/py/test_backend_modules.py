@@ -2825,10 +2825,40 @@ class TestReportTemplateCatalog:
             saved = report_storage.save_report_draft(
                 "session-report",
                 "project-1",
-                {"metadata": {"engagement_name": "June assessment", "date_range": "2026-06-01 to 2026-06-05"}},
+                {
+                    "metadata": {"engagement_name": "June assessment", "date_range": "2026-06-01 to 2026-06-05"},
+                    "selection_modes": {"run_ids": "all", "target_ids": "all"},
+                    "selection_filters": {
+                        "run_ids": {"q": "nmap"},
+                        "target_ids": {"q": "api", "type": "domain", "auto_discovered": True},
+                        "finding_ids": {"review_state": "new", "severity": "high"},
+                    },
+                    "selection_exclude_ids": {
+                        "run_ids": ["run-1", "run-2", "run-3"],
+                        "target_ids": ["target-1"],
+                    },
+                },
             )
             assert saved["draft"]["metadata"]["engagement_name"] == "June assessment"
             assert saved["draft"]["metadata"]["date_range"] == "2026-06-01 to 2026-06-05"
+            assert saved["draft"]["selection_modes"]["run_ids"] == "all"
+            assert saved["draft"]["selection_filters"]["run_ids"]["q"] == "nmap"
+            assert saved["draft"]["selection_filters"]["target_ids"] == {
+                "q": "api",
+                "type": "domain",
+                "auto_discovered": True,
+            }
+            assert saved["draft"]["selection_filters"]["finding_ids"] == {
+                "q": "",
+                "review_state": "new",
+                "severity": "high",
+            }
+            assert saved["draft"]["selection_exclude_ids"]["run_ids"] == ["run-1", "run-2", "run-3"]
+            assert saved["draft"]["selection_exclude_ids"]["target_ids"] == ["target-1"]
+            reloaded_saved = report_storage.get_report_draft("session-report", "project-1")
+            assert reloaded_saved is not None
+            assert reloaded_saved["draft"]["selection_exclude_ids"]["run_ids"] == ["run-1", "run-2", "run-3"]
+            assert reloaded_saved["draft"]["selection_filters"]["run_ids"]["q"] == "nmap"
 
             with pytest.raises(ProjectWorkspaceError, match="YYYY-MM-DD to YYYY-MM-DD"):
                 report_storage.save_report_draft(
@@ -2849,6 +2879,37 @@ class TestReportTemplateCatalog:
                     "session-report",
                     "project-invalid-date-order",
                     {"metadata": {"date_range": "2026-06-05 to 2026-06-01"}},
+                )
+
+            legacy = report_storage.save_report_draft(
+                "session-report",
+                "project-legacy-entity-selection",
+                {"selection": {"entity_ids": ["target-legacy"]}},
+            )
+            assert legacy["draft"]["selection"]["target_ids"] == ["target-legacy"]
+            assert "entity_ids" not in legacy["draft"]["selection"]
+
+            with pytest.raises(ProjectWorkspaceError, match="unsupported report run_ids filter"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-selection-filter",
+                    {"selection_filters": {"run_ids": {"q": "nmap", "status": "done"}}},
+                )
+
+            oversized_selection = [f"run-{index}" for index in range(501)]
+            with pytest.raises(ProjectWorkspaceError, match="limited to 500 ids per section"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-oversized-manual-selection",
+                    {"selection": {"run_ids": oversized_selection}},
+                )
+
+            oversized_exclusions = [f"run-{index}" for index in range(501)]
+            with pytest.raises(ProjectWorkspaceError, match="limited to 500 ids per section"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-oversized-selection-exclusions",
+                    {"selection_exclude_ids": {"run_ids": oversized_exclusions}},
                 )
 
             updated = report_storage.save_report_draft(
@@ -15058,7 +15119,7 @@ class TestAuditEvents:
             report_jobs._record_job_audit(
                 report_job,
                 status="failed",
-                error=raw_error,
+                reason="size_limit",
                 archive_bytes=456,
                 metrics=metrics,
             )
@@ -15088,7 +15149,7 @@ class TestAuditEvents:
                 report_jobs._record_job_audit(
                     report_job,
                     status="failed",
-                    error=raw_error,
+                    reason="size_limit",
                     archive_bytes=456,
                     metrics=metrics,
                 )

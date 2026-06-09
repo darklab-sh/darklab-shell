@@ -417,6 +417,15 @@ def render_report_markdown(
         team_id=team_id,
         cfg=cfg,
     )
+    return render_report_markdown_from_context(context, generated_at=generated_at, cfg=cfg)
+
+
+def render_report_markdown_from_context(
+    context: dict[str, Any],
+    *,
+    generated_at: datetime | str | None = None,
+    cfg: dict | None = None,
+) -> str:
     title = report_title(context)
     generation = report_generation_metadata(context, generated_at=generated_at, cfg=cfg)
     lines = [f"# {title}", "", f"_{_generation_line(generation)}_", ""]
@@ -445,6 +454,15 @@ def render_report_html(
         team_id=team_id,
         cfg=cfg,
     )
+    return render_report_html_from_context(context, generated_at=generated_at, cfg=cfg)
+
+
+def render_report_html_from_context(
+    context: dict[str, Any],
+    *,
+    generated_at: datetime | str | None = None,
+    cfg: dict | None = None,
+) -> str:
     generation = report_generation_metadata(context, generated_at=generated_at, cfg=cfg)
     return _REPORT_HTML_TEMPLATE.render(
         title=report_title(context),

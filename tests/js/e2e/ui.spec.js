@@ -160,6 +160,156 @@ print(json.dumps({"runId": run_id, "artifactId": artifact_id, "findingId": findi
   return JSON.parse(result.stdout)
 }
 
+function seedLargeProjectReportFixture(testInfo, { sessionId, projectId, count = 60 }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id, raw_count = sys.argv[1:5]
+count = int(raw_count)
+workspace_name = "sess_" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+workspace_root = Path(data_dir) / "workspaces" / workspace_name
+workspace_root.mkdir(parents=True, exist_ok=True)
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+run_ids = []
+artifact_ids = []
+finding_ids = []
+target_ids = []
+try:
+    for index in range(count):
+        suffix = f"{index:03d}"
+        run_id = f"run_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        artifact_id = f"rfa_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        finding_id = f"fnd_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        target_id = f"ent_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        command = f"large-report-run-{suffix} --target report-target-{suffix}.example.test"
+        artifact_rel = f"reports/large-evidence-{suffix}.txt"
+        artifact_content = f"large evidence artifact {suffix}\nselector coverage artifact {suffix}\n"
+        artifact_path = workspace_root / artifact_rel
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(artifact_content, encoding="utf-8")
+        byte_size = len(artifact_content.encode("utf-8"))
+        conn.execute(
+            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, ?, 'external', ?, datetime('now', ?), datetime('now', ?), 0, ?, 0, 2, 1, 0)",
+            (
+                run_id,
+                session_id,
+                command,
+                f"+{index} seconds",
+                f"+{index} seconds",
+                json.dumps([command, f"large selector evidence {suffix}"]),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'active_project', datetime('now', ?))",
+            (f"pln_report_large_run_{uuid.uuid4().hex[:10]}_{suffix}", project_id, run_id, f"+{index} seconds"),
+        )
+        conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
+            "VALUES (?, ?, ?, ?, ?, 'output', ?, 'workspace_flag', 'text/plain', 'text', datetime('now', ?))",
+            (
+                artifact_id,
+                session_id,
+                run_id,
+                artifact_rel,
+                f"large-evidence-{suffix}.txt",
+                byte_size,
+                f"+{index} seconds",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
+            "VALUES (?, ?, ?, 'finding', ?, ?, 1, 'info', ?, 'new', datetime('now', ?))",
+            (
+                finding_id,
+                session_id,
+                run_id,
+                f"Large selector finding {suffix}",
+                f"large selector finding evidence {suffix}",
+                "fp-" + finding_id,
+                f"+{index} seconds",
+            ),
+        )
+        canonical_value = f"report-target-{suffix}.example.test"
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, 'domain', ?, ?, datetime('now', ?), datetime('now', ?), datetime('now', ?))",
+            (
+                target_id,
+                session_id,
+                canonical_value,
+                "sig-" + target_id,
+                f"+{index} seconds",
+                f"+{index} seconds",
+                f"+{index} seconds",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now', ?))",
+            (f"pln_report_large_ent_{uuid.uuid4().hex[:10]}_{suffix}", project_id, target_id, f"+{index} seconds"),
+        )
+        run_ids.append(run_id)
+        artifact_ids.append(artifact_id)
+        finding_ids.append(finding_id)
+        target_ids.append(target_id)
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "count": count,
+    "runIds": run_ids,
+    "artifactIds": artifact_ids,
+    "findingIds": finding_ids,
+    "targetIds": target_ids,
+    "includedArtifactText": "large evidence artifact 059",
+    "excludedArtifactText": "large evidence artifact 005",
+    "artifactFilterQuery": "large-evidence",
+}))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId, projectId, String(count)], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed large report fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
+function readReportArchiveText(zipPath) {
+  const script = String.raw`
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    chunks = []
+    for name in archive.namelist():
+        if name.endswith((".html", ".md", ".json")):
+            chunks.append(archive.read(name).decode("utf-8", errors="replace"))
+print("\n".join(chunks))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, zipPath], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to inspect report archive: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return result.stdout
+}
+
 function seedAutoPromoteAtlasEntity(testInfo, { sessionId }) {
   const dataDir = e2eDataDirForProject(testInfo)
   const script = String.raw`
@@ -1134,6 +1284,100 @@ test.describe('project workspace modal', () => {
     ])
     expect(download.suggestedFilename()).toMatch(/playwright-report-\d+-engagement-report\.zip/)
     await expect(reportRoot.locator('.project-report-message')).toContainText('Report download started.')
+  })
+
+  test('keeps large report selector paging, exclusions, draft reload, and exports stable', async ({ page }, testInfo) => {
+    test.setTimeout(120_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Large Report ${Date.now()}`)
+    const sessionId = await browserSessionId(page)
+    const fixture = seedLargeProjectReportFixture(testInfo, { sessionId, projectId, count: 60 })
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+
+    await switchProjectTab(page, 'report')
+    const reportRoot = page.locator('.project-report-root', {
+      has: page.locator('[data-project-report-action="save"]'),
+    }).first()
+    const editor = reportRoot.locator('.project-report-editor')
+    const artifactsGroup = reportRoot.locator('.project-report-selection-group', {
+      has: page.locator('h4', { hasText: 'Artifacts' }),
+    }).first()
+    const artifactFilter = artifactsGroup.locator('[data-project-report-selection-filter="q"]')
+    const allArtifacts = artifactsGroup.locator('[data-project-report-action="selection-all"][data-selection-key="artifact_ids"]')
+    const noArtifacts = artifactsGroup.locator('[data-project-report-action="selection-none"][data-selection-key="artifact_ids"]')
+    const nextArtifacts = artifactsGroup.locator('[data-project-report-action="selection-next"][data-selection-key="artifact_ids"]')
+    const prevArtifacts = artifactsGroup.locator('[data-project-report-action="selection-prev"][data-selection-key="artifact_ids"]')
+
+    async function expectReportEditorStayedPut(before) {
+      await expect.poll(async () => editor.evaluate((node) => node.scrollTop), { timeout: 5_000 })
+        .toBeGreaterThanOrEqual(Math.max(0, before - 240))
+    }
+
+    async function clickAndKeepScroll(locator) {
+      await expect(locator).toBeVisible({ timeout: 15_000 })
+      await locator.click({ trial: true })
+      const before = await editor.evaluate((node) => node.scrollTop)
+      await locator.click()
+      await expectReportEditorStayedPut(before)
+    }
+
+    await expect(artifactFilter).toBeVisible({ timeout: 20_000 })
+    await artifactFilter.fill(fixture.artifactFilterQuery)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
+    await expect(artifactsGroup).toContainText('large-evidence-059.txt')
+    await page.waitForTimeout(250)
+
+    await clickAndKeepScroll(noArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('0 selected')
+    await clickAndKeepScroll(allArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('60 selected')
+
+    await clickAndKeepScroll(nextArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('51-60 of 60', { timeout: 15_000 })
+    const excludedRow = artifactsGroup.locator('.project-report-selection-row', { hasText: 'large-evidence-005.txt' })
+    await expect(excludedRow).toBeVisible()
+    const beforeToggle = await editor.evaluate((node) => node.scrollTop)
+    await excludedRow.locator('[data-project-report-selection="artifact_ids"]').uncheck()
+    await expectReportEditorStayedPut(beforeToggle)
+
+    await clickAndKeepScroll(prevArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
+
+    await reportRoot.locator('[data-project-report-metadata="engagement_name"]').fill('Large browser selector report')
+    const saveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname === `/projects/${projectId}/report`
+    })
+    await reportRoot.locator('[data-project-report-action="save"]').click()
+    const savedReportResponse = await saveResponse
+    expect(savedReportResponse.ok()).toBe(true)
+    const savedReportBody = JSON.parse(savedReportResponse.request().postData() || '{}')
+    expect(savedReportBody.draft.selection_filters.artifact_ids.q).toBe(fixture.artifactFilterQuery)
+    expect(savedReportBody.draft.selection_exclude_ids.artifact_ids).toHaveLength(1)
+    await expect(reportRoot.locator('.project-report-message')).toContainText('Report draft saved.')
+
+    await reportRoot.locator('[data-project-report-action="reload"]').click()
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('59 selected', {
+      timeout: 15_000,
+    })
+    await clickAndKeepScroll(nextArtifacts)
+    await expect(excludedRow.locator('[data-project-report-selection="artifact_ids"]')).not.toBeChecked()
+
+    await reportRoot.locator('[data-project-report-action="preview"]').click()
+    const frame = reportRoot.frameLocator('.project-report-preview-frame')
+    await expect(frame.locator('body')).toContainText('Large browser selector report', { timeout: 20_000 })
+    await expect(frame.locator('body')).toContainText(fixture.includedArtifactText)
+    await expect(frame.locator('body')).not.toContainText(fixture.excludedArtifactText)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      reportRoot.locator('[data-project-report-action="export"]').click(),
+    ])
+    const archiveText = readReportArchiveText(await download.path())
+    expect(archiveText).toContain(fixture.includedArtifactText)
+    expect(archiveText).not.toContain(fixture.excludedArtifactText)
   })
 
   test('edits finding and artifact metadata and previews project artifacts', async ({ page }, testInfo) => {
