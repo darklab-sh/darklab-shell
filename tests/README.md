@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,664
+- behavior tests: 3,665
 - docs/inventory meta-tests: 34
-- `pytest`: 2067 (2033 behavior + 34 meta)
+- `pytest`: 2068 (2034 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,698
+- total: 3,699
 
 This document is organized in two parts:
 
@@ -1818,6 +1818,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
 | `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
+| `TestRunRoute.test_client_side_run_redacts_output_before_search_and_entity_capture` | Verifies browser-owned run output is redacted before search indexing while safe entity metadata can still be captured. |
 | `TestRunRoute.test_client_side_run_can_offload_search_text_and_delete_it_with_run` | Verifies oversized run search text can be offloaded and cleaned up when the run is deleted. |
 | `TestRunRoute.test_client_side_run_applies_preview_byte_cap` | Verifies that browser-owned run persistence applies the same preview byte cap as server-owned run output. |
 | `TestRunRoute.test_client_side_run_persists_tour_builtin` | Verifies that the terminal tour can persist its client-side transcript as a normal history run. |

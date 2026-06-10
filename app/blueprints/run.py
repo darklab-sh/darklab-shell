@@ -37,10 +37,10 @@ from services.commands.registry import (
     split_command_argv,
     validate_command,
 )
-from config import CFG, SCANNER_PREFIX
+from config import CFG, SCANNER_PREFIX, get_share_redaction_rules
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
-from core.redaction import REDACTED_ENTITY_SENTINEL
+from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from extensions import limiter
 from services.commands.builtins import (
     execute_builtin_command,
@@ -1214,9 +1214,10 @@ def _client_side_run_command_allowed(command: str) -> bool:
     return root in CLIENT_SIDE_RUN_ROOTS
 
 
-def _normalize_client_side_run_lines(lines):
+def _normalize_client_side_run_lines(lines, command: str):
     if not isinstance(lines, list):
         return [], False, 0
+    signal_classifier = OutputSignalClassifier(command, cmd_type="builtin")
     capture = RunOutputCapture(
         run_id="client-side-run-preview",
         preview_limit=CFG["max_output_lines"],
@@ -1231,7 +1232,17 @@ def _normalize_client_side_run_lines(lines):
         else:
             text = str(item)
             legacy_class = ""
-        capture.add_event(line_event_from_legacy(text, legacy_class))
+        _capture_event_with_signals(capture, signal_classifier, text, cls=legacy_class)
+    redaction_rules = get_share_redaction_rules(CFG)
+    if redaction_rules:
+        redacted_events = redact_line_entries(capture.preview_lines, redaction_rules)
+        redacted_entries: list[dict[str, object]] = []
+        for entry in line_entries_from_events(redacted_events):
+            if isinstance(entry, dict):
+                redacted_entries.append(entry)
+            else:
+                redacted_entries.append({"text": str(entry), "cls": ""})
+        capture.preview_lines = deque(redacted_entries)
     return list(capture.preview_lines), capture.preview_truncated, capture.output_line_count
 
 
@@ -1275,7 +1286,7 @@ def save_client_side_run():
             "cmd": command,
             "payload_type": type(raw_lines).__name__,
         })
-    lines, preview_truncated, output_line_count = _normalize_client_side_run_lines(raw_lines)
+    lines, preview_truncated, output_line_count = _normalize_client_side_run_lines(raw_lines, command)
     if isinstance(raw_lines, list) and preview_truncated:
         log.warning("CLIENT_RUN_OUTPUT_TRUNCATED", extra={
             "session": get_log_session_id(session_id),
@@ -1330,6 +1341,26 @@ def save_client_side_run():
             output_search_text=stored_output_search_text,
         )
         replace_run_output_summary(conn, run_id, lines)
+        try:
+            _run_finalize_savepoint(
+                conn,
+                "atlas_entities",
+                lambda: materialize_run_entities(
+                    conn,
+                    session_id,
+                    run_id,
+                    lines,
+                    team_id=owner_scope.team_id,
+                    seen_at=finished.isoformat(),
+                ),
+            )
+        except Exception:
+            app_metrics.record_run_finalize_error("entity_materialize")
+            log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "cmd": command,
+            })
         conn.commit()
 
     elapsed = round((finished - started).total_seconds(), 1)

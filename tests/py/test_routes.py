@@ -15603,6 +15603,72 @@ class TestRunRoute:
             conn.commit()
             conn.close()
 
+    def test_client_side_run_redacts_output_before_search_and_entity_capture(self):
+        client = get_client()
+        session = "client-run-redaction-" + uuid.uuid4().hex[:8]
+        fake_classifier = mock.Mock()
+        fake_classifier.classify_line.return_value = {
+            "command_root": "theme",
+            "line_index": 0,
+            "entities": [
+                {
+                    "type": "cve",
+                    "value": "CVE-2026-1234",
+                    "canonical_value": "CVE-2026-1234",
+                    "confidence": "high",
+                    "source_line": 0,
+                    "start": 8,
+                    "end": 21,
+                }
+            ],
+        }
+        try:
+            with mock.patch("blueprints.run.OutputSignalClassifier", return_value=fake_classifier):
+                resp = client.post(
+                    "/run/client",
+                    headers={"X-Session-ID": session},
+                    json={
+                        "command": "theme current",
+                        "exit_code": 0,
+                        "lines": [{
+                            "text": "Finding CVE-2026-1234 reported by admin@example.com",
+                            "cls": "builtin-section",
+                        }],
+                    },
+                )
+            data = json.loads(resp.data)
+            with db_connect() as conn:
+                row = conn.execute(
+                    "SELECT output_preview, output_search_text FROM runs WHERE id = ?",
+                    (data["run_id"],),
+                ).fetchone()
+                entity_rows = conn.execute(
+                    "SELECT e.type, e.canonical_value "
+                    "FROM entity_run_links erl JOIN entities e ON e.id = erl.entity_id "
+                    "WHERE erl.run_id = ?",
+                    (data["run_id"],),
+                ).fetchall()
+            preview = json.loads(row["output_preview"])
+            output_search_text = str(row["output_search_text"] or "")
+
+            assert resp.status_code == 200
+            assert preview[0]["text"] == "Finding CVE-2026-1234 reported by [email-redacted]"
+            assert "admin@example.com" not in output_search_text
+            assert "[email-redacted]" in output_search_text
+            assert [(item["type"], item["canonical_value"]) for item in entity_rows] == [
+                ("cve", "CVE-2026-1234")
+            ]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "DELETE FROM entity_run_links WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
+                (session,),
+            )
+            conn.execute("DELETE FROM entities WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
     def test_client_side_run_can_offload_search_text_and_delete_it_with_run(self):
         from services.storage import body_store
 

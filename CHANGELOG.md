@@ -87,6 +87,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Single-worker local development can still run without Redis, and Redis-backed or fake-Redis test/capture modes continue to support multi-worker settings.
   - **Tests:** added backend coverage for rejected multi-worker/no-Redis startup, allowed single-worker fallback, and allowed multi-worker Redis configuration. Current suite total: 2067 pytest + 1368 Vitest + 263 Playwright = **3,698 tests**.
 
+- **Client-side run redaction** — `/run/client` now applies the normal output metadata and share/export redaction path before browser-owned built-in output becomes run history, search text, or Atlas entity data.
+  - The route still only accepts the fixed browser-owned built-in allow-list, but client-submitted line text no longer bypasses the redaction baseline before persistence.
+  - **Tests:** added route coverage proving client-side run output is redacted before search indexing while non-redacted entities can still be materialized. Current suite total: 2068 pytest + 1368 Vitest + 263 Playwright = **3,699 tests**.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.
