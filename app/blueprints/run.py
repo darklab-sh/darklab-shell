@@ -472,6 +472,26 @@ _RUN_OUTPUT_LIVE_BATCH_MAX_LATENCY_SECONDS = 0.075
 _RUN_OUTPUT_POLL_SECONDS = 0.05
 _RUN_OUTPUT_LIVE_BATCH_COALESCED_ROLES = {LineRole.progress, LineRole.status_line}
 _KILL_PROCESS_GROUP_GONE_DELAYS = (0.0, 0.05, 0.15, 0.3, 0.5)
+_ACTIVE_RUN_OWNER_TOUCH_INTERVAL_SECONDS = 5.0
+
+
+def _maybe_touch_active_run_owner(
+    run_id: str,
+    owner_client_id: str,
+    owner_tab_id: str,
+    *,
+    last_touch_monotonic: float | None,
+) -> float | None:
+    if not owner_client_id:
+        return last_touch_monotonic
+    now = time.monotonic()
+    if (
+        last_touch_monotonic is not None
+        and now - last_touch_monotonic < _ACTIVE_RUN_OWNER_TOUCH_INTERVAL_SECONDS
+    ):
+        return last_touch_monotonic
+    active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+    return now
 
 
 class _BrokerOutputBatcher:
@@ -2561,9 +2581,15 @@ def stream_interactive_pty_run(run_id):
             claim_pty_stream_owner(run_id, session_id, owner_client_id, owner_tab_id)
 
     def generate():
+        last_touch_monotonic = None
         for item in stream_pty_events(run_id, session_id, after=after_id, team_id=owner_scope.team_id):
             if owner_client_id and can_control:
-                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+                last_touch_monotonic = _maybe_touch_active_run_owner(
+                    run_id,
+                    owner_client_id,
+                    owner_tab_id,
+                    last_touch_monotonic=last_touch_monotonic,
+                )
             yield item
 
     return Response(
@@ -2771,9 +2797,15 @@ def stream_brokered_run(run_id):
     owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
 
     def generate():
+        last_touch_monotonic = None
         for item in stream_run_events(run_id, after_id=after_id):
             if owner_client_id:
-                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+                last_touch_monotonic = _maybe_touch_active_run_owner(
+                    run_id,
+                    owner_client_id,
+                    owner_tab_id,
+                    last_touch_monotonic=last_touch_monotonic,
+                )
             yield item
 
     return Response(generate(), mimetype="text/event-stream",

@@ -45,6 +45,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Stream owner-liveness refresh load** — brokered command and interactive PTY streams now refresh active-run ownership immediately, then at most once every five seconds per stream connection, instead of rewriting owner metadata for every streamed frame.
+  - **Tests:** added route coverage for throttled owner refreshes on normal brokered streams and interactive PTY streams. Current suite total: 2050 pytest + 1367 Vitest + 263 Playwright = **3,680 tests**.
+
 - **Run-output summary backfill retries** — startup now records durable status for run-output summary backfill attempts, so legacy runs with empty structured output or unreadable artifacts/previews are handled once instead of being retried and re-logged on every restart.
   - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers.
 

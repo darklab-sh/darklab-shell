@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,644
+- behavior tests: 3,646
 - docs/inventory meta-tests: 34
-- `pytest`: 2048 (2014 behavior + 34 meta)
+- `pytest`: 2050 (2016 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,678
+- total: 3,680
 
 This document is organized in two parts:
 
@@ -1790,6 +1790,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunRoute.test_brokered_run_events_returns_session_scoped_backfill` | Verifies that brokered event backfill returns personal and team-authorized events with event IDs. |
 | `TestRunRoute.test_brokered_run_events_rejects_runs_outside_session` | Verifies that brokered event backfill rejects run IDs outside the current session before reading broker events. |
 | `TestRunRoute.test_brokered_run_stream_replays_events_for_session_run` | Verifies that brokered stream replay emits personal and team-scoped stored events and refreshes owner liveness. |
+| `TestRunRoute.test_brokered_run_stream_throttles_owner_liveness_refresh` | Verifies that brokered stream replay refreshes owner liveness immediately, then throttles repeated refreshes on busy streams. |
 | `TestRunRoute.test_brokered_run_stream_allows_registered_run_that_exited_before_persistence` | Verifies that brokered stream replay can attach to a registered same-session run that exited before completed-run persistence finished. |
 | `TestRunRoute.test_brokered_run_stream_rejects_runs_outside_session` | Verifies that brokered stream replay rejects run IDs outside the current session before opening a broker stream. |
 | `TestRunRoute.test_brokered_run_events_and_stream_report_scope_mismatch` | Verifies brokered event and stream reattach requests report wrong-scope runs with a scope-mismatch response instead of a generic not-found error. |
@@ -1933,6 +1934,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestInteractivePtyRuns.test_start_interactive_pty_allows_multiple_active_pty_runs_for_session` | Verifies that a session can start another interactive PTY while one is already active. |
 | `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit` | Verifies that interactive PTY startup returns a clear limit error instead of spawning when the session already has the configured maximum active PTYs. |
 | `TestInteractivePtyRuns.test_stream_interactive_pty_touches_active_run_owner` | Verifies that active PTY streams refresh owner liveness like normal brokered run streams. |
+| `TestInteractivePtyRuns.test_stream_interactive_pty_throttles_owner_liveness_refresh` | Verifies that active PTY streams refresh owner liveness immediately, then throttle repeated refreshes on busy streams. |
 | `TestInteractivePtyRuns.test_snapshot_interactive_pty_returns_terminal_resume_state` | Verifies that the PTY snapshot endpoint returns terminal frame state and resume event id for active PTY reattach. |
 | `TestInteractivePtyRuns.test_snapshot_interactive_pty_reports_worker_local_limit` | Verifies that PTY snapshot requests explain when the run belongs to the session but is not available on the current worker. |
 | `TestInteractivePtyRuns.test_snapshot_interactive_pty_uses_specific_failure_statuses` | Verifies that PTY snapshot failures use specific HTTP statuses for missing, closed, stale, and not-yet-available runs. |

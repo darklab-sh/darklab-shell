@@ -2093,12 +2093,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,644
+- behavior tests: 3,646
 - docs/inventory meta-tests: 34
-- `pytest`: 2048 (2014 behavior + 34 meta)
+- `pytest`: 2050 (2016 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,678
+- total: 3,680
 
 ### Testing Architecture
 

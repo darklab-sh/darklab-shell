@@ -484,6 +484,35 @@ class TestInteractivePtyRuns:
         assert resp.status_code == 404
         rejected_claim_owner.assert_not_called()
 
+    def test_stream_interactive_pty_throttles_owner_liveness_refresh(self):
+        client = get_client()
+        events = [
+            'data: {"type":"output","text":"one"}\n\n',
+            'data: {"type":"output","text":"two"}\n\n',
+            'data: {"type":"output","text":"three"}\n\n',
+        ]
+
+        with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run.stream_pty_events", return_value=iter(events)), \
+             mock.patch("blueprints.run.claim_pty_stream_owner"), \
+             mock.patch("blueprints.run.time.monotonic", side_effect=[100.0, 101.0, 105.0, 106.0, 107.0]), \
+             mock.patch("blueprints.run.active_run_touch_owner") as touch_owner:
+            resp = client.get(
+                "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
+                headers={
+                    "X-Session-ID": "sess-pty-owner",
+                    "X-Client-ID": "client-1",
+                },
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert body == "".join(events)
+        assert touch_owner.call_args_list == [
+            mock.call("pty-run-owner", "client-1", "tab-1"),
+            mock.call("pty-run-owner", "client-1", "tab-1"),
+        ]
+
     def test_snapshot_interactive_pty_returns_terminal_resume_state(self):
         client = get_client()
 
