@@ -45,6 +45,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **SQLite WAL growth control** — SQLite connections now set `wal_autocheckpoint=1000`, and Flask workers periodically run a guarded `PRAGMA wal_checkpoint(TRUNCATE)` before requests so long-lived containers do not let `history.db-wal` grow unchecked.
+  - `/diag` and Prometheus already expose WAL size; the checkpoint hook now gives that signal an automatic cleanup path.
+  - **Tests:** added backend coverage for the SQLite connection PRAGMAs and route coverage for the periodic checkpoint hook. Current suite total: 2054 pytest + 1367 Vitest + 263 Playwright = **3,684 tests**.
+
 - **Team active-run lookup scale** — Redis-backed team active-run lists now use a `teamprocs:<team_id>` index instead of scanning every `procmeta:*` row for each team-scoped stream, event, or kill visibility check.
   - Team-owned run registration, owner heartbeats, owner claims, active-run removal, and stale metadata cleanup now keep the team index aligned with the existing session index. Redis diagnostics and metrics also count the `teamprocs` namespace.
   - **Tests:** added backend coverage proving team listings use the team index without a metadata scan and that removing a team run clears the index. Current suite total: 2052 pytest + 1367 Vitest + 263 Playwright = **3,682 tests**.

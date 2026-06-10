@@ -101,6 +101,8 @@ from blueprints.watchers import watchers_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
 from core.http_rate_limit import check_dynamic_route_rate_limit  # noqa: E402
+from core.database import DB_BACKEND, db_connect  # noqa: E402
+from core.database_backend import DatabaseBackend  # noqa: E402
 from core.process import cleanup_stale_active_run_metadata, redis_client  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
 from services import metrics as app_metrics  # noqa: E402
@@ -111,7 +113,10 @@ app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
 limiter.init_app(app)
 
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
+_SQLITE_WAL_CHECKPOINT_INTERVAL_SECONDS = 300
 _last_workspace_cleanup_monotonic = 0.0
+_last_sqlite_wal_checkpoint_monotonic = 0.0
+_sqlite_wal_checkpoint_monotonic = time.monotonic
 _REQUEST_COMPLETED_LOG_SKIP_PREFIXES = ("/static/", "/vendor/")
 _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
 _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
@@ -220,6 +225,7 @@ def _server_error_handler(e):
 @app.before_request
 def _run_periodic_workspace_cleanup():
     _maybe_cleanup_workspaces()
+    _maybe_checkpoint_sqlite_wal()
 
 
 def _maybe_cleanup_workspaces():
@@ -236,6 +242,33 @@ def _maybe_cleanup_workspaces():
             log.info("WORKSPACE_CLEANUP", extra={"removed": removed})
     except Exception:
         log.exception("WORKSPACE_CLEANUP_ERROR")
+
+
+def _maybe_checkpoint_sqlite_wal():
+    global _last_sqlite_wal_checkpoint_monotonic
+    if DB_BACKEND != DatabaseBackend.SQLITE:
+        return
+    now = _sqlite_wal_checkpoint_monotonic()
+    if now - _last_sqlite_wal_checkpoint_monotonic < _SQLITE_WAL_CHECKPOINT_INTERVAL_SECONDS:
+        return
+    _last_sqlite_wal_checkpoint_monotonic = now
+    try:
+        with db_connect() as conn:
+            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    except Exception:
+        log.warning("SQLITE_WAL_CHECKPOINT_FAILED", exc_info=True)
+        return
+    if not row:
+        return
+    busy = int(row[0] or 0)
+    log_frames = int(row[1] or 0)
+    checkpointed_frames = int(row[2] or 0)
+    if busy or log_frames or checkpointed_frames:
+        log.info("SQLITE_WAL_CHECKPOINT", extra={
+            "busy": busy,
+            "log_frames": log_frames,
+            "checkpointed_frames": checkpointed_frames,
+        })
 
 
 @app.before_request

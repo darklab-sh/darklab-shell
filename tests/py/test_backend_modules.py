@@ -2973,6 +2973,20 @@ class TestDatabaseBackend:
         )
         assert sqlite3.IntegrityError in database_backend.integrity_error_types(database_backend.DatabaseBackend.SQLITE)
 
+    def test_connect_sqlite_enables_wal_autocheckpoint(self, tmp_path):
+        db_path = tmp_path / "wal-autocheckpoint.db"
+        conn = database_backend.connect_sqlite(str(db_path))
+        try:
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            synchronous = conn.execute("PRAGMA synchronous").fetchone()[0]
+            wal_autocheckpoint = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+        finally:
+            conn.close()
+
+        assert journal_mode == "wal"
+        assert synchronous == 1
+        assert wal_autocheckpoint == 1000
+
     def test_postgres_backend_exposes_dialect_and_pool_settings(self, monkeypatch):
         monkeypatch.delenv("PGOPTIONS", raising=False)
         cfg = {

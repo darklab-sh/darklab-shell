@@ -495,7 +495,7 @@ class TestInteractivePtyRuns:
         with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=True), \
              mock.patch("blueprints.run.stream_pty_events", return_value=iter(events)), \
              mock.patch("blueprints.run.claim_pty_stream_owner"), \
-             mock.patch("blueprints.run.time.monotonic", side_effect=[100.0, 101.0, 105.0, 106.0, 107.0]), \
+             mock.patch("blueprints.run._active_run_owner_touch_monotonic", side_effect=[100.0, 101.0, 105.0]), \
              mock.patch("blueprints.run.active_run_touch_owner") as touch_owner:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",

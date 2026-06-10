@@ -40,7 +40,7 @@ import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
-from core.database_backend import quote_sqlite_identifier
+from core.database_backend import DatabaseBackend, quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import record_run_findings
@@ -15067,6 +15067,32 @@ class TestWorkspaceRoutes:
         finally:
             shell_app._last_workspace_cleanup_monotonic = previous_cleanup
 
+    def test_periodic_sqlite_wal_checkpoint_runs_before_requests(self):
+        client = get_client()
+        previous_checkpoint = shell_app._last_sqlite_wal_checkpoint_monotonic
+        fake_conn = mock.MagicMock()
+        fake_conn.__enter__.return_value = fake_conn
+        fake_conn.__exit__.return_value = None
+        fake_conn.execute.return_value.fetchone.return_value = (0, 12, 12)
+        try:
+            shell_app._last_sqlite_wal_checkpoint_monotonic = 0
+            with mock.patch.object(shell_app, "DB_BACKEND", DatabaseBackend.SQLITE), \
+                 mock.patch.object(shell_app, "db_connect", return_value=fake_conn) as connect_db, \
+                 mock.patch.object(shell_app, "_sqlite_wal_checkpoint_monotonic", return_value=1000), \
+                 mock.patch.object(shell_app.log, "info") as log_info:
+                resp = client.get("/health")
+
+            assert resp.status_code == 200
+            connect_db.assert_called_once_with()
+            fake_conn.execute.assert_called_once_with("PRAGMA wal_checkpoint(TRUNCATE)")
+            log_info.assert_any_call("SQLITE_WAL_CHECKPOINT", extra={
+                "busy": 0,
+                "log_frames": 12,
+                "checkpointed_frames": 12,
+            })
+        finally:
+            shell_app._last_sqlite_wal_checkpoint_monotonic = previous_checkpoint
+
 
 # ── /runs ─────────────────────────────────────────────────────────────────────
 
@@ -15312,7 +15338,7 @@ class TestRunRoute:
         events = ["data: one\n\n", "data: two\n\n", "data: three\n\n"]
         with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
              mock.patch("blueprints.run.stream_run_events", return_value=iter(events)), \
-             mock.patch("blueprints.run.time.monotonic", side_effect=[100.0, 101.0, 105.0, 106.0, 107.0]), \
+             mock.patch("blueprints.run._active_run_owner_touch_monotonic", side_effect=[100.0, 101.0, 105.0]), \
              mock.patch("blueprints.run.active_run_touch_owner") as touch:
             resp = client.get(
                 "/runs/run-1/stream?tab_id=tab-1",

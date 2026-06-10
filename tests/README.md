@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,648
+- behavior tests: 3,650
 - docs/inventory meta-tests: 34
-- `pytest`: 2052 (2018 behavior + 34 meta)
+- `pytest`: 2054 (2020 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,682
+- total: 3,684
 
 This document is organized in two parts:
 
@@ -509,6 +509,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestReportTemplateCatalog.test_report_template_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator report template overrides log a warning and fall back to the shipped catalog. |
 | `TestReportTemplateCatalog.test_report_draft_storage_handles_scope_and_conflicts` | Verifies report draft storage keeps personal/team drafts separate and rejects stale saves. |
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
+| `TestDatabaseBackend.test_connect_sqlite_enables_wal_autocheckpoint` | Verifies SQLite connections enable WAL mode, normal synchronous writes, and the configured auto-checkpoint page cap. |
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
 | `TestDatabaseBackend.test_postgres_pool_preserves_pgoptions_when_disabling_jit` | Verifies the Postgres pool preserves caller-provided connection options while adding the app's default JIT setting. |
 | `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
@@ -1782,6 +1783,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestWorkspaceRoutes.test_file_list_includes_project_artifact_metadata` | Verifies that workspace file listings include project artifact metadata for files captured from run input/output flags. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_runs_before_requests_when_workspace_enabled` | Verifies that request-driven workspace cleanup removes expired session directories when workspace storage is enabled. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_skips_request_session_workspace` | Verifies that request-driven workspace cleanup preserves the active request session while removing other expired workspaces. |
+| `TestWorkspaceRoutes.test_periodic_sqlite_wal_checkpoint_runs_before_requests` | Verifies that the request hook periodically truncates SQLite WAL files through a guarded checkpoint. |
 | `TestRunRoute.test_workspace_path_output_filter_masks_absolute_session_paths` | Verifies real-run output masking rewrites absolute session workspace paths to user-facing workspace paths. |
 | `TestRunRoute.test_brokered_run_requires_available_broker` | Verifies that `POST /runs` reports an unavailable broker before starting a command. |
 | `TestRunRoute.test_brokered_run_missing_runtime_returns_synthetic_stream_reference` | Verifies that brokered command starts return a synthetic stream reference when an allowed runtime is missing. |
