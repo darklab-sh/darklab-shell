@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,653
+- behavior tests: 3,659
 - docs/inventory meta-tests: 34
-- `pytest`: 2057 (2023 behavior + 34 meta)
-- `vitest`: 1367
+- `pytest`: 2062 (2028 behavior + 34 meta)
+- `vitest`: 1368
 - `playwright`: 263
-- total: 3,687
+- total: 3,693
 
 This document is organized in two parts:
 
@@ -398,6 +398,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_run_start_rejects_project_links_for_builtin_missing_and_interactive` | Verifies explicit project links are rejected for built-ins, missing runtimes, and interactive PTY commands. |
 | `test_api_v1_run_start_rewrites_workspace_root_output_paths` | Verifies API-started runs rewrite leading-slash workspace output paths before spawning commands. |
 | `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies active-run lists, run streams, wait requests, and cancel requests are scoped to the owning token. |
+| `test_api_v1_cancel_skips_signal_when_scanner_pid_start_time_changed` | Verifies API cancel treats reused scanner PIDs as already gone and does not signal the stale process group. |
 | `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
 | `test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped` | Verifies schedule API CRUD, manual run-now, fire audit rows, automation audit rows without raw command text, cross-session 404 behavior, and team viewer read-only role gates. |
 | `test_api_v1_schedules_reject_invalid_body_and_disallowed_command` | Verifies schedule API creates reject non-object bodies and commands that fail command policy. |
@@ -793,6 +794,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_run_claim_owner_reports_changed_client` | Verifies that owner claims report whether a PTY stream moved to a different browser client. |
 | `TestActiveRunMetadata.test_active_run_owner_metadata_remains_provenance_only` | Verifies that active-run owner metadata remains origin/liveness information rather than a reassignment permission model. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_is_the_active_run_permission_boundary` | Verifies that active-run PID lookup is scoped to the requesting session. |
+| `TestActiveRunMetadata.test_active_run_pid_start_matches_current_process` | Verifies that active-run PID start-time checks accept the original process. |
+| `TestActiveRunMetadata.test_active_run_pid_start_rejects_reused_process` | Verifies that active-run PID start-time checks reject a reused PID. |
+| `TestActiveRunMetadata.test_active_run_pid_start_rejects_legacy_metadata_without_start_time` | Verifies that active-run PID start-time checks fail closed when metadata has no stored start time. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_active_runs_for_team_uses_team_index_without_procmeta_scan` | Verifies that Redis-backed team active-run listings use the team index instead of scanning all active-run metadata. |
@@ -1419,6 +1423,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestKillRoute.test_kill_sends_sigterm_to_process_group` | Checks that kill sends sigterm to process group. |
 | `TestKillRoute.test_kill_still_returns_true_when_process_lookup_fails` | Checks that kill still returns true when process lookup fails. |
 | `TestKillRoute.test_kill_uses_scanner_sudo_path_when_configured` | Checks that kill uses scanner sudo path when configured. |
+| `TestKillRoute.test_kill_skips_scanner_sudo_path_when_pid_start_time_changed` | Verifies that `/kill` skips scanner sudo signaling when the stored PID has been reused. |
 | `TestKillRoute.test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race` | Verifies that kill treats an already-exited scanner process group as a successful race after sudo reports failure. |
 | `TestKillRoute.test_kill_rejects_non_object_json` | Checks that kill rejects non object JSON. |
 | `TestKillRoute.test_kill_rejects_non_string_run_id` | Checks that kill rejects non string run id. |
@@ -2670,6 +2675,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 
 | Test | Description |
 | --- | --- |
+| `app/templates/app_stylesheets.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the shared stylesheet include — currently emits no button-like elements; pins that state. |
 | `app/templates/diag.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator diagnostics page — currently emits no button-like elements, so the assertion short-circuits clean and pins that state (any future button added to `/diag` must go through a primitive or an allowlist entry). |
 | `app/templates/diag_audit.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator audit-log viewer so its filter, pagination, and export controls keep using shared button primitives. |
 | `app/templates/index.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the main app template — the surface that owns the desktop rail, tab bar, terminal chrome, mobile hamburger/recents sheets, and the five app-level modals. The bulk of the exception fixture exists because of this file. |

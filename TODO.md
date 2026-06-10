@@ -29,7 +29,52 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Frontend asset build pipeline
+
+The 1.7 asset pass removed the CSS `@import` waterfall and added versioned static URLs, but the shell still ships many individual CSS and JavaScript files during the first page load. Add a small build pipeline that turns the current source files into deterministic, cache-friendly bundles without forcing a broad JavaScript module rewrite at the same time.
+
+**Why this is open:**
+- Initial loads still spend request budget on many separate static assets, which makes browser bursts more likely to collide with HTTP rate limiting.
+- The current `static_asset()` helper appends a version query string, which is useful, but content-hashed build filenames are cleaner for long-lived immutable caching and rollbacks.
+- JavaScript load order is still managed by template script tags. A build manifest would make that order explicit and easier to test.
+
+**Implementation plan:**
+- Add an asset build script such as `scripts/build_assets.mjs` plus package scripts like `assets:build` and `assets:check`.
+- Write generated files under `app/static/build/`, with a manifest at `app/static/build/manifest.json`.
+- Prefer content-hashed filenames, for example `app.<hash>.css`, `shell-core.<hash>.js`, `shell-features.<hash>.js`, `shell-bootstrap.<hash>.js`, and `permalink.<hash>.js`.
+- Teach Flask a manifest helper that maps logical bundle names to built asset paths. Development can fall back to source files when the manifest is missing; production should fail clearly if bundle mode is enabled and the manifest is absent.
+- Keep `/static/build/...` on immutable cache headers. Dynamic HTML should stay fresh.
+- Bundle CSS first using the order currently captured in `app/templates/app_stylesheets.html`. Keep page-specific CSS, such as diagnostics and terminal export styles, as separate bundles unless combining them is clearly simpler.
+- Bundle JavaScript as order-preserving classic scripts first. Do not make this depend on an all-at-once ESM conversion.
+- Preserve the existing source files as the canonical files for development and unit tests.
+
+**Likely JavaScript bundle shape:**
+- `shell-core`: shared state, session handling, DOM helpers, config, output model, export helpers, and UI primitives.
+- `shell-features`: history, workspace, projects, Atlas, command registry, status monitor, schedules, watchers, workflows, preferences, and related feature modules.
+- `shell-bootstrap`: app wiring that depends on the core and feature bundles, including composer/controller/chrome/mobile boot behavior.
+- `permalink`: the share/permalink viewer's smaller dependency set.
+- PTY and xterm assets can stay separate or lazy until there is evidence they should move into the main shell bundles.
+
+**Rollout path:**
+- Start with CSS bundling and the manifest helper because the dependency order is already explicit.
+- Add classic-script JavaScript bundles after CSS is stable, preserving today's script order exactly.
+- Once bundle mode is the default in local and production flows, remove any template fallback that still emits the full source-file list in normal operation.
+- Consider an ESM migration later, one low-risk area at a time, after request-count and caching wins are already in place.
+
+**Testing and documentation:**
+- Add focused tests for deterministic manifest output, missing source failures, and bundle ordering.
+- Extend route tests so the index, permalink, and diagnostics pages render bundle URLs instead of the full source asset list.
+- Keep cache-header tests covering `/static/build/...`.
+- Keep Vitest coverage against source modules; the build should not make tests depend on minified output.
+- Run targeted browser coverage through `bash scripts/run_playwright.sh ...` for shell boot, run streaming, and permalink rendering once JavaScript bundles are in play.
+- Update README.md, FEATURES.md, ARCHITECTURE.md, CONFIGURATION.md if needed, CHANGELOG.md, release drafts, and test-count docs when implementation changes behavior or coverage.
+
+**Acceptance criteria:**
+- First-load static request count drops substantially without breaking local development ergonomics.
+- Static bundles use content-hashed filenames and immutable cache headers.
+- HTML templates reference manifest-backed bundle URLs in normal operation.
+- Missing or stale build output fails loudly in production-style checks.
+- Existing shell, permalink, diagnostics, and mobile flows keep working with the bundled assets.
 
 ---
 

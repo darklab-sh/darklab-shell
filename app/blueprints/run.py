@@ -50,6 +50,7 @@ from services.commands.builtins import (
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from core.process import (
     active_run_belongs_to_scope,
+    active_run_pid_start_matches,
     active_run_register,
     active_run_remove,
     active_run_touch_owner,
@@ -621,6 +622,19 @@ def _signal_process_group(pgid: int) -> None:
         return
 
     os.killpg(pgid, signal.SIGTERM)
+
+
+def _ensure_scanner_process_group_current(
+    run_id: str,
+    pid: int,
+    session_id: str,
+    team_id: str = "",
+) -> None:
+    if not SCANNER_PREFIX:
+        return
+    if active_run_pid_start_matches(run_id, pid, session_id=session_id, team_id=team_id):
+        return
+    raise ProcessLookupError("active run PID start time no longer matches")
 
 
 _SEARCH_ENTITY_MAX_BYTES = 4096
@@ -2873,6 +2887,12 @@ def kill_command():
         # Using the original PID as the PGID is safe: if the process group
         # no longer exists the signal fails with ESRCH instead of hitting
         # an unrelated process.
+        _ensure_scanner_process_group_current(
+            run_id,
+            pgid,
+            session_id,
+            team_id=owner_scope.team_id if owner_scope.is_team else "",
+        )
         _signal_process_group(pgid)
         if run_type == "pty":
             if owner_scope.is_team:

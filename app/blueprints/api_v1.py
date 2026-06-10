@@ -158,6 +158,7 @@ from blueprints.run import (  # noqa: PLC0415
     _history_safe_command_for_storage,
     _prepare_command_input,
     _prepare_real_command,
+    _ensure_scanner_process_group_current,
     _signal_process_group,
     _start_real_command_process,
     _workspace_cwd_value,
@@ -3057,6 +3058,12 @@ def api_run_cancel(run_id):
     if not pid:
         return _api_json_error("not_found", "No active process found for run.", 404)
     try:
+        _ensure_scanner_process_group_current(
+            run_id,
+            pid,
+            session_id,
+            team_id=owner_scope.team_id if owner_scope.is_team else "",
+        )
         _signal_process_group(pid)
         publish_run_event(run_id, "killed", {"api": True})
     except ProcessLookupError as exc:

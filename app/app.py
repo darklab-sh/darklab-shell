@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import signal  # noqa: F401 — re-exported for test compatibility
 import time
+import hashlib
 
 from flask import Flask, jsonify, request
 
@@ -120,6 +121,9 @@ _sqlite_wal_checkpoint_monotonic = time.monotonic
 _REQUEST_COMPLETED_LOG_SKIP_PREFIXES = ("/static/", "/vendor/")
 _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
 _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
+_IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
+_ASSET_VERSION_CACHE: dict[str, str] = {}
 
 
 def _should_log_request_completed() -> bool:
@@ -136,6 +140,43 @@ def _request_completed_log_level(status_code: int) -> int | None:
     if path in _REQUEST_COMPLETED_LOG_DEBUG_PATHS and 200 <= status_code < 400:
         return logging.DEBUG
     return logging.INFO
+
+
+def _apply_immutable_asset_cache_headers(response):
+    if request.method not in {"GET", "HEAD"} or response.status_code not in {200, 304}:
+        return response
+    path = request.path or ""
+    if path.startswith(_IMMUTABLE_ASSET_PREFIXES):
+        response.headers["Cache-Control"] = _IMMUTABLE_ASSET_CACHE_CONTROL
+    return response
+
+
+def _versioned_asset_url(path: str) -> str:
+    asset_path = str(path or "")
+    if not asset_path.startswith(("/static/", "/vendor/")):
+        return asset_path
+    if asset_path not in _ASSET_VERSION_CACHE:
+        _ASSET_VERSION_CACHE[asset_path] = _asset_version(asset_path)
+    version = _ASSET_VERSION_CACHE[asset_path]
+    separator = "&" if "?" in asset_path else "?"
+    return f"{asset_path}{separator}v={version}" if version else asset_path
+
+
+def _asset_version(path: str) -> str:
+    local_path: Path | None = None
+    if path.startswith("/static/"):
+        local_path = Path(app.static_folder or "") / path.removeprefix("/static/")
+    elif path.startswith("/vendor/"):
+        local_path = Path(app.static_folder or "") / path.removeprefix("/vendor/")
+    if local_path is None:
+        return APP_VERSION
+    try:
+        return hashlib.sha256(local_path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return APP_VERSION
+
+
+app.jinja_env.globals["static_asset"] = _versioned_asset_url
 
 
 def _cleanup_active_run_metadata_on_startup():
@@ -284,6 +325,7 @@ def _log_request():
 
 @app.after_request
 def _log_response(response):
+    response = _apply_immutable_asset_cache_headers(response)
     started = request.environ.get("darklab_metrics_start")
     try:
         elapsed = time.perf_counter() - float(started) if started else 0.0

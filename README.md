@@ -814,7 +814,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   └── components.css # Tabs, search UI, permalink surfaces, toast, and shared menu components
 │   │   │   ├── shell-chrome.css # Desktop shell: left rail, tabbar row, and bottom HUD bar
 │   │   │   ├── shell.css       # Terminal shell frame, panels, generic modal foundations, and utility buttons
-│   │   │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
+│   │   │   ├── styles.css      # Compatibility CSS entrypoint; templates link modular CSS files directly
 │   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── favicon.ico         # Site favicon
@@ -982,6 +982,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
 │   │       └── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
 │   └── templates/
+│       ├── app_stylesheets.html # Shared direct CSS link list for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
 │       ├── diag_audit.html     # Operator audit-log viewer and export links (IP-gated)
 │       ├── index.html          # Frontend HTML shell rendered by Flask

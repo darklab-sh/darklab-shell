@@ -11332,6 +11332,57 @@ class TestActiveRunMetadata:
             assert "run-owned" not in process._pid_map
             assert "run-owned" not in process._active_run_meta
 
+    def test_active_run_pid_start_matches_current_process(self):
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            process.active_run_register(
+                "run-current",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            assert process.active_run_pid_start_matches(
+                "run-current",
+                12345,
+                session_id="session-1",
+            )
+
+    def test_active_run_pid_start_rejects_reused_process(self):
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            process.active_run_register(
+                "run-reused",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_start_time", return_value="202"):
+            assert not process.active_run_pid_start_matches(
+                "run-reused",
+                12345,
+                session_id="session-1",
+            )
+
+    def test_active_run_pid_start_rejects_legacy_metadata_without_start_time(self):
+        with mock.patch.object(process, "_pid_start_time", return_value=None):
+            process.active_run_register(
+                "run-legacy",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            assert not process.active_run_pid_start_matches(
+                "run-legacy",
+                12345,
+                session_id="session-1",
+            )
+
     def test_active_runs_for_session_prunes_dead_pid(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):
             process.active_run_register(

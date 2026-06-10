@@ -533,6 +533,42 @@ def pid_for_team(run_id: str, team_id: str) -> int | None:
         return _coerce_pid(meta.get("pid") or _pid_map.get(run_id))
 
 
+def active_run_pid_start_matches(
+    run_id: str,
+    pid: int,
+    *,
+    session_id: str = "",
+    team_id: str = "",
+) -> bool:
+    """Return whether active-run metadata still points at this exact PID."""
+    if not run_id or pid <= 0:
+        return False
+
+    team_id = str(team_id or "").strip()
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        payload = _load_active_run_payload(redis_client.get(meta_key), meta_key)
+    else:
+        with _pid_lock:
+            payload = dict(_active_run_meta.get(run_id) or {})
+
+    if not payload:
+        return False
+    if team_id:
+        if str(payload.get("team_id", "") or "") != team_id:
+            return False
+    elif str(payload.get("session_id", "") or "") != session_id:
+        return False
+
+    if _coerce_pid(payload.get("pid")) != pid:
+        return False
+    expected_start = payload.get("pid_start_time")
+    if expected_start is None:
+        return False
+    current_start = _pid_start_time(pid)
+    return current_start is not None and str(current_start) == str(expected_start)
+
+
 def pid_pop_for_session(run_id: str, session_id: str) -> int | None:
     """Remove and return a PID only when the active run belongs to session_id."""
     if not run_id or not session_id:

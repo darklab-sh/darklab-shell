@@ -67,6 +67,18 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Finding counts still use a batched run-id query, and the larger offloaded-output search indexing work remains tracked with the rest of the history search scaling follow-up.
   - **Tests:** existing route coverage for History search metadata counts and permalink JSON metadata counts passes unchanged.
 
+- **Static asset browser caching** — `/static/...` and `/vendor/...` responses now send `Cache-Control: public, max-age=31536000, immutable`, so repeat page loads can reuse unchanged CSS, JavaScript, fonts, and vendored browser libraries instead of revalidating every file.
+  - The main HTML route stays outside the immutable policy so browser reloads still pick up new app markup and asset references.
+  - **Tests:** extended existing route coverage to assert immutable caching on static/vendor assets and to keep the index route uncached by that policy.
+
+- **CSS startup waterfall** — shell, permalink, and diagnostics templates now link the modular CSS files directly with content-hash query strings instead of loading `styles.css` and discovering the rest through serial `@import` rules.
+  - `styles.css` remains as a compatibility entrypoint, but app-rendered pages no longer use it for boot CSS. JavaScript bundling stays as a separate build-system follow-up.
+  - **Tests:** extended existing index and permalink route coverage to assert direct hashed CSS links. Current suite total: 2057 pytest + 1368 Vitest + 263 Playwright = **3,688 tests**.
+
+- **Scanner kill PID reuse guard** — scanner-mode `/kill` and API cancel requests now verify the active run's stored PID start time before sending the sudo-backed process-group signal, so a recycled PID cannot make the app terminate an unrelated scanner process group.
+  - Stale or unverifiable scanner metadata is treated like an already-gone process group and still releases the caller's running state without issuing the sudo kill.
+  - **Tests:** added backend, route, and API coverage for matching PID start times, reused PID rejection, legacy metadata without start time, and scanner kill/cancel stale-PID handling. Current suite total: 2062 pytest + 1368 Vitest + 263 Playwright = **3,693 tests**.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.

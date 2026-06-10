@@ -1903,6 +1903,7 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
         lambda requested_run_id, session_id: 4321 if requested_run_id == run_id and session_id == token else None,
     )
     monkeypatch.setattr(api_blueprint, "publish_run_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(api_blueprint, "_ensure_scanner_process_group_current", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(api_blueprint, "_signal_process_group", lambda pid: killed.update({"pid": pid}))
 
     owner_active = client.get("/api/v1/runs", headers=_headers(token))
@@ -1928,6 +1929,41 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     assert json.loads(owner_cancel.data) == {"killed": True, "id": run_id}
     assert killed["pid"] == 4321
     assert cross_cancel.status_code == 404
+
+
+def test_api_v1_cancel_skips_signal_when_scanner_pid_start_time_changed(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+    run_id = "api_cancel_reused_" + uuid.uuid4().hex[:8]
+    published = []
+
+    monkeypatch.setattr(
+        api_blueprint,
+        "active_runs_for_session",
+        lambda session_id, **_kwargs: [{"run_id": run_id, "command": "sleep 30"}] if session_id == token else [],
+    )
+    monkeypatch.setattr(
+        api_blueprint,
+        "pid_for_session",
+        lambda requested_run_id, session_id: 4321 if requested_run_id == run_id and session_id == token else None,
+    )
+    monkeypatch.setattr(api_blueprint, "publish_run_event", lambda *args, **_kwargs: published.append(args))
+    monkeypatch.setattr(
+        api_blueprint,
+        "_ensure_scanner_process_group_current",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ProcessLookupError("stale pid")),
+    )
+    signal_process_group = mock.Mock()
+    monkeypatch.setattr(api_blueprint, "_signal_process_group", signal_process_group)
+
+    resp = client.post(f"/api/v1/runs/{run_id}/cancel", headers=_headers(token))
+
+    assert resp.status_code == 200
+    assert json.loads(resp.data) == {"killed": True, "id": run_id}
+    assert published == [(run_id, "killed", {"api": True})]
+    signal_process_group.assert_not_called()
 
 
 def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):

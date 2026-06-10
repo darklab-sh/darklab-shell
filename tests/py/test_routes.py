@@ -143,11 +143,16 @@ class TestIndexRoute:
         client = get_client()
         resp = client.get("/")
         assert resp.status_code == 200
+        assert "immutable" not in resp.headers.get("Cache-Control", "")
 
     def test_returns_html(self):
         client = get_client()
         resp = client.get("/")
         assert b"<!DOCTYPE html>" in resp.data or b"<html" in resp.data.lower()
+        body = resp.get_data(as_text=True)
+        assert '/static/css/styles.css' not in body
+        assert '/static/css/core/base.css?v=' in body
+        assert '/static/css/mobile-chrome.css?v=' in body
 
     def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
         client = get_client()
@@ -5823,6 +5828,7 @@ class TestProjectRoutes:
 
         assert first.status_code == 200
         assert second.status_code == 200
+        assert first.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
 
     def test_create_list_get_update_archive_and_delete_project(self):
         client = get_client()
@@ -10677,35 +10683,44 @@ class TestThemesRoute:
 # ── /vendor assets ───────────────────────────────────────────────────────────
 
 class TestVendorAssets:
+    @staticmethod
+    def _assert_immutable_asset_cache(resp):
+        assert resp.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+
     def test_ansi_up_js_is_served(self):
         client = get_client()
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
         assert "javascript" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
 
     def test_jspdf_js_is_served(self):
         client = get_client()
         resp = client.get("/vendor/jspdf.umd.min.js")
         assert resp.status_code == 200
         assert "javascript" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
 
     def test_xterm_js_is_served(self):
         client = get_client()
         resp = client.get("/vendor/xterm.js")
         assert resp.status_code == 200
         assert "javascript" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
 
     def test_xterm_fit_js_is_served(self):
         client = get_client()
         resp = client.get("/vendor/xterm-addon-fit.js")
         assert resp.status_code == 200
         assert "javascript" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
 
     def test_xterm_css_is_served(self):
         client = get_client()
         resp = client.get("/vendor/xterm.css")
         assert resp.status_code == 200
         assert "text/css" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
 
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()
@@ -10717,6 +10732,7 @@ class TestVendorAssets:
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
         assert resp.data == b"font bytes"
+        self._assert_immutable_asset_cache(resp)
 
     def test_font_route_rejects_unknown_or_traversal_paths(self):
         client = get_client()
@@ -18891,7 +18907,9 @@ class TestShareRoute:
         body = resp.get_data(as_text=True)
         assert 'class="permalink-page"' in body
         assert 'data-theme="apricot_sand"' in body
-        assert '/static/css/styles.css' in body
+        assert '/static/css/core/base.css?v=' in body
+        assert '/static/css/features/history.css?v=' in body
+        assert '/static/css/terminal_export.css?v=' in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()

@@ -6,8 +6,7 @@
 <meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ app_name }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="stylesheet" href="/static/css/core/fonts.css">
-<link rel="stylesheet" href="/static/css/styles.css">
+{% include "app_stylesheets.html" %}
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>

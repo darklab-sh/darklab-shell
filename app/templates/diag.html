@@ -17,10 +17,9 @@
   })();
 </script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="stylesheet" href="/static/css/core/fonts.css">
-<link rel="stylesheet" href="/static/css/styles.css">
-<link rel="stylesheet" href="/static/css/terminal_export.css">
-<link rel="stylesheet" href="/static/css/diag.css">
+{% include "app_stylesheets.html" %}
+<link rel="stylesheet" href="{{ static_asset('/static/css/terminal_export.css') }}">
+<link rel="stylesheet" href="{{ static_asset('/static/css/diag.css') }}">
 {% include "theme_vars_style.html" %}
 </head>
 <body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
