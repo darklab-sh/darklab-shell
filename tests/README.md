@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,646
+- behavior tests: 3,648
 - docs/inventory meta-tests: 34
-- `pytest`: 2050 (2016 behavior + 34 meta)
+- `pytest`: 2052 (2018 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,680
+- total: 3,682
 
 This document is organized in two parts:
 
@@ -794,6 +794,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_pid_pop_for_session_is_the_active_run_permission_boundary` | Verifies that active-run PID lookup is scoped to the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
+| `TestActiveRunMetadata.test_active_runs_for_team_uses_team_index_without_procmeta_scan` | Verifies that Redis-backed team active-run listings use the team index instead of scanning all active-run metadata. |
+| `TestActiveRunMetadata.test_active_run_remove_clears_team_index` | Verifies that removing a Redis-backed team active run clears both session and team active-run indexes. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
 | `TestActiveRunMetadata.test_cleanup_stale_active_run_metadata_removes_orphans_and_previous_container_rows` | Verifies startup active-run cleanup removes Redis metadata left by dead containers while preserving live rows for the current container. |

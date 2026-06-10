@@ -45,6 +45,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Team active-run lookup scale** — Redis-backed team active-run lists now use a `teamprocs:<team_id>` index instead of scanning every `procmeta:*` row for each team-scoped stream, event, or kill visibility check.
+  - Team-owned run registration, owner heartbeats, owner claims, active-run removal, and stale metadata cleanup now keep the team index aligned with the existing session index. Redis diagnostics and metrics also count the `teamprocs` namespace.
+  - **Tests:** added backend coverage proving team listings use the team index without a metadata scan and that removing a team run clears the index. Current suite total: 2052 pytest + 1367 Vitest + 263 Playwright = **3,682 tests**.
+
 - **Stream owner-liveness refresh load** — brokered command and interactive PTY streams now refresh active-run ownership immediately, then at most once every five seconds per stream connection, instead of rewriting owner metadata for every streamed frame.
   - **Tests:** added route coverage for throttled owner refreshes on normal brokered streams and interactive PTY streams. Current suite total: 2050 pytest + 1367 Vitest + 263 Playwright = **3,680 tests**.
 

@@ -1141,6 +1141,7 @@ Because commands run as `scanner` and Gunicorn runs as `appuser`, the web worker
 This gets more important with multiple Gunicorn workers. The worker that receives `POST /kill` may not be the worker that launched the process. To solve that:
 
 - `pid_register(run_id, pid)` writes the process id to Redis with a 4-hour TTL
+- active-run metadata is indexed by `sessionprocs:<session_id>` and, for team-owned runs, `teamprocs:<team_id>` so personal and team active-run listings fetch only the runs in scope
 - `pid_pop(run_id)` uses Redis `GETDEL` so lookup and removal are atomic
 - any worker can therefore resolve and kill the correct process group without relying on shared in-memory state
 
@@ -2093,12 +2094,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,646
+- behavior tests: 3,648
 - docs/inventory meta-tests: 34
-- `pytest`: 2050 (2016 behavior + 34 meta)
+- `pytest`: 2052 (2018 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,680
+- total: 3,682
 
 ### Testing Architecture
 

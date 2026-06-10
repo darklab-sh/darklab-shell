@@ -140,11 +140,13 @@ def _cleanup_active_run_metadata_on_startup():
         log.exception("ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR")
         return
     removed = int(result.get("metadata_removed", 0) or 0)
-    members = int(result.get("session_members_removed", 0) or 0)
-    if removed or members:
+    session_members = int(result.get("session_members_removed", 0) or 0)
+    team_members = int(result.get("team_members_removed", 0) or 0)
+    if removed or session_members or team_members:
         log.info("ACTIVE_RUN_METADATA_STARTUP_CLEANUP", extra={
             "metadata_removed": removed,
-            "session_members_removed": members,
+            "session_members_removed": session_members,
+            "team_members_removed": team_members,
         })
 
 

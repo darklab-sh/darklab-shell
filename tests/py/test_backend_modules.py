@@ -11355,6 +11355,60 @@ class TestActiveRunMetadata:
             assert fake_redis.get("proc:run-reused") is None
             assert fake_redis.smembers("sessionprocs:session-1") == set()
 
+    def test_active_runs_for_team_uses_team_index_without_procmeta_scan(self):
+        fake_redis = process._FakeRedisClient()
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_maybe_cleanup_stale_active_run_metadata"),
+        ):
+            process.active_run_register(
+                "run-team-1",
+                45678,
+                "session-1",
+                "nuclei -u https://darklab.sh",
+                "2026-01-01T00:00:00Z",
+                team_id="team-1",
+            )
+            process.active_run_register(
+                "run-personal",
+                56789,
+                "session-2",
+                "ping darklab.sh",
+                "2026-01-01T00:00:01Z",
+            )
+            process.pid_register("run-team-1", 45678)
+            process.pid_register("run-personal", 56789)
+
+            with mock.patch.object(fake_redis, "scan_iter", wraps=fake_redis.scan_iter) as scan_iter:
+                runs = process.active_runs_for_team("team-1")
+
+        assert [item["run_id"] for item in runs] == ["run-team-1"]
+        assert fake_redis.smembers("teamprocs:team-1") == {"run-team-1"}
+        scan_iter.assert_not_called()
+
+    def test_active_run_remove_clears_team_index(self):
+        fake_redis = process._FakeRedisClient()
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+        ):
+            process.active_run_register(
+                "run-team-remove",
+                45678,
+                "session-1",
+                "httpx -u https://darklab.sh",
+                "2026-01-01T00:00:00Z",
+                team_id="team-1",
+            )
+
+            process.active_run_remove("run-team-remove")
+
+        assert fake_redis.get("procmeta:run-team-remove") is None
+        assert fake_redis.smembers("sessionprocs:session-1") == set()
+        assert fake_redis.smembers("teamprocs:team-1") == set()
+
     def test_pid_pop_for_session_requires_matching_session(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):
             process.pid_register("run-owned", 12345)
@@ -11431,16 +11485,18 @@ class TestActiveRunMetadata:
             fake_redis.set("procmeta:run-live", process.json.dumps(live))
             fake_redis.set("proc:run-live", 33333)
             fake_redis.sadd("sessionprocs:session-1", "run-missing-proc", "run-old-container", "run-live")
+            fake_redis.sadd("teamprocs:team-1", "run-missing-proc", "run-old-container", "run-live")
 
             result = process.cleanup_stale_active_run_metadata()
 
-        assert result == {"metadata_removed": 2, "session_members_removed": 2}
+        assert result == {"metadata_removed": 2, "session_members_removed": 2, "team_members_removed": 2}
         assert fake_redis.get("procmeta:run-missing-proc") is None
         assert fake_redis.get("procmeta:run-old-container") is None
         assert fake_redis.get("proc:run-old-container") is None
         assert fake_redis.get("procmeta:run-live") is not None
         assert fake_redis.get("proc:run-live") == 33333
         assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
+        assert fake_redis.smembers("teamprocs:team-1") == {"run-live"}
 
     def test_active_runs_for_session_periodically_cleans_unindexed_stale_metadata(self):
         fake_redis = process._FakeRedisClient()

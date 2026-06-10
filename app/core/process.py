@@ -596,6 +596,10 @@ def active_run_register(
         redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
         redis_client.sadd(session_key, run_id)
         redis_client.expire(session_key, _PID_TTL)
+        if team_id:
+            team_key = f"teamprocs:{team_id}"
+            redis_client.sadd(team_key, run_id)
+            redis_client.expire(team_key, _PID_TTL)
     else:
         with _pid_lock:
             _active_run_meta[run_id] = payload
@@ -626,6 +630,9 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
         session_id = str(payload.get("session_id", "") or "")
         if session_id:
             redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
+        team_id = str(payload.get("team_id", "") or "")
+        if team_id:
+            redis_client.expire(f"teamprocs:{team_id}", _PID_TTL)
         return True
 
     with _pid_lock:
@@ -660,6 +667,9 @@ def active_run_claim_owner_transition(run_id: str, owner_client_id: str = "", ow
         session_id = str(payload.get("session_id", "") or "")
         if session_id:
             redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
+        team_id = str(payload.get("team_id", "") or "")
+        if team_id:
+            redis_client.expire(f"teamprocs:{team_id}", _PID_TTL)
         return {
             "claimed": True,
             "changed_client": bool(previous_client_id and previous_client_id != owner_client_id),
@@ -767,8 +777,11 @@ def active_run_remove(run_id: str) -> None:
             payload = _load_active_run_payload(raw, meta_key)
             session_id = str(payload.get("session_id", "")) if payload else ""
             run_type = str(payload.get("run_type", "command") or "command") if payload else "command"
+            team_id = str(payload.get("team_id", "") or "") if payload else ""
             if session_id:
                 redis_client.srem(f"sessionprocs:{session_id}", run_id)
+            if team_id:
+                redis_client.srem(f"teamprocs:{team_id}", run_id)
         redis_client.delete(meta_key)
         if payload:
             app_metrics.record_run_removed(run_type)
@@ -789,12 +802,14 @@ def active_run_remove(run_id: str) -> None:
 def cleanup_stale_active_run_metadata() -> dict[str, int]:
     """Remove Redis active-run metadata left behind by dead app containers."""
     if not redis_client:
-        return {"metadata_removed": 0, "session_members_removed": 0}
+        return {"metadata_removed": 0, "session_members_removed": 0, "team_members_removed": 0}
 
     current_namespace = _process_namespace_id()
     removed_meta = 0
-    removed_members = 0
+    removed_session_members = 0
+    removed_team_members = 0
     session_member_removals: dict[str, set[str]] = {}
+    team_member_removals: dict[str, set[str]] = {}
 
     for meta_key in _redis_scan_strings("procmeta:*"):
         raw = redis_client.get(meta_key)
@@ -804,6 +819,7 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
             continue
         proc_key = f"proc:{run_id}"
         session_id = str((payload or {}).get("session_id", "") or "")
+        team_id = str((payload or {}).get("team_id", "") or "")
         namespace = str((payload or {}).get("process_namespace_id", "") or "")
         stale = (
             not payload
@@ -817,6 +833,8 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
         removed_meta += 1
         if session_id:
             session_member_removals.setdefault(f"sessionprocs:{session_id}", set()).add(run_id)
+        if team_id:
+            team_member_removals.setdefault(f"teamprocs:{team_id}", set()).add(run_id)
 
     for session_key in _redis_scan_strings("sessionprocs:*"):
         stale_members = session_member_removals.setdefault(session_key, set())
@@ -824,12 +842,27 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
             if redis_client.get(f"procmeta:{run_id}") is None or redis_client.get(f"proc:{run_id}") is None:
                 stale_members.add(run_id)
 
+    for team_key in _redis_scan_strings("teamprocs:*"):
+        stale_members = team_member_removals.setdefault(team_key, set())
+        for run_id in _redis_smembers_strings(team_key):
+            if redis_client.get(f"procmeta:{run_id}") is None or redis_client.get(f"proc:{run_id}") is None:
+                stale_members.add(run_id)
+
     for session_key, run_ids in session_member_removals.items():
         if not run_ids:
             continue
-        removed_members += int(cast(int, redis_client.srem(session_key, *sorted(run_ids))) or 0)
+        removed_session_members += int(cast(int, redis_client.srem(session_key, *sorted(run_ids))) or 0)
 
-    return {"metadata_removed": removed_meta, "session_members_removed": removed_members}
+    for team_key, run_ids in team_member_removals.items():
+        if not run_ids:
+            continue
+        removed_team_members += int(cast(int, redis_client.srem(team_key, *sorted(run_ids))) or 0)
+
+    return {
+        "metadata_removed": removed_meta,
+        "session_members_removed": removed_session_members,
+        "team_members_removed": removed_team_members,
+    }
 
 
 def _maybe_cleanup_stale_active_run_metadata() -> None:
@@ -847,11 +880,13 @@ def _maybe_cleanup_stale_active_run_metadata() -> None:
         log.warning("ACTIVE_RUN_METADATA_CLEANUP_ERROR", exc_info=True)
         return
     removed = int(result.get("metadata_removed", 0) or 0)
-    members = int(result.get("session_members_removed", 0) or 0)
-    if removed or members:
+    session_members = int(result.get("session_members_removed", 0) or 0)
+    team_members = int(result.get("team_members_removed", 0) or 0)
+    if removed or session_members or team_members:
         log.info("ACTIVE_RUN_METADATA_CLEANUP", extra={
             "metadata_removed": removed,
-            "session_members_removed": members,
+            "session_members_removed": session_members,
+            "team_members_removed": team_members,
         })
 
 
@@ -959,27 +994,48 @@ def active_runs_for_team(team_id: str, client_id: str = "") -> list[dict]:
     if redis_client:
         _maybe_cleanup_stale_active_run_metadata()
         items = []
-        stale_redis: list[tuple[str, str]] = []
-        for meta_key in _redis_scan_strings("procmeta:*"):
+        remove_from_team: set[str] = set()
+        stale_run_ids: set[str] = set()
+        stale_session_members: dict[str, set[str]] = {}
+        team_key = f"teamprocs:{team_id}"
+        for run_id in sorted(_redis_smembers_strings(team_key)):
+            meta_key = f"procmeta:{run_id}"
             raw = redis_client.get(meta_key)
+            if not raw:
+                remove_from_team.add(run_id)
+                stale_run_ids.add(run_id)
+                continue
             payload = _load_active_run_payload(raw, meta_key)
             if not payload:
-                stale_redis.append((meta_key, ""))
+                remove_from_team.add(run_id)
+                stale_run_ids.add(run_id)
                 continue
             if str(payload.get("team_id", "") or "") != team_id:
+                remove_from_team.add(run_id)
                 continue
-            run_id = str(payload.get("run_id", "") or "")
+            payload_run_id = str(payload.get("run_id", "") or "")
+            if payload_run_id != run_id:
+                remove_from_team.add(run_id)
+                stale_run_ids.add(run_id)
+                continue
             if not _active_run_is_alive(payload):
-                stale_redis.append((meta_key, run_id))
+                remove_from_team.add(run_id)
+                stale_run_ids.add(run_id)
+                session_id = str(payload.get("session_id", "") or "")
+                if session_id:
+                    stale_session_members.setdefault(f"sessionprocs:{session_id}", set()).add(run_id)
                 continue
             if client_id and str(payload.get("owner_client_id", "") or "") == client_id:
                 payload["owner_last_seen"] = time.time()
                 redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
             items.append(payload)
-        for meta_key, run_id in stale_redis:
-            redis_client.delete(meta_key)
-            if run_id:
-                redis_client.delete(f"proc:{run_id}")
+        if remove_from_team:
+            redis_client.srem(team_key, *sorted(remove_from_team))
+        if stale_run_ids:
+            for run_id in sorted(stale_run_ids):
+                redis_client.delete(f"procmeta:{run_id}", f"proc:{run_id}")
+            for session_key, run_ids in stale_session_members.items():
+                redis_client.srem(session_key, *sorted(run_ids))
         public_items = [
             _active_run_public_item(item, "redis", client_id=client_id)
             for item in items

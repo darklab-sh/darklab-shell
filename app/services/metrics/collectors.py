@@ -31,6 +31,7 @@ _REDIS_KEY_PATTERNS = (
     ("proc", "proc:*"),
     ("procmeta", "procmeta:*"),
     ("sessionprocs", "sessionprocs:*"),
+    ("teamprocs", "teamprocs:*"),
     ("intel", "intel:*"),
     ("ai_rate", "ai:rate:*"),
     ("ai_assist_inflight", "ai:assist:inflight:*"),

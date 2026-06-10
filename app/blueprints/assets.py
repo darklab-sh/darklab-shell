@@ -106,6 +106,7 @@ _DIAG_REDIS_KEY_PREFIXES = (
     ("proc", "proc:*"),
     ("procmeta", "procmeta:*"),
     ("sessionprocs", "sessionprocs:*"),
+    ("teamprocs", "teamprocs:*"),
 )
 _DIAG_CLASSIFIER_LINE_LIMIT = 4096
 _DIAG_CLASSIFIER_COMMAND_LIMIT = 512
