@@ -691,7 +691,21 @@ class TestRunStreaming:
              mock.patch("blueprints.run.active_run_remove") as active_remove, \
              mock.patch(
                  "blueprints.run._finalize_completed_run",
-                 return_value={"elapsed": 0.2, "active_project_link": None},
+                 return_value={
+                     "elapsed": 0.2,
+                     "active_project_link": {
+                         "project_id": "proj-worker",
+                         "project_name": "Worker Project",
+                         "discovered_target_count": 2,
+                         "linked_entity_count": 1,
+                         "rejected_entity_count": 3,
+                     },
+                     "finalize_summary": {
+                         "project_auto_promote_count": 2,
+                         "project_auto_promote_promoted_count": 1,
+                         "project_auto_promote_project_ids": ["proj-auto"],
+                     },
+                 },
              ) as finalize:
             run_routes._brokered_real_run_worker(
                 run_id="run-broker-worker",
@@ -714,12 +728,35 @@ class TestRunStreaming:
         capture.finalize()
 
         event_types = [event_type for _, event_type, _ in published]
-        assert event_types == ["notice", "notice", "notice", "output", "exit"]
-        assert [payload["text"] for _, event_type, payload in published if event_type == "notice"] == [
+        assert event_types == [
+            "notice",
+            "notice",
+            "notice",
+            "output",
+            "notice",
+            "notice",
+            "notice",
+            "notice",
+            "notice",
+            "exit",
+        ]
+        notice_payloads = [payload for _, event_type, payload in published if event_type == "notice"]
+        assert [payload["text"] for payload in notice_payloads] == [
             "[var] HOST=darklab.sh",
             "[notice] rewritten for safety",
             "[workspace] writing scan.txt",
+            "[project] linked run to Worker Project",
+            "[project] discovered 2 targets for Worker Project",
+            "[project] linked 1 Atlas entity to Worker Project",
+            "[project] skipped 3 Atlas entities for Worker Project because the project link limit was reached",
+            "[project] auto-promoted 2 Atlas entities",
         ]
+        assert notice_payloads[3]["project_linked"] is True
+        assert notice_payloads[4]["target_count"] == 2
+        assert notice_payloads[5]["entity_count"] == 1
+        assert notice_payloads[6]["reason"] == "project_link_limit"
+        assert notice_payloads[7]["project_ids"] == ["proj-auto"]
+        assert notice_payloads[7]["promoted_count"] == 1
         assert [payload["text"] for _, event_type, payload in published if event_type == "output"] == [
             "keep this\n",
         ]

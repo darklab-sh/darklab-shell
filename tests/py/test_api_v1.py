@@ -2017,6 +2017,8 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
             (project["id"], run_id),
         ).fetchone()
 
+    assert link is not None
+    assert row is not None
     assert link["project_id"] == project["id"]
     assert row[0] == "manual"
 

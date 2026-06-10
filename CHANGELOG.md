@@ -98,6 +98,9 @@ Entries favor clear outcomes first, then implementation and test details when th
   - The same savepoints, non-fatal failure handling, logs, metrics, and returned project-link details are preserved, but each stage has a narrower helper and a shared result object.
   - **Tests:** existing SQLite finalize, auto-promote, Postgres graph, optional-failure, and pyright coverage passes unchanged.
 
+- **Project completion notice cleanup** — brokered real-run completion now publishes project-link, target, Atlas entity, rejected-entity, and auto-promote notices through one counted-notice helper instead of hand-building each payload inline.
+  - **Tests:** extended the existing broker-worker route test to pin the project notice text and metadata without changing the suite total.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.

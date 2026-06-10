@@ -2346,6 +2346,107 @@ def _brokered_synthetic_run(
     return run_id
 
 
+def _publish_counted_project_notice(
+    run_id: str,
+    *,
+    count: int,
+    singular: str,
+    plural: str,
+    text_template: str,
+    payload: dict[str, object],
+) -> None:
+    if count <= 0:
+        return
+    label = singular if count == 1 else plural
+    publish_run_event(run_id, "notice", {
+        **payload,
+        "text": text_template.format(count=count, label=label),
+    })
+
+
+def _publish_project_finalize_notices(run_id: str, active_project_link, finalize_summary) -> None:
+    if active_project_link:
+        project_name = str(
+            active_project_link.get("project_name")
+            or active_project_link.get("project_id")
+            or "active project"
+        )
+        project_payload = {
+            "project_id": active_project_link.get("project_id"),
+            "project_name": project_name,
+        }
+        publish_run_event(run_id, "notice", {
+            **project_payload,
+            "text": f"[project] linked run to {project_name}",
+            "project_linked": True,
+        })
+        discovered_target_count = int(active_project_link.get("discovered_target_count") or 0)
+        linked_entity_count = int(active_project_link.get("linked_entity_count") or 0)
+        rejected_entity_count = int(active_project_link.get("rejected_entity_count") or 0)
+        for spec in (
+            {
+                "count": discovered_target_count,
+                "singular": "target",
+                "plural": "targets",
+                "text_template": f"[project] discovered {{count}} {{label}} for {project_name}",
+                "payload": {
+                    **project_payload,
+                    "project_targets_discovered": True,
+                    "target_count": discovered_target_count,
+                },
+            },
+            {
+                "count": linked_entity_count,
+                "singular": "Atlas entity",
+                "plural": "Atlas entities",
+                "text_template": f"[project] linked {{count}} {{label}} to {project_name}",
+                "payload": {
+                    **project_payload,
+                    "project_entities_linked": True,
+                    "entity_count": linked_entity_count,
+                },
+            },
+            {
+                "count": rejected_entity_count,
+                "singular": "Atlas entity",
+                "plural": "Atlas entities",
+                "text_template": (
+                    f"[project] skipped {{count}} {{label}} for {project_name} "
+                    "because the project link limit was reached"
+                ),
+                "payload": {
+                    **project_payload,
+                    "project_entities_rejected": True,
+                    "entity_count": rejected_entity_count,
+                    "reason": "project_link_limit",
+                },
+            },
+        ):
+            _publish_counted_project_notice(run_id, **spec)
+    if isinstance(finalize_summary, dict):
+        auto_promote_count = int(finalize_summary.get("project_auto_promote_count") or 0)
+        promoted_count = int(finalize_summary.get("project_auto_promote_promoted_count") or 0)
+        project_ids = [
+            str(project_id)
+            for project_id in (finalize_summary.get("project_auto_promote_project_ids") or [])
+            if str(project_id or "")
+        ]
+        _publish_counted_project_notice(
+            run_id,
+            count=auto_promote_count,
+            singular="Atlas entity",
+            plural="Atlas entities",
+            text_template="[project] auto-promoted {count} {label}",
+            payload={
+                "project_id": project_ids[0] if len(project_ids) == 1 else "",
+                "project_ids": project_ids,
+                "project_auto_promoted": True,
+                "entity_count": auto_promote_count,
+                "promoted_count": promoted_count,
+            },
+        )
+
+
 def _brokered_real_run_worker(
     *,
     run_id,
@@ -2482,70 +2583,7 @@ def _brokered_real_run_worker(
         elapsed = finalize_info["elapsed"]
         active_project_link = finalize_info.get("active_project_link")
         finalize_summary = finalize_info.get("finalize_summary") if isinstance(finalize_info, dict) else {}
-        if active_project_link:
-            project_name = str(
-                active_project_link.get("project_name")
-                or active_project_link.get("project_id")
-                or "active project"
-            )
-            publish_run_event(run_id, "notice", {
-                "text": f"[project] linked run to {project_name}",
-                "project_id": active_project_link.get("project_id"),
-                "project_name": project_name,
-                "project_linked": True,
-            })
-            discovered_target_count = int(active_project_link.get("discovered_target_count") or 0)
-            if discovered_target_count:
-                target_label = "target" if discovered_target_count == 1 else "targets"
-                publish_run_event(run_id, "notice", {
-                    "text": f"[project] discovered {discovered_target_count} {target_label} for {project_name}",
-                    "project_id": active_project_link.get("project_id"),
-                    "project_name": project_name,
-                    "project_targets_discovered": True,
-                    "target_count": discovered_target_count,
-                })
-            linked_entity_count = int(active_project_link.get("linked_entity_count") or 0)
-            if linked_entity_count:
-                entity_label = "Atlas entity" if linked_entity_count == 1 else "Atlas entities"
-                publish_run_event(run_id, "notice", {
-                    "text": f"[project] linked {linked_entity_count} {entity_label} to {project_name}",
-                    "project_id": active_project_link.get("project_id"),
-                    "project_name": project_name,
-                    "project_entities_linked": True,
-                    "entity_count": linked_entity_count,
-                })
-            rejected_entity_count = int(active_project_link.get("rejected_entity_count") or 0)
-            if rejected_entity_count:
-                entity_label = "Atlas entity" if rejected_entity_count == 1 else "Atlas entities"
-                publish_run_event(run_id, "notice", {
-                    "text": (
-                        f"[project] skipped {rejected_entity_count} {entity_label} for {project_name} "
-                        "because the project link limit was reached"
-                    ),
-                    "project_id": active_project_link.get("project_id"),
-                    "project_name": project_name,
-                    "project_entities_rejected": True,
-                    "entity_count": rejected_entity_count,
-                    "reason": "project_link_limit",
-                })
-        if isinstance(finalize_summary, dict):
-            auto_promote_count = int(finalize_summary.get("project_auto_promote_count") or 0)
-            if auto_promote_count:
-                promoted_count = int(finalize_summary.get("project_auto_promote_promoted_count") or 0)
-                project_ids = [
-                    str(project_id)
-                    for project_id in (finalize_summary.get("project_auto_promote_project_ids") or [])
-                    if str(project_id or "")
-                ]
-                entity_label = "Atlas entity" if auto_promote_count == 1 else "Atlas entities"
-                publish_run_event(run_id, "notice", {
-                    "text": f"[project] auto-promoted {auto_promote_count} {entity_label}",
-                    "project_id": project_ids[0] if len(project_ids) == 1 else "",
-                    "project_ids": project_ids,
-                    "project_auto_promoted": True,
-                    "entity_count": auto_promote_count,
-                    "promoted_count": promoted_count,
-                })
+        _publish_project_finalize_notices(run_id, active_project_link, finalize_summary)
         publish_run_event(run_id, "exit", {
             "code": exit_code,
             "elapsed": elapsed,
