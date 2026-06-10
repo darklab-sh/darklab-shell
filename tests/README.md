@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,651
+- behavior tests: 3,653
 - docs/inventory meta-tests: 34
-- `pytest`: 2055 (2021 behavior + 34 meta)
+- `pytest`: 2057 (2023 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,685
+- total: 3,687
 
 This document is organized in two parts:
 
@@ -890,6 +890,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_preview_byte_cap_drops_oldest_lines` | Checks that the SQLite preview byte cap drops oldest preview lines before storing oversized previews. |
 | `TestRunOutputCapture.test_preview_byte_cap_truncates_single_huge_line` | Checks that one huge output line is truncated inside the SQLite preview while preserving the run line count. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
+| `TestRunOutputCapture.test_artifact_rel_path_uses_two_level_hash_shards` | Verifies new full-output artifact paths use the hash-based two-level shard layout. |
+| `TestRunOutputCapture.test_delete_artifact_file_removes_sharded_artifact` | Verifies sharded full-output artifacts are removed through the shared artifact delete helper. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
 | `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
 | `TestRunOutputCapture.test_replace_run_output_summary_tolerates_concurrent_backfill_insert` | Verifies structured output summary backfills tolerate another worker inserting the same summary key first. |

@@ -59,6 +59,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Run-output summary backfill retries** — startup now records durable status for run-output summary backfill attempts, so legacy runs with empty structured output or unreadable artifacts/previews are handled once instead of being retried and re-logged on every restart.
   - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers.
 
+- **Run-output artifact sharding** — new full-output transcript artifacts now write under hash-sharded `run-output/ab/abcd/<run_id>.txt.gz` paths instead of adding every file directly under `run-output/`.
+  - Existing flat artifact paths still load and delete normally through their stored `run_output_artifacts.rel_path`, so no bulk migration is required. Timed retention pruning remains tracked with the broader retention-scheduler work.
+  - **Tests:** added backend coverage for the two-level shard path contract and sharded artifact deletion. Current suite total: 2057 pytest + 1367 Vitest + 263 Playwright = **3,687 tests**.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.

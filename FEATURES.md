@@ -1313,7 +1313,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 - SQLite stores run history, preview metadata, full-output artifact metadata, and tab snapshots in `./data/history.db`.
 - Postgres stores database rows in Postgres while still using `./data` for full-output artifacts, body-store files, and the app-owned secret key file.
-- Persisted full-output artifacts are written as compressed files under `./data/run-output/`.
+- Persisted full-output artifacts are written as compressed files under hash-sharded `./data/run-output/` paths.
 - Optional body-store thresholds can move large run search text, tab snapshot bodies, and Atlas intel payloads into compressed files under `./data/body-store/` while the app keeps reading them normally.
 - The `./data` directory is created automatically on first run and persists filesystem-backed artifacts across container restarts and recreations.
 - On startup, runs, run-output artifact metadata, artifact files, and snapshots older than `permalink_retention_days` are pruned together.

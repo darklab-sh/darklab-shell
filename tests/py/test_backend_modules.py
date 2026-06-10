@@ -91,6 +91,8 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, LineRole
 from services.runs.output_store import (
     RunOutputCapture,
     RUN_OUTPUT_DIR,
+    artifact_rel_path_for_run,
+    delete_artifact_file,
     load_full_output_entries,
     load_full_output_events,
     load_full_output_lines,
@@ -13792,9 +13794,16 @@ class TestOutputSignals:
 class TestRunOutputCapture:
     def teardown_method(self):
         if os.path.isdir(RUN_OUTPUT_DIR):
-            for name in os.listdir(RUN_OUTPUT_DIR):
-                if name.startswith("test-run-output-"):
-                    os.unlink(os.path.join(RUN_OUTPUT_DIR, name))
+            for root, dirs, files in os.walk(RUN_OUTPUT_DIR, topdown=False):
+                for name in files:
+                    if name.startswith("test-run-output-"):
+                        os.unlink(os.path.join(root, name))
+                for name in dirs:
+                    path = os.path.join(root, name)
+                    try:
+                        os.rmdir(path)
+                    except OSError:
+                        pass
 
     @staticmethod
     def _artifact_rows(rel_path):
@@ -13862,6 +13871,8 @@ class TestRunOutputCapture:
         assert capture.full_output_available is True
         artifact_rel_path = capture.artifact_rel_path
         assert artifact_rel_path is not None
+        assert artifact_rel_path == artifact_rel_path_for_run("test-run-output-artifact")
+        assert os.path.exists(os.path.join(RUN_OUTPUT_DIR, artifact_rel_path))
         assert load_full_output_lines(artifact_rel_path) == ["alpha", "beta"]
         assert load_full_output_entries(artifact_rel_path) == [
             {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
@@ -13875,8 +13886,43 @@ class TestRunOutputCapture:
         assert rows[1]["kind"] == "info"
         assert rows[1]["role"] == "body"
 
+    def test_artifact_rel_path_uses_two_level_hash_shards(self):
+        run_id = "test-run-output-sharded-path"
+        digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+
+        assert artifact_rel_path_for_run(run_id) == os.path.join(
+            digest[:2],
+            digest[:4],
+            f"{run_id}.txt.gz",
+        )
+
+    def test_delete_artifact_file_removes_sharded_artifact(self):
+        capture = RunOutputCapture(
+            "test-run-output-sharded-delete",
+            preview_limit=2,
+            persist_full_output=True,
+            full_output_max_bytes=0
+        )
+        capture.add_event(line_event_from_legacy("delete me"))
+        capture.finalize()
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        artifact_path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        shard_dir = os.path.dirname(artifact_path)
+        assert os.path.exists(artifact_path)
+
+        delete_artifact_file(artifact_rel_path)
+
+        assert not os.path.exists(artifact_path)
+        assert not os.path.exists(shard_dir)
+
     def test_full_output_artifact_round_trips_signal_metadata(self):
-        capture = RunOutputCapture("test-run-output-signals", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
+        capture = RunOutputCapture(
+            "test-run-output-signals",
+            preview_limit=5,
+            persist_full_output=True,
+            full_output_max_bytes=0
+        )
         capture.add_event(line_event_from_legacy(
             "443/tcp open https",
             signals=(LineSignal.findings,),
@@ -14167,8 +14213,9 @@ class TestRunOutputCapture:
             persist_full_output=True,
             full_output_max_bytes=0,
         )
-        assert capture.artifact_rel_path == "test-run-output-empty.txt.gz"
-        assert not os.path.exists(os.path.join(RUN_OUTPUT_DIR, capture.artifact_rel_path))
+        expected_rel_path = artifact_rel_path_for_run("test-run-output-empty")
+        assert capture.artifact_rel_path == expected_rel_path
+        assert not os.path.exists(os.path.join(RUN_OUTPUT_DIR, expected_rel_path))
 
         capture.finalize()
 
