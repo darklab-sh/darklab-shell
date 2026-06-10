@@ -335,6 +335,7 @@ def _run_job(job_id, cfg_snapshot):
             int(metrics.get("skipped_items") or 0) - int(metrics.get("skipped_artifacts") or 0),
         ),
     )
+    _record_job_audit(job, status="complete", archive_bytes=archive_bytes, metrics=metrics)
     _update(
         "complete",
         "complete",
@@ -346,7 +347,6 @@ def _run_job(job_id, cfg_snapshot):
         skipped_artifacts=len(archive.get("skipped_artifacts") or []),
         metrics=metrics,
     )
-    _record_job_audit(job, status="complete", archive_bytes=archive_bytes, metrics=metrics)
 
 
 def start_evidence_package_archive_job(session_id, project_id, package_id, *, cfg=None, team_id="", actor_member_id=""):

@@ -83,6 +83,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Startup pruning remains in place for boot-time cleanup, and the scheduler uses the same database and audit retention helpers so deletion, artifact cleanup, and logging stay consistent.
   - **Tests:** added scheduler-worker coverage for daily retention pruning and the once-per-interval guard. Current suite total: 2064 pytest + 1368 Vitest + 263 Playwright = **3,695 tests**.
 
+- **Redis required for multi-worker startup** — deployments with `WEB_CONCURRENCY>1` now fail fast when Redis is unavailable instead of silently falling back to per-worker PID and active-run maps.
+  - Single-worker local development can still run without Redis, and Redis-backed or fake-Redis test/capture modes continue to support multi-worker settings.
+  - **Tests:** added backend coverage for rejected multi-worker/no-Redis startup, allowed single-worker fallback, and allowed multi-worker Redis configuration. Current suite total: 2067 pytest + 1368 Vitest + 263 Playwright = **3,698 tests**.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.

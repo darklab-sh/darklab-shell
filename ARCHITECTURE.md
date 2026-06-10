@@ -937,7 +937,7 @@ flowchart TB
 This boundary view answers a different question than the dependency graph above: not "which module imports which," but "which runtime service owns which responsibility."
 
 - Flask + Gunicorn own routing, request hooks, response shaping, and template rendering.
-- Redis owns the shared coordination required across Gunicorn workers: route and dynamic-request rate limiting, active-run PID tracking for `/kill`, replayable run-broker streams, and PTY event/control streams when those brokered runtimes are enabled.
+- Redis owns the shared coordination required across Gunicorn workers: route and dynamic-request rate limiting, active-run PID tracking for `/kill`, replayable run-broker streams, and PTY event/control streams when those brokered runtimes are enabled. Startup fails fast when `WEB_CONCURRENCY>1` and Redis is unavailable, because those states cannot safely fall back to per-worker dictionaries.
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
@@ -1144,6 +1144,8 @@ This gets more important with multiple Gunicorn workers. The worker that receive
 - active-run metadata is indexed by `sessionprocs:<session_id>` and, for team-owned runs, `teamprocs:<team_id>` so personal and team active-run listings fetch only the runs in scope
 - `pid_pop(run_id)` uses Redis `GETDEL` so lookup and removal are atomic
 - any worker can therefore resolve and kill the correct process group without relying on shared in-memory state
+
+If Redis is unavailable, the in-process PID maps are only allowed when `WEB_CONCURRENCY=1`. Multi-worker startup raises a clear error instead of silently splitting active-run state across workers.
 
 When a user clicks Kill:
 
@@ -2094,12 +2096,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,661
+- behavior tests: 3,664
 - docs/inventory meta-tests: 34
-- `pytest`: 2064 (2030 behavior + 34 meta)
+- `pytest`: 2067 (2033 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,695
+- total: 3,698
 
 ### Testing Architecture
 

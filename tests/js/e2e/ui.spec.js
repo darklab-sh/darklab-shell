@@ -1325,7 +1325,16 @@ test.describe('project workspace modal', () => {
     }
 
     await expect(artifactFilter).toBeVisible({ timeout: 20_000 })
+    const filteredArtifactsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${projectId}/artifacts`
+        && url.searchParams.get('q') === fixture.artifactFilterQuery
+        && url.searchParams.get('offset') === '0'
+    })
     await artifactFilter.fill(fixture.artifactFilterQuery)
+    expect((await filteredArtifactsResponse).ok()).toBe(true)
+    await expect(artifactFilter).toHaveValue(fixture.artifactFilterQuery)
     await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
     await expect(artifactsGroup).toContainText('large-evidence-059.txt')
     await page.waitForTimeout(250)

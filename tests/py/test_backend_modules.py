@@ -11138,6 +11138,23 @@ class TestRunBrokerMemoryStore:
             assert isinstance(run_broker._store(), run_broker._MemoryRunBrokerStore)
 
 
+class TestProcessRedisWorkerConfiguration:
+    def test_multi_worker_requires_redis(self):
+        with mock.patch.object(process.log, "critical") as critical:
+            with pytest.raises(RuntimeError, match="Redis is required when WEB_CONCURRENCY=4"):
+                process.validate_redis_worker_configuration(None, workers=4)
+
+        critical.assert_called_once()
+        assert critical.call_args.args == ("REDIS_REQUIRED_FOR_MULTI_WORKER",)
+        assert critical.call_args.kwargs["extra"]["workers"] == 4
+
+    def test_single_worker_allows_in_process_fallback(self):
+        process.validate_redis_worker_configuration(None, workers=1)
+
+    def test_multi_worker_allows_redis_client(self):
+        process.validate_redis_worker_configuration(object(), workers=4)
+
+
 # ── pid_register / pid_pop (in-process mode) ─────────────────────────────────
 
 class TestPidMap:

@@ -105,7 +105,7 @@ Before you begin, make sure you have:
 - Python 3.14+
 - pip3
 - Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- (Optional) Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. If not configured or available, the app falls back to in-process mode
+- Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. Redis is required when `WEB_CONCURRENCY` is greater than `1`; single-worker local development can run without Redis and use in-process state.
 
 Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter, redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
 
@@ -540,7 +540,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0030_audit_events.py # Postgres audit event table and indexes
 │   │   │   └── v0031_run_output_summary_status.py # Postgres run-output summary backfill status markers
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
-│   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
+│   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
 │   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup

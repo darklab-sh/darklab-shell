@@ -264,16 +264,36 @@ elif REDIS_URL:
         )
         redis_client = None
 
-if not redis_client:
-    _workers = int(os.environ.get("WEB_CONCURRENCY", 0))
-    if _workers > 1:
+def _worker_count_from_env() -> int:
+    try:
+        return int(os.environ.get("WEB_CONCURRENCY", 0) or 0)
+    except (TypeError, ValueError):
         log.warning(
-            "Redis unavailable with WEB_CONCURRENCY=%d — PID tracking and rate limiting "
-            "use per-worker in-process state. Kill requests routed to a different worker "
-            "than the one that started the command will silently fail. "
-            "Configure Redis or set workers=1.",
-            _workers
+            "WEB_CONCURRENCY_INVALID",
+            extra={"value": str(os.environ.get("WEB_CONCURRENCY", "")), "fallback": 0},
         )
+        return 0
+
+
+def validate_redis_worker_configuration(redis, *, workers: int | None = None) -> None:
+    """Fail fast when multi-worker process state would silently diverge."""
+    worker_count = _worker_count_from_env() if workers is None else int(workers)
+    if redis or worker_count <= 1:
+        return
+    message = (
+        f"Redis is required when WEB_CONCURRENCY={worker_count}. "
+        "Without Redis, PID tracking, active-run metadata, and broker fallback "
+        "state are per-worker and kill/stream requests can route to the wrong "
+        "worker. Configure REDIS_URL or set WEB_CONCURRENCY=1."
+    )
+    log.critical(
+        "REDIS_REQUIRED_FOR_MULTI_WORKER",
+        extra={"workers": worker_count, "redis_configured": bool(REDIS_URL)},
+    )
+    raise RuntimeError(message)
+
+
+validate_redis_worker_configuration(redis_client)
 
 _pid_map: dict[str, int] = {}
 _active_run_meta: dict[str, dict] = {}

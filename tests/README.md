@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,661
+- behavior tests: 3,664
 - docs/inventory meta-tests: 34
-- `pytest`: 2064 (2030 behavior + 34 meta)
+- `pytest`: 2067 (2033 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,695
+- total: 3,698
 
 This document is organized in two parts:
 
@@ -785,6 +785,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunBrokerMemoryStore.test_redis_publish_trims_stream_with_replay_derived_maxlen` | Verifies that Redis broker publishes trim streams with a replay-derived maximum length. |
 | `TestRunBrokerMemoryStore.test_broker_requires_redis_when_configured` | Verifies that broker availability fails with an operator-facing message when Redis is required but unavailable. |
 | `TestRunBrokerMemoryStore.test_broker_allows_memory_store_when_redis_is_optional` | Verifies that local development can use the in-memory broker store when Redis is optional. |
+| `TestProcessRedisWorkerConfiguration.test_multi_worker_requires_redis` | Verifies that multi-worker startup fails fast when Redis is unavailable. |
+| `TestProcessRedisWorkerConfiguration.test_single_worker_allows_in_process_fallback` | Verifies that single-worker local mode can still use in-process active-run state without Redis. |
+| `TestProcessRedisWorkerConfiguration.test_multi_worker_allows_redis_client` | Verifies that Redis-backed multi-worker startup is accepted. |
 | `TestPidMap.test_register_and_pop_returns_pid` | Checks that register and pop returns pid. |
 | `TestPidMap.test_pop_unknown_run_id_returns_none` | Checks that pop unknown run id returns none. |
 | `TestPidMap.test_double_pop_returns_none_second_time` | Checks that double pop returns none second time. |
