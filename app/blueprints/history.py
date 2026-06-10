@@ -39,7 +39,7 @@ from services.history.run_metadata import (
     normalize_history_filter_text as _normalize_history_filter_text,
     run_atlas_counts_by_run as _run_atlas_counts_by_run,
     run_file_artifacts_by_run as _run_file_artifacts_by_run,
-    run_metadata_counts_by_run as _run_metadata_counts_by_run,
+    run_finding_counts_by_run as _run_finding_counts_by_run,
 )
 from services.history.search import run_search_clause, sqlite_fts_query
 from core.process import active_runs_for_session
@@ -1123,7 +1123,7 @@ def get_history():
         paged_snapshots = [item for item in paged_items if item.get("type") == "snapshot"]
         artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
         project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
-        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        finding_counts_by_run = _run_finding_counts_by_run(conn, [item["id"] for item in paged_runs])
         atlas_counts = _run_atlas_counts_by_run(
             conn,
             session_id,
@@ -1142,11 +1142,10 @@ def get_history():
             item["project_link_count"] = len(item["project_links"])
             item["labels"] = labels_by_run.get(str(item["id"]), [])
             item["note"] = (notes_by_run.get(str(item["id"]), []) or [None])[0]
-            item.update(metadata_counts_by_run.get(str(item["id"]), {
-                "finding_count": 0,
-                "label_count": 0,
-                "note_count": 0,
-            }))
+            run_id = str(item["id"])
+            item["finding_count"] = finding_counts_by_run.get(run_id, 0)
+            item["label_count"] = len(item["labels"])
+            item["note_count"] = len(notes_by_run.get(run_id, []))
             item.update(atlas_counts.get(str(item["id"]), {
                 "atlas_entity_count": 0,
                 "atlas_finding_count": 0,
@@ -1760,7 +1759,7 @@ def get_run(run_id):
         )
         if run_team_id:
             include_private_metadata = team_scope_allowed
-        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id]) if include_private_metadata else {}
+        finding_counts_by_run = _run_finding_counts_by_run(conn, [run_id]) if include_private_metadata else {}
         atlas_counts = (
             _run_atlas_counts_by_run(conn, session_id, [run_id], team_id=run_team_id)
             if include_private_metadata else {}
@@ -1782,11 +1781,9 @@ def get_run(run_id):
     run["findings"] = findings_by_run.get(str(run_id), [])
     run["labels"] = labels_by_run.get(str(run_id), [])
     run["note"] = (notes_by_run.get(str(run_id), []) or [None])[0]
-    run.update(metadata_counts_by_run.get(str(run_id), {
-        "finding_count": 0,
-        "label_count": 0,
-        "note_count": 0,
-    }))
+    run["finding_count"] = finding_counts_by_run.get(str(run_id), 0)
+    run["label_count"] = len(run["labels"])
+    run["note_count"] = len(notes_by_run.get(str(run_id), []))
     run.update(atlas_counts.get(str(run_id), {
         "atlas_entity_count": 0,
         "atlas_finding_count": 0,

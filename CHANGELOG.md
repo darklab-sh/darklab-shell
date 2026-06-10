@@ -63,6 +63,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Existing flat artifact paths still load and delete normally through their stored `run_output_artifacts.rel_path`, so no bulk migration is required. Timed retention pruning remains tracked with the broader retention-scheduler work.
   - **Tests:** added backend coverage for the two-level shard path contract and sharded artifact deletion. Current suite total: 2057 pytest + 1367 Vitest + 263 Playwright = **3,687 tests**.
 
+- **History metadata query load** — browser History pages and run permalink JSON now reuse the label and note rows they already fetch when reporting label/note counts, instead of issuing separate count queries for the same metadata.
+  - Finding counts still use a batched run-id query, and the larger offloaded-output search indexing work remains tracked with the rest of the history search scaling follow-up.
+  - **Tests:** existing route coverage for History search metadata counts and permalink JSON metadata counts passes unchanged.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.

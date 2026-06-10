@@ -292,6 +292,26 @@ def run_metadata_counts_by_run(conn, run_ids) -> dict[str, dict[str, int]]:
     return counts
 
 
+def run_finding_counts_by_run(conn, run_ids) -> dict[str, int]:
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    counts = {run_id: 0 for run_id in ids}
+    if not ids or not (
+        history_table_exists(conn, "findings")
+        and history_table_exists(conn, "findings_occurrences")
+    ):
+        return counts
+    placeholders = ",".join("?" for _ in ids)
+    for row in conn.execute(
+        "SELECT fo.run_id, COUNT(*) AS count "
+        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+        f"WHERE f.session_id IN (SELECT session_id FROM runs WHERE id IN ({placeholders})) "  # nosec
+        f"AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
+        [*ids, *ids],
+    ).fetchall():
+        counts[str(row["run_id"])] = int(row["count"] or 0)
+    return counts
+
+
 def run_atlas_counts_by_run(conn, session_id: str, run_ids, *, team_id: str = "") -> dict[str, dict[str, int]]:
     ids = [str(run_id) for run_id in run_ids if run_id]
     counts = {
