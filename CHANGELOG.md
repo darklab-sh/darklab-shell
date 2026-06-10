@@ -94,6 +94,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Run-prep owner scope cleanup** — command validation, real-command rewriting, and interactive PTY prep now share one helper for deciding when an `OwnerContext` needs to be passed through, keeping personal and team-scope behavior aligned across those paths.
   - **Tests:** existing scheduler launch, API run-start, owner-context predicate, and pyright coverage passes unchanged.
 
+- **Completed-run finalizer cleanup** — `_save_completed_run` now coordinates named finalize stages instead of carrying every project link, artifact, finding, Atlas, auto-promote, and summary step inline.
+  - The same savepoints, non-fatal failure handling, logs, metrics, and returned project-link details are preserved, but each stage has a narrower helper and a shared result object.
+  - **Tests:** existing SQLite finalize, auto-promote, Postgres graph, optional-failure, and pyright coverage passes unchanged.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.
