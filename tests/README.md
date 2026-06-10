@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,650
+- behavior tests: 3,651
 - docs/inventory meta-tests: 34
-- `pytest`: 2054 (2020 behavior + 34 meta)
+- `pytest`: 2055 (2021 behavior + 34 meta)
 - `vitest`: 1367
 - `playwright`: 263
-- total: 3,684
+- total: 3,685
 
 This document is organized in two parts:
 
@@ -1547,6 +1547,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_dynamic_unknown_routes_use_baseline_http_rate_limit` | Verifies repeated unknown dynamic paths hit the baseline HTTP rate limit instead of bypassing route-specific throttles. |
+| `TestProjectRoutes.test_default_baseline_http_rate_limit_allows_page_load_burst` | Verifies the default baseline HTTP burst limit allows a normal first-load fan-out without rejecting app requests. |
 | `TestProjectRoutes.test_static_assets_skip_baseline_http_rate_limit` | Verifies static assets stay exempt from the baseline dynamic-route HTTP rate limit. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
 | `TestProjectRoutes.test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere` | Verifies project deletion keeps entity-owned findings intact when the entity remains linked through another project. |

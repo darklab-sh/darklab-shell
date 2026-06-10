@@ -30,7 +30,7 @@ class HttpRateLimitResult:
 def dynamic_route_rate_limit_label(cfg: dict[str, Any]) -> str:
     return (
         f"{_coerce_positive_int(cfg.get('http_rate_limit_per_minute'), 240)} per minute; "
-        f"{_coerce_positive_int(cfg.get('http_rate_limit_per_second'), 20)} per second"
+        f"{_coerce_positive_int(cfg.get('http_rate_limit_per_second'), 60)} per second"
     )
 
 
@@ -55,7 +55,7 @@ def check_dynamic_route_rate_limit(
     checked_at = time.time() if now is None else float(now)
     checks = (
         (60, _coerce_positive_int(cfg.get("http_rate_limit_per_minute"), 240)),
-        (1, _coerce_positive_int(cfg.get("http_rate_limit_per_second"), 20)),
+        (1, _coerce_positive_int(cfg.get("http_rate_limit_per_second"), 60)),
     )
     label = dynamic_route_rate_limit_label(cfg)
     for window_seconds, limit in checks:

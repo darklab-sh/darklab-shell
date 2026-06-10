@@ -530,8 +530,8 @@
 # Baseline burst limit for dynamic app routes that do not already have a tighter
 # route-specific limit. Set to 0 to disable this baseline; route-specific limits
 # still apply.
-# Server default if unset: 20
-# http_rate_limit_per_second: 20
+# Server default if unset: 60
+# http_rate_limit_per_second: 60
 
 # Maximum number of command-start and API requests per minute per IP
 # Server default if unset: 30

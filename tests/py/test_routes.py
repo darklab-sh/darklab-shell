@@ -5800,6 +5800,18 @@ class TestProjectRoutes:
         assert second.status_code == 429
         assert json.loads(second.data)["error"] == "rate_limited"
 
+    def test_default_baseline_http_rate_limit_allows_page_load_burst(self):
+        client = get_client()
+        remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+        probe_prefix = f"/bootstrap-probe-{uuid.uuid4().hex}"
+
+        responses = [
+            client.get(f"{probe_prefix}-{idx}", environ_base={"REMOTE_ADDR": remote_addr})
+            for idx in range(60)
+        ]
+
+        assert [resp.status_code for resp in responses] == [404] * 60
+
     def test_static_assets_skip_baseline_http_rate_limit(self, monkeypatch):
         client = get_client()
         remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
