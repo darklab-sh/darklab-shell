@@ -5786,6 +5786,32 @@ class TestProjectRoutes:
         assert "__wrapper-limiter-instance" in project_routes.projects_packages_download.__dict__
         assert "__wrapper-limiter-instance" in project_routes.projects_auto_promote_rules_preview.__dict__
 
+    def test_dynamic_unknown_routes_use_baseline_http_rate_limit(self, monkeypatch):
+        client = get_client()
+        remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+        probe_path = f"/nuclei-probe-{uuid.uuid4().hex}"
+        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_minute", 1)
+        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_second", 1)
+
+        first = client.get(probe_path, environ_base={"REMOTE_ADDR": remote_addr})
+        second = client.get(probe_path, environ_base={"REMOTE_ADDR": remote_addr})
+
+        assert first.status_code == 404
+        assert second.status_code == 429
+        assert json.loads(second.data)["error"] == "rate_limited"
+
+    def test_static_assets_skip_baseline_http_rate_limit(self, monkeypatch):
+        client = get_client()
+        remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_minute", 1)
+        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_second", 1)
+
+        first = client.get("/static/js/app.js", environ_base={"REMOTE_ADDR": remote_addr})
+        second = client.get("/static/js/app.js", environ_base={"REMOTE_ADDR": remote_addr})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
     def test_create_list_get_update_archive_and_delete_project(self):
         client = get_client()
         session_id = self._session_id()

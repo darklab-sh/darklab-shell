@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,641
+- behavior tests: 3,644
 - docs/inventory meta-tests: 34
-- `pytest`: 2046 (2012 behavior + 34 meta)
-- `vitest`: 1366
+- `pytest`: 2048 (2014 behavior + 34 meta)
+- `vitest`: 1367
 - `playwright`: 263
-- total: 3,675
+- total: 3,678
 
 This document is organized in two parts:
 
@@ -1543,6 +1543,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_targets_list_supports_pagination_type_search_and_auto_filter` | Verifies the project target list supports paging, type filters, search, and the auto-discovered target review filter. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
+| `TestProjectRoutes.test_dynamic_unknown_routes_use_baseline_http_rate_limit` | Verifies repeated unknown dynamic paths hit the baseline HTTP rate limit instead of bypassing route-specific throttles. |
+| `TestProjectRoutes.test_static_assets_skip_baseline_http_rate_limit` | Verifies static assets stay exempt from the baseline dynamic-route HTTP rate limit. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
 | `TestProjectRoutes.test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere` | Verifies project deletion keeps entity-owned findings intact when the entity remains linked through another project. |
 | `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
@@ -3458,6 +3460,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `returns false when measurements are not yet available` | Verifies that the decision is safe (no collapse) when bar width or chrome width is unmeasured. |
 | `respects the fit buffer at the boundary` | Verifies the fit buffer behavior at the exact width boundary. |
 | `is state-independent — the decision does not take a current collapsed flag` | Verifies the decision depends only on widths, not the current collapsed state, which prevents collapse/expand oscillation. |
+| `hides the chrome toggle once pinned-open controls fit again` | Verifies the tab-bar chrome toggle disappears after tabs shrink enough for the full search/display controls to fit. |
 
 #### `tabs.test.js`
 

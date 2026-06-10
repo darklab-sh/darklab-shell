@@ -133,6 +133,8 @@ def _prune_diag_ai_test_clients(now: float) -> None:
 _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Rate limiting", (
         "rate_limit_enabled",
+        "http_rate_limit_per_minute",
+        "http_rate_limit_per_second",
         "rate_limit_per_minute",
         "rate_limit_per_second",
     )),
@@ -1132,6 +1134,8 @@ def diag():
     # ── Operational config ───────────────────────────────────────────────────
     result["config"] = {
         "rate_limit_enabled":         CFG.get("rate_limit_enabled"),
+        "http_rate_limit_per_minute": CFG.get("http_rate_limit_per_minute"),
+        "http_rate_limit_per_second": CFG.get("http_rate_limit_per_second"),
         "rate_limit_per_minute":      CFG.get("rate_limit_per_minute"),
         "rate_limit_per_second":      CFG.get("rate_limit_per_second"),
         "command_timeout_seconds":    CFG.get("command_timeout_seconds"),

@@ -100,7 +100,8 @@ from blueprints.teams import teams_bp  # noqa: E402
 from blueprints.watchers import watchers_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
-from core.process import cleanup_stale_active_run_metadata  # noqa: E402
+from core.http_rate_limit import check_dynamic_route_rate_limit  # noqa: E402
+from core.process import cleanup_stale_active_run_metadata, redis_client  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
 from services import metrics as app_metrics  # noqa: E402
 from services.api_v1.serialization import json_error  # noqa: E402
@@ -171,6 +172,28 @@ def _rate_limit_handler(e):
             retry_after = int(limit_item.get_expiry())
         return jsonify({"error": "rate_limited", "retry_after": retry_after}), 429
     return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+
+@app.before_request
+def _enforce_dynamic_route_rate_limit():
+    result = check_dynamic_route_rate_limit(
+        client_ip=get_client_ip(),
+        path=request.path,
+        cfg=CFG,
+        redis_client=redis_client,
+    )
+    if result.allowed:
+        return None
+    log.warning("RATE_LIMIT", extra={
+        "ip": get_client_ip(),
+        "path": request.path,
+        "limit": result.limit,
+        "scope": "http",
+    })
+    app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope="http")
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("rate_limited", "Rate limit exceeded. Please slow down.")), 429
+    return jsonify({"error": "rate_limited", "retry_after": result.retry_after}), 429
 
 
 @app.errorhandler(500)

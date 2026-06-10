@@ -513,17 +513,31 @@
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
-# Whether the shared /runs and /api/v1 rate limiter is active at all. Set to false
-# for test-only or maintenance overlays where you want the app to accept requests
+# Whether the shared HTTP rate limiter is active at all. Set to false for
+# test-only or maintenance overlays where you want the app to accept requests
 # without throttling.
 # Server default if unset: true
 # rate_limit_enabled: true
 
-# Maximum number of /runs and /api/v1 requests per minute per IP
+# Baseline limit for dynamic app routes that do not already have a tighter
+# route-specific limit. Static assets are exempt so normal page loads still work,
+# while broad scanners hitting random paths get throttled before they can tie up
+# the web worker pool. Set to 0 to disable this baseline; route-specific limits
+# still apply.
+# Server default if unset: 240
+# http_rate_limit_per_minute: 240
+
+# Baseline burst limit for dynamic app routes that do not already have a tighter
+# route-specific limit. Set to 0 to disable this baseline; route-specific limits
+# still apply.
+# Server default if unset: 20
+# http_rate_limit_per_second: 20
+
+# Maximum number of command-start and API requests per minute per IP
 # Server default if unset: 30
 # rate_limit_per_minute: 30
 
-# Maximum number of /runs and /api/v1 requests per second per IP
+# Maximum number of command-start and API requests per second per IP
 # Server default if unset: 5
 # rate_limit_per_second: 5
 

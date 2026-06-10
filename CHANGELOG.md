@@ -46,7 +46,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 ### Fixed
 
 - **Run-output summary backfill retries** — startup now records durable status for run-output summary backfill attempts, so legacy runs with empty structured output or unreadable artifacts/previews are handled once instead of being retried and re-logged on every restart.
-  - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers. Current suite total: 2046 pytest + 1366 Vitest + 263 Playwright = **3,675 tests**.
+  - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers.
+
+- **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
+  - Static assets stay exempt, and existing command/API/write-specific limits remain tighter where they already apply.
+  - **Tests:** added route coverage for repeated unknown-path probes and static-asset exemptions.
+
+- **Tabbar chrome toggle reset** — the search/display controls toggle now hides itself once closed tabs leave enough room for the full tabbar chrome again, instead of lingering as a no-op collapse glyph.
+  - **Tests:** added Vitest coverage for the pinned-open toggle visibility decision. Current suite total: 2048 pytest + 1367 Vitest + 263 Playwright = **3,678 tests**.
 
 - **Report selector freshness** — report selector page loads now ignore stale responses after filter changes, so slower old requests cannot redraw older rows over newer filtered results.
 

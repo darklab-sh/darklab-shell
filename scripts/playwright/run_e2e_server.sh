@@ -33,6 +33,8 @@ workspace_enabled: true
 workspace_backend: tmpfs
 workspace_root: "$WORKSPACE_DIR"
 workspace_inactivity_ttl_hours: 1
+http_rate_limit_per_minute: 0
+http_rate_limit_per_second: 0
 rate_limit_per_minute: 10000
 rate_limit_per_second: 25
 evidence_package_download_rate_limit_per_minute: 10000

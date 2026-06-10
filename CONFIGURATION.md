@@ -150,9 +150,11 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
-| `rate_limit_enabled` | `true` | Enables the shared `/runs` and `/api/v1` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
-| `rate_limit_per_minute` | `30` | Max `/runs` and `/api/v1` requests per minute per IP |
-| `rate_limit_per_second` | `5` | Max `/runs` and `/api/v1` requests per second per IP |
+| `rate_limit_enabled` | `true` | Enables the shared HTTP rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
+| `http_rate_limit_per_minute` | `240` | Baseline limit for dynamic app routes that do not already have a tighter route-specific limit. Static assets are exempt, so normal page loads still work while broad scanners hitting random paths are throttled. Set to `0` to disable this baseline while keeping route-specific limits |
+| `http_rate_limit_per_second` | `20` | Baseline burst limit for dynamic app routes that do not already have a tighter route-specific limit. Set to `0` to disable this baseline while keeping route-specific limits |
+| `rate_limit_per_minute` | `30` | Max command-start and API requests per minute per IP |
+| `rate_limit_per_second` | `5` | Max command-start and API requests per second per IP |
 | `team_read_rate_limit_per_minute` | `180` | Max team-management read requests per minute. The Options Teams tab, desktop HUD scope selector, mobile scope selector, and `/api/v1/teams` list/detail routes use this token-keyed limit |
 | `team_read_rate_limit_per_second` | `20` | Max team-management read requests per second for the same read surfaces |
 | `team_write_rate_limit_per_minute` | `30` | Max team-management write requests per minute for create, join, invite, membership, archive/reactivate, leave, and recovery-code changes |

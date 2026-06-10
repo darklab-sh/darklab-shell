@@ -38,7 +38,7 @@ At a high level, it works like this:
 
 - The browser loads a Flask-rendered shell page, then fetches focused startup data from routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
 - Command execution starts with `POST /runs` and streams through replayable `/runs/<run_id>/stream` SSE subscriptions. The backend validates and rewrites commands, handles app-native built-ins, starts isolated scanner subprocesses when needed, and publishes output events.
-- Redis stores shared state that must work across multiple Gunicorn workers: rate limits, active run PID tracking for `/kill`, production run-broker replay, and interactive PTY event/control streams.
+- Redis stores shared state that must work across multiple Gunicorn workers: route and dynamic-request rate limits, active run PID tracking for `/kill`, production run-broker replay, and interactive PTY event/control streams.
 - The configured database stores completed run metadata, preview output, snapshots, and full-output file metadata so history and share links survive restarts.
 - The browser client has no build step. Classic scripts share one global runtime, and browser cookies/storage handle local continuity around session identity, preferences, and reload restore.
 - The Docker runtime uses two unprivileged users: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner` with the shared `appuser` group. That group lets validated Files workspace entries stay group-readable or group-writable without making them world-readable.
@@ -937,7 +937,7 @@ flowchart TB
 This boundary view answers a different question than the dependency graph above: not "which module imports which," but "which runtime service owns which responsibility."
 
 - Flask + Gunicorn own routing, request hooks, response shaping, and template rendering.
-- Redis owns the shared coordination required across Gunicorn workers: rate limiting, active-run PID tracking for `/kill`, replayable run-broker streams, and PTY event/control streams when those brokered runtimes are enabled.
+- Redis owns the shared coordination required across Gunicorn workers: route and dynamic-request rate limiting, active-run PID tracking for `/kill`, replayable run-broker streams, and PTY event/control streams when those brokered runtimes are enabled.
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
@@ -2093,12 +2093,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,641
+- behavior tests: 3,644
 - docs/inventory meta-tests: 34
-- `pytest`: 2046 (2012 behavior + 34 meta)
-- `vitest`: 1366
+- `pytest`: 2048 (2014 behavior + 34 meta)
+- `vitest`: 1367
 - `playwright`: 263
-- total: 3,675
+- total: 3,678
 
 ### Testing Architecture
 

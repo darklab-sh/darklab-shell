@@ -15,6 +15,8 @@ import config as shell_config  # noqa: E402
 
 
 TEST_RATE_LIMIT_OVERRIDES = {
+    "http_rate_limit_per_minute": 100000,
+    "http_rate_limit_per_second": 1000,
     "rate_limit_per_minute": 100000,
     "rate_limit_per_second": 1000,
     "evidence_package_download_rate_limit_per_minute": 100000,

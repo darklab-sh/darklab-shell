@@ -203,6 +203,8 @@ def load_config(conf_dir=None):
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
+        "http_rate_limit_per_minute": 240,
+        "http_rate_limit_per_second": 20,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
         "team_read_rate_limit_per_minute": 180,

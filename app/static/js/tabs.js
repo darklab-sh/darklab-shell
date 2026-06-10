@@ -146,13 +146,18 @@ function _decideTabbarChromeCollapsed({ pref, tabsWidth, chromeFullWidth, barWid
   return (tabsWidth + chromeFullWidth) > (barWidth - buffer);
 }
 
-function _applyTabbarChromeState(barEl, collapsed, pref) {
+function _shouldShowTabbarChromeToggle({ pref, collapsed, autoWouldCollapse }) {
+  return !!(collapsed || (pref === 'expanded' && autoWouldCollapse));
+}
+
+function _applyTabbarChromeState(barEl, collapsed, pref, autoWouldCollapse = collapsed) {
   if (!barEl) return;
   barEl.classList.toggle('chrome-collapsed', collapsed);
   if (typeof tabbarChromeToggle === 'undefined' || !tabbarChromeToggle) return;
-  // The toggle is only actionable when collapsed (expand) or pinned open
-  // (release to auto); otherwise there is plenty of room and nothing to toggle.
-  const showToggle = collapsed || pref === 'expanded';
+  // The toggle is actionable when auto collapsed (expand) or while pinned open
+  // only if auto mode would still need to collapse. Once tabs fit again, hide
+  // the release-to-auto affordance so the chrome returns to its normal shape.
+  const showToggle = _shouldShowTabbarChromeToggle({ pref, collapsed, autoWouldCollapse });
   tabbarChromeToggle.classList.toggle('u-hidden', !showToggle);
   // Glyph points the way the controls will travel: » collapses them away, «
   // pulls them back into view.
@@ -175,13 +180,20 @@ function updateTabbarChromeFit() {
     const width = tabbarChrome.scrollWidth;
     if (width > 0) _tabbarChromeFullWidth = width;
   }
-  const collapsed = _decideTabbarChromeCollapsed({
-    pref,
-    tabsWidth: _tabsIntrinsicWidth(),
+  const tabsWidth = _tabsIntrinsicWidth();
+  const autoWouldCollapse = _decideTabbarChromeCollapsed({
+    pref: 'auto',
+    tabsWidth,
     chromeFullWidth: _tabbarChromeFullWidth,
     barWidth: barEl.clientWidth,
   });
-  _applyTabbarChromeState(barEl, collapsed, pref);
+  const collapsed = _decideTabbarChromeCollapsed({
+    pref,
+    tabsWidth,
+    chromeFullWidth: _tabbarChromeFullWidth,
+    barWidth: barEl.clientWidth,
+  });
+  _applyTabbarChromeState(barEl, collapsed, pref, autoWouldCollapse);
 }
 
 function _toggleTabbarChrome() {
