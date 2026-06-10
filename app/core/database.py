@@ -2276,9 +2276,11 @@ def delete_snapshot_metadata(conn, snapshot_ids):
     )
 
 
-def _prune_retention(conn):
+def _prune_retention(conn, *, cfg=None) -> dict[str, int]:
     """Delete runs and snapshots older than permalink_retention_days."""
-    days = CFG.get("permalink_retention_days", 0)
+    counts = {"runs": 0, "snapshots": 0}
+    active_cfg = CFG if cfg is None else cfg
+    days = active_cfg.get("permalink_retention_days", 0)
     if days and days > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
         if DB_BACKEND == DatabaseBackend.POSTGRES:
@@ -2327,12 +2329,22 @@ def _prune_retention(conn):
             f"DELETE FROM snapshots WHERE {created_older_sql}",  # nosec B608
             (cutoff,)
         )
+        counts = {
+            "runs": int(cur_runs.rowcount or 0),
+            "snapshots": int(cur_snaps.rowcount or 0),
+        }
         if cur_runs.rowcount or cur_snaps.rowcount:
             log.info("DB_PRUNED", extra={
                 "runs": cur_runs.rowcount,
                 "snapshots": cur_snaps.rowcount,
                 "retention_days": days,
             })
+    return counts
+
+
+def prune_retention(conn, *, cfg=None) -> dict[str, int]:
+    """Delete expired run and snapshot data using the normal retention policy."""
+    return _prune_retention(conn, cfg=cfg)
 
 
 def db_init():

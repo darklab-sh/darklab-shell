@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,659
+- behavior tests: 3,661
 - docs/inventory meta-tests: 34
-- `pytest`: 2062 (2028 behavior + 34 meta)
+- `pytest`: 2064 (2030 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,693
+- total: 3,695
 
 This document is organized in two parts:
 
@@ -552,6 +552,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSchedulerFoundation.test_scheduler_due_schedules_orders_limits_and_ignores_disabled` | Verifies due schedule selection orders by next fire, honors limits, and ignores disabled schedules. |
 | `TestSchedulerFoundation.test_scheduler_recovery_skips_invalid_and_stale_missed_fires` | Verifies recovery audits invalid due timestamps and stale missed fires outside the catch-up window. |
 | `TestSchedulerFoundation.test_scheduler_worker_run_once_fires_due_schedules_and_commits` | Verifies one worker tick fires due schedules and commits the resulting fire rows. |
+| `TestSchedulerFoundation.test_scheduler_worker_run_once_runs_daily_retention` | Verifies one worker tick runs daily run/snapshot and audit retention pruning. |
+| `TestSchedulerFoundation.test_scheduler_retention_guard_skips_until_interval_elapses` | Verifies scheduler retention pruning is guarded to run at most once per interval. |
 | `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
 | `TestWatchersFoundation.test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists` | Verifies watcher creation inserts the watcher row and owned schedule row together while normal schedule lists hide watcher-owned cadence. |
 | `TestWatchersFoundation.test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically` | Verifies deleting a watcher removes its state, owned schedule, and fire audit rows together. |

@@ -4592,6 +4592,68 @@ class TestSchedulerFoundation:
         assert fired_ids == [due.id]
         assert [dict(row) for row in rows] == [{"schedule_id": due.id, "status": "fired", "run_id": "run_worker_once"}]
 
+    def test_scheduler_worker_run_once_runs_daily_retention(self, monkeypatch, tmp_path):
+        from services.scheduler import worker
+
+        cfg = {
+            **app_config.CFG,
+            "permalink_retention_days": 30,
+            "audit_retention_days": 30,
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+        }
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) "
+                "VALUES ('scheduler-old-run', 'tok_scheduler_retention', 'echo old', datetime('now', '-100 days'))"
+            )
+            conn.execute(
+                "INSERT INTO audit_events (id, event_type, target_type, created) "
+                "VALUES ('scheduler-old-audit', 'history.delete', 'run', ?)",
+                ((datetime.now(timezone.utc) - timedelta(days=100)).isoformat(),),
+            )
+            conn.commit()
+
+        monkeypatch.setattr(worker, "CFG", cfg)
+        monkeypatch.setattr(worker, "_last_retention_check_monotonic", None)
+
+        assert worker.run_once(limit=5) == 0
+
+        with database.db_connect() as conn:
+            counts = {
+                "runs": conn.execute("SELECT COUNT(*) FROM runs WHERE id = 'scheduler-old-run'").fetchone()[0],
+                "audit_events": conn.execute(
+                    "SELECT COUNT(*) FROM audit_events WHERE id = 'scheduler-old-audit'"
+                ).fetchone()[0],
+            }
+        assert counts == {"runs": 0, "audit_events": 0}
+
+    def test_scheduler_retention_guard_skips_until_interval_elapses(self, monkeypatch):
+        from services.scheduler import worker
+
+        prune_retention = mock.Mock(return_value={"runs": 1, "snapshots": 0})
+        prune_events = mock.Mock(return_value=2)
+        monkeypatch.setattr(worker.database, "prune_retention", prune_retention)
+        monkeypatch.setattr(worker, "prune_events", prune_events)
+        monkeypatch.setattr(worker, "_last_retention_check_monotonic", None)
+
+        first = worker.maybe_run_retention(mock.Mock(), monotonic_now=100.0, cfg={})
+        second = worker.maybe_run_retention(mock.Mock(), monotonic_now=101.0, cfg={})
+        third = worker.maybe_run_retention(
+            mock.Mock(),
+            monotonic_now=100.0 + worker.RETENTION_CHECK_INTERVAL_SECONDS + 1,
+            cfg={},
+        )
+
+        assert first == {"runs": 1, "snapshots": 0, "audit_events": 2}
+        assert second == {"runs": 0, "snapshots": 0, "audit_events": 0}
+        assert third == {"runs": 1, "snapshots": 0, "audit_events": 2}
+        assert prune_retention.call_count == 2
+        assert prune_events.call_count == 2
+
     def test_scheduler_postgres_lock_exits_when_already_held(self, monkeypatch):
         from services.scheduler import worker
 

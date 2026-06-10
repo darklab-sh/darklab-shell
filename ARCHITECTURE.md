@@ -1028,7 +1028,7 @@ The notification worker is a dedicated Gunicorn-sibling process started and supe
 
 Scheduled runs are stored in the shared `schedules` table with personal/team ownership columns. The same table also holds watcher-owned schedules through `owner_kind='watcher'`; normal schedule listings only expose `owner_kind='user'` rows so watcher cadence cannot be edited as an ordinary command schedule. Schedules require durable `tok_` session ownership because the worker has to keep firing after the browser closes and token revocation must remain enforceable. Team-owned schedules keep their `team_id` when they fire, and archiving a team pauses its schedules in place. Reactivating the team restores access but leaves those schedules paused until a member resumes them.
 
-The scheduler worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `SCHEDULER_ENABLED` is not disabled. It is not hosted inside Flask workers. On startup it takes one deployment-wide lock: Postgres uses the reserved `darklab_shell_scheduler` advisory-lock namespace, and SQLite uses a filesystem lock at `scheduler.lock` in the app data directory unless `scheduler.lock_path` overrides it. If another scheduler owns the lock, the extra process exits cleanly and the supervisor can retry later.
+The scheduler worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `SCHEDULER_ENABLED` is not disabled. It is not hosted inside Flask workers. On startup it takes one deployment-wide lock: Postgres uses the reserved `darklab_shell_scheduler` advisory-lock namespace, and SQLite uses a filesystem lock at `scheduler.lock` in the app data directory unless `scheduler.lock_path` overrides it. If another scheduler owns the lock, the extra process exits cleanly and the supervisor can retry later. The worker also runs the daily retention pass for expired runs, snapshots, run-output artifacts, and audit rows, so long-running containers keep applying `permalink_retention_days` and `audit_retention_days` without waiting for a restart.
 
 Due user-owned schedules launch through the same brokered run preparation path as browser and API runs, including command policy checks, registry rewrites, variable expansion, runtime checks, workspace output rewrites, history persistence, and run-complete notification fan-out. Each fire writes a `schedule_fires` audit row with the schedule's personal/team scope; successful fires store the resulting run id on both the audit row and the schedule. History and Run Details read those audit rows to show a scheduled-run badge. If the owning token has been revoked, the scheduler records `skipped_revoked` and disables the schedule. If the previous scheduled run is still active in the same scope, the scheduler records `skipped_overlap` and advances to the next fire window instead of queueing another copy.
 
@@ -2094,12 +2094,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,659
+- behavior tests: 3,661
 - docs/inventory meta-tests: 34
-- `pytest`: 2062 (2028 behavior + 34 meta)
+- `pytest`: 2064 (2030 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,693
+- total: 3,695
 
 ### Testing Architecture
 

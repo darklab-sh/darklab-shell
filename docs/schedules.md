@@ -54,6 +54,8 @@ darklab schedule create --every hourly -- nmap -p 80 darklab.sh
 
 Due schedules are fired by the scheduler worker, not by Flask request handlers. The worker launches schedules through the same brokered run path as browser and API starts, including command policy, command registry rewrites, workspace output handling, history persistence, Atlas capture, active-project capture, and outbound `run_complete` notifications. Scheduled runs keep the personal or team scope of the schedule that created them.
 
+The same worker also runs the daily retention pass for expired runs, snapshots, run-output artifacts, and audit rows. That keeps retention active in containers that stay up for weeks.
+
 Each fire writes a `schedule_fires` audit row. Successful fires store the run id on the audit row and on the schedule. History rows and Run Details use that link to show a `scheduled` badge, and clicking the badge reopens the originating schedule.
 
 If a scheduled run is still active when you open or reload the UI, it stays in the Status Monitor instead of automatically taking over the terminal. Use **Attach** from Status Monitor when you want to watch that run live.

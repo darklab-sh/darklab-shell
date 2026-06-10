@@ -60,7 +60,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers.
 
 - **Run-output artifact sharding** — new full-output transcript artifacts now write under hash-sharded `run-output/ab/abcd/<run_id>.txt.gz` paths instead of adding every file directly under `run-output/`.
-  - Existing flat artifact paths still load and delete normally through their stored `run_output_artifacts.rel_path`, so no bulk migration is required. Timed retention pruning remains tracked with the broader retention-scheduler work.
+  - Existing flat artifact paths still load and delete normally through their stored `run_output_artifacts.rel_path`, so no bulk migration is required.
   - **Tests:** added backend coverage for the two-level shard path contract and sharded artifact deletion. Current suite total: 2057 pytest + 1367 Vitest + 263 Playwright = **3,687 tests**.
 
 - **History metadata query load** — browser History pages and run permalink JSON now reuse the label and note rows they already fetch when reporting label/note counts, instead of issuing separate count queries for the same metadata.
@@ -78,6 +78,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Scanner kill PID reuse guard** — scanner-mode `/kill` and API cancel requests now verify the active run's stored PID start time before sending the sudo-backed process-group signal, so a recycled PID cannot make the app terminate an unrelated scanner process group.
   - Stale or unverifiable scanner metadata is treated like an already-gone process group and still releases the caller's running state without issuing the sudo kill.
   - **Tests:** added backend, route, and API coverage for matching PID start times, reused PID rejection, legacy metadata without start time, and scanner kill/cancel stale-PID handling. Current suite total: 2062 pytest + 1368 Vitest + 263 Playwright = **3,693 tests**.
+
+- **Periodic retention cleanup** — the scheduler worker now runs a guarded daily retention pass for expired runs, snapshots, run-output artifacts, and audit rows, so long-lived containers keep applying retention without waiting for a restart.
+  - Startup pruning remains in place for boot-time cleanup, and the scheduler uses the same database and audit retention helpers so deletion, artifact cleanup, and logging stay consistent.
+  - **Tests:** added scheduler-worker coverage for daily retention pruning and the once-per-interval guard. Current suite total: 2064 pytest + 1368 Vitest + 263 Playwright = **3,695 tests**.
 
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.

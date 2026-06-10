@@ -1307,7 +1307,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Persistence & Retention
 
-**Purpose:** durable storage layout for run history, preview metadata, full-output artifacts, and tab snapshots, with time-based retention pruning on startup.
+**Purpose:** durable storage layout for run history, preview metadata, full-output artifacts, and tab snapshots, with time-based retention pruning at startup and during the scheduler worker's daily cleanup pass.
 
 **Behavior:**
 
@@ -1316,7 +1316,7 @@ wget -q -O /dev/null --server-response https://example.com
 - Persisted full-output artifacts are written as compressed files under hash-sharded `./data/run-output/` paths.
 - Optional body-store thresholds can move large run search text, tab snapshot bodies, and Atlas intel payloads into compressed files under `./data/body-store/` while the app keeps reading them normally.
 - The `./data` directory is created automatically on first run and persists filesystem-backed artifacts across container restarts and recreations.
-- On startup, runs, run-output artifact metadata, artifact files, and snapshots older than `permalink_retention_days` are pruned together.
+- Runs, run-output artifact metadata, artifact files, and snapshots older than `permalink_retention_days` are pruned together at startup and by the scheduler worker's daily retention pass.
 
 **Limits:** `./data` is the only writable path in an otherwise read-only container. Setting `permalink_retention_days: 0` disables pruning entirely (unlimited retention). On SQLite deployments, never write to `./data/history.db` from the host — host/container SQLite version mismatches can corrupt the FTS5 btree.
 
