@@ -254,14 +254,15 @@ def _validate_command_for_run(
             display_command=command,
             exec_command=command,
         )
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+    effective_owner_context = _effective_owner_context(owner_context, session_id)
+    if effective_owner_context is not None:
         return validate_command(
             command,
             session_id=session_id,
             cfg=CFG,
             workspace_cwd=workspace_cwd,
             extra_allowed_prefixes=extra_allowed_prefixes,
-            owner_context=owner_context,
+            owner_context=effective_owner_context,
         )
     return validate_command(
         command,
@@ -270,6 +271,43 @@ def _validate_command_for_run(
         workspace_cwd=workspace_cwd,
         extra_allowed_prefixes=extra_allowed_prefixes,
     )
+
+
+def _validate_command_with_effective_owner(
+    command: str,
+    session_id: str,
+    workspace_cwd: str = "",
+    *,
+    extra_allowed_prefixes: list[str] | None = None,
+    owner_context: OwnerContext | None = None,
+) -> CommandValidationResult:
+    effective_owner_context = _effective_owner_context(owner_context, session_id)
+    if effective_owner_context is not None:
+        return _validate_command_for_run(
+            command,
+            session_id,
+            workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+            owner_context=effective_owner_context,
+        )
+    if extra_allowed_prefixes is not None:
+        return _validate_command_for_run(
+            command,
+            session_id,
+            workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+        )
+    return _validate_command_for_run(command, session_id, workspace_cwd)
+
+
+def _effective_owner_context(owner_context: OwnerContext | None, session_id: str) -> OwnerContext | None:
+    if owner_context is None:
+        return None
+    if owner_context.is_team:
+        return owner_context
+    if owner_context.owner_id != str(session_id or "").strip():
+        return owner_context
+    return None
 
 
 def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
@@ -1691,21 +1729,13 @@ def _prepare_interactive_pty_command(
         raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
     execution_command = shlex.join(argv)
     extra_allowed_prefixes = [str(spec.get("root") or tokens[0].lower())]
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
-        validation = _validate_command_for_run(
-            execution_command,
-            session_id,
-            workspace_cwd,
-            extra_allowed_prefixes=extra_allowed_prefixes,
-            owner_context=owner_context,
-        )
-    else:
-        validation = _validate_command_for_run(
-            execution_command,
-            session_id,
-            workspace_cwd,
-            extra_allowed_prefixes=extra_allowed_prefixes,
-        )
+    validation = _validate_command_with_effective_owner(
+        execution_command,
+        session_id,
+        workspace_cwd,
+        extra_allowed_prefixes=extra_allowed_prefixes,
+        owner_context=owner_context,
+    )
     if not validation.allowed:
         log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
@@ -1865,26 +1895,24 @@ def _prepare_real_command(
     owner_context: OwnerContext | None = None,
 ) -> _PreparedRealCommand:
     registry_command = execution_command
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
-        validation = _validate_command_for_run(
-            execution_command,
-            session_id,
-            workspace_cwd,
-            owner_context=owner_context,
-        )
-    else:
-        validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
+    effective_owner_context = _effective_owner_context(owner_context, session_id)
+    validation = _validate_command_with_effective_owner(
+        execution_command,
+        session_id,
+        workspace_cwd,
+        owner_context=effective_owner_context,
+    )
     if not validation.allowed:
         log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
     execution_command = validation.exec_command or execution_command
 
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+    if effective_owner_context is not None:
         command, notice = rewrite_command(
             execution_command,
             session_id=session_id,
             cfg=CFG,
-            owner_context=owner_context,
+            owner_context=effective_owner_context,
         )
     else:
         command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
