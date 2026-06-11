@@ -771,15 +771,25 @@ test.describe('project workspace modal', () => {
     expect(projectId).toBeTruthy()
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
-    const linkResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'POST'
-        && url.pathname === `/projects/${projectId}/links`
-    })
-    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
-    expect((await linkResponse).ok()).toBe(true)
+    const [linkResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return response.request().method() === 'POST'
+          && url.pathname === `/projects/${projectId}/links`
+      }),
+      page.locator('#confirm-host [data-confirm-action-id="add"]').click(),
+    ])
+    expect(linkResponse.ok()).toBe(true)
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     const runRow = page.locator('.project-explorer-item').filter({ hasText: seededRun.command }).first()
+    await expect.poll(async () => page.evaluate(async ({ id, command }) => {
+      const params = new URLSearchParams({ page_size: '25' })
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/runs?${params.toString()}`, { cache: 'no-store' })
+      if (!resp.ok) return false
+      const data = await resp.json()
+      const runs = Array.isArray(data.runs) ? data.runs : []
+      return runs.some(run => String(run && run.command || '') === command)
+    }, { id: projectId, command: seededRun.command })).toBe(true)
     await expect(runRow).toBeVisible()
     return { runRow, command: seededRun.command }
   }

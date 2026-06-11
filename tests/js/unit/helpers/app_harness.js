@@ -591,6 +591,7 @@ export async function loadAppFns({
       'app/static/js/features/preferences/secrets_panel.js',
       'app/static/js/features/preferences/teams_panel.js',
       'app/static/js/features/preferences/session_token_controls.js',
+      'app/static/js/features/command-registry/faq_helpers.js',
       'app/static/js/features/command-registry/command_registry.js',
       'app/static/js/features/theme/theme.js',
       'app/static/js/features/terminal/composer_editing.js',

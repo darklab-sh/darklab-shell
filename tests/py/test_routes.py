@@ -154,7 +154,73 @@ class TestIndexRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/mobile-chrome.css?v=' in body
         assert '/vendor/ansi_up.js?v=' in body
-        assert '/vendor/jspdf.umd.min.js?v=' in body
+        assert '<script src="/static/js/export_pdf.js?v=' not in body
+        assert '"export_pdf": "/static/js/export_pdf.js?v=' in body
+        assert '<script src="/static/js/features/atlas/atlas_tabs.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_entity_detail.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_entity_row.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_overlay.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_mobile.js?v=' not in body
+        assert '"atlas_tabs": "/static/js/features/atlas/atlas_tabs.js?v=' in body
+        assert '"atlas_entity_row": "/static/js/features/atlas/atlas_entity_row.js?v=' in body
+        assert '"atlas_entity_detail": "/static/js/features/atlas/atlas_entity_detail.js?v=' in body
+        assert '"atlas_overlay": "/static/js/features/atlas/atlas_overlay.js?v=' in body
+        assert '"atlas_mobile": "/static/js/features/atlas/atlas_mobile.js?v=' in body
+        assert '<script src="/static/js/features/findings/findings_board_modal.js?v=' not in body
+        assert '"findings_board": "/static/js/features/findings/findings_board_modal.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_activity.js?v=' not in body
+        assert '"project_activity": "/static/js/features/projects/project_activity.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_artifacts.js?v=' not in body
+        assert '"project_artifacts": "/static/js/features/projects/project_artifacts.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_workspace_shell.js?v=' not in body
+        assert '"project_workspace_shell": "/static/js/features/projects/project_workspace_shell.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_workspace_events.js?v=' not in body
+        assert '"project_workspace_events": "/static/js/features/projects/project_workspace_events.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_entities.js?v=' not in body
+        assert '"project_entities": "/static/js/features/projects/project_entities.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_packages.js?v=' not in body
+        assert '"project_packages": "/static/js/features/projects/project_packages.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_report.js?v=' not in body
+        assert '"project_report": "/static/js/features/projects/project_report.js?v=' in body
+        assert '<script src="/static/js/features/run-comparison/history_compare_renderer.js?v=' not in body
+        assert '"history_compare_core": "/static/js/features/run-comparison/history_compare_core.js?v=' in body
+        assert '"history_compare_overlay": "/static/js/features/run-comparison/history_compare_overlay.js?v=' in body
+        assert '"history_compare_controls": "/static/js/features/run-comparison/history_compare_controls.js?v=' in body
+        assert '"history_compare_navigation": "/static/js/features/run-comparison/history_compare_navigation.js?v=' in body
+        assert '"history_compare_renderer": "/static/js/features/run-comparison/history_compare_renderer.js?v=' in body
+        assert '"history_compare_launcher": "/static/js/features/run-comparison/history_compare_launcher.js?v=' in body
+        assert '<script src="/static/js/features/history/history_run_details.js?v=' not in body
+        assert '"history_run_details": "/static/js/features/history/history_run_details.js?v=' in body
+        assert '<script src="/static/js/features/preferences/teams_panel.js?v=' not in body
+        assert '"options_session_token_controls": "/static/js/features/preferences/session_token_controls.js?v=' in body
+        assert '"options_secrets_panel": "/static/js/features/preferences/secrets_panel.js?v=' in body
+        assert '"options_teams_panel": "/static/js/features/preferences/teams_panel.js?v=' in body
+        assert '"options_notification_channels": "/static/js/features/preferences/notification_channels.js?v=' in body
+        assert '/static/js/features/command-registry/faq_helpers.js?v=' in body
+        assert '<script src="/static/js/features/command-registry/command_registry.js?v=' not in body
+        assert '"command_registry": "/static/js/features/command-registry/command_registry.js?v=' in body
+        assert '<script src="/static/js/features/workflows/workflows.js?v=' not in body
+        assert '"workflows": "/static/js/features/workflows/workflows.js?v=' in body
+        assert '<script src="/static/js/pty.js?v=' not in body
+        assert '"pty_controller": "/static/js/pty.js?v=' in body
+        assert '<script src="/static/js/features/schedules/schedules_modal.js?v=' not in body
+        assert '"schedules_modal": "/static/js/features/schedules/schedules_modal.js?v=' in body
+        assert '<script src="/static/js/features/status-monitor/status_monitor_core.js?v=' not in body
+        assert '<script src="/static/js/status_monitor.js?v=' not in body
+        assert '"status_monitor_core": "/static/js/features/status-monitor/status_monitor_core.js?v=' in body
+        assert '"status_monitor_data": "/static/js/features/status-monitor/status_monitor_data.js?v=' in body
+        assert '"status_monitor_resources": "/static/js/features/status-monitor/status_monitor_resources.js?v=' in body
+        assert '"status_monitor": "/static/js/status_monitor.js?v=' in body
+        assert '<script src="/static/js/tour_modal.js?v=' not in body
+        assert '"tour_modal": "/static/js/tour_modal.js?v=' in body
+        assert '<script src="/static/js/features/watchers/watchers_modal.js?v=' not in body
+        assert '"watchers_modal": "/static/js/features/watchers/watchers_modal.js?v=' in body
+        assert '<script src="/vendor/jspdf.umd.min.js?v=' not in body
+        assert '"jspdf": "/vendor/jspdf.umd.min.js?v=' in body
+        assert '<script src="/vendor/xterm.js?v=' not in body
+        assert '"xterm_js": "/vendor/xterm.js?v=' in body
+        assert '"xterm_fit_js": "/vendor/xterm-addon-fit.js?v=' in body
+        assert '"xterm_css": "/vendor/xterm.css?v=' in body
         assert '/static/js/core/run_output_model.js?v=' in body
         assert '/static/js/core/config.js?v=' in body
         assert '/static/js/mobile_chrome.js?v=' in body

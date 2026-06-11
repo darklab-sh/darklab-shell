@@ -1,6 +1,5 @@
 // ── Shared history drawer logic ──
 const _historyCore = typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null;
-const _historyCompareCore = typeof DarklabHistoryCompareCore !== 'undefined' ? DarklabHistoryCompareCore : null;
 
 // History drawer filters are deliberately simple in the first pass:
 // server-backed search/filtering for persisted run attributes, plus a local
@@ -75,9 +74,14 @@ const _historyRunOnlyFilterKeys = new Set([
 const _historyStructuredFilterKeys = new Set(['signal', 'kind', 'entity', 'entityType']);
 
 function _historyCompareCoreCall(name, ...args) {
+  const _historyCompareCore = typeof DarklabHistoryCompareCore !== 'undefined' ? DarklabHistoryCompareCore : null;
   const helper = _historyCompareCore && _historyCompareCore[name];
   if (typeof helper !== 'function') throw new Error(`DarklabHistoryCompareCore.${name} is unavailable`);
   return helper(...args);
+}
+
+function _closeHistoryCompareActionMenusIfLoaded() {
+  if (typeof _closeHistoryCompareActionMenus === 'function') _closeHistoryCompareActionMenus();
 }
 
 function _compareFormatDate(value) {
@@ -1774,14 +1778,14 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
     if (event.target && event.target.closest && event.target.closest('.history-run-action-menu-wrap')) return;
     _closeHistoryActionMenus();
     _closeHistoryBulkActionMenu();
-    _closeHistoryCompareActionMenus();
+    _closeHistoryCompareActionMenusIfLoaded();
     _closeHistoryRunActionMenus();
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       _closeHistoryActionMenus();
       _closeHistoryBulkActionMenu();
-      _closeHistoryCompareActionMenus();
+      _closeHistoryCompareActionMenusIfLoaded();
       _closeHistoryRunActionMenus();
     }
   });
@@ -1790,13 +1794,13 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   window.addEventListener('resize', () => {
     _closeHistoryActionMenus();
     _closeHistoryBulkActionMenu();
-    _closeHistoryCompareActionMenus();
+    _closeHistoryCompareActionMenusIfLoaded();
     _closeHistoryRunActionMenus();
   });
   window.addEventListener('scroll', () => {
     _closeHistoryActionMenus();
     _closeHistoryBulkActionMenu();
-    _closeHistoryCompareActionMenus();
+    _closeHistoryCompareActionMenusIfLoaded();
     _closeHistoryRunActionMenus();
   }, true);
 }

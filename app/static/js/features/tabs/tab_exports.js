@@ -240,16 +240,20 @@ async function exportTabPdf(id) {
     _refocusAfterTabAction();
     return;
   }
-  if (!window.jspdf) {
+  const existingPdfUtils = (typeof ExportPdfUtils !== 'undefined' && ExportPdfUtils) || window.ExportPdfUtils;
+  if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
     showToast('PDF library not loaded', 'error');
     _refocusAfterTabAction();
     return;
   }
   try {
-    const { jsPDF } = window.jspdf;
+    const pdfUtils = existingPdfUtils || await window.loadExportPdfUtils();
+    const jsPDF = typeof window.loadJsPdf === 'function'
+      ? await window.loadJsPdf()
+      : await pdfUtils.loadJsPdf();
     const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
     const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
-    const doc = await ExportPdfUtils.buildTerminalExportPdf({
+    const doc = await pdfUtils.buildTerminalExportPdf({
       jsPDF,
       appName: exportModel.appName,
       metaLine: exportModel.metaLine,

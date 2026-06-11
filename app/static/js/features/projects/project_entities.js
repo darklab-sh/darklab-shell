@@ -51,6 +51,77 @@
     return `intel: ${providerText}${refreshed}`;
   }
 
+  function _appendDataset(el, dataset = {}) {
+    Object.entries(dataset || {}).forEach(([key, value]) => {
+      el.dataset[key] = value;
+    });
+  }
+
+  function _fallbackProjectEntityRow({
+    entity,
+    projectId = '',
+    title = '',
+    meta = '',
+    detail = '',
+    chips = [],
+    accessory = null,
+    action = null,
+    selected = false,
+    checkbox = null,
+    chipClass = () => 'badge badge-tone-muted',
+    bindPressable = null,
+  }) {
+    const row = document.createElement('article');
+    row.className = 'project-explorer-item panel-row project-entity-row';
+    row.classList.toggle('is-selected', !!selected);
+    if (checkbox) row.appendChild(checkbox);
+
+    let contentHost = row;
+    if (action) {
+      contentHost = document.createElement('button');
+      contentHost.type = 'button';
+      contentHost.className = 'control-row project-explorer-item-click-target';
+      contentHost.dataset.projectAction = action.action;
+      _appendDataset(contentHost, action.dataset || {});
+      if (projectId && !contentHost.dataset.projectId) contentHost.dataset.projectId = projectId;
+      if (typeof bindPressable === 'function') bindPressable(contentHost);
+    }
+
+    const main = document.createElement('div');
+    main.className = 'project-explorer-item-main';
+    const heading = document.createElement('div');
+    heading.className = 'project-explorer-item-title';
+    heading.textContent = title || String(entity && (entity.canonical_value || entity.value || entity.id) || '');
+    main.appendChild(heading);
+    if (meta) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'project-explorer-item-meta';
+      metaEl.textContent = meta;
+      main.appendChild(metaEl);
+    }
+    if (detail) {
+      const detailEl = document.createElement('div');
+      detailEl.className = 'project-explorer-item-detail';
+      detailEl.textContent = detail;
+      main.appendChild(detailEl);
+    }
+    if (Array.isArray(chips) && chips.length) {
+      const chipWrap = document.createElement('div');
+      chipWrap.className = 'project-explorer-item-chips';
+      chips.forEach((chip) => {
+        const chipEl = document.createElement('span');
+        chipEl.className = chipClass(chip.kind);
+        chipEl.textContent = String(chip.label || '');
+        chipWrap.appendChild(chipEl);
+      });
+      main.appendChild(chipWrap);
+    }
+    contentHost.appendChild(main);
+    if (contentHost !== row) row.appendChild(contentHost);
+    if (accessory) row.appendChild(accessory);
+    return row;
+  }
+
   function _entityCounts(summary) {
     const counts = {};
     _entityTabs().forEach((tab) => { counts[tab.type] = 0; });
@@ -1563,7 +1634,10 @@
           checkbox.dataset.projectId = projectId;
           checkbox.setAttribute('aria-label', `Select ${value || entityId}`);
         }
-        const row = entityRowApi.renderProjectEntityRow({
+        const renderProjectEntityRow = typeof entityRowApi.renderProjectEntityRow === 'function'
+          ? entityRowApi.renderProjectEntityRow
+          : _fallbackProjectEntityRow;
+        const row = renderProjectEntityRow({
           entity,
           projectId,
           title: value || entityId,

@@ -806,14 +806,13 @@ test.beforeEach(async ({ page }) => {
     // header visible and making the grab and close button unreachable.
     // bindMobileSheet now watches the sheet's visibility and scrubs any stale
     // inline styles the moment the sheet becomes hidden.
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await expect(page.locator('#workflows-modal')).toBeVisible()
     await page.waitForFunction(() => {
       const body = document.querySelector('#workflows-modal .workflows-body')
       return body && body.children.length > 0
     }, { timeout: 5000 })
-
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
-    await expect(page.locator('#workflows-modal')).toBeVisible()
 
     // Start a synthetic drag on the grab that moves the sheet 40px down.
     const grabBox = await page.locator('#workflows-modal > .sheet-grab').boundingBox()
@@ -1007,11 +1006,11 @@ test.beforeEach(async ({ page }) => {
   test('workflows sheet starts collapsed and wraps commands inside cards', async ({ page }) => {
     await page.setViewportSize(MOBILE)
     await page.goto('/')
-    await page.waitForFunction(() => document.querySelectorAll('#workflows-modal .workflow-card').length > 0)
 
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
     await expect(page.locator('#workflows-modal')).toBeVisible()
+    await page.waitForFunction(() => document.querySelectorAll('#workflows-modal .workflow-card').length > 0)
 
     const cards = page.locator('#workflows-modal .workflow-card')
     await expect(cards.first()).toHaveClass(/\bis-collapsed\b/)

@@ -51,6 +51,8 @@ Part 8 — related-doc navigation:
 """
 
 import ast
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -69,6 +71,7 @@ _DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
 _README = _REPO_ROOT / "README.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
+_ASSET_MANIFEST = _REPO_ROOT / "app" / "static" / "build" / "manifest.json"
 _RELEASE_DRAFTS_DIR = _REPO_ROOT / "docs" / "release-drafts"
 
 _DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
@@ -860,6 +863,30 @@ _PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE = re.compile(
 _PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE = re.compile(
     r"^app/static/build/[a-z0-9-]+\.[0-9a-f]{12}\.(css|js)$"
 )
+_TEMPLATE_STATIC_URL_RE = re.compile(r"['\"](/(?:static|vendor)/[^'\"]+)['\"]")
+
+
+def _asset_source_path(source: str) -> Path:
+    if source.startswith("/static/"):
+        return _REPO_ROOT / "app" / "static" / source.removeprefix("/static/")
+    if source.startswith("/vendor/fonts/"):
+        return _REPO_ROOT / "app" / "static" / source.removeprefix("/vendor/")
+    if source.startswith("/vendor/"):
+        return _REPO_ROOT / "app" / "static" / "js" / "vendor" / source.removeprefix("/vendor/")
+    raise AssertionError(f"Unsupported asset source in manifest: {source}")
+
+
+def _template_static_url_violations() -> list[str]:
+    violations: list[str] = []
+    templates_root = _REPO_ROOT / "app" / "templates"
+    for template in sorted(templates_root.rglob("*.html")):
+        rel = template.relative_to(_REPO_ROOT).as_posix()
+        for line_no, line in enumerate(template.read_text(encoding="utf-8").splitlines(), start=1):
+            if "static_asset(" in line or "asset_bundle(" in line:
+                continue
+            for match in _TEMPLATE_STATIC_URL_RE.finditer(line):
+                violations.append(f"{rel}:{line_no}: {match.group(1)}")
+    return violations
 
 
 def _git_tracked_files() -> list[str]:
@@ -1025,6 +1052,21 @@ class TestProjectStructureCoverage:
     """The README's project-structure tree must list every git-tracked file
     so contributors land on a complete navigation map."""
 
+    def test_asset_manifest_source_hashes_match_current_sources(self):
+        manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
+        stale = []
+        for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
+            source_hashes = bundle.get("source_hashes") or {}
+            for source, expected_hash in sorted(source_hashes.items()):
+                path = _asset_source_path(source)
+                actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                if actual_hash != expected_hash:
+                    stale.append(f"{bundle_name}: {source}")
+        assert not stale, (
+            "Asset manifest source hashes are stale. Run assets:sync:\n"
+            + "\n".join(f"  {item}" for item in stale)
+        )
+
     def test_no_files_missing_from_structure(self):
         listed = set(_parse_project_structure_tree(_README.read_text()))
         tracked = _git_tracked_files()
@@ -1055,6 +1097,13 @@ class TestProjectStructureCoverage:
         README tree must correspond to a real git-tracked file or directory.
         Subtree-internal paths beneath an opaque dir are exempt because the
         README intentionally only names the parent."""
+        template_static_url_violations = _template_static_url_violations()
+        assert not template_static_url_violations, (
+            "Templates must resolve /static/ and /vendor/ URLs through "
+            "static_asset() or asset_bundle() so immutable cache headers always "
+            "have a cache-buster:\n"
+            + "\n".join(f"  {violation}" for violation in template_static_url_violations)
+        )
         listed = _parse_project_structure_tree(_README.read_text())
         listed_set = set(listed)
         literal_hashed_build_assets = sorted(

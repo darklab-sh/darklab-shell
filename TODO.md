@@ -32,53 +32,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Frontend asset build pipeline
-
-The shell now has a committed, manifest-backed build pipeline for CSS and classic JavaScript bundles. Bundle mode is the shipping and end-to-end default; the remaining work is to add the final template guard and follow with a separate lazy-loading pass for rarely-first-paint code.
-
-**Why this is open:**
-- Bundling the current classic scripts reduces request count, not first-load JavaScript bytes. The first byte-weight win should come from lazy-loading rarely-first-paint features, not from concatenating every eager module into one file.
-- Immutable cache headers are applied by `/static/` and `/vendor/` path prefix. The build already covers bundle membership and order, but the repo still needs a template guard that rejects hard-coded static/vendor URLs without `static_asset()` or `asset_bundle()`.
-
-**Implementation plan:**
-- Keep `asset_bundle_mode` deterministic: `source` renders ordered source-file tags from the manifest, and `bundle` renders single hashed bundle tags while failing loudly at runtime if the manifest is missing or incomplete. Production, CI, and end-to-end runs use `bundle` so they exercise exactly what ships.
-- Do not force `bundle` everywhere: bundle-only would tax the dev inner loop (a rebuild on every source edit), risk silently serving stale bundles during development, and couple Python route tests and local e2e to a fresh Node artifact. The source/bundle divergence risk that a single mode would avoid is covered by the dual-mode route tests, the order-equivalence assertion, and the structural coverage check.
-- Keep stale-manifest detection in `assets:check`, not in request rendering. The check can compare source hashes to the manifest during build/CI, while runtime bundle mode should only enforce that the manifest is present and complete.
-- Keep `/static/build/...` on immutable cache headers. Dynamic HTML should stay fresh.
-- Two cache-busting schemes coexisting is intentional, not a half-done migration: bundles use content-hashed filenames, while non-bundled static assets (fonts, images, and standalone vendor such as jspdf and xterm) keep the existing `static_asset()` `?v=` query string. Those files change rarely, so `?v=` is sufficient and hashing their filenames is not worth the extra build machinery now. See the Technical Debt note about unifying this later.
-- Do not carve a lean permalink-only CSS bundle now, even though permalink's JS is self-contained. CSS is treated differently from JS here on purpose: the JS decoupling was driven by correctness and coupling (shell-core runs session/teams/state logic permalink never executes, and a shell-core change could break the share page), whereas unused CSS is only wasted bytes and cannot break anything. Carving permalink CSS would require auditing which shared stylesheets it actually needs, with real regression risk for modest byte savings, so permalink loads the shared `app.css` as it does today. A lean permalink CSS bundle is a future lever to pursue only if permalink CSS weight is ever measured as a problem.
-- Preserve the existing source files as the canonical files for development and unit tests.
-
-**Implementation phases:**
-
-Each phase is independently shippable and verifiable. Phases 1-3 are complete; do not start the lazy-loading phase until the template guard is in place.
-
-- **Phase 4 (later, separate) — lazy-loading and ESM.** Make `jspdf`/`export_pdf` lazy on first PDF export, then pursue broader lazy-loading of rarely-first-paint modules (Projects, Atlas, Watchers, report builder, Findings Board, PTY/xterm) and an incremental ESM migration, one low-risk area at a time. This is the first-load byte-reduction pass and is explicitly distinct from the request-count work in Phases 1–3; keep it deferred until those wins are in place.
-
-**Testing and documentation:**
-- Add `assets:check` coverage for stale manifests by changing a source file after build and asserting the check fails without requiring runtime re-hashing.
-- Add a CI lint/test that scans templates and fails when a `/static/` or `/vendor/` URL is hard-coded instead of being resolved through `static_asset()` or the bundle manifest helper.
-- Keep route tests covering source and bundle modes, missing-manifest failures, and `/static/build/...` cache headers as the bundle manifest grows.
-- Keep Vitest coverage against source modules; the build should not make tests depend on minified output.
-- Run targeted browser coverage through `bash scripts/run_playwright.sh ...` for shell boot, run streaming, and permalink rendering as the bundle shape changes.
-- Update README.md, FEATURES.md, ARCHITECTURE.md, CONFIGURATION.md if needed, CHANGELOG.md, release drafts, and test-count docs when implementation changes behavior or coverage.
-
-**Acceptance criteria:**
-- First-load static request count drops substantially without breaking local development ergonomics.
-- First-load byte size does not need to drop in the classic-bundle pass, and the plan keeps an explicit follow-up path for lazy-loading heavy feature modules.
-- The first rollout stays dependency-free and unminified. Minification is out of scope until sourcemaps and separate review coverage are added.
-- Static bundles use content-hashed filenames and immutable cache headers.
-- HTML templates reference manifest-backed bundle URLs in normal operation, and CI rejects unversioned `/static/` or `/vendor/` references that would receive immutable cache headers without a cache-buster.
-- `asset_bundle_mode` is exactly two modes, `source` and `bundle` (no `auto`), each deterministic and testable, including a fail-loud bundle mode when the manifest is unavailable.
-- Production, CI, and e2e use `asset_bundle_mode=bundle`; local development can opt into `source`, and Python route tests default to `source` so the suite runs on a clean checkout without a Node build.
-- `assets.config.json` is the single source of truth for bundle membership and order; templates compose bundles rather than listing source files, and Flask renders both modes from the compiled `manifest.json` alone.
-- Every `app/static/js/**` source file is covered by at least one bundle or the explicit lazy/excluded allowlist, enforced structurally by `assets:check`, so a new unbundled file fails CI. Files shared intentionally across bundles (such as render primitives reused by the self-contained `permalink` bundle) are allowed in more than one bundle.
-- `permalink` is a self-contained bundle with no dependency on `shell-core`, and PDF export becomes lazy on the permalink surface in the later lazy-loading pass.
-- Missing or incomplete build output fails loudly at runtime in bundle mode; stale build output fails in `assets:check` and CI without adding per-request source hashing.
-- Built bundles and the manifest are committed, `.gitignore`-allowlisted, regenerated by `assets:sync`, and drift-guarded by `assets:check` in CI — with no new runtime-image build dependency and no bundle generation at container boot.
-- Existing shell, permalink, diagnostics, and mobile flows keep working with the bundled assets.
-
----
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -88,7 +42,8 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Unify static-asset cache-busting on content-hashed filenames.** After the frontend asset build pipeline lands, the app uses two cache-busting schemes: content-hashed filenames for bundles and `static_asset()` `?v=` query strings for non-bundled assets (fonts, images, and standalone vendor such as jspdf and xterm). The split is intentional for now because those files change rarely, but a future pass could move them to hashed filenames too for one consistent scheme and to avoid query-string URLs that some proxies and CDNs cache conservatively. This needs the build to rewrite in-CSS font/image references to the hashed paths, so it is deferred until the bundle pipeline is stable.
+- **Incrementally move low-risk frontend modules to ESM.** The current asset pipeline intentionally keeps classic-script semantics, dependency-free concatenation, and unminified output. A future pass can move isolated leaf helpers or rarely-first-paint lazy surfaces toward ES modules one area at a time, while preserving source/bundle parity and the local edit-and-refresh workflow. Keep minification and sourcemaps as a separate decision after the ESM boundary is proven.
+- **Unify static-asset cache-busting on content-hashed filenames.** The app uses two cache-busting schemes: content-hashed filenames for bundles and `static_asset()` `?v=` query strings for non-bundled assets (fonts, images, and standalone vendor such as jspdf and xterm). The split is intentional for now because those files change rarely, but a future pass could move them to hashed filenames too for one consistent scheme and to avoid query-string URLs that some proxies and CDNs cache conservatively. This needs the build to rewrite in-CSS font/image references to the hashed paths, so it is deferred until the bundle pipeline is stable.
 
 ---
 

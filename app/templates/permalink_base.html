@@ -13,7 +13,7 @@
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="{{ static_asset('/vendor/ansi_up.js') }}"></script>
-<script src="{{ static_asset('/vendor/jspdf.umd.min.js') }}"></script>
+<script id="lazy-assets-json" type="application/json">{{ {'export_pdf': static_asset('/static/js/export_pdf.js'), 'jspdf': static_asset('/vendor/jspdf.umd.min.js'), 'xterm_css': static_asset('/vendor/xterm.css'), 'xterm_js': static_asset('/vendor/xterm.js'), 'xterm_fit_js': static_asset('/vendor/xterm-addon-fit.js')}|tojson }}</script>
 {% block extra_head %}{% endblock %}
 </head>
 <body class="permalink-page" data-theme="{{ current_theme.name }}">

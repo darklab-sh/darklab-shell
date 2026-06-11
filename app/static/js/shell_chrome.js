@@ -1,10 +1,7 @@
 // ── Shell chrome controller ──
 // Owns the desktop rail (Recent, Workflows, nav) and the bottom HUD.
-// Loaded after dom.js, state.js, ui_helpers.js, history.js, tabs.js, app.js,
-// project_details.js, project_list.js, project_navigation.js, project_entity_editor.js,
-// project_active_context.js, project_workspace_constants.js, project_workspace_state.js, project_workspace_lifecycle.js, project_workspace_renderer.js, project_workspace_bootstrap.js, project_shared_ui.js, project_nested_sheets.js, project_mobile_compare.js, project_mobile_shell.js, project_mobile_detail.js,
-// project_entities.js, project_findings.js, project_findings_board.js, findings_board_modal.js, project_artifacts.js, project_packages.js, and controller.js
-// so the helpers and overlays it delegates to are already defined.
+// Loaded after the shell core, the active-project HUD helpers, and controller.js.
+// The heavier Projects workspace controllers are loaded on first workspace open.
 
 (function initShellChrome(global) {
   if (typeof document === 'undefined') return;
@@ -139,6 +136,67 @@
     && global.DarklabProjectWorkspaceState.createProjectWorkspaceState;
   if (typeof projectWorkspaceStateFactory !== 'function') throw new Error('DarklabProjectWorkspaceState is unavailable');
   const projectWorkspaceState = projectWorkspaceStateFactory();
+  const PROJECT_WORKSPACE_LAZY_GLOBALS = [
+    ['DarklabProjectDetails', 'createProjectDetailsController'],
+    ['DarklabProjectList', 'createProjectListController'],
+    ['DarklabProjectNavigation', 'createProjectNavigationController'],
+    ['DarklabProjectEntityEditor', 'createProjectEntityEditorController'],
+    ['DarklabProjectWorkspaceActions', 'createProjectWorkspaceActionsController'],
+    ['DarklabProjectWorkspaceShell', 'createProjectWorkspaceShellController'],
+    ['DarklabProjectWorkspaceLifecycle', 'createProjectWorkspaceLifecycleController'],
+    ['DarklabProjectWorkspaceRenderer', 'createProjectWorkspaceRendererController'],
+    ['DarklabProjectWorkspaceBootstrap', 'createProjectWorkspaceBootstrapController'],
+    ['DarklabProjectNestedSheets', 'createProjectNestedSheetsController'],
+    ['DarklabProjectWorkspaceEvents', 'createProjectWorkspaceEventsController'],
+    ['DarklabProjectTargets', 'createProjectTargetsController'],
+    ['DarklabProjectRuns', 'createProjectRunsController'],
+    ['DarklabProjectMobileCompare', 'createProjectMobileCompareController'],
+    ['DarklabProjectMobileShell', 'createProjectMobileShellController'],
+    ['DarklabProjectMobileDetail', 'createProjectMobileDetailController'],
+    ['DarklabProjectFindingsData', 'createProjectFindingsDataController'],
+    ['DarklabProjectFilters', 'createProjectFiltersController'],
+    ['DarklabProjectEntities', 'createProjectEntitiesController'],
+    ['DarklabProjectFindings', 'createProjectFindingsController'],
+    ['DarklabProjectFindingsBoard', 'createProjectFindingsBoardController'],
+  ];
+  let projectWorkspaceModulesPromise = null;
+  let projectWorkspaceBootstrapped = false;
+
+  function _projectWorkspaceModulesReady() {
+    return PROJECT_WORKSPACE_LAZY_GLOBALS.every(([name, factory]) => (
+      global[name] && typeof global[name][factory] === 'function'
+    ));
+  }
+
+  function _projectWorkspaceOverlayOpenFallback() {
+    return !!(projectWorkspaceOverlay && projectWorkspaceOverlay.classList.contains('open'));
+  }
+
+  function _bindProjectWorkspaceIfNeeded() {
+    if (projectWorkspaceBootstrapped) return;
+    _projectWorkspaceBootstrapController().bindAll();
+    projectWorkspaceBootstrapped = true;
+  }
+
+  async function _ensureProjectWorkspaceModules() {
+    if (_projectWorkspaceModulesReady()) {
+      _bindProjectWorkspaceIfNeeded();
+      return;
+    }
+    if (!projectWorkspaceModulesPromise) {
+      const loader = global.loadProjectWorkspace;
+      if (typeof loader !== 'function') throw new Error('Project workspace loader is unavailable');
+      projectWorkspaceModulesPromise = loader()
+        .then(() => {
+          if (!_projectWorkspaceModulesReady()) throw new Error('Project workspace modules did not finish loading');
+          _bindProjectWorkspaceIfNeeded();
+        })
+        .finally(() => {
+          projectWorkspaceModulesPromise = null;
+        });
+    }
+    await projectWorkspaceModulesPromise;
+  }
   // ── Layout application ──────────────────────────────────────────
   function applyCollapsed() {
     rail.classList.toggle('rail-collapsed', ui.collapsed);
@@ -354,9 +412,12 @@
     });
   }
 
-  function openScopedWorkflow(idx) {
+  async function openScopedWorkflow(idx) {
     const item = allWorkflows[idx];
     if (!item) return;
+    if (typeof loadWorkflows === 'function') {
+      try { await loadWorkflows(); } catch (_) { /* non-critical */ }
+    }
     if (typeof renderWorkflowItems === 'function') {
       renderWorkflowItems([item], { emitCatalogEvent: false });
     }
@@ -1339,10 +1400,15 @@
   }
 
   function isProjectWorkspaceOpen() {
+    if (!_projectWorkspaceModulesReady()) return _projectWorkspaceOverlayOpenFallback();
     return _projectWorkspaceShellController().isOpen();
   }
 
   function _setProjectWorkspaceMessage(text = '', { error = false, toast = true } = {}) {
+    if (!_projectWorkspaceModulesReady()) {
+      if (toast && text && typeof showToast === 'function') showToast(text, error ? 'error' : 'info');
+      return;
+    }
     _projectWorkspaceShellController().setMessage(text, { error, toast });
   }
 
@@ -1428,6 +1494,7 @@
   }
 
   let projectPackagesController = null;
+  let projectPackagesControllerPromise = null;
 
   function _projectPackagesController() {
     if (projectPackagesController) return projectPackagesController;
@@ -1484,9 +1551,27 @@
     return projectPackagesController;
   }
 
+  function _projectPackagesControllerIfReady() {
+    return projectPackagesController || null;
+  }
+
+  function _loadProjectPackagesController() {
+    if (projectPackagesController) return Promise.resolve(projectPackagesController);
+    if (projectPackagesControllerPromise) return projectPackagesControllerPromise;
+    const loader = global.loadProjectPackages;
+    projectPackagesControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
+      .then(() => _projectPackagesController())
+      .finally(() => {
+        projectPackagesControllerPromise = null;
+      });
+    return projectPackagesControllerPromise;
+  }
+
   let projectReportController = null;
+  let projectReportControllerPromise = null;
 
   let projectActivityController = null;
+  let projectActivityControllerPromise = null;
 
   function _projectActivityController() {
     if (projectActivityController) return projectActivityController;
@@ -1504,6 +1589,22 @@
       openProjectObject: _openProjectObject,
     });
     return projectActivityController;
+  }
+
+  function _projectActivityControllerIfReady() {
+    return projectActivityController || null;
+  }
+
+  function _loadProjectActivityController() {
+    if (projectActivityController) return Promise.resolve(projectActivityController);
+    if (projectActivityControllerPromise) return projectActivityControllerPromise;
+    const loader = global.loadProjectActivity;
+    projectActivityControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
+      .then(() => _projectActivityController())
+      .finally(() => {
+        projectActivityControllerPromise = null;
+      });
+    return projectActivityControllerPromise;
   }
 
   function _projectReportController() {
@@ -1538,6 +1639,22 @@
       },
     });
     return projectReportController;
+  }
+
+  function _projectReportControllerIfReady() {
+    return projectReportController || null;
+  }
+
+  function _loadProjectReportController() {
+    if (projectReportController) return Promise.resolve(projectReportController);
+    if (projectReportControllerPromise) return projectReportControllerPromise;
+    const loader = global.loadProjectReport;
+    projectReportControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
+      .then(() => _projectReportController())
+      .finally(() => {
+        projectReportControllerPromise = null;
+      });
+    return projectReportControllerPromise;
   }
 
   let projectFiltersController = null;
@@ -1666,6 +1783,18 @@
   }
 
   let projectArtifactsController = null;
+  let projectArtifactsControllerPromise = null;
+
+  function _projectArtifactsControllerIfReady() {
+    return projectArtifactsController;
+  }
+
+  function _projectArtifactsFactoryReady() {
+    return !!(
+      global.DarklabProjectArtifacts
+      && typeof global.DarklabProjectArtifacts.createProjectArtifactsController === 'function'
+    );
+  }
 
   function _projectArtifactsController() {
     if (projectArtifactsController) return projectArtifactsController;
@@ -1706,6 +1835,24 @@
       groupCaret: '▾',
     });
     return projectArtifactsController;
+  }
+
+  function _loadProjectArtifactsController() {
+    if (projectArtifactsController) return Promise.resolve(projectArtifactsController);
+    if (projectArtifactsControllerPromise) return projectArtifactsControllerPromise;
+    if (_projectArtifactsFactoryReady()) {
+      return Promise.resolve(_projectArtifactsController());
+    }
+    const loader = global.loadProjectArtifacts;
+    if (typeof loader !== 'function') {
+      return Promise.reject(new Error('Project artifacts loader is unavailable'));
+    }
+    projectArtifactsControllerPromise = loader()
+      .then(() => _projectArtifactsController())
+      .finally(() => {
+        projectArtifactsControllerPromise = null;
+      });
+    return projectArtifactsControllerPromise;
   }
 
   let projectDetailsController = null;
@@ -1926,8 +2073,8 @@
       projectMobileTabs,
       projectPackageManifestOverlay,
       projectPackageWizardOverlay,
-      projectActivityController: _projectActivityController,
-      projectPackagesController: _projectPackagesController,
+      projectActivityController: _projectActivityControllerIfReady,
+      projectPackagesController: _projectPackagesControllerIfReady,
       projectTargetEditorOverlay,
       projectTargetsController: _projectTargetsController,
       projectWorkspaceEventsController: _projectWorkspaceEventsController,
@@ -2154,9 +2301,9 @@
       renderProjectMobileDetailTopbar: _renderProjectMobileDetailTopbar,
       renderProjectMobileTabs: _renderProjectMobileTabs,
       renderProjectMobileEntitiesTab: (projectId, summary) => _projectEntitiesController().renderMobileEntitiesTab(projectId, summary),
-      renderProjectMobilePackagesTab: (projectId, summary) => _projectPackagesController().renderMobilePackagesTab(projectId, summary),
-      renderProjectMobileReportTab: (projectId, summary) => _projectReportController().renderMobileReportTab(projectId, summary),
-      renderProjectMobileActivityTab: (projectId, summary) => _projectActivityController().renderMobileActivityTab(projectId, summary),
+      renderProjectMobilePackagesTab: _renderProjectMobilePackagesTab,
+      renderProjectMobileReportTab: _renderProjectMobileReportTab,
+      renderProjectMobileActivityTab: _renderProjectMobileActivityTab,
       setProjectMobileView: _setProjectMobileView,
       loadProjectFindings: _loadProjectFindings,
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
@@ -2233,7 +2380,7 @@
       invalidateProjectFindings: _invalidateProjectFindings,
       invalidateProjectRuns: _invalidateProjectRuns,
       invalidateProjectEntities: (projectId = '') => _projectEntitiesController().invalidate(projectId),
-      invalidateProjectArtifacts: (projectId = '') => _projectArtifactsController().invalidate?.(projectId),
+      invalidateProjectArtifacts: (projectId = '') => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,
       syncProjectNotesForm: _syncProjectNotesForm,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
@@ -2298,10 +2445,10 @@
       openProjectPackageManifest: _openProjectPackageManifest,
       openProjectPackageWizardFromPackage: _openProjectPackageWizardFromPackage,
       openProjectTargetEditor: _openProjectTargetEditor,
-      packagesController: _projectPackagesController,
+      packagesController: _projectPackagesControllerIfReady,
       previewProjectArtifact: _previewProjectArtifact,
-      reportController: _projectReportController,
-      activityController: _projectActivityController,
+      reportController: _projectReportControllerIfReady,
+      activityController: _projectActivityControllerIfReady,
       projectArtifactItems: _projectArtifactItems,
       projectArtifactPagination: _projectArtifactPagination,
       projectDisplayName: _projectDisplayName,
@@ -2496,11 +2643,15 @@
   }
 
   function _projectArtifactGroupKey(projectId, runId) {
-    return _projectArtifactsController().groupKey(projectId, runId);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.groupKey(projectId, runId);
+    return `${String(projectId || '')}\x1f${String(runId || '')}`;
   }
 
   function _projectArtifactGroupCollapsed(projectId, runId) {
-    return _projectArtifactsController().groupCollapsed(projectId, runId);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.groupCollapsed(projectId, runId);
+    return projectWorkspaceState.collapsedArtifactGroups().has(_projectArtifactGroupKey(projectId, runId));
   }
 
   function _projectRunItems(summary) {
@@ -2536,47 +2687,70 @@
   }
 
   function _projectArtifactItems(summary) {
-    return _projectArtifactsController().items(summary);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.items(summary);
+    return summary && Array.isArray(summary.artifacts) ? summary.artifacts : [];
   }
 
   function _projectArtifactPagination(projectId = projectWorkspaceState.selectedId()) {
-    return _projectArtifactsController().page(projectId);
+    const controller = _projectArtifactsControllerIfReady() || (_projectArtifactsFactoryReady() ? _projectArtifactsController() : null);
+    if (controller) return controller.page(projectId);
+    return { artifacts: [], total: 0, runCounts: {}, limit: 50, offset: 0, loading: true, loaded: false, error: '' };
   }
 
   function _setProjectArtifactPageOffset(projectId = projectWorkspaceState.selectedId(), offset = 0) {
-    _projectArtifactsController().setPageOffset(projectId, offset);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) controller.setPageOffset(projectId, offset);
   }
 
   function _pagedProjectArtifactItems(projectId = projectWorkspaceState.selectedId(), artifacts = []) {
-    return _projectArtifactsController().pagedItems(projectId, artifacts);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.pagedItems(projectId, artifacts);
+    const page = _projectArtifactPagination(projectId);
+    const offset = Math.max(0, Number(page.offset || 0));
+    const limit = Math.max(1, Number(page.limit || 50));
+    return (Array.isArray(artifacts) ? artifacts : []).slice(offset, offset + limit);
   }
 
   async function _loadProjectArtifacts(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId), options = {}) {
-    return _projectArtifactsController().load(projectId, summary, options);
+    const controller = await _loadProjectArtifactsController();
+    return controller.load(projectId, summary, options);
   }
 
   async function _loadAllProjectArtifacts(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
-    return _projectArtifactsController().loadAll(projectId, summary);
+    const controller = await _loadProjectArtifactsController();
+    return controller.loadAll(projectId, summary);
   }
 
   function _projectFilesEnabled() {
-    return _projectArtifactsController().filesEnabled();
+    return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
   }
 
   function _projectArtifactsVisible() {
-    return _projectArtifactsController().artifactsVisible();
+    return _projectFilesEnabled();
   }
 
   function _projectArtifactStatus(artifact) {
-    return _projectArtifactsController().status(artifact);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.status(artifact);
+    const artifactStatus = String(artifact && artifact.file_status || '').trim();
+    if (['available', 'missing', 'changed', 'disabled'].includes(artifactStatus)) return artifactStatus;
+    return artifact && artifact.file_available === false ? 'missing' : 'available';
   }
 
   function _projectArtifactStatusLabel(artifact) {
-    return _projectArtifactsController().statusLabel(artifact);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.statusLabel(artifact);
+    const artifactStatus = _projectArtifactStatus(artifact);
+    if (artifactStatus === 'disabled') return 'disabled';
+    if (artifactStatus === 'changed') return 'changed';
+    if (artifactStatus === 'missing') return 'missing';
+    return 'available';
   }
 
   function _projectArtifactAccessory(projectId, artifact) {
-    return _projectArtifactsController().accessory(projectId, artifact);
+    const controller = _projectArtifactsControllerIfReady();
+    return controller ? controller.accessory(projectId, artifact) : null;
   }
 
   function _entityLabelValues(entity) {
@@ -2620,15 +2794,49 @@
   }
 
   function _projectArtifactDetail(artifact) {
-    return _projectArtifactsController().detail(artifact);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.detail(artifact);
+    const parts = [
+      artifact && artifact.kind || 'file',
+      artifact && artifact.content_type || 'unknown type',
+      _formatProjectDate(artifact && artifact.created),
+    ];
+    const artifactStatus = _projectArtifactStatus(artifact);
+    const statusDetail = String(artifact && artifact.file_status_detail || '').trim();
+    if (artifactStatus === 'changed') {
+      parts.push(`current ${_formatProjectBytes(artifact && artifact.current_byte_size)}`);
+    } else if (artifactStatus === 'missing') {
+      parts.push(statusDetail || 'workspace file is missing');
+    } else if (artifactStatus === 'disabled') {
+      parts.push(statusDetail || 'Files are disabled on this instance');
+    }
+    return parts.filter(Boolean).join(' · ');
   }
 
   function _projectArtifactDetailLines(artifact) {
-    return _projectArtifactsController().detailLines(artifact);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.detailLines(artifact);
+    const artifactStatus = _projectArtifactStatus(artifact);
+    const statusDetail = String(artifact && artifact.file_status_detail || '').trim();
+    const lines = [
+      [artifact && artifact.kind || 'file', artifact && artifact.content_type || 'unknown type'].filter(Boolean).join(' · '),
+      _formatProjectDate(artifact && artifact.created),
+    ].filter(Boolean);
+    if (artifactStatus === 'changed') {
+      lines.push(`current ${_formatProjectBytes(artifact && artifact.current_byte_size)}`);
+    } else if (artifactStatus === 'missing') {
+      lines.push(statusDetail || 'workspace file is missing');
+    } else if (artifactStatus === 'disabled') {
+      lines.push(statusDetail || 'Files are disabled on this instance');
+    }
+    return lines;
   }
 
   function _projectArtifactDownloadName(artifactPath = '', fallback = 'artifact') {
-    return _projectArtifactsController().downloadName(artifactPath, fallback);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.downloadName(artifactPath, fallback);
+    const name = String(artifactPath || '').split('/').filter(Boolean).pop();
+    return name || fallback;
   }
 
   function _downloadBlobAsAttachment(blob, filename, successMessage = '') {
@@ -2656,42 +2864,74 @@
   }
 
   function _closeProjectPackageManifest() {
-    _projectPackagesController().closeManifest();
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) {
+      controller.closeManifest();
+      return;
+    }
+    if (!projectPackageManifestOverlay) return;
+    projectPackageManifestOverlay.classList.add('u-hidden');
+    projectPackageManifestOverlay.classList.remove('open');
+    projectPackageManifestOverlay.setAttribute('aria-hidden', 'true');
   }
 
   function isProjectPackageManifestOpen() {
-    return _projectPackagesController().isManifestOpen();
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) return controller.isManifestOpen();
+    return !!(projectPackageManifestOverlay && projectPackageManifestOverlay.classList.contains('open'));
   }
 
   function _openProjectPackageManifest(pkg) {
-    _projectPackagesController().openManifest(pkg);
+    _loadProjectPackagesController()
+      .then(controller => controller.openManifest(pkg))
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project package manifest', err);
+        _setProjectWorkspaceMessage('Could not load package manifest.', { error: true });
+      });
   }
 
   async function _previewProjectArtifact(projectId, artifactId) {
-    await _projectArtifactsController().preview(projectId, artifactId);
+    const controller = await _loadProjectArtifactsController();
+    await controller.preview(projectId, artifactId);
   }
 
   async function _downloadProjectArtifact(projectId, artifactId, artifactPath = '') {
-    await _projectArtifactsController().download(projectId, artifactId, artifactPath);
+    const controller = await _loadProjectArtifactsController();
+    await controller.download(projectId, artifactId, artifactPath);
   }
 
   function _projectPackageItems(summary) {
-    return _projectPackagesController().items(summary);
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) return controller.items(summary);
+    return summary && Array.isArray(summary.packages) ? summary.packages : [];
   }
 
   function _projectPackageWizardActive(projectId = projectWorkspaceState.selectedId()) {
-    return _projectPackagesController().isWizardActive(projectId);
+    const controller = _projectPackagesControllerIfReady();
+    return controller ? controller.isWizardActive(projectId) : false;
   }
 
   function isProjectPackageWizardOpen() {
-    return _projectPackagesController().isWizardOpen();
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) return controller.isWizardOpen();
+    return !!(projectPackageWizardOverlay && projectPackageWizardOverlay.classList.contains('open'));
   }
 
   function isProjectEntityEditorOpen() {
+    if (!_projectWorkspaceModulesReady()) {
+      return !!(projectEntityEditorOverlay && projectEntityEditorOverlay.classList.contains('open'));
+    }
     return _projectEntityEditorController().isOpen();
   }
 
   function _closeProjectEntityEditor() {
+    if (!_projectWorkspaceModulesReady()) {
+      if (!projectEntityEditorOverlay) return;
+      projectEntityEditorOverlay.classList.add('u-hidden');
+      projectEntityEditorOverlay.classList.remove('open');
+      projectEntityEditorOverlay.setAttribute('aria-hidden', 'true');
+      return;
+    }
     _projectEntityEditorController().close();
   }
 
@@ -2703,35 +2943,67 @@
     const projectId = options && Object.prototype.hasOwnProperty.call(options, 'projectId')
       ? options.projectId
       : '';
-    _openProjectEntityEditor(projectId, entityType, entity, options);
+    _ensureProjectWorkspaceModules()
+      .then(() => _openProjectEntityEditor(projectId, entityType, entity, options))
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project entity editor', err);
+        if (typeof showToast === 'function') showToast('Could not open the metadata editor.', 'error');
+      });
   };
 
   function _renderProjectPackageWizardModal(options = {}) {
-    _projectPackagesController().renderWizardModal(options);
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) controller.renderWizardModal(options);
   }
 
   function _openProjectPackageWizard(projectId, preset = 'evidence') {
-    _projectPackagesController().openWizard(projectId, preset);
+    _loadProjectPackagesController()
+      .then(controller => controller.openWizard(projectId, preset))
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project package wizard', err);
+        _setProjectWorkspaceMessage('Could not load package builder.', { error: true });
+      });
   }
 
   function _openProjectPackageWizardFromPackage(projectId, pkg) {
-    _projectPackagesController().openWizardFromPackage(projectId, pkg);
+    _loadProjectPackagesController()
+      .then(controller => controller.openWizardFromPackage(projectId, pkg))
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project package wizard', err);
+        _setProjectWorkspaceMessage('Could not load package builder.', { error: true });
+      });
   }
 
   function _closeProjectPackageWizard(options = {}) {
-    _projectPackagesController().closeWizard(options);
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) controller.closeWizard(options);
+    else if (projectPackageWizardOverlay) {
+      projectPackageWizardOverlay.classList.add('u-hidden');
+      projectPackageWizardOverlay.classList.remove('open');
+      projectPackageWizardOverlay.setAttribute('aria-hidden', 'true');
+    }
   }
 
   function _projectPackageById(summary, packageId) {
-    return _projectPackagesController().byId(summary, packageId);
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) return controller.byId(summary, packageId);
+    const normalized = String(packageId || '').trim();
+    if (!normalized || !summary || !Array.isArray(summary.packages)) return null;
+    return summary.packages.find(item => String(item && item.id || '') === normalized) || null;
   }
 
   function _setProjectPackageDownloadBusy(button, busy) {
-    _projectPackagesController().setDownloadBusy(button, busy);
+    const controller = _projectPackagesControllerIfReady();
+    if (controller) {
+      controller.setDownloadBusy(button, busy);
+      return;
+    }
+    if (button) button.disabled = !!busy;
   }
 
   async function _downloadProjectPackage(projectId, pkg) {
-    await _projectPackagesController().downloadPackage(projectId, pkg);
+    const controller = await _loadProjectPackagesController();
+    await controller.downloadPackage(projectId, pkg);
   }
 
   function _projectFindingItems(projectId = projectWorkspaceState.selectedId()) {
@@ -2755,11 +3027,16 @@
   }
 
   function _projectArtifactServerFilterParams(projectId, summary = _projectSummary(projectId)) {
-    return _projectArtifactsController().serverFilterParams(projectId, summary);
+    const controller = _projectArtifactsControllerIfReady();
+    return controller ? controller.serverFilterParams(projectId, summary) : new URLSearchParams();
   }
 
   function _projectArtifactServerFilterKey(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
-    return _projectArtifactsController().serverFilterKey(projectId, summary);
+    const controller = _projectArtifactsControllerIfReady();
+    if (controller) return controller.serverFilterKey(projectId, summary);
+    const params = _projectArtifactServerFilterParams(projectId, summary);
+    params.sort?.();
+    return params.toString();
   }
 
   function _projectFindingServerFiltersActive(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
@@ -2819,10 +3096,20 @@
   }
 
   function _closeProjectTargetEditor(options = {}) {
+    if (!_projectWorkspaceModulesReady()) {
+      if (!projectTargetEditorOverlay) return;
+      projectTargetEditorOverlay.classList.add('u-hidden');
+      projectTargetEditorOverlay.classList.remove('open');
+      projectTargetEditorOverlay.setAttribute('aria-hidden', 'true');
+      return;
+    }
     _projectTargetsController().closeEditor(options);
   }
 
   function isProjectTargetEditorOpen() {
+    if (!_projectWorkspaceModulesReady()) {
+      return !!(projectTargetEditorOverlay && projectTargetEditorOverlay.classList.contains('open'));
+    }
     return _projectTargetsController().isOpen();
   }
 
@@ -2895,6 +3182,7 @@
   }
 
   function _scheduleProjectFilterSortDividerSync(root) {
+    if (!_projectWorkspaceModulesReady()) return;
     _projectFiltersController().scheduleFilterSortDividerSync(root);
   }
 
@@ -2943,10 +3231,12 @@
   }
 
   function _syncProjectNotesForm() {
+    if (!_projectWorkspaceModulesReady()) return;
     _projectDetailsController().syncNotesForm();
   }
 
   function _flushProjectNotesAutosave() {
+    if (!_projectWorkspaceModulesReady()) return Promise.resolve();
     return _projectDetailsController().flushNotesAutosave();
   }
 
@@ -3019,6 +3309,7 @@
   }
 
   function _closeProjectMobileActionSheet({ restoreFocus = true } = {}) {
+    if (!_projectWorkspaceModulesReady()) return;
     _projectMobileDetailController().closeActionSheet({ restoreFocus });
   }
 
@@ -3027,6 +3318,7 @@
   }
 
   function _closeProjectMobileCompareSheet({ restoreFocus = true } = {}) {
+    if (!_projectWorkspaceModulesReady()) return;
     _projectMobileCompareController().close({ restoreFocus });
   }
 
@@ -3077,6 +3369,7 @@
   }
 
   function cycleProjectWorkspaceTab(offset = 1) {
+    if (!_projectWorkspaceModulesReady()) return false;
     return _projectWorkspaceRendererController().cycleTab(offset);
   }
 
@@ -3105,15 +3398,57 @@
   }
 
   function _renderProjectArtifacts(container, projectId, summary) {
-    _projectArtifactsController().renderArtifacts(container, projectId, summary);
+    if (projectArtifactsController) {
+      projectArtifactsController.renderArtifacts(container, projectId, summary);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading project artifacts...'));
+    _loadProjectArtifactsController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'artifacts') return;
+        controller.renderArtifacts(container, projectId, summary);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project artifacts', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load project artifacts.'));
+      });
   }
 
   function _renderProjectPackages(container, projectId, summary) {
-    _projectPackagesController().renderPackages(container, projectId, summary);
+    if (projectPackagesController) {
+      projectPackagesController.renderPackages(container, projectId, summary);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading evidence packages...'));
+    _loadProjectPackagesController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'packages') return;
+        controller.renderPackages(container, projectId, summary);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project packages', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load evidence packages.'));
+      });
   }
 
   function _renderProjectActivity(container, projectId, summary) {
-    _projectActivityController().renderActivity(container, projectId, summary);
+    if (projectActivityController) {
+      projectActivityController.renderActivity(container, projectId, summary);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading project activity...'));
+    _loadProjectActivityController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'activity') return;
+        controller.renderActivity(container, projectId, summary);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project activity', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load project activity.'));
+      });
   }
 
   function _openProjectObject(projectId, { tab = '', targetType = '', targetId = '' } = {}) {
@@ -3131,19 +3466,88 @@
   function _openProjectActivity(projectId, { targetId = '', targetType = '' } = {}) {
     const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
     if (!normalizedProjectId) return;
-    const st = _projectActivityController().stateFor(normalizedProjectId);
-    st.filters.target_id = String(targetId || '').trim();
-    st.filters.target_type = String(targetType || '').trim();
-    st.offset = 0;
-    st.loaded = false;
     _closeProjectEntityEditor();
     projectWorkspaceState.setTab('activity');
     _renderProjectExplorer();
-    _projectActivityController().load(normalizedProjectId).catch(() => {});
+    _loadProjectActivityController()
+      .then((controller) => {
+        const st = controller.stateFor(normalizedProjectId);
+        st.filters.target_id = String(targetId || '').trim();
+        st.filters.target_type = String(targetType || '').trim();
+        st.offset = 0;
+        st.loaded = false;
+        if (projectWorkspaceState.tab() === 'activity') _renderProjectExplorer();
+        return controller.load(normalizedProjectId);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to open project activity', err);
+      });
   }
 
   function _renderProjectReport(container, projectId, summary) {
-    _projectReportController().renderReport(container, projectId, summary);
+    if (projectReportController) {
+      projectReportController.renderReport(container, projectId, summary);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading report builder...'));
+    _loadProjectReportController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'report') return;
+        controller.renderReport(container, projectId, summary);
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load project report builder', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load the report builder.'));
+      });
+  }
+
+  function _renderProjectMobileReportTab(projectId, summary) {
+    if (projectReportController) return projectReportController.renderMobileReportTab(projectId, summary);
+    const panel = _emptyProjectPanel('Loading report builder...');
+    _loadProjectReportController()
+      .then(() => {
+        if (projectWorkspaceState.tab() === 'report' && _projectMobileShellController().currentView() === 'detail') {
+          _renderProjectMobileDetail();
+        }
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load mobile project report builder', err);
+        if (panel.isConnected) panel.replaceChildren('Could not load the report builder.');
+      });
+    return panel;
+  }
+
+  function _renderProjectMobilePackagesTab(projectId, summary) {
+    if (projectPackagesController) return projectPackagesController.renderMobilePackagesTab(projectId, summary);
+    const panel = _emptyProjectPanel('Loading evidence packages...');
+    _loadProjectPackagesController()
+      .then(() => {
+        if (projectWorkspaceState.tab() === 'packages' && _projectMobileShellController().currentView() === 'detail') {
+          _renderProjectMobileDetail();
+        }
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load mobile project packages', err);
+        if (panel.isConnected) panel.replaceChildren('Could not load evidence packages.');
+      });
+    return panel;
+  }
+
+  function _renderProjectMobileActivityTab(projectId, summary) {
+    if (projectActivityController) return projectActivityController.renderMobileActivityTab(projectId, summary);
+    const panel = _emptyProjectPanel('Loading project activity...');
+    _loadProjectActivityController()
+      .then(() => {
+        if (projectWorkspaceState.tab() === 'activity' && _projectMobileShellController().currentView() === 'detail') {
+          _renderProjectMobileDetail();
+        }
+      })
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load mobile project activity', err);
+        if (panel.isConnected) panel.replaceChildren('Could not load project activity.');
+      });
+    return panel;
   }
 
   function _renderProjectExplorer() {
@@ -3167,20 +3571,35 @@
   }
 
   async function refreshProjectWorkspace() {
+    if (!_projectWorkspaceModulesReady()) {
+      if (!_projectWorkspaceOverlayOpenFallback()) return;
+      await _ensureProjectWorkspaceModules();
+    }
     await _projectWorkspaceLifecycleController().refreshProjectWorkspace();
   }
 
   function _scheduleProjectWorkspaceExternalRefresh() {
+    if (!_projectWorkspaceModulesReady()) {
+      if (!_projectWorkspaceOverlayOpenFallback()) return;
+      _ensureProjectWorkspaceModules()
+        .then(() => _scheduleProjectWorkspaceExternalRefresh())
+        .catch((err) => {
+          if (typeof logClientError === 'function') logClientError('failed to load project workspace for external refresh', err);
+        });
+      return;
+    }
     _projectWorkspaceShellController().scheduleExternalRefresh();
   }
 
   function _notifyProjectWorkspaceChanged(reason = 'updated', projectId = '', { local = true } = {}) {
+    if (!_projectWorkspaceModulesReady()) return;
     _projectWorkspaceShellController().notifyChanged(reason, projectId, { local });
   }
 
   _projectActiveContextController().bindTargetDiscoveryEvent();
 
   async function openProjectWorkspace() {
+    await _ensureProjectWorkspaceModules();
     await _projectWorkspaceShellController().open();
   }
 
@@ -3259,6 +3678,12 @@
   }
 
   function closeProjectWorkspace({ refocus = true } = {}) {
+    if (!_projectWorkspaceModulesReady()) {
+      if (!projectWorkspaceOverlay) return;
+      projectWorkspaceOverlay.classList.remove('open');
+      projectWorkspaceOverlay.setAttribute('aria-hidden', 'true');
+      return;
+    }
     _projectWorkspaceShellController().close({ refocus });
   }
 
@@ -3305,8 +3730,6 @@
   function _updateCachedProjectFinding(projectId, findingId, updates) {
     _projectFindingsDataController().updateCachedFinding(projectId, findingId, updates);
   }
-
-  _projectWorkspaceBootstrapController().bindAll();
 
   function _renderUptime() {
     if (!hudUptimeEl) return;

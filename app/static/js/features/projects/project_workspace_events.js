@@ -155,14 +155,18 @@
 
     async function handleInput(event) {
       if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
-      if (ctx.reportController?.().handleInput(event)) return;
-      ctx.packagesController?.().handleInput(event);
+      const reportController = ctx.reportController?.();
+      if (reportController && reportController.handleInput(event)) return;
+      const packagesController = ctx.packagesController?.();
+      packagesController?.handleInput(event);
     }
 
     async function handleChange(event) {
       if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
-      if (ctx.reportController?.().handleChange(event)) return;
-      if (ctx.packagesController?.().handleChange(event)) return;
+      const reportController = ctx.reportController?.();
+      if (reportController && reportController.handleChange(event)) return;
+      const packagesController = ctx.packagesController?.();
+      if (packagesController && packagesController.handleChange(event)) return;
       const findingViewModeControl = event.target.closest?.('[data-project-finding-view-mode]');
       if (findingViewModeControl) {
         event.preventDefault();
@@ -323,7 +327,8 @@
               .map(item => String(item.finding_id || ''))
             : findingIds;
           updatedIds.forEach(findingId => ctx.setCachedFindingReviewState(projectId, findingId, reviewState));
-          ctx.activityController?.().invalidate?.(projectId);
+          const activityController = ctx.activityController?.();
+          activityController?.invalidate?.(projectId);
           selectedFindingIds().clear();
           ctx.setFindingSelectMode(false);
           ctx.renderProjectExplorer();
@@ -364,7 +369,8 @@
         const result = await resp.json();
         const updated = Number(result?.counts?.updated || 0);
         if (!updated) throw new Error('Finding was no longer available in this project.');
-        ctx.activityController?.().invalidate?.(projectId);
+        const activityController = ctx.activityController?.();
+        activityController?.invalidate?.(projectId);
         control.dataset.previousReviewState = reviewState;
       } catch (err) {
         ctx.setCachedFindingReviewState(projectId, findingId, previousReviewState);
@@ -406,11 +412,14 @@
 
     async function handleClick(event) {
       if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
+      const activityController = ctx.activityController?.();
       if (
         event.target.closest?.('[data-project-activity-action]')
-        && await ctx.activityController?.().handleClick(event)
+        && activityController
+        && await activityController.handleClick(event)
       ) return;
-      if (await ctx.reportController?.().handleClick(event)) return;
+      const reportController = ctx.reportController?.();
+      if (reportController && await reportController.handleClick(event)) return;
       if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
       if (mobileDetailTab) {
@@ -1025,9 +1034,10 @@
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectTargetEditor(projectId);
           return;
-        } else if (await ctx.packagesController?.().handleAction(btn)) {
-          return;
-        } else if (action === 'edit-target') {
+        }
+        const packagesController = ctx.packagesController?.();
+        if (packagesController && await packagesController.handleAction(btn)) return;
+        if (action === 'edit-target') {
           const targetId = String(btn.dataset.targetId || '');
           const target = ctx.projectTargetById?.(projectId, targetId)
             || ctx.projectTargetItems(ctx.projectSummary?.(projectId)).find(item => String(item.id || '') === targetId);

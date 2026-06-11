@@ -634,7 +634,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `note` — optional; helper text shown alongside the command.
 - `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
 
-**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/user_workflows.py` (session workflow storage), `app/static/js/app.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
+**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/user_workflows.py` (session workflow storage), `app/static/js/features/workflows/workflows.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
 
 ---
 

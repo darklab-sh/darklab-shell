@@ -265,6 +265,26 @@ writeFileSync(resolve(outDir, 'manifest.json'), `${JSON.stringify(manifest, null
 
 if (checkOnly) {
   const committedDir = resolve(ROOT, 'app/static/build');
+  const committedManifestPath = resolve(committedDir, 'manifest.json');
+  const staleSources = [];
+  if (existsSync(committedManifestPath)) {
+    const committedManifest = JSON.parse(readFileSync(committedManifestPath, 'utf8'));
+    const committedBundles = committedManifest && committedManifest.bundles && typeof committedManifest.bundles === 'object'
+      ? committedManifest.bundles
+      : {};
+    for (const [bundleName, bundleEntry] of Object.entries(committedBundles)) {
+      const sourceHashes = bundleEntry && bundleEntry.source_hashes && typeof bundleEntry.source_hashes === 'object'
+        ? bundleEntry.source_hashes
+        : {};
+      for (const [source, expectedHash] of Object.entries(sourceHashes)) {
+        const file = assertSourceExists(source);
+        const actualHash = sha256(readFileSync(file));
+        if (actualHash !== expectedHash) {
+          staleSources.push(`${bundleName}: ${source}`);
+        }
+      }
+    }
+  }
   const expectedFiles = collectStaticFiles(outDir);
   const committedFiles = collectStaticFiles(committedDir);
   const missing = expectedFiles.filter((file) => !committedFiles.includes(file));
@@ -276,8 +296,9 @@ if (checkOnly) {
       && statSync(expectedPath).isFile()
       && sha256(readFileSync(expectedPath)) !== sha256(readFileSync(committedPath));
   });
-  if (missing.length || extra.length || changed.length) {
+  if (staleSources.length || missing.length || extra.length || changed.length) {
     const details = [
+      ...staleSources.map((source) => `stale source hash: ${source}`),
       ...missing.map((file) => `missing committed asset: ${file}`),
       ...extra.map((file) => `extra committed asset: ${file}`),
       ...changed.map((file) => `changed committed asset: ${file}`),

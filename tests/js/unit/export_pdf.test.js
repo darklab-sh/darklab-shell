@@ -122,6 +122,7 @@ describe('ExportPdfUtils module', () => {
     // Use real jsdom document — only testing the module shape, not canvas calls.
     const utils = loadExportPdfUtils()
     expect(typeof utils).toBe('object')
+    expect(typeof utils.loadJsPdf).toBe('function')
     expect(typeof utils.buildTerminalExportPdf).toBe('function')
     expect(typeof utils.parseCssColor).toBe('function')
     expect(typeof utils.themeColors).toBe('function')

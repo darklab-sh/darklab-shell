@@ -110,6 +110,7 @@ function makeExportHtmlUtilsMock() {
 function makeExportPdfUtilsMock() {
   const doc = { save: vi.fn() }
   return {
+    loadJsPdf: vi.fn(() => Promise.resolve(vi.fn())),
     buildTerminalExportPdf: vi.fn(() => Promise.resolve(doc)),
     _doc: doc,
   }
@@ -669,6 +670,7 @@ describe('data-action dispatch', () => {
     el.container.appendChild(btn)
     btn.click()
     await Promise.resolve()
+    await Promise.resolve()
     expect(mocks.ExportPdfUtils.buildTerminalExportPdf).toHaveBeenCalledOnce()
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledOnce()
@@ -686,6 +688,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
+    await Promise.resolve()
     await Promise.resolve()
 
     expect(mocks.ExportHtmlUtils.buildExportDocumentModel).toHaveBeenCalledWith({
@@ -709,6 +712,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
+    await Promise.resolve()
     await Promise.resolve()
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledWith('darklab-2025-01-15T10-30-00.pdf')

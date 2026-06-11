@@ -73,14 +73,35 @@ function _optionsSecretConsumerInputValue(secret) {
   return envs.join(', ');
 }
 
-async function _ensureOptionsSecretCatalog() {
-  if (typeof commandRegistryData !== 'undefined' && commandRegistryData) return commandRegistryData;
+function _optionsCommandRegistryData() {
+  if (typeof window !== 'undefined' && window.commandRegistryData) return window.commandRegistryData;
+  if (typeof globalThis !== 'undefined' && globalThis.commandRegistryData) return globalThis.commandRegistryData;
+  return null;
+}
+
+function _setOptionsCommandRegistryData(data) {
+  if (typeof window !== 'undefined') window.commandRegistryData = data;
+  if (typeof globalThis !== 'undefined') globalThis.commandRegistryData = data;
+}
+
+function _optionsCatalogHasRequiredData(data, requirements = {}) {
+  if (!data) return false;
+  if (requirements.intelProviders) return Array.isArray(data.intel_providers);
+  return (
+    Array.isArray(data.secret_consumers)
+    || (Array.isArray(data.commands) && data.commands.length > 0)
+  );
+}
+
+async function _ensureOptionsSecretCatalog(requirements = {}) {
+  const current = _optionsCommandRegistryData();
+  if (_optionsCatalogHasRequiredData(current, requirements)) return current;
   if (typeof apiFetch !== 'function') return null;
   try {
     const resp = await apiFetch('/commands/catalog');
     const data = await resp.json().catch(() => ({}));
     if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
-    if (typeof commandRegistryData !== 'undefined') commandRegistryData = data;
+    _setOptionsCommandRegistryData(data);
     return data;
   } catch (err) {
     if (typeof logClientError === 'function') logClientError('failed to load secret consumer catalog', err);
@@ -89,7 +110,7 @@ async function _ensureOptionsSecretCatalog() {
 }
 
 function _optionsKnownSecretChoices() {
-  const data = typeof commandRegistryData !== 'undefined' ? commandRegistryData : null;
+  const data = _optionsCommandRegistryData();
   const commands = Array.isArray(data?.commands) ? data.commands : [];
   const secretConsumers = Array.isArray(data?.secret_consumers) ? data.secret_consumers : [];
   const byName = new Map();
@@ -330,7 +351,7 @@ async function openProviderStatusModal() {
   _optionsSecretsShowMsg('');
   try {
     const [catalog, secrets] = await Promise.all([
-      _ensureOptionsSecretCatalog(),
+      _ensureOptionsSecretCatalog({ intelProviders: true }),
       _loadOptionsSecretsForProviderStatus(),
     ]);
     const providers = Array.isArray(catalog?.intel_providers) ? catalog.intel_providers : [];
