@@ -156,6 +156,7 @@ def load_config(conf_dir=None):
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
+        "asset_bundle_mode":          "source",
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
         "data_dir":                   "",

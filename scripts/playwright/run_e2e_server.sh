@@ -33,6 +33,7 @@ workspace_enabled: true
 workspace_backend: tmpfs
 workspace_root: "$WORKSPACE_DIR"
 workspace_inactivity_ttl_hours: 1
+asset_bundle_mode: "${ASSET_BUNDLE_MODE:-source}"
 http_rate_limit_per_minute: 0
 http_rate_limit_per_second: 0
 rate_limit_per_minute: 10000

@@ -154,6 +154,20 @@ class TestIndexRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/mobile-chrome.css?v=' in body
 
+    def test_bundle_mode_renders_built_css_bundle(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            body = client.get("/").get_data(as_text=True)
+        assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert '/static/css/core/base.css?v=' not in body
+        assert '/static/css/mobile-chrome.css?v=' not in body
+
+    def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            with pytest.raises(RuntimeError, match="Run assets:sync"):
+                shell_app._asset_bundle("app")
+
     def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
         client = get_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["203.0.113.0/24"]}):
@@ -10722,6 +10736,14 @@ class TestVendorAssets:
         assert "text/css" in resp.content_type
         self._assert_immutable_asset_cache(resp)
 
+    def test_built_css_bundle_is_served_with_immutable_cache_header(self):
+        client = get_client()
+        built_path = shell_app._asset_bundle_entry("app")["path"]
+        resp = client.get(built_path)
+        assert resp.status_code == 200
+        assert "text/css" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
+
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()
         font_dir = tmp_path / "fonts"
@@ -10821,6 +10843,20 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag")
         assert resp.status_code == 200
+
+    def test_bundle_mode_renders_diag_css_bundles(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "asset_bundle_mode": "bundle",
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+        }):
+            body = client.get("/diag").get_data(as_text=True)
+        assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'href="/static/build/diag\.[a-f0-9]{12}\.css"', body)
+        assert '/static/css/core/base.css?v=' not in body
+        assert '/static/css/terminal_export.css?v=' not in body
+        assert '/static/css/diag.css?v=' not in body
 
     def test_response_has_expected_top_level_keys(self):
         client = self._allowed_client()
@@ -18976,6 +19012,22 @@ class TestShareRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/features/history.css?v=' in body
         assert '/static/css/terminal_export.css?v=' in body
+
+    def test_get_share_html_bundle_mode_renders_per_page_css_bundle(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "bundle mode test", "content": ["line"]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            body = client.get(f"/share/{share_id}").get_data(as_text=True)
+        assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
+        assert '/static/css/core/base.css?v=' not in body
+        assert '/static/css/features/history.css?v=' not in body
+        assert '/static/css/terminal_export.css?v=' not in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()

@@ -7,7 +7,9 @@
 <title>{{ page_title }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 {% include "app_stylesheets.html" %}
-<link rel="stylesheet" href="{{ static_asset('/static/css/terminal_export.css') }}">
+{% for href in asset_bundle('terminal-export') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>

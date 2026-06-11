@@ -19,6 +19,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
+  - [Diff-aware scheduled monitoring dashboards](#diff-aware-scheduled-monitoring-dashboards)
+  - [Attack-surface delta digest notifications](#attack-surface-delta-digest-notifications)
+  - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Architecture](#architecture)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
@@ -31,49 +34,75 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ### Frontend asset build pipeline
 
-The 1.7 asset pass removed the CSS `@import` waterfall and added versioned static URLs, but the shell still ships many individual CSS and JavaScript files during the first page load. Add a small build pipeline that turns the current source files into deterministic, cache-friendly bundles without forcing a broad JavaScript module rewrite at the same time.
+The CSS/foundation pass now has a committed, manifest-backed build pipeline, but the shell still ships many individual JavaScript files during the first page load. Extend that pipeline to the current classic scripts without forcing a broad JavaScript module rewrite at the same time.
 
 **Why this is open:**
-- Initial loads still spend request budget on many separate static assets, which makes browser bursts more likely to collide with HTTP rate limiting.
-- The current `static_asset()` helper appends a version query string, which is useful, but content-hashed build filenames are cleaner for long-lived immutable caching and rollbacks.
+- Initial loads still request many separate JavaScript assets. Static and vendor paths are rate-limit exempt, so the win is lower connection and latency overhead on cold loads, not avoiding limiter collisions.
+- Bundling the current classic scripts reduces request count, not first-load JavaScript bytes. The first byte-weight win should come later from lazy-loading rarely-first-paint features, not from concatenating every eager module into one file.
+- The current `static_asset()` helper still appends a version query string for non-bundled assets, which is useful, but content-hashed build filenames are cleaner for long-lived immutable caching and rollbacks.
+- Immutable cache headers are applied by `/static/` and `/vendor/` path prefix. Any template that hard-codes one of those URLs without a cache-busted helper can leave browsers pinned to stale assets for a year, so the build needs a guard instead of relying on convention.
 - JavaScript load order is still managed by template script tags. A build manifest would make that order explicit and easier to test.
 
 **Implementation plan:**
-- Add an asset build script such as `scripts/build_assets.mjs` plus package scripts like `assets:build` and `assets:check`.
-- Write generated files under `app/static/build/`, with a manifest at `app/static/build/manifest.json`.
 - Prefer content-hashed filenames, for example `app.<hash>.css`, `shell-core.<hash>.js`, `shell-features.<hash>.js`, `shell-bootstrap.<hash>.js`, and `permalink.<hash>.js`.
-- Teach Flask a manifest helper that maps logical bundle names to built asset paths. Development can fall back to source files when the manifest is missing; production should fail clearly if bundle mode is enabled and the manifest is absent.
+- Keep the first build script dependency-free and concat-only: read source files in manifest order, concatenate them without minifying, compute a SHA-256 content hash, write the bundle, and record it in the manifest.
+- Defer minification to a later, separate step with sourcemaps. Concatenated classic scripts already change stack-trace line numbers, so the first rollout should stay unminified and reviewable while the bundle path settles.
+- Keep `assets.config.json` as the canonical source of truth for bundle membership and intra-bundle order. Add each logical JavaScript bundle (`shell-core`, `shell-features`, `shell-bootstrap`, `permalink`) to its ordered source files, plus an explicit `lazy`/`excluded` allowlist for assets that are intentionally not bundled (PTY, xterm, jspdf). This is the one declarative place a source file gets ordered, so the build script, the Flask helper, and the parity check all read from it instead of from template tag order. Keep the authored config strict JSON so it stays covered by the repo's existing `lint:json` gate; the Flask-read manifest is strict JSON too.
+- Have templates compose bundles, never list individual source files: replace the per-page `<script>` lists in `index.html` (currently ~132 tags) and `permalink_base.html` (currently ~9) with `asset_bundle('shell-core')`-style helper calls. Which bundles a page loads, and in what order, is inherently per-page and stays in the page template; the files inside each bundle live only in `assets.config.json`. This keeps each page's bundle set an explicit, reviewable template choice (for example the index page composing core, features, and bootstrap, while the permalink page loads only its self-contained bundle).
+- Compile `assets.config.json` into `app/static/build/manifest.json` during `assets:sync`, recording per logical bundle both the content-hashed built path and the ordered source-file list. Flask reads only `manifest.json` in both modes — never the authored config and never the templates: `bundle` mode emits the single hashed bundle tag, `source` mode emits the ordered source tags from the same manifest. Dev and prod therefore render from one artifact, which is what makes the two modes provably equivalent.
+- Keep the existing `asset_bundle_mode` behavior: `source` renders ordered source-file tags from the manifest, and `bundle` renders single hashed bundle tags while failing loudly at runtime if the manifest is missing or incomplete. Production, CI, and end-to-end runs use `bundle` so they exercise exactly what ships.
+- Do not force `bundle` everywhere: bundle-only would tax the dev inner loop (a rebuild on every source edit), risk silently serving stale bundles during development, and couple Python route tests and local e2e to a fresh Node artifact. The source/bundle divergence risk that a single mode would avoid is covered by the dual-mode route tests, the order-equivalence assertion, and the structural coverage check.
+- Keep stale-manifest detection in `assets:check`, not in request rendering. The check can compare source hashes to the manifest during build/CI, while runtime bundle mode should only enforce that the manifest is present and complete.
 - Keep `/static/build/...` on immutable cache headers. Dynamic HTML should stay fresh.
-- Bundle CSS first using the order currently captured in `app/templates/app_stylesheets.html`. Keep page-specific CSS, such as diagnostics and terminal export styles, as separate bundles unless combining them is clearly simpler.
+- Two cache-busting schemes coexisting is intentional, not a half-done migration: bundles use content-hashed filenames, while non-bundled static assets (fonts, images, and standalone vendor such as jspdf and xterm) keep the existing `static_asset()` `?v=` query string. Those files change rarely, so `?v=` is sufficient and hashing their filenames is not worth the extra build machinery now. See the Technical Debt note about unifying this later.
+- Do not carve a lean permalink-only CSS bundle now, even though permalink's JS is self-contained. CSS is treated differently from JS here on purpose: the JS decoupling was driven by correctness and coupling (shell-core runs session/teams/state logic permalink never executes, and a shell-core change could break the share page), whereas unused CSS is only wasted bytes and cannot break anything. Carving permalink CSS would require auditing which shared stylesheets it actually needs, with real regression risk for modest byte savings, so permalink loads the shared `app.css` as it does today. A lean permalink CSS bundle is a future lever to pursue only if permalink CSS weight is ever measured as a problem.
 - Bundle JavaScript as order-preserving classic scripts first. Do not make this depend on an all-at-once ESM conversion.
 - Preserve the existing source files as the canonical files for development and unit tests.
 
 **Likely JavaScript bundle shape:**
+- Bundle granularity is decided: favor a small number of coarse bundles for the lowest first-load request count, accepting that any change to a feature module re-busts and re-downloads the whole `shell-features` bundle. Cache stability across deploys is explicitly the lower priority here; if it ever becomes a problem, splitting `shell-features` more finely is the follow-up lever, not a reason to fragment bundles now.
 - `shell-core`: shared state, session handling, DOM helpers, config, output model, export helpers, and UI primitives.
 - `shell-features`: history, workspace, projects, Atlas, command registry, status monitor, schedules, watchers, workflows, preferences, and related feature modules.
 - `shell-bootstrap`: app wiring that depends on the core and feature bundles, including composer/controller/chrome/mobile boot behavior.
-- `permalink`: the share/permalink viewer's smaller dependency set.
-- PTY and xterm assets can stay separate or lazy until there is evidence they should move into the main shell bundles.
+- `permalink`: a self-contained bundle for the share/permalink viewer. It does not depend on `shell-core` — permalink loads only shared rendering primitives (`utils`, `run_output_model`, `output_core`, `export_html`, `ui_outside_click`) plus `permalink.js`, and none of the interactive core (session, teams, state, config, dom, full UI-primitive set). Permalink is the public share surface hit mostly by external single-visit recipients, so pulling interactive `shell-core` would be pure overhead for them. Keeping it self-contained also gives both pages the lowest request count (the shell stays at 3 bundles rather than splitting out a shared runtime, and permalink is one bundle), consistent with the request-count-over-cache-stability decision above. The trade is a handful of small render-primitive files duplicated into the permalink bundle and no cross-page cache reuse, which is accepted; a side benefit is that the public share surface stays fully decoupled from interactive shell code. Keep `jspdf` and `export_pdf` lazy on permalink too (load on first PDF export), matching the jspdf lazy-load decision, instead of the current eager load in `permalink_base.html`.
+- PTY and xterm assets can stay separate or lazy until there is evidence they should move into the main shell bundles. Use the same instinct later for rarely-first-paint feature surfaces such as Projects, Atlas, Watchers, report builder, Findings Board, and other heavy modal workflows. `jspdf.umd.min.js` is the first concrete vendor lazy-load candidate: keep ANSI rendering core, but load jsPDF on first PDF export instead of first paint.
 
-**Rollout path:**
-- Start with CSS bundling and the manifest helper because the dependency order is already explicit.
-- Add classic-script JavaScript bundles after CSS is stable, preserving today's script order exactly.
-- Once bundle mode is the default in local and production flows, remove any template fallback that still emits the full source-file list in normal operation.
-- Consider an ESM migration later, one low-risk area at a time, after request-count and caching wins are already in place.
+**Implementation phases:**
+
+Each phase is independently shippable and verifiable. `source` mode lets the full pipeline land without changing what ships, so the foundation is proven before the order-sensitive JS cutover. Do not start a phase until the previous phase's exit criteria are met.
+
+- **Phase 2 — JavaScript bundling (order-sensitive surface).** Compose `shell-core`, `shell-features`, `shell-bootstrap`, and the self-contained `permalink` bundle per the decided shape, and extend the structural coverage guard to `app/static/js/**`. The migration order-equivalence assertion (compiled order equals current template tag order 1:1) is the load-bearing guard for this phase.
+  - Exit criteria: index and permalink render correct JS in both modes; the order-equivalence assertion passes; Playwright covers shell boot, run streaming, and permalink rendering; dual-mode route tests include the JS bundles.
+- **Phase 3 — Make bundle the default and remove the source-list fallback.** Set production, CI, and e2e to `asset_bundle_mode=bundle`, confirm everything stays green, then remove any template path that still emits the full source-file list in normal operation.
+  - Exit criteria: bundle mode is the production default; no template emits the raw source-file list in normal operation; `source` mode remains available for local development and Python route tests.
+- **Phase 4 (later, separate) — lazy-loading and ESM.** Make `jspdf`/`export_pdf` lazy on first PDF export, then pursue broader lazy-loading of rarely-first-paint modules (Projects, Atlas, Watchers, report builder, Findings Board, PTY/xterm) and an incremental ESM migration, one low-risk area at a time. This is the first-load byte-reduction pass and is explicitly distinct from the request-count work in Phases 1–3; keep it deferred until those wins are in place.
 
 **Testing and documentation:**
 - Add focused tests for deterministic manifest output, missing source failures, and bundle ordering.
-- Extend route tests so the index, permalink, and diagnostics pages render bundle URLs instead of the full source asset list.
-- Keep cache-header tests covering `/static/build/...`.
+- Add coverage that proves the first build is concat-only and does not require esbuild, Rollup, a minifier, or another new build dependency.
+- Add `assets:check` coverage for stale manifests by changing a source file after build and asserting the check fails without requiring runtime re-hashing.
+- Add a CI lint/test that scans templates and fails when a `/static/` or `/vendor/` URL is hard-coded instead of being resolved through `static_asset()` or the bundle manifest helper.
+- Make the same check assert structural coverage against `assets.config.json`: every file under `app/static/js/**` (and the bundled CSS set) must appear in at least one bundle or in the explicit `lazy`/`excluded` allowlist. A file may appear in more than one bundle when sharing is intentional (for example shared rendering primitives that live in both a shell bundle and the self-contained `permalink` bundle); the guard only fails when a file is in zero bundles and not allowlisted. Because membership lives in one declarative file, adding a source file without placing it fails CI. This is the strongest form of the "added a JS/CSS file but forgot to bundle it" guard, alongside the "forgot the cache-busting helper" template scan.
+- Add a one-time migration assertion that the compiled bundle order matches the current template tag order in `index.html` and `permalink_base.html` exactly (1:1), so the order-sensitive classic-script cutover is provably order-preserving and any transcription slip fails loudly instead of producing a subtly broken bundle.
+- Extend route tests so the index and permalink pages render JavaScript bundle URLs instead of the full source script list once JS bundles are in play.
+- Keep route tests covering source and bundle modes, missing-manifest failures, and `/static/build/...` cache headers as the bundle manifest grows.
 - Keep Vitest coverage against source modules; the build should not make tests depend on minified output.
 - Run targeted browser coverage through `bash scripts/run_playwright.sh ...` for shell boot, run streaming, and permalink rendering once JavaScript bundles are in play.
 - Update README.md, FEATURES.md, ARCHITECTURE.md, CONFIGURATION.md if needed, CHANGELOG.md, release drafts, and test-count docs when implementation changes behavior or coverage.
 
 **Acceptance criteria:**
 - First-load static request count drops substantially without breaking local development ergonomics.
+- First-load byte size does not need to drop in the classic-bundle pass, and the plan keeps an explicit follow-up path for lazy-loading heavy feature modules.
+- The first rollout uses dependency-free concatenation only. Minification is out of scope until sourcemaps and separate review coverage are added.
 - Static bundles use content-hashed filenames and immutable cache headers.
-- HTML templates reference manifest-backed bundle URLs in normal operation.
-- Missing or stale build output fails loudly in production-style checks.
+- HTML templates reference manifest-backed bundle URLs in normal operation, and CI rejects unversioned `/static/` or `/vendor/` references that would receive immutable cache headers without a cache-buster.
+- `asset_bundle_mode` is exactly two modes, `source` and `bundle` (no `auto`), each deterministic and testable, including a fail-loud bundle mode when the manifest is unavailable.
+- Production, CI, and e2e use `asset_bundle_mode=bundle`; local development and Python route tests default to `source` so the suite runs on a clean checkout without a Node build.
+- `assets.config.json` is the single source of truth for bundle membership and order; templates compose bundles rather than listing source files, and Flask renders both modes from the compiled `manifest.json` alone.
+- Every `app/static/js/**` source file is covered by at least one bundle or the explicit lazy/excluded allowlist, enforced structurally by `assets:check`, so a new unbundled file fails CI. Files shared intentionally across bundles (such as render primitives reused by the self-contained `permalink` bundle) are allowed in more than one bundle.
+- `permalink` is a self-contained bundle with no dependency on `shell-core`, and PDF export stays lazy on the permalink surface.
+- Missing or incomplete build output fails loudly at runtime in bundle mode; stale build output fails in `assets:check` and CI without adding per-request source hashing.
+- Built bundles and the manifest are committed, `.gitignore`-allowlisted, regenerated by `assets:sync`, and drift-guarded by `assets:check` in CI — with no new runtime-image build dependency and no bundle generation at container boot.
 - Existing shell, permalink, diagnostics, and mobile flows keep working with the bundled assets.
 
 ---
@@ -86,7 +115,7 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Unify static-asset cache-busting on content-hashed filenames.** After the frontend asset build pipeline lands, the app uses two cache-busting schemes: content-hashed filenames for bundles and `static_asset()` `?v=` query strings for non-bundled assets (fonts, images, and standalone vendor such as jspdf and xterm). The split is intentional for now because those files change rarely, but a future pass could move them to hashed filenames too for one consistent scheme and to avoid query-string URLs that some proxies and CDNs cache conservatively. This needs the build to rewrite in-CSS font/image references to the hashed paths, so it is deferred until the bundle pipeline is stable.
 
 ---
 
@@ -119,11 +148,14 @@ No research items are currently tracked.
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
+- **External tool integration candidates:** add the strongest reviewed tool gaps when they fit the sandboxed registry, findings, Atlas, and provenance model. High-value candidates are ProjectDiscovery's `tlsx` for TLS/certificate metadata and `cdncheck` for CDN/WAF classification, plus `trufflehog` or `gitleaks` for exposed-secret findings from repos and files. Medium candidates are resolver-backed brute-force DNS tools such as `puredns` or `shuffledns`, Shodan InternetDB as a free/no-key IP context provider, optional FOFA/ZoomEye providers for users with keys, and a `nuclei` template management or pinning surface so scan provenance can explain which template set produced a result. A lower-risk app-native `jq`-style JSON/JSONL selector could also extend safe post-filtering without exposing real shell pipes.
+
 ### Workflows v2 — playbooks with parameters
 - Evolve workflows from saved command lists into reusable runbooks.
 - Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.
 - Add conditional next-step behavior based on exit code.
 - Let each step capture selected output into named variables that later steps can consume.
+- Build on the existing session-variable and workflow foundations so operators can turn repeat scans into parameterized profiles without rewriting commands by hand.
 
 ### Run replay / scrubbable event stream
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.
@@ -165,10 +197,10 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### PWA install and service-worker push
 - Make the mobile shell installable and deliver completion pings via web-push so phone users get notified when the tab is closed or the device is asleep. Today mobile notifications are intentionally hidden because foreground-only notifications are not useful on phones.
+- Reuse the run-complete notification hook so push delivery becomes another channel rather than a separate completion system.
 - **Entry-level scope:**
   - Add a manifest, app icons, and a small service worker so users can "Add to Home Screen" and launch into a standalone mobile shell.
   - VAPID-signed web-push subscription tied to the active session token; subscribe and unsubscribe from the Options sheet.
-  - Reuse the run-complete event hook from the outbound-notifications surface so push is just another channel.
 - **Architecture:**
   - New `app/static/manifest.webmanifest`, icon assets under `app/static/icons/`, and `app/static/sw.js` registered from `app.js` only when the runtime supports it.
   - New `WebPushChannel` in the notifications service; VAPID keys stored as operator config; per-session-token subscription endpoint at `/session/push/subscribe`.
@@ -183,8 +215,25 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
   - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
 
+### Diff-aware scheduled monitoring dashboards
+- Combine schedules, Watchers, run comparison, and tool-aware diff parsing into a project-level monitoring view.
+- Let an operator schedule a command, choose a baseline, and review each later run as a timeline of changes instead of reading every transcript from scratch.
+- Surface high-signal deltas such as new or closed ports, new or disappeared subdomains, HTTP status/title changes, and TLS certificate changes.
+- Keep the dashboard tied to Projects, Atlas entities, findings, and notifications so monitoring results become part of the normal engagement workflow.
+
+### Attack-surface delta digest notifications
+- Send scheduled project summaries such as "since last week: 3 new subdomains, 2 new open ports, 1 certificate expiring soon" through the existing notification channels.
+- Build the digest from watcher diffs, run-comparison classifiers, Atlas entity counts, and provider-enriched target context instead of inventing a separate reporting path.
+- Let operators tune cadence and scope per project so noisy scan projects can stay quiet while recurring monitoring projects stay visible.
+
+### Project-scoped target intelligence overview
+- Add a project overview surface that rolls up hosts, ports, services, cert expirations, top findings by severity, and provider-enriched context for each target.
+- Treat the overview as an engagement console: enough context to understand the current attack surface before drilling into individual runs, targets, Atlas rows, or findings.
+- Reuse existing project summaries, Atlas materialization, target relationships, findings, and intel provider snapshots so the overview stays consistent with the rest of the workspace.
+
 ### Native ticketing integrations
 - From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.
+- Keep the action close to existing triage and review-state controls so tickets feel like an extension of finding review, not a separate export step.
 - **Entry-level scope:**
   - Generic webhook + templated payload connector plus first-class adapters for the most common trackers.
   - Secret-backed auth stored in the existing encrypted secrets surface.
@@ -198,6 +247,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ### Operator-extensible signal and parser rules
 - Allow operators to extend the built-in findings classifier, entity extractor, and structured metadata logic via a hot-reloadable `conf/signals.yaml` (or small sandboxed snippets) without code changes.
 - Custom rules feed the same findings strip, Atlas materialization, search scopes, run comparison diffs, project triage, and export surfaces as core signals.
+- Target custom scanner output and internal tooling first; the biggest value is letting self-hosted teams teach darklab_shell their local signal language without carrying a fork.
 - **Entry-level scope:**
   - Declarative regex + capture group + mapping rules for common cases (e.g., custom internal scanner output).
   - Optional tiny expression or Lua/JS sandbox for complex parsing.

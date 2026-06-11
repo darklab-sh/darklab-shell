@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,666
+- behavior tests: 3,671
 - docs/inventory meta-tests: 34
-- `pytest`: 2069 (2035 behavior + 34 meta)
+- `pytest`: 2074 (2040 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,700
+- total: 3,705
 
 This document is organized in two parts:
 
@@ -1494,6 +1494,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
+| `TestIndexRoute.test_bundle_mode_renders_built_css_bundle` | Verifies bundle mode renders the generated app CSS bundle instead of source stylesheet links. |
+| `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
 | `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
 | `TestHealthRoute.test_returns_200_when_db_ok` | Returns 200 when database ok. |
@@ -1646,12 +1648,14 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
+| `TestVendorAssets.test_built_css_bundle_is_served_with_immutable_cache_header` | Verifies generated CSS bundles are served with the immutable static-asset cache header. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
 | `TestDiagRoute.test_returns_404_when_cidrs_not_set` | Returns 404 when cidrs not set. |
 | `TestDiagRoute.test_returns_404_when_client_ip_not_in_cidrs` | Returns 404 when client IP not in cidrs. |
 | `TestDiagRoute.test_returns_200_when_client_ip_in_cidrs` | Returns 200 when client IP in cidrs. |
+| `TestDiagRoute.test_bundle_mode_renders_diag_css_bundles` | Verifies diagnostics pages render generated shared and page-specific CSS bundles in bundle mode. |
 | `TestDiagRoute.test_response_has_expected_top_level_keys` | Checks that response has expected top level keys. |
 | `TestDiagRoute.test_app_section_has_version_and_name` | Checks that app section has version and name. |
 | `TestDiagRoute.test_config_section_contains_operational_keys` | Checks that config section contains operational keys. |
@@ -1890,6 +1894,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestShareRoute.test_get_share_json_returns_content` | Checks that get share JSON returns content. |
 | `TestShareRoute.test_get_share_html_returns_page` | Checks that get share HTML returns page. |
 | `TestShareRoute.test_get_share_html_honors_theme_name_cookie` | Checks that get share HTML honors theme name cookie. |
+| `TestShareRoute.test_get_share_html_bundle_mode_renders_per_page_css_bundle` | Verifies permalink pages render generated shared and permalink CSS bundles in bundle mode. |
 | `TestShareRoute.test_get_share_html_contains_label` | Checks that get share HTML contains label. |
 | `TestShareRoute.test_get_share_html_does_not_prepend_label_for_structured_snapshot_content` | Checks that get share HTML does not prepend label for structured snapshot content. |
 | `TestShareRoute.test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content` | Checks that get share HTML includes prompt echo renderer for snapshot content. |

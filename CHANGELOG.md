@@ -10,6 +10,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Frontend CSS bundle pipeline** — The shell now has a dependency-free asset builder that generates committed, content-hashed CSS bundles and a manifest under `app/static/build/`.
+  - `assets.config.json` owns CSS bundle membership and order, `npm run assets:sync` regenerates the committed output, and `npm run assets:check` verifies the build output stays in sync during lint/CI.
+  - Flask templates render CSS through the manifest-backed `asset_bundle()` helper. Local development defaults to source links with cache-busting query strings, while `asset_bundle_mode=bundle` serves the generated hashed bundles and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete.
+  - **Tests:** added route coverage for source and bundle CSS rendering on index, permalink, and diagnostics pages, a missing-manifest failure case, and immutable cache headers for `/static/build/...`. Current suite total: 2074 pytest + 1368 Vitest + 263 Playwright = **3,705 tests**.
+
 - **Engagement report builder** — Projects now have a full Report tab for turning selected project evidence into a readable engagement report.
   - Operators can edit engagement metadata, executive summary, methodology, cover notes, and date ranges with `YYYY-MM-DD to YYYY-MM-DD` validation.
   - The editor can toggle and reorder shipped sections, choose included runs/targets/findings/artifacts, save drafts explicitly with optimistic concurrency, preview rendered HTML, export a markdown/HTML archive, and use browser Print/PDF from the preview.

@@ -110,6 +110,15 @@ if [[ -n "$web_server_timeout" ]]; then
   export PLAYWRIGHT_WEB_SERVER_TIMEOUT="$web_server_timeout"
 fi
 
+ASSET_BUNDLE_MODE="${ASSET_BUNDLE_MODE:-${PW_ASSET_BUNDLE_MODE:-}}"
+if [[ "$ASSET_BUNDLE_MODE" == "bundle" ]]; then
+  if ! npm run assets:check; then
+    echo "run_playwright.sh: asset_bundle_mode=bundle requires current committed build output; run assets:sync" >&2
+    exit 1
+  fi
+  export ASSET_BUNDLE_MODE
+fi
+
 if [[ -z "${PW_E2E_SERVER_LOG_DIR:-}" ]]; then
   PW_E2E_SERVER_LOG_DIR="$PWD/test-results/e2e-server-logs/$(date +%Y%m%d-%H%M%S)-$$"
   export PW_E2E_SERVER_LOG_DIR

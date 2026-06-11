@@ -154,7 +154,7 @@ Before merging a version branch back to `main`:
 
 **Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
-**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
+**JavaScript and CSS assets** — the frontend stays in the classic-script pattern: no ES modules, no framework dependencies. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. CSS bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled CSS membership or source files. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
@@ -188,8 +188,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **2069 pytest + 1368 Vitest + 263 Playwright = 3,700 tests**.
-That total includes 3,666 behavior tests plus 34 docs/inventory meta-tests.
+Current totals: **2074 pytest + 1368 Vitest + 263 Playwright = 3,705 tests**.
+That total includes 3,671 behavior tests plus 34 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -202,6 +202,7 @@ profile-gated Compose Postgres service without publishing the database port.
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- Set `ASSET_BUNDLE_MODE=bundle` when a Playwright run should exercise generated bundle output. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
@@ -239,8 +240,9 @@ The checks and their scope:
 | YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
 | Markdown | `markdownlint-cli2` | all tracked `.md` files | `npm run lint:md` |
 | Vendor JS | `build_vendor.mjs` + `git diff` | `app/static/js/vendor/` | `npm run vendor:check` |
+| Frontend bundles | `build_assets.mjs` + committed build output | `assets.config.json`, `app/static/build/`, bundled CSS | `npm run assets:check` |
 
-Run all linters at once (Python + JS/CSS/shell/Docker/YAML/Markdown + vendor): `npm run lint`
+Run all linters at once (Python + JS/CSS/shell/Docker/YAML/Markdown + vendor/assets): `npm run lint`
 
 Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
@@ -269,6 +271,8 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 `vendor:check` runs automatically as part of `npm run lint` and the pre-commit hook (when `node_modules` is present).
 
 **Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
+
+**Frontend bundles:** CSS bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles still match the current CSS sources. The app defaults to source mode for local development, but bundle mode serves the content-hashed files and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete.
 
 ---
 
