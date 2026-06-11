@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,665
+- behavior tests: 3,666
 - docs/inventory meta-tests: 34
-- `pytest`: 2068 (2034 behavior + 34 meta)
+- `pytest`: 2069 (2035 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,699
+- total: 3,700
 
 This document is organized in two parts:
 
@@ -1961,6 +1961,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestInteractivePtyRuns.test_interactive_pty_control_routes_use_dedicated_rate_limits` | Verifies that PTY input and resize routes use dedicated interactive-control rate limits instead of the normal `/runs` limit. |
 | `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
 | `TestRunStreaming.test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up` | Verifies that the broker worker publishes notices, filtered output, exit metadata, and cleanup calls. |
+| `TestRunStreaming.test_synthetic_sort_and_uniq_postfilters_cap_buffer_and_emit_notice` | Verifies that buffered sort and uniq post-filters honor max_output_lines and emit a truncation notice. |
 | `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |
 | `TestRunStreaming.test_broker_worker_publishes_error_and_cleans_up_when_stdout_is_missing` | Verifies that broker worker startup errors publish an error event and still clean up process tracking. |
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |

@@ -1582,6 +1582,8 @@ class _SyntheticPostFilterStageProcessor:
         self._tail_buffer = deque(maxlen=int(self.spec.get("count", 0) or 0))
         self._grep_match = None
         self._line_buffer = []
+        self._line_buffer_limit = max(0, int(CFG.get("max_output_lines", 0) or 0))
+        self._line_buffer_dropped = 0
 
         if self.kind == "grep":
             pattern = self.spec["pattern"]
@@ -1629,12 +1631,24 @@ class _SyntheticPostFilterStageProcessor:
             return []
 
         if self.kind in ("sort", "uniq"):
+            if self._line_buffer_limit and len(self._line_buffer) >= self._line_buffer_limit:
+                self._line_buffer_dropped += 1
+                return []
             self._line_buffer.append(line)
             return []
 
         return [line]
 
     def finalize_output_lines(self) -> list[str]:
+        def _buffer_truncation_notice() -> list[str]:
+            if self._line_buffer_dropped <= 0:
+                return []
+            return [
+                "[post-filter] output truncated to "
+                f"{self._line_buffer_limit} lines before {self.kind}; "
+                f"{self._line_buffer_dropped} later lines were skipped.\n"
+            ]
+
         if self.kind == "tail":
             return list(self._tail_buffer)
         if self.kind == "wc_l":
@@ -1661,7 +1675,7 @@ class _SyntheticPostFilterStageProcessor:
                         seen.add(key)
                         deduped.append(ln)
                 result = deduped
-            return result
+            return [*_buffer_truncation_notice(), *result]
 
         if self.kind == "uniq":
             result = []
@@ -1680,13 +1694,13 @@ class _SyntheticPostFilterStageProcessor:
                         cnt = 1
                 if prev is not None:
                     groups.append((cnt, prev))
-                return [f"{c:7d} {ln}\n" for c, ln in groups]
+                return [*_buffer_truncation_notice(), *[f"{c:7d} {ln}\n" for c, ln in groups]]
             for ln in self._line_buffer:
                 n = ln.rstrip("\n")
                 if n != prev:
                     result.append(ln)
                     prev = n
-            return result
+            return [*_buffer_truncation_notice(), *result]
 
         return []
 

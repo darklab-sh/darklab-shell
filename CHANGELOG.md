@@ -101,6 +101,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Project completion notice cleanup** — brokered real-run completion now publishes project-link, target, Atlas entity, rejected-entity, and auto-promote notices through one counted-notice helper instead of hand-building each payload inline.
   - **Tests:** extended the existing broker-worker route test to pin the project notice text and metadata without changing the suite total.
 
+- **Synthetic post-filter buffer cap** — server-side `sort` and `uniq` pipe helpers now bound their buffered input with `max_output_lines` and emit a `[post-filter]` notice when later lines are skipped before sorting or deduping.
+  - `max_output_lines=0` keeps the existing unlimited behavior for operators who explicitly disable the output-line cap.
+  - **Tests:** added backend coverage for capped `sort` and `uniq -c` buffers plus the truncation notice. Current suite total: 2069 pytest + 1368 Vitest + 263 Playwright = **3,700 tests**.
+
+- **Stale Python bytecode cleanup** — cleared ignored `app/**/__pycache__` files left over from earlier module layouts and confirmed `.gitignore` already excludes `__pycache__/`, `*.pyc`, and `*.pyo`.
+  - **Tests:** documentation drift coverage passes unchanged; no suite-total change.
+
 - **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
   - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
   - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions. Current suite total: 2055 pytest + 1367 Vitest + 263 Playwright = **3,685 tests**.

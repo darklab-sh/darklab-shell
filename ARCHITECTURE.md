@@ -767,7 +767,7 @@ The structured autocomplete path is intentionally token-aware rather than shell-
 
 Recent target autocomplete is session-token-backed state. `autocomplete.js` keeps a page-local cache for immediate suggestions, but `GET`/`POST /session/recent-values` persist normalized domains, IPs, URLs, and port sets in SQLite under the active session ID. Each value kind is capped at 10 entries and migrates with `/session/migrate`. Capture and suggestions still require explicit value-type metadata in the command registry; placeholder text and descriptions are display-only and do not make a slot record recent targets. URLs are saved without query strings or fragments so pasted tokens do not become suggestions.
 
-Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the broker worker applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
+Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes narrow `command | helper ...` stages for `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, validates only the base command, and the broker worker applies the selected helpers before lines are emitted or persisted. Buffered `sort` and `uniq` stages honor `max_output_lines` when it is nonzero and emit a `[post-filter]` notice when later lines are skipped. That keeps shell-like helpers app-native without reopening general shell piping.
 
 ### Design System Primitives
 
@@ -1094,7 +1094,7 @@ Registry-owned `requires_secrets` declarations resolve against the encrypted per
 
 The app-native `intel` built-in uses the same encrypted-secret boundary without spawning a provider CLI. The full intel pipeline, provider fan-out, and provider directory are covered in **Intel and Provider Integrations** below. Workspace move, glob, and permission-repair behavior is covered in **Session Workspace and Files**.
 
-Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the brokered stream applies the selected helper before lines are emitted or persisted.
+Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes narrow `command | helper ...` stages for `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, validates only the base command, and the brokered stream applies the selected helpers before lines are emitted or persisted. Buffered `sort` and `uniq` stages use `max_output_lines` as their memory bound unless the cap is set to `0`.
 
 ### Command Registry And Discovery
 
@@ -2096,12 +2096,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,665
+- behavior tests: 3,666
 - docs/inventory meta-tests: 34
-- `pytest`: 2068 (2034 behavior + 34 meta)
+- `pytest`: 2069 (2035 behavior + 34 meta)
 - `vitest`: 1368
 - `playwright`: 263
-- total: 3,699
+- total: 3,700
 
 ### Testing Architecture
 

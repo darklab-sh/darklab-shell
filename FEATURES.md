@@ -311,6 +311,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Behavior:**
 
 - One or more supported helper stages can be chained in a single command; the final filtered view is what appears in the terminal, history, permalinks, and exports for that run.
+- Server-side `sort` and `uniq` stages cap their buffered input with `max_output_lines` when that setting is nonzero and add a `[post-filter]` notice if later lines are skipped before the final result.
 - Autocomplete understands the narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` after `command |`.
 - Workspace `ls` / `file list` keep their compact one-line display when run directly, but pipe helpers receive short listings as one logical entry per line so common forms like `ls | grep txt` behave like a normal terminal.
 - Arbitrary pipes, chaining, and redirection remain blocked at the command-validation layer.

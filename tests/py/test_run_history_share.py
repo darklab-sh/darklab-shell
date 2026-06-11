@@ -768,6 +768,28 @@ class TestRunStreaming:
         pid_pop.assert_called_once_with("run-broker-worker")
         active_remove.assert_called_once_with("run-broker-worker")
 
+    def test_synthetic_sort_and_uniq_postfilters_cap_buffer_and_emit_notice(self):
+        with mock.patch.dict("blueprints.run.CFG", {"max_output_lines": 3}):
+            sort_filter = run_routes._SyntheticPostFilterProcessor({"kind": "sort"})
+            uniq_filter = run_routes._SyntheticPostFilterProcessor({"kind": "uniq", "count": True})
+
+        for line in ["gamma\n", "alpha\n", "beta\n", "delta\n", "epsilon\n"]:
+            assert sort_filter.process_output_line(line) == []
+        for line in ["same\n", "same\n", "other\n", "other\n", "late\n"]:
+            assert uniq_filter.process_output_line(line) == []
+
+        assert sort_filter.finalize_output_lines() == [
+            "[post-filter] output truncated to 3 lines before sort; 2 later lines were skipped.\n",
+            "alpha\n",
+            "beta\n",
+            "gamma\n",
+        ]
+        assert uniq_filter.finalize_output_lines() == [
+            "[post-filter] output truncated to 3 lines before uniq; 2 later lines were skipped.\n",
+            "      2 same\n",
+            "      1 other\n",
+        ]
+
     def test_broker_worker_times_out_and_publishes_timeout_notice(self):
         fake_proc = _FakeProc(lines=["late output\n"], returncode=None, wait_returncode=-15)
         published = []
