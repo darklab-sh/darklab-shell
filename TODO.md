@@ -34,15 +34,14 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ### Frontend asset build pipeline
 
-The shell now has a committed, manifest-backed build pipeline for CSS and classic JavaScript bundles. The remaining work is to make bundle mode the shipping default, then follow with a separate lazy-loading pass for rarely-first-paint code.
+The shell now has a committed, manifest-backed build pipeline for CSS and classic JavaScript bundles. Bundle mode is the shipping and end-to-end default; the remaining work is to add the final template guard and follow with a separate lazy-loading pass for rarely-first-paint code.
 
 **Why this is open:**
-- Bundle mode is still opt-in. Production, CI, and end-to-end runs should switch to `asset_bundle_mode=bundle` so they exercise the same content-hashed files that ship.
 - Bundling the current classic scripts reduces request count, not first-load JavaScript bytes. The first byte-weight win should come from lazy-loading rarely-first-paint features, not from concatenating every eager module into one file.
 - Immutable cache headers are applied by `/static/` and `/vendor/` path prefix. The build already covers bundle membership and order, but the repo still needs a template guard that rejects hard-coded static/vendor URLs without `static_asset()` or `asset_bundle()`.
 
 **Implementation plan:**
-- Keep `asset_bundle_mode` deterministic: `source` renders ordered source-file tags from the manifest, and `bundle` renders single hashed bundle tags while failing loudly at runtime if the manifest is missing or incomplete. Production, CI, and end-to-end runs should use `bundle` so they exercise exactly what ships.
+- Keep `asset_bundle_mode` deterministic: `source` renders ordered source-file tags from the manifest, and `bundle` renders single hashed bundle tags while failing loudly at runtime if the manifest is missing or incomplete. Production, CI, and end-to-end runs use `bundle` so they exercise exactly what ships.
 - Do not force `bundle` everywhere: bundle-only would tax the dev inner loop (a rebuild on every source edit), risk silently serving stale bundles during development, and couple Python route tests and local e2e to a fresh Node artifact. The source/bundle divergence risk that a single mode would avoid is covered by the dual-mode route tests, the order-equivalence assertion, and the structural coverage check.
 - Keep stale-manifest detection in `assets:check`, not in request rendering. The check can compare source hashes to the manifest during build/CI, while runtime bundle mode should only enforce that the manifest is present and complete.
 - Keep `/static/build/...` on immutable cache headers. Dynamic HTML should stay fresh.
@@ -52,10 +51,8 @@ The shell now has a committed, manifest-backed build pipeline for CSS and classi
 
 **Implementation phases:**
 
-Each phase is independently shippable and verifiable. `source` mode lets the full pipeline land without changing what ships, so the foundation is proven before the order-sensitive JS cutover. Do not start a phase until the previous phase's exit criteria are met.
+Each phase is independently shippable and verifiable. Phases 1-3 are complete; do not start the lazy-loading phase until the template guard is in place.
 
-- **Phase 3 — Make bundle the default and remove the source-list fallback.** Set production, CI, and e2e to `asset_bundle_mode=bundle`, confirm everything stays green, then remove any template path that still emits the full source-file list in normal operation.
-  - Exit criteria: bundle mode is the production default; no template emits the raw source-file list in normal operation; `source` mode remains available for local development and Python route tests.
 - **Phase 4 (later, separate) — lazy-loading and ESM.** Make `jspdf`/`export_pdf` lazy on first PDF export, then pursue broader lazy-loading of rarely-first-paint modules (Projects, Atlas, Watchers, report builder, Findings Board, PTY/xterm) and an incremental ESM migration, one low-risk area at a time. This is the first-load byte-reduction pass and is explicitly distinct from the request-count work in Phases 1–3; keep it deferred until those wins are in place.
 
 **Testing and documentation:**
@@ -63,7 +60,7 @@ Each phase is independently shippable and verifiable. `source` mode lets the ful
 - Add a CI lint/test that scans templates and fails when a `/static/` or `/vendor/` URL is hard-coded instead of being resolved through `static_asset()` or the bundle manifest helper.
 - Keep route tests covering source and bundle modes, missing-manifest failures, and `/static/build/...` cache headers as the bundle manifest grows.
 - Keep Vitest coverage against source modules; the build should not make tests depend on minified output.
-- Run targeted browser coverage through `bash scripts/run_playwright.sh ...` for shell boot, run streaming, and permalink rendering when switching production/CI/e2e to bundle mode.
+- Run targeted browser coverage through `bash scripts/run_playwright.sh ...` for shell boot, run streaming, and permalink rendering as the bundle shape changes.
 - Update README.md, FEATURES.md, ARCHITECTURE.md, CONFIGURATION.md if needed, CHANGELOG.md, release drafts, and test-count docs when implementation changes behavior or coverage.
 
 **Acceptance criteria:**
@@ -73,7 +70,7 @@ Each phase is independently shippable and verifiable. `source` mode lets the ful
 - Static bundles use content-hashed filenames and immutable cache headers.
 - HTML templates reference manifest-backed bundle URLs in normal operation, and CI rejects unversioned `/static/` or `/vendor/` references that would receive immutable cache headers without a cache-buster.
 - `asset_bundle_mode` is exactly two modes, `source` and `bundle` (no `auto`), each deterministic and testable, including a fail-loud bundle mode when the manifest is unavailable.
-- Production, CI, and e2e use `asset_bundle_mode=bundle`; local development and Python route tests default to `source` so the suite runs on a clean checkout without a Node build.
+- Production, CI, and e2e use `asset_bundle_mode=bundle`; local development can opt into `source`, and Python route tests default to `source` so the suite runs on a clean checkout without a Node build.
 - `assets.config.json` is the single source of truth for bundle membership and order; templates compose bundles rather than listing source files, and Flask renders both modes from the compiled `manifest.json` alone.
 - Every `app/static/js/**` source file is covered by at least one bundle or the explicit lazy/excluded allowlist, enforced structurally by `assets:check`, so a new unbundled file fails CI. Files shared intentionally across bundles (such as render primitives reused by the self-contained `permalink` bundle) are allowed in more than one bundle.
 - `permalink` is a self-contained bundle with no dependency on `shell-core`, and PDF export becomes lazy on the permalink surface in the later lazy-loading pass.

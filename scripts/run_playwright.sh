@@ -9,6 +9,7 @@ webserver_logs=0
 force_color=0
 serial_mode=0
 web_server_timeout=""
+asset_bundle_mode=""
 playwright_args=()
 
 while (($#)); do
@@ -40,6 +41,19 @@ while (($#)); do
       ;;
     --server-timeout=*)
       web_server_timeout="${1#--server-timeout=}"
+      shift
+      ;;
+    --asset-bundle-mode)
+      shift
+      if (($# == 0)); then
+        echo "run_playwright.sh: --asset-bundle-mode requires source or bundle" >&2
+        exit 2
+      fi
+      asset_bundle_mode="$1"
+      shift
+      ;;
+    --asset-bundle-mode=*)
+      asset_bundle_mode="${1#--asset-bundle-mode=}"
       shift
       ;;
     --no-stop-servers)
@@ -110,14 +124,18 @@ if [[ -n "$web_server_timeout" ]]; then
   export PLAYWRIGHT_WEB_SERVER_TIMEOUT="$web_server_timeout"
 fi
 
-ASSET_BUNDLE_MODE="${ASSET_BUNDLE_MODE:-${PW_ASSET_BUNDLE_MODE:-}}"
+ASSET_BUNDLE_MODE="${asset_bundle_mode:-${ASSET_BUNDLE_MODE:-${PW_ASSET_BUNDLE_MODE:-bundle}}}"
+if [[ "$ASSET_BUNDLE_MODE" != "source" && "$ASSET_BUNDLE_MODE" != "bundle" ]]; then
+  echo "run_playwright.sh: --asset-bundle-mode/ASSET_BUNDLE_MODE must be source or bundle" >&2
+  exit 2
+fi
 if [[ "$ASSET_BUNDLE_MODE" == "bundle" ]]; then
   if ! npm run assets:check; then
     echo "run_playwright.sh: asset_bundle_mode=bundle requires current committed build output; run assets:sync" >&2
     exit 1
   fi
-  export ASSET_BUNDLE_MODE
 fi
+export ASSET_BUNDLE_MODE
 
 if [[ -z "${PW_E2E_SERVER_LOG_DIR:-}" ]]; then
   PW_E2E_SERVER_LOG_DIR="$PWD/test-results/e2e-server-logs/$(date +%Y%m%d-%H%M%S)-$$"

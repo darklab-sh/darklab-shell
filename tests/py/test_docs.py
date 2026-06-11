@@ -854,6 +854,13 @@ _PROJECT_STRUCTURE_OPAQUE_DIRS = frozenset({
     "tests/js/e2e/fixtures",          # binary screenshot fixtures
 })
 
+_PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE = re.compile(
+    r"^app/static/build/([a-z0-9-]+)\.([0-9a-f]{12}|<hash>)\.(css|js)$"
+)
+_PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE = re.compile(
+    r"^app/static/build/[a-z0-9-]+\.[0-9a-f]{12}\.(css|js)$"
+)
+
 
 def _git_tracked_files() -> list[str]:
     """Return files tracked by git (committed to the index)."""
@@ -950,13 +957,21 @@ def _is_under_opaque_dir(path: str) -> bool:
     return any(path == d or path.startswith(d + "/") for d in _PROJECT_STRUCTURE_OPAQUE_DIRS)
 
 
+def _canonical_project_structure_path(path: str) -> str:
+    match = _PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE.match(path)
+    if match:
+        name, _hash_or_placeholder, extension = match.groups()
+        return f"app/static/build/{name}.<hash>.{extension}"
+    return path
+
+
 def _display_target_for_project_structure(path: str) -> str | None:
     if path in _PROJECT_STRUCTURE_EXCLUSIONS:
         return None
     for opaque_dir in sorted(_PROJECT_STRUCTURE_OPAQUE_DIRS):
         if path == opaque_dir or path.startswith(opaque_dir + "/"):
             return opaque_dir
-    return path
+    return _canonical_project_structure_path(path)
 
 
 def _expected_project_structure_order(tracked: list[str]) -> list[str]:
@@ -1015,9 +1030,8 @@ class TestProjectStructureCoverage:
         tracked = _git_tracked_files()
         missing = sorted(
             path for path in tracked
-            if path not in listed
-            and path not in _PROJECT_STRUCTURE_EXCLUSIONS
-            and not _is_under_opaque_dir(path)
+            if (target := _display_target_for_project_structure(path)) is not None
+            and target not in listed
         )
         assert not missing, (
             "Files missing from README.md '## Project Structure' tree:\n"
@@ -1043,15 +1057,28 @@ class TestProjectStructureCoverage:
         README intentionally only names the parent."""
         listed = _parse_project_structure_tree(_README.read_text())
         listed_set = set(listed)
+        literal_hashed_build_assets = sorted(
+            p for p in listed_set
+            if _PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE.match(p)
+        )
+        assert not literal_hashed_build_assets, (
+            "README.md '## Project Structure' should use <hash> placeholders "
+            "for generated build assets instead of commit-specific filenames:\n"
+            + "\n".join(f"  {p}" for p in literal_hashed_build_assets)
+        )
         tracked = set(_git_tracked_files())
         untracked = set(_git_untracked_files())
         # Allow any directory that contains tracked files, including every
         # intermediate ancestor (so '.gitlab' resolves via
         # '.gitlab/merge_request_templates/Default.md').
-        valid = tracked | untracked | _all_ancestor_dirs(tracked | untracked) | {"."}
+        valid_files = {
+            _canonical_project_structure_path(p)
+            for p in tracked | untracked
+        }
+        valid = valid_files | _all_ancestor_dirs(valid_files) | {"."}
         unknown = sorted(
             p for p in listed_set
-            if p not in valid
+            if _canonical_project_structure_path(p) not in valid
             and not _is_under_opaque_dir(p)
             # Some entries describe files that don't ship in git but are
             # created at runtime (data/history.db) or as user-created
@@ -1069,7 +1096,10 @@ class TestProjectStructureCoverage:
         )
 
     def test_structure_order_matches_git_file_listing(self):
-        listed = _parse_project_structure_tree(_README.read_text())
+        listed = [
+            _canonical_project_structure_path(path)
+            for path in _parse_project_structure_tree(_README.read_text())
+        ]
         tracked = _git_tracked_files()
         expected = _expected_project_structure_order(tracked)
         expected_set = set(expected)

@@ -156,7 +156,7 @@ def load_config(conf_dir=None):
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
-        "asset_bundle_mode":          "source",
+        "asset_bundle_mode":          "bundle",
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
         "data_dir":                   "",
@@ -419,6 +419,9 @@ def load_config(conf_dir=None):
     env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
     if env_prometheus_multiproc_dir:
         defaults["prometheus_multiproc_dir"] = env_prometheus_multiproc_dir
+    env_asset_bundle_mode = str(os.environ.get("ASSET_BUNDLE_MODE") or "").strip()
+    if env_asset_bundle_mode:
+        defaults["asset_bundle_mode"] = env_asset_bundle_mode
     env_restricted_command_input_cidrs = str(os.environ.get("RESTRICTED_COMMAND_INPUT_CIDRS") or "").strip()
     if env_restricted_command_input_cidrs:
         defaults["restricted_command_input_cidrs"] = [

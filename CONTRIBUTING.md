@@ -202,7 +202,7 @@ profile-gated Compose Postgres service without publishing the database port.
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
-- Set `ASSET_BUNDLE_MODE=bundle` when a Playwright run should exercise generated bundle output. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale.
+- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. Pass `--asset-bundle-mode source` when debugging source-file loading without putting an environment variable before the approved helper command.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
@@ -272,7 +272,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 **Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
-**Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles still match the current sources. The app defaults to source mode for local development, but bundle mode serves the content-hashed files and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete.
+**Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles still match the current sources. The app serves content-hashed bundles by default and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete. Set `asset_bundle_mode: source` in `app/conf/config.local.yaml` for local edit-and-refresh work without rebuilding after every source change.
 
 ---
 

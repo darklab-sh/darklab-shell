@@ -3,9 +3,9 @@
  * Build committed app CSS/JS bundles from assets.config.json.
  *
  * The build is deliberately dependency-free and unminified: preserve source
- * order, normalize classic-script top-level declarations for concatenation,
- * write content-hashed filenames, and record enough manifest metadata for
- * Flask source/bundle rendering plus CI drift checks.
+ * order, keep each classic script as its own execution unit, write
+ * content-hashed filenames, and record enough manifest metadata for Flask
+ * source/bundle rendering plus CI drift checks.
  */
 
 import {
@@ -79,9 +79,8 @@ function outputExtension(type) {
 
 function classicScriptBundleText(source, content) {
   if (!source.endsWith('.js')) return content;
-  return content
-    .replace(/^class ([A-Za-z_$][A-Za-z0-9_$]*)(\s|{)/gm, 'var $1 = class $1$2')
-    .replace(/^(const|let)\s+/gm, 'var ');
+  const sourceUrl = `\n//# sourceURL=${source}`;
+  return `_runBundledClassicScript(${JSON.stringify(source)}, ${JSON.stringify(`${content}${sourceUrl}`)});`;
 }
 
 function normalizeBundles(rawBundles) {
@@ -210,6 +209,25 @@ mkdirSync(outDir, { recursive: true });
 for (const bundle of bundles) {
   const sourceHashes = {};
   const parts = [];
+  if (bundle.type === 'js') {
+    parts.push(`;(function () {
+  var _bundleAnchorScript = document.currentScript;
+  var _bundleScriptParent = (_bundleAnchorScript && _bundleAnchorScript.parentNode)
+    || document.head
+    || document.documentElement;
+  function _runBundledClassicScript(source, body) {
+    var script = document.createElement('script');
+    script.text = body;
+    script.setAttribute('data-bundled-source', source);
+    try {
+      _bundleScriptParent.insertBefore(script, _bundleAnchorScript ? _bundleAnchorScript.nextSibling : null);
+    } catch (err) {
+      setTimeout(function () { throw err; }, 0);
+    } finally {
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+  }`);
+  }
   for (const source of bundle.sources) {
     const file = assertSourceExists(source);
     const content = readFileSync(file);
@@ -220,6 +238,9 @@ for (const bundle of bundles) {
     } else {
       parts.push(`/* ${source} */\n${body}\n`);
     }
+  }
+  if (bundle.type === 'js') {
+    parts.push('}());');
   }
   const output = `${parts.join('\n')}\n`;
   const hash = sha256(output);

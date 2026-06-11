@@ -75,8 +75,8 @@
     },
     "shell-core": {
       "type": "js",
-      "path": "/static/build/shell-core.83cdbce0235c.js",
-      "hash": "83cdbce0235c56e7a87aea0d6a37ad63c3a965c938d080647f001a012221dff7",
+      "path": "/static/build/shell-core.51183cb5ec4a.js",
+      "hash": "51183cb5ec4a24f9393f466d202dd3b3bf05f70ed148dcffafeb2ac49a46b6c0",
       "sources": [
         "/static/js/core/run_output_model.js",
         "/static/js/export_html.js",
@@ -98,8 +98,8 @@
     },
     "shell-features": {
       "type": "js",
-      "path": "/static/build/shell-features.4f2cb91152f7.js",
-      "hash": "4f2cb91152f7e6bbc29cf0b7c7d7822023c735d195dd1bb17937283a5e6be174",
+      "path": "/static/build/shell-features.b0dba398cfe9.js",
+      "hash": "b0dba398cfe96a3cecf464cb098a2d31a9d392e7315c11020557e5d5305f027e",
       "sources": [
         "/static/js/core/config.js",
         "/static/js/core/dom.js",
@@ -283,7 +283,7 @@
         "/static/js/features/runner/runner_persistence.js": "1251ed014f1cf4495d0d483e075e2109b48709a5ff701755997552cf160e2353",
         "/static/js/features/runner/runner_workspace.js": "b5600b6b093efb62df1869de7196eba0d9077ba7d58e93d9eea7f3f8a0c04093",
         "/static/js/pty.js": "1a6f2ae6b2601c37928b56b623270334fd4528269dcb43249a45224b8993907a",
-        "/static/js/runner.js": "74897ea42652bf7c365be664902529c3a2740d22d6ae0850179abcd106ebe8b3",
+        "/static/js/runner.js": "17b39ff4e7e3e5e87ab7c1234b8ebf3322076a616f18931b1c921bd613c7f9d3",
         "/static/js/core/app_preferences_core.js": "68f6d38f8993108eefd7af7ece8765ce9c89b17d68c4296038cb7cc27b5d79dc",
         "/static/js/app.js": "f59486ba301e17da83211c06ee37afe39a1f4e70a52717ee7bd191f7de0d0904",
         "/static/js/features/mobile/mobile_shell_layout.js": "4b43877da6a62474054e431581220ac80d3344cbcb2a8bd9666739c8f69e2f10",
@@ -343,8 +343,8 @@
     },
     "shell-bootstrap": {
       "type": "js",
-      "path": "/static/build/shell-bootstrap.1251df21301f.js",
-      "hash": "1251df21301fe9d0a4024432bae9c4d4aff53acd23bd4195ed150c6a745ad38d",
+      "path": "/static/build/shell-bootstrap.316f9b1a13a9.js",
+      "hash": "316f9b1a13a93142d84063860a8b86d341bdd8920144d3f1781a0b4d6f7aab47",
       "sources": [
         "/static/js/controller.js",
         "/static/js/features/terminal/composer_controller.js",
@@ -362,8 +362,8 @@
     },
     "permalink": {
       "type": "js",
-      "path": "/static/build/permalink.78fb5a0f28a6.js",
-      "hash": "78fb5a0f28a6f3f287d91807c79d01b423c66aaab7a3bc0784f385b778a585ab",
+      "path": "/static/build/permalink.a59efa80a5ac.js",
+      "hash": "a59efa80a5ac58a13156fed9cb0c470e018335469934403fd1be014ca2f9ba41",
       "sources": [
         "/static/js/core/utils.js",
         "/static/js/core/run_output_model.js",

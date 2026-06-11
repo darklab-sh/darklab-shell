@@ -184,8 +184,8 @@ def _asset_version(path: str) -> str:
 
 
 def _asset_bundle_mode() -> str:
-    mode = str(CFG.get("asset_bundle_mode") or "source").strip().lower()
-    return mode if mode in _VALID_ASSET_BUNDLE_MODES else "source"
+    mode = str(CFG.get("asset_bundle_mode") or "bundle").strip().lower()
+    return mode if mode in _VALID_ASSET_BUNDLE_MODES else "bundle"
 
 
 def _asset_manifest_error(message: str) -> RuntimeError:
