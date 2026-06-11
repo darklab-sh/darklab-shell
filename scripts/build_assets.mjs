@@ -2,9 +2,10 @@
 /**
  * Build committed app CSS/JS bundles from assets.config.json.
  *
- * Phase 1 is deliberately dependency-free and concat-only: preserve source
- * order, write content-hashed filenames, and record enough manifest metadata
- * for Flask source/bundle rendering plus CI drift checks.
+ * The build is deliberately dependency-free and unminified: preserve source
+ * order, normalize classic-script top-level declarations for concatenation,
+ * write content-hashed filenames, and record enough manifest metadata for
+ * Flask source/bundle rendering plus CI drift checks.
  */
 
 import {
@@ -53,7 +54,11 @@ function sourceToFile(source) {
     return resolve(ROOT, 'app/static', source.slice('/static/'.length));
   }
   if (source.startsWith('/vendor/')) {
-    return resolve(ROOT, 'app/static', source.slice('/vendor/'.length));
+    const vendorPath = source.slice('/vendor/'.length);
+    if (vendorPath.startsWith('fonts/')) {
+      return resolve(ROOT, 'app/static', vendorPath);
+    }
+    return resolve(ROOT, 'app/static/js/vendor', vendorPath);
   }
   throw new Error(`Unsupported asset source prefix: ${source}`);
 }
@@ -70,6 +75,13 @@ function outputExtension(type) {
   if (type === 'css') return 'css';
   if (type === 'js') return 'js';
   throw new Error(`Unsupported bundle type: ${type}`);
+}
+
+function classicScriptBundleText(source, content) {
+  if (!source.endsWith('.js')) return content;
+  return content
+    .replace(/^class ([A-Za-z_$][A-Za-z0-9_$]*)(\s|{)/gm, 'var $1 = class $1$2')
+    .replace(/^(const|let)\s+/gm, 'var ');
 }
 
 function normalizeBundles(rawBundles) {
@@ -120,9 +132,76 @@ function assertCssCoverage(configuredSources) {
   }
 }
 
+function coveredSources(configuredSources) {
+  const covered = new Set([
+    ...configuredSources,
+    ...((Array.isArray(config.excluded) ? config.excluded : [])),
+    ...((Array.isArray(config.lazy) ? config.lazy : [])),
+  ]);
+  for (const source of Array.from(covered)) {
+    if (source.startsWith('/vendor/')) {
+      const vendorPath = source.slice('/vendor/'.length);
+      if (!vendorPath.startsWith('fonts/')) {
+        covered.add(`/static/js/vendor/${vendorPath}`);
+      }
+    }
+  }
+  return covered;
+}
+
+function assertJsCoverage(configuredSources) {
+  const jsRoot = resolve(ROOT, 'app/static/js');
+  const expected = collectStaticFiles(jsRoot)
+    .filter((rel) => rel.endsWith('.js'))
+    .map((rel) => `/static/js/${rel}`);
+  const covered = coveredSources(configuredSources);
+  const missing = expected.filter((source) => !covered.has(source));
+  if (missing.length) {
+    throw new Error(`JS assets missing from assets.config.json:\n${missing.map((item) => `  ${item}`).join('\n')}`);
+  }
+}
+
+function assertOrderChecks(bundlesByName) {
+  const rawChecks = config.order_checks || {};
+  if (!rawChecks || typeof rawChecks !== 'object' || Array.isArray(rawChecks)) {
+    throw new Error('assets.config.json order_checks must be an object');
+  }
+  for (const [name, check] of Object.entries(rawChecks)) {
+    if (!check || typeof check !== 'object' || Array.isArray(check)) {
+      throw new Error(`Order check ${name} must be an object`);
+    }
+    const checkBundles = Array.isArray(check.bundles) ? check.bundles : [];
+    const expected = Array.isArray(check.sources) ? check.sources : [];
+    if (!checkBundles.length || !expected.length) {
+      throw new Error(`Order check ${name} must list bundles and sources`);
+    }
+    const actual = [];
+    for (const bundleName of checkBundles) {
+      const bundle = bundlesByName.get(bundleName);
+      if (!bundle) {
+        throw new Error(`Order check ${name} references unknown bundle ${bundleName}`);
+      }
+      actual.push(...bundle.sources);
+    }
+    const mismatches = [];
+    const maxLength = Math.max(actual.length, expected.length);
+    for (let index = 0; index < maxLength; index += 1) {
+      if (actual[index] !== expected[index]) {
+        mismatches.push(`  position ${index + 1}: bundle=${actual[index] || '<missing>'}, expected=${expected[index] || '<missing>'}`);
+      }
+    }
+    if (mismatches.length) {
+      throw new Error(`Asset order check ${name} does not match configured source order:\n${mismatches.join('\n')}`);
+    }
+  }
+}
+
 const bundles = normalizeBundles(config.bundles);
+const bundlesByName = new Map(bundles.map((bundle) => [bundle.name, bundle]));
 const allSources = bundles.flatMap((bundle) => bundle.sources);
 assertCssCoverage(allSources);
+assertJsCoverage(allSources);
+assertOrderChecks(bundlesByName);
 
 const buildEntries = {};
 rmSync(outDir, { recursive: true, force: true });
@@ -135,7 +214,12 @@ for (const bundle of bundles) {
     const file = assertSourceExists(source);
     const content = readFileSync(file);
     sourceHashes[source] = sha256(content);
-    parts.push(`/* ${source} */\n${content.toString('utf8').replace(/\s*$/, '')}\n`);
+    const body = classicScriptBundleText(source, content.toString('utf8')).replace(/\s*$/, '');
+    if (bundle.type === 'js') {
+      parts.push(`;\n/* ${source} */\n${body}\n;`);
+    } else {
+      parts.push(`/* ${source} */\n${body}\n`);
+    }
   }
   const output = `${parts.join('\n')}\n`;
   const hash = sha256(output);

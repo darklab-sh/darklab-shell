@@ -1494,7 +1494,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
-| `TestIndexRoute.test_bundle_mode_renders_built_css_bundle` | Verifies bundle mode renders the generated app CSS bundle instead of source stylesheet links. |
+| `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
 | `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
 | `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
@@ -1894,7 +1894,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestShareRoute.test_get_share_json_returns_content` | Checks that get share JSON returns content. |
 | `TestShareRoute.test_get_share_html_returns_page` | Checks that get share HTML returns page. |
 | `TestShareRoute.test_get_share_html_honors_theme_name_cookie` | Checks that get share HTML honors theme name cookie. |
-| `TestShareRoute.test_get_share_html_bundle_mode_renders_per_page_css_bundle` | Verifies permalink pages render generated shared and permalink CSS bundles in bundle mode. |
+| `TestShareRoute.test_get_share_html_bundle_mode_renders_per_page_asset_bundles` | Verifies permalink pages render generated shared CSS and permalink JavaScript bundles in bundle mode. |
 | `TestShareRoute.test_get_share_html_contains_label` | Checks that get share HTML contains label. |
 | `TestShareRoute.test_get_share_html_does_not_prepend_label_for_structured_snapshot_content` | Checks that get share HTML does not prepend label for structured snapshot content. |
 | `TestShareRoute.test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content` | Checks that get share HTML includes prompt echo renderer for snapshot content. |

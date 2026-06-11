@@ -12,14 +12,8 @@
 {% endfor %}
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
-<script src="/vendor/ansi_up.js"></script>
-<script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/static/js/core/utils.js"></script>
-<script src="/static/js/core/run_output_model.js"></script>
-<script src="/static/js/core/output_core.js"></script>
-<script src="/static/js/export_html.js"></script>
-<script src="/static/js/export_pdf.js"></script>
-<script src="/static/js/ui/ui_outside_click.js"></script>
+<script src="{{ static_asset('/vendor/ansi_up.js') }}"></script>
+<script src="{{ static_asset('/vendor/jspdf.umd.min.js') }}"></script>
 {% block extra_head %}{% endblock %}
 </head>
 <body class="permalink-page" data-theme="{{ current_theme.name }}">
@@ -37,6 +31,8 @@
 </main>
 {% block footer %}{% endblock %}
 {% block scripts %}{% endblock %}
-<script src="/static/js/permalink.js"></script>
+{% for src in asset_bundle('permalink') %}
+<script src="{{ src }}"></script>
+{% endfor %}
 </body>
 </html>

@@ -153,14 +153,25 @@ class TestIndexRoute:
         assert '/static/css/styles.css' not in body
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/mobile-chrome.css?v=' in body
+        assert '/vendor/ansi_up.js?v=' in body
+        assert '/vendor/jspdf.umd.min.js?v=' in body
+        assert '/static/js/core/run_output_model.js?v=' in body
+        assert '/static/js/core/config.js?v=' in body
+        assert '/static/js/mobile_chrome.js?v=' in body
 
-    def test_bundle_mode_renders_built_css_bundle(self):
+    def test_bundle_mode_renders_built_asset_bundles(self):
         client = get_client()
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
             body = client.get("/").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'src="/static/build/shell-core\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'src="/static/build/shell-features\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/mobile-chrome.css?v=' not in body
+        assert '/static/js/core/run_output_model.js?v=' not in body
+        assert '/static/js/core/config.js?v=' not in body
+        assert '/static/js/mobile_chrome.js?v=' not in body
 
     def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
@@ -19012,8 +19023,10 @@ class TestShareRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/features/history.css?v=' in body
         assert '/static/css/terminal_export.css?v=' in body
+        assert '/static/js/core/utils.js?v=' in body
+        assert '/static/js/permalink.js?v=' in body
 
-    def test_get_share_html_bundle_mode_renders_per_page_css_bundle(self):
+    def test_get_share_html_bundle_mode_renders_per_page_asset_bundles(self):
         client = get_client()
         create_resp = client.post(
             "/share",
@@ -19025,9 +19038,12 @@ class TestShareRoute:
             body = client.get(f"/share/{share_id}").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'src="/static/build/permalink\.[a-f0-9]{12}\.js"', body)
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/features/history.css?v=' not in body
         assert '/static/css/terminal_export.css?v=' not in body
+        assert '/static/js/core/utils.js?v=' not in body
+        assert '/static/js/permalink.js?v=' not in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()

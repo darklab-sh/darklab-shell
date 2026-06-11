@@ -10,10 +10,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
-- **Frontend CSS bundle pipeline** — The shell now has a dependency-free asset builder that generates committed, content-hashed CSS bundles and a manifest under `app/static/build/`.
-  - `assets.config.json` owns CSS bundle membership and order, `npm run assets:sync` regenerates the committed output, and `npm run assets:check` verifies the build output stays in sync during lint/CI.
-  - Flask templates render CSS through the manifest-backed `asset_bundle()` helper. Local development defaults to source links with cache-busting query strings, while `asset_bundle_mode=bundle` serves the generated hashed bundles and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete.
-  - **Tests:** added route coverage for source and bundle CSS rendering on index, permalink, and diagnostics pages, a missing-manifest failure case, and immutable cache headers for `/static/build/...`. Current suite total: 2074 pytest + 1368 Vitest + 263 Playwright = **3,705 tests**.
+- **Frontend asset bundle pipeline** — The shell now has a dependency-free asset builder that generates committed, content-hashed CSS and classic JavaScript bundles plus a manifest under `app/static/build/`.
+  - `assets.config.json` owns bundle membership and order for shared app CSS, diagnostics/export CSS, `shell-core`, `shell-features`, `shell-bootstrap`, and the self-contained permalink viewer bundle. `npm run assets:sync` regenerates the committed output, and `npm run assets:check` verifies the build output, JavaScript coverage, and bundle order stay in sync during lint/CI.
+  - The JavaScript build stays dependency-free and unminified, with a small top-level declaration normalization step so concatenated classic scripts keep the same visibility timing they had as separate script tags.
+  - Flask templates render CSS and JavaScript through the manifest-backed `asset_bundle()` helper. Local development defaults to source links with cache-busting query strings, while `asset_bundle_mode=bundle` serves the generated hashed bundles and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete.
+  - **Tests:** added route coverage for source and bundle asset rendering on index, permalink, and diagnostics pages, a missing-manifest failure case, immutable cache headers for `/static/build/...`, and `assets:check` coverage for generated bundle drift. Current suite total: 2074 pytest + 1368 Vitest + 263 Playwright = **3,705 tests**.
 
 - **Engagement report builder** — Projects now have a full Report tab for turning selected project evidence into a readable engagement report.
   - Operators can edit engagement metadata, executive summary, methodology, cover notes, and date ranges with `YYYY-MM-DD to YYYY-MM-DD` validation.
@@ -77,7 +78,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** extended existing route coverage to assert immutable caching on static/vendor assets and to keep the index route uncached by that policy.
 
 - **CSS startup waterfall** — shell, permalink, and diagnostics templates now link the modular CSS files directly with content-hash query strings instead of loading `styles.css` and discovering the rest through serial `@import` rules.
-  - `styles.css` remains as a compatibility entrypoint, but app-rendered pages no longer use it for boot CSS. JavaScript bundling stays as a separate build-system follow-up.
+  - `styles.css` remains as a compatibility entrypoint, but app-rendered pages no longer use it for boot CSS. JavaScript bundling now uses the shared frontend asset bundle pipeline.
   - **Tests:** extended existing index and permalink route coverage to assert direct hashed CSS links. Current suite total: 2057 pytest + 1368 Vitest + 263 Playwright = **3,688 tests**.
 
 - **Scanner kill PID reuse guard** — scanner-mode `/kill` and API cancel requests now verify the active run's stored PID start time before sending the sudo-backed process-group signal, so a recycled PID cannot make the app terminate an unrelated scanner process group.

@@ -170,7 +170,11 @@ def _asset_version(path: str) -> str:
     if path.startswith("/static/"):
         local_path = Path(app.static_folder or "") / path.removeprefix("/static/")
     elif path.startswith("/vendor/"):
-        local_path = Path(app.static_folder or "") / path.removeprefix("/vendor/")
+        vendor_path = path.removeprefix("/vendor/")
+        if vendor_path.startswith("fonts/"):
+            local_path = Path(app.static_folder or "") / vendor_path
+        else:
+            local_path = Path(app.static_folder or "") / "js/vendor" / vendor_path
     if local_path is None:
         return APP_VERSION
     try:
@@ -219,7 +223,7 @@ def _asset_bundle(logical_name: str) -> list[str]:
     entry = _asset_bundle_entry(logical_name)
     bundle_type = str(entry.get("type") or "").strip()
     mode = _asset_bundle_mode()
-    if bundle_type != "css":
+    if bundle_type not in {"css", "js"}:
         raise _asset_manifest_error(f"Unsupported asset bundle type for {logical_name}: {bundle_type}")
     if mode == "bundle":
         built_path = str(entry.get("path") or "").strip()
