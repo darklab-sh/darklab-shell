@@ -32,6 +32,9 @@ async function openTeamsOptions(page) {
   await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
   await page.locator('#options-tab-teams').click()
   await expect(page.locator('#options-panel-teams')).toBeVisible()
+  await expect(page.locator('#options-panel-teams')).toHaveAttribute('data-teams-panel-bound', '1', {
+    timeout: 15_000,
+  })
   await expect(page.locator('#options-team-create-btn')).toBeEnabled({ timeout: 15_000 })
 }
 
@@ -47,6 +50,7 @@ async function createTeamFromOptions(page, { name, slug, displayName }) {
   await openTeamsOptions(page)
   await page.locator('#options-team-create-btn').click()
   const form = page.locator('[data-team-form="create"]')
+  await expect(form).toBeVisible()
   await form.locator('[name="name"]').fill(name)
   await form.locator('[name="slug"]').fill(slug)
   await form.locator('[name="display_name"]').fill(displayName)
@@ -80,6 +84,7 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
   await openTeamsOptions(page)
   await page.locator('#options-team-join-btn').click()
   const form = page.locator('[data-team-form="join"]')
+  await expect(form).toBeVisible()
   await form.locator('[name="code"]').fill(code)
   await form.locator('[name="display_name"]').fill(displayName)
   await form.locator('button[type="submit"]').click()

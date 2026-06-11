@@ -1335,11 +1335,20 @@ test.describe('project workspace modal', () => {
     }
 
     await expect(artifactFilter).toBeVisible({ timeout: 20_000 })
+    await expect(artifactsGroup.locator('.project-report-selection-row')).toHaveCount(50, { timeout: 15_000 })
+    await expect(nextArtifacts).toBeEnabled()
+    const filteredArtifactsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.ok()
+        && url.pathname === `/projects/${projectId}/artifacts`
+        && url.searchParams.get('offset') === '0'
+        && url.searchParams.get('q') === fixture.artifactFilterQuery
+    })
     await artifactFilter.fill(fixture.artifactFilterQuery)
+    await filteredArtifactsResponse
     await expect(artifactFilter).toHaveValue(fixture.artifactFilterQuery)
     await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
     await expect(artifactsGroup).toContainText('large-evidence-059.txt')
-    await page.waitForTimeout(250)
 
     await clickAndKeepScroll(noArtifacts)
     await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('0 selected')

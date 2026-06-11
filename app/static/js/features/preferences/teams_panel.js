@@ -1400,6 +1400,8 @@
   function _bind() {
     if (_bound) return;
     _bound = true;
+    const panel = _el('options-panel-teams');
+    if (panel) panel.dataset.teamsPanelBound = '1';
     _el('options-teams-refresh-btn')?.addEventListener('click', () => {
       refreshOptionsTeams().catch(error => _logTeamUiActionFailure('refresh_teams', error));
     });
