@@ -51,6 +51,8 @@ Part 8 — related-doc navigation:
 """
 
 import ast
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -69,6 +71,7 @@ _DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
 _README = _REPO_ROOT / "README.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
+_ASSET_MANIFEST = _REPO_ROOT / "app" / "static" / "build" / "manifest.json"
 _RELEASE_DRAFTS_DIR = _REPO_ROOT / "docs" / "release-drafts"
 
 _DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
@@ -854,6 +857,37 @@ _PROJECT_STRUCTURE_OPAQUE_DIRS = frozenset({
     "tests/js/e2e/fixtures",          # binary screenshot fixtures
 })
 
+_PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE = re.compile(
+    r"^app/static/build/([a-z0-9-]+)\.([0-9a-f]{12}|<hash>)\.(css|js)$"
+)
+_PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE = re.compile(
+    r"^app/static/build/[a-z0-9-]+\.[0-9a-f]{12}\.(css|js)$"
+)
+_TEMPLATE_STATIC_URL_RE = re.compile(r"['\"](/(?:static|vendor)/[^'\"]+)['\"]")
+
+
+def _asset_source_path(source: str) -> Path:
+    if source.startswith("/static/"):
+        return _REPO_ROOT / "app" / "static" / source.removeprefix("/static/")
+    if source.startswith("/vendor/fonts/"):
+        return _REPO_ROOT / "app" / "static" / source.removeprefix("/vendor/")
+    if source.startswith("/vendor/"):
+        return _REPO_ROOT / "app" / "static" / "js" / "vendor" / source.removeprefix("/vendor/")
+    raise AssertionError(f"Unsupported asset source in manifest: {source}")
+
+
+def _template_static_url_violations() -> list[str]:
+    violations: list[str] = []
+    templates_root = _REPO_ROOT / "app" / "templates"
+    for template in sorted(templates_root.rglob("*.html")):
+        rel = template.relative_to(_REPO_ROOT).as_posix()
+        for line_no, line in enumerate(template.read_text(encoding="utf-8").splitlines(), start=1):
+            if "static_asset(" in line or "asset_bundle(" in line:
+                continue
+            for match in _TEMPLATE_STATIC_URL_RE.finditer(line):
+                violations.append(f"{rel}:{line_no}: {match.group(1)}")
+    return violations
+
 
 def _git_tracked_files() -> list[str]:
     """Return files tracked by git (committed to the index)."""
@@ -950,13 +984,21 @@ def _is_under_opaque_dir(path: str) -> bool:
     return any(path == d or path.startswith(d + "/") for d in _PROJECT_STRUCTURE_OPAQUE_DIRS)
 
 
+def _canonical_project_structure_path(path: str) -> str:
+    match = _PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE.match(path)
+    if match:
+        name, _hash_or_placeholder, extension = match.groups()
+        return f"app/static/build/{name}.<hash>.{extension}"
+    return path
+
+
 def _display_target_for_project_structure(path: str) -> str | None:
     if path in _PROJECT_STRUCTURE_EXCLUSIONS:
         return None
     for opaque_dir in sorted(_PROJECT_STRUCTURE_OPAQUE_DIRS):
         if path == opaque_dir or path.startswith(opaque_dir + "/"):
             return opaque_dir
-    return path
+    return _canonical_project_structure_path(path)
 
 
 def _expected_project_structure_order(tracked: list[str]) -> list[str]:
@@ -1010,14 +1052,28 @@ class TestProjectStructureCoverage:
     """The README's project-structure tree must list every git-tracked file
     so contributors land on a complete navigation map."""
 
+    def test_asset_manifest_source_hashes_match_current_sources(self):
+        manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
+        stale = []
+        for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
+            source_hashes = bundle.get("source_hashes") or {}
+            for source, expected_hash in sorted(source_hashes.items()):
+                path = _asset_source_path(source)
+                actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                if actual_hash != expected_hash:
+                    stale.append(f"{bundle_name}: {source}")
+        assert not stale, (
+            "Asset manifest source hashes are stale. Run assets:sync:\n"
+            + "\n".join(f"  {item}" for item in stale)
+        )
+
     def test_no_files_missing_from_structure(self):
         listed = set(_parse_project_structure_tree(_README.read_text()))
         tracked = _git_tracked_files()
         missing = sorted(
             path for path in tracked
-            if path not in listed
-            and path not in _PROJECT_STRUCTURE_EXCLUSIONS
-            and not _is_under_opaque_dir(path)
+            if (target := _display_target_for_project_structure(path)) is not None
+            and target not in listed
         )
         assert not missing, (
             "Files missing from README.md '## Project Structure' tree:\n"
@@ -1041,17 +1097,37 @@ class TestProjectStructureCoverage:
         README tree must correspond to a real git-tracked file or directory.
         Subtree-internal paths beneath an opaque dir are exempt because the
         README intentionally only names the parent."""
+        template_static_url_violations = _template_static_url_violations()
+        assert not template_static_url_violations, (
+            "Templates must resolve /static/ and /vendor/ URLs through "
+            "static_asset() or asset_bundle() so immutable cache headers always "
+            "have a cache-buster:\n"
+            + "\n".join(f"  {violation}" for violation in template_static_url_violations)
+        )
         listed = _parse_project_structure_tree(_README.read_text())
         listed_set = set(listed)
+        literal_hashed_build_assets = sorted(
+            p for p in listed_set
+            if _PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE.match(p)
+        )
+        assert not literal_hashed_build_assets, (
+            "README.md '## Project Structure' should use <hash> placeholders "
+            "for generated build assets instead of commit-specific filenames:\n"
+            + "\n".join(f"  {p}" for p in literal_hashed_build_assets)
+        )
         tracked = set(_git_tracked_files())
         untracked = set(_git_untracked_files())
         # Allow any directory that contains tracked files, including every
         # intermediate ancestor (so '.gitlab' resolves via
         # '.gitlab/merge_request_templates/Default.md').
-        valid = tracked | untracked | _all_ancestor_dirs(tracked | untracked) | {"."}
+        valid_files = {
+            _canonical_project_structure_path(p)
+            for p in tracked | untracked
+        }
+        valid = valid_files | _all_ancestor_dirs(valid_files) | {"."}
         unknown = sorted(
             p for p in listed_set
-            if p not in valid
+            if _canonical_project_structure_path(p) not in valid
             and not _is_under_opaque_dir(p)
             # Some entries describe files that don't ship in git but are
             # created at runtime (data/history.db) or as user-created
@@ -1069,7 +1145,10 @@ class TestProjectStructureCoverage:
         )
 
     def test_structure_order_matches_git_file_listing(self):
-        listed = _parse_project_structure_tree(_README.read_text())
+        listed = [
+            _canonical_project_structure_path(path)
+            for path in _parse_project_structure_tree(_README.read_text())
+        ]
         tracked = _git_tracked_files()
         expected = _expected_project_structure_order(tracked)
         expected_set = set(expected)

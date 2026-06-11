@@ -7,8 +7,12 @@
 <title>{{ app_name }} — audit log</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 {% include "app_stylesheets.html" %}
-<link rel="stylesheet" href="{{ static_asset('/static/css/terminal_export.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/diag.css') }}">
+{% for href in asset_bundle('terminal-export') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
+{% for href in asset_bundle('diag') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
 {% include "theme_vars_style.html" %}
 </head>
 <body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">

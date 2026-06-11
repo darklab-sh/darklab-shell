@@ -156,6 +156,7 @@ lint-js:
     - npm run lint:md
     - npm run lint:json
     - npm run vendor:check
+    - npm run assets:check
 
 audit-py:
   stage: audit

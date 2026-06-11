@@ -19,6 +19,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
+  - [Diff-aware scheduled monitoring dashboards](#diff-aware-scheduled-monitoring-dashboards)
+  - [Attack-surface delta digest notifications](#attack-surface-delta-digest-notifications)
+  - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Architecture](#architecture)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
@@ -29,54 +32,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Frontend asset build pipeline
-
-The 1.7 asset pass removed the CSS `@import` waterfall and added versioned static URLs, but the shell still ships many individual CSS and JavaScript files during the first page load. Add a small build pipeline that turns the current source files into deterministic, cache-friendly bundles without forcing a broad JavaScript module rewrite at the same time.
-
-**Why this is open:**
-- Initial loads still spend request budget on many separate static assets, which makes browser bursts more likely to collide with HTTP rate limiting.
-- The current `static_asset()` helper appends a version query string, which is useful, but content-hashed build filenames are cleaner for long-lived immutable caching and rollbacks.
-- JavaScript load order is still managed by template script tags. A build manifest would make that order explicit and easier to test.
-
-**Implementation plan:**
-- Add an asset build script such as `scripts/build_assets.mjs` plus package scripts like `assets:build` and `assets:check`.
-- Write generated files under `app/static/build/`, with a manifest at `app/static/build/manifest.json`.
-- Prefer content-hashed filenames, for example `app.<hash>.css`, `shell-core.<hash>.js`, `shell-features.<hash>.js`, `shell-bootstrap.<hash>.js`, and `permalink.<hash>.js`.
-- Teach Flask a manifest helper that maps logical bundle names to built asset paths. Development can fall back to source files when the manifest is missing; production should fail clearly if bundle mode is enabled and the manifest is absent.
-- Keep `/static/build/...` on immutable cache headers. Dynamic HTML should stay fresh.
-- Bundle CSS first using the order currently captured in `app/templates/app_stylesheets.html`. Keep page-specific CSS, such as diagnostics and terminal export styles, as separate bundles unless combining them is clearly simpler.
-- Bundle JavaScript as order-preserving classic scripts first. Do not make this depend on an all-at-once ESM conversion.
-- Preserve the existing source files as the canonical files for development and unit tests.
-
-**Likely JavaScript bundle shape:**
-- `shell-core`: shared state, session handling, DOM helpers, config, output model, export helpers, and UI primitives.
-- `shell-features`: history, workspace, projects, Atlas, command registry, status monitor, schedules, watchers, workflows, preferences, and related feature modules.
-- `shell-bootstrap`: app wiring that depends on the core and feature bundles, including composer/controller/chrome/mobile boot behavior.
-- `permalink`: the share/permalink viewer's smaller dependency set.
-- PTY and xterm assets can stay separate or lazy until there is evidence they should move into the main shell bundles.
-
-**Rollout path:**
-- Start with CSS bundling and the manifest helper because the dependency order is already explicit.
-- Add classic-script JavaScript bundles after CSS is stable, preserving today's script order exactly.
-- Once bundle mode is the default in local and production flows, remove any template fallback that still emits the full source-file list in normal operation.
-- Consider an ESM migration later, one low-risk area at a time, after request-count and caching wins are already in place.
-
-**Testing and documentation:**
-- Add focused tests for deterministic manifest output, missing source failures, and bundle ordering.
-- Extend route tests so the index, permalink, and diagnostics pages render bundle URLs instead of the full source asset list.
-- Keep cache-header tests covering `/static/build/...`.
-- Keep Vitest coverage against source modules; the build should not make tests depend on minified output.
-- Run targeted browser coverage through `bash scripts/run_playwright.sh ...` for shell boot, run streaming, and permalink rendering once JavaScript bundles are in play.
-- Update README.md, FEATURES.md, ARCHITECTURE.md, CONFIGURATION.md if needed, CHANGELOG.md, release drafts, and test-count docs when implementation changes behavior or coverage.
-
-**Acceptance criteria:**
-- First-load static request count drops substantially without breaking local development ergonomics.
-- Static bundles use content-hashed filenames and immutable cache headers.
-- HTML templates reference manifest-backed bundle URLs in normal operation.
-- Missing or stale build output fails loudly in production-style checks.
-- Existing shell, permalink, diagnostics, and mobile flows keep working with the bundled assets.
-
----
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -86,7 +42,8 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Incrementally move low-risk frontend modules to ESM.** The current asset pipeline intentionally keeps classic-script semantics, dependency-free concatenation, and unminified output. A future pass can move isolated leaf helpers or rarely-first-paint lazy surfaces toward ES modules one area at a time, while preserving source/bundle parity and the local edit-and-refresh workflow. Keep minification and sourcemaps as a separate decision after the ESM boundary is proven.
+- **Unify static-asset cache-busting on content-hashed filenames.** The app uses two cache-busting schemes: content-hashed filenames for bundles and `static_asset()` `?v=` query strings for non-bundled assets (fonts, images, and standalone vendor such as jspdf and xterm). The split is intentional for now because those files change rarely, but a future pass could move them to hashed filenames too for one consistent scheme and to avoid query-string URLs that some proxies and CDNs cache conservatively. This needs the build to rewrite in-CSS font/image references to the hashed paths, so it is deferred until the bundle pipeline is stable.
 
 ---
 
@@ -119,11 +76,14 @@ No research items are currently tracked.
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
+- **External tool integration candidates:** add the strongest reviewed tool gaps when they fit the sandboxed registry, findings, Atlas, and provenance model. High-value candidates are ProjectDiscovery's `tlsx` for TLS/certificate metadata and `cdncheck` for CDN/WAF classification, plus `trufflehog` or `gitleaks` for exposed-secret findings from repos and files. Medium candidates are resolver-backed brute-force DNS tools such as `puredns` or `shuffledns`, Shodan InternetDB as a free/no-key IP context provider, optional FOFA/ZoomEye providers for users with keys, and a `nuclei` template management or pinning surface so scan provenance can explain which template set produced a result. A lower-risk app-native `jq`-style JSON/JSONL selector could also extend safe post-filtering without exposing real shell pipes.
+
 ### Workflows v2 — playbooks with parameters
 - Evolve workflows from saved command lists into reusable runbooks.
 - Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.
 - Add conditional next-step behavior based on exit code.
 - Let each step capture selected output into named variables that later steps can consume.
+- Build on the existing session-variable and workflow foundations so operators can turn repeat scans into parameterized profiles without rewriting commands by hand.
 
 ### Run replay / scrubbable event stream
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.
@@ -165,10 +125,10 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### PWA install and service-worker push
 - Make the mobile shell installable and deliver completion pings via web-push so phone users get notified when the tab is closed or the device is asleep. Today mobile notifications are intentionally hidden because foreground-only notifications are not useful on phones.
+- Reuse the run-complete notification hook so push delivery becomes another channel rather than a separate completion system.
 - **Entry-level scope:**
   - Add a manifest, app icons, and a small service worker so users can "Add to Home Screen" and launch into a standalone mobile shell.
   - VAPID-signed web-push subscription tied to the active session token; subscribe and unsubscribe from the Options sheet.
-  - Reuse the run-complete event hook from the outbound-notifications surface so push is just another channel.
 - **Architecture:**
   - New `app/static/manifest.webmanifest`, icon assets under `app/static/icons/`, and `app/static/sw.js` registered from `app.js` only when the runtime supports it.
   - New `WebPushChannel` in the notifications service; VAPID keys stored as operator config; per-session-token subscription endpoint at `/session/push/subscribe`.
@@ -183,8 +143,25 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
   - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
 
+### Diff-aware scheduled monitoring dashboards
+- Combine schedules, Watchers, run comparison, and tool-aware diff parsing into a project-level monitoring view.
+- Let an operator schedule a command, choose a baseline, and review each later run as a timeline of changes instead of reading every transcript from scratch.
+- Surface high-signal deltas such as new or closed ports, new or disappeared subdomains, HTTP status/title changes, and TLS certificate changes.
+- Keep the dashboard tied to Projects, Atlas entities, findings, and notifications so monitoring results become part of the normal engagement workflow.
+
+### Attack-surface delta digest notifications
+- Send scheduled project summaries such as "since last week: 3 new subdomains, 2 new open ports, 1 certificate expiring soon" through the existing notification channels.
+- Build the digest from watcher diffs, run-comparison classifiers, Atlas entity counts, and provider-enriched target context instead of inventing a separate reporting path.
+- Let operators tune cadence and scope per project so noisy scan projects can stay quiet while recurring monitoring projects stay visible.
+
+### Project-scoped target intelligence overview
+- Add a project overview surface that rolls up hosts, ports, services, cert expirations, top findings by severity, and provider-enriched context for each target.
+- Treat the overview as an engagement console: enough context to understand the current attack surface before drilling into individual runs, targets, Atlas rows, or findings.
+- Reuse existing project summaries, Atlas materialization, target relationships, findings, and intel provider snapshots so the overview stays consistent with the rest of the workspace.
+
 ### Native ticketing integrations
 - From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.
+- Keep the action close to existing triage and review-state controls so tickets feel like an extension of finding review, not a separate export step.
 - **Entry-level scope:**
   - Generic webhook + templated payload connector plus first-class adapters for the most common trackers.
   - Secret-backed auth stored in the existing encrypted secrets surface.
@@ -198,6 +175,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ### Operator-extensible signal and parser rules
 - Allow operators to extend the built-in findings classifier, entity extractor, and structured metadata logic via a hot-reloadable `conf/signals.yaml` (or small sandboxed snippets) without code changes.
 - Custom rules feed the same findings strip, Atlas materialization, search scopes, run comparison diffs, project triage, and export surfaces as core signals.
+- Target custom scanner output and internal tooling first; the biggest value is letting self-hosted teams teach darklab_shell their local signal language without carrying a fork.
 - **Entry-level scope:**
   - Declarative regex + capture group + mapping rules for common cases (e.g., custom internal scanner output).
   - Optional tiny expression or Lua/JS sandbox for complex parsing.

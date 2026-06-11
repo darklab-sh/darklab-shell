@@ -153,6 +153,97 @@ class TestIndexRoute:
         assert '/static/css/styles.css' not in body
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/mobile-chrome.css?v=' in body
+        assert '/vendor/ansi_up.js?v=' in body
+        assert '<script src="/static/js/export_pdf.js?v=' not in body
+        assert '"export_pdf": "/static/js/export_pdf.js?v=' in body
+        assert '<script src="/static/js/features/atlas/atlas_tabs.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_entity_detail.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_entity_row.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_overlay.js?v=' not in body
+        assert '<script src="/static/js/features/atlas/atlas_mobile.js?v=' not in body
+        assert '"atlas_tabs": "/static/js/features/atlas/atlas_tabs.js?v=' in body
+        assert '"atlas_entity_row": "/static/js/features/atlas/atlas_entity_row.js?v=' in body
+        assert '"atlas_entity_detail": "/static/js/features/atlas/atlas_entity_detail.js?v=' in body
+        assert '"atlas_overlay": "/static/js/features/atlas/atlas_overlay.js?v=' in body
+        assert '"atlas_mobile": "/static/js/features/atlas/atlas_mobile.js?v=' in body
+        assert '<script src="/static/js/features/findings/findings_board_modal.js?v=' not in body
+        assert '"findings_board": "/static/js/features/findings/findings_board_modal.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_activity.js?v=' not in body
+        assert '"project_activity": "/static/js/features/projects/project_activity.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_artifacts.js?v=' not in body
+        assert '"project_artifacts": "/static/js/features/projects/project_artifacts.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_workspace_shell.js?v=' not in body
+        assert '"project_workspace_shell": "/static/js/features/projects/project_workspace_shell.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_workspace_events.js?v=' not in body
+        assert '"project_workspace_events": "/static/js/features/projects/project_workspace_events.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_entities.js?v=' not in body
+        assert '"project_entities": "/static/js/features/projects/project_entities.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_packages.js?v=' not in body
+        assert '"project_packages": "/static/js/features/projects/project_packages.js?v=' in body
+        assert '<script src="/static/js/features/projects/project_report.js?v=' not in body
+        assert '"project_report": "/static/js/features/projects/project_report.js?v=' in body
+        assert '<script src="/static/js/features/run-comparison/history_compare_renderer.js?v=' not in body
+        assert '"history_compare_core": "/static/js/features/run-comparison/history_compare_core.js?v=' in body
+        assert '"history_compare_overlay": "/static/js/features/run-comparison/history_compare_overlay.js?v=' in body
+        assert '"history_compare_controls": "/static/js/features/run-comparison/history_compare_controls.js?v=' in body
+        assert '"history_compare_navigation": "/static/js/features/run-comparison/history_compare_navigation.js?v=' in body
+        assert '"history_compare_renderer": "/static/js/features/run-comparison/history_compare_renderer.js?v=' in body
+        assert '"history_compare_launcher": "/static/js/features/run-comparison/history_compare_launcher.js?v=' in body
+        assert '<script src="/static/js/features/history/history_run_details.js?v=' not in body
+        assert '"history_run_details": "/static/js/features/history/history_run_details.js?v=' in body
+        assert '<script src="/static/js/features/preferences/teams_panel.js?v=' not in body
+        assert '"options_session_token_controls": "/static/js/features/preferences/session_token_controls.js?v=' in body
+        assert '"options_secrets_panel": "/static/js/features/preferences/secrets_panel.js?v=' in body
+        assert '"options_teams_panel": "/static/js/features/preferences/teams_panel.js?v=' in body
+        assert '"options_notification_channels": "/static/js/features/preferences/notification_channels.js?v=' in body
+        assert '/static/js/features/command-registry/faq_helpers.js?v=' in body
+        assert '<script src="/static/js/features/command-registry/command_registry.js?v=' not in body
+        assert '"command_registry": "/static/js/features/command-registry/command_registry.js?v=' in body
+        assert '<script src="/static/js/features/workflows/workflows.js?v=' not in body
+        assert '"workflows": "/static/js/features/workflows/workflows.js?v=' in body
+        assert '<script src="/static/js/pty.js?v=' not in body
+        assert '"pty_controller": "/static/js/pty.js?v=' in body
+        assert '<script src="/static/js/features/schedules/schedules_modal.js?v=' not in body
+        assert '"schedules_modal": "/static/js/features/schedules/schedules_modal.js?v=' in body
+        assert '<script src="/static/js/features/status-monitor/status_monitor_core.js?v=' not in body
+        assert '<script src="/static/js/status_monitor.js?v=' not in body
+        assert '"status_monitor_core": "/static/js/features/status-monitor/status_monitor_core.js?v=' in body
+        assert '"status_monitor_data": "/static/js/features/status-monitor/status_monitor_data.js?v=' in body
+        assert '"status_monitor_resources": "/static/js/features/status-monitor/status_monitor_resources.js?v=' in body
+        assert '"status_monitor": "/static/js/status_monitor.js?v=' in body
+        assert '<script src="/static/js/tour_modal.js?v=' not in body
+        assert '"tour_modal": "/static/js/tour_modal.js?v=' in body
+        assert '<script src="/static/js/features/watchers/watchers_modal.js?v=' not in body
+        assert '"watchers_modal": "/static/js/features/watchers/watchers_modal.js?v=' in body
+        assert '<script src="/vendor/jspdf.umd.min.js?v=' not in body
+        assert '"jspdf": "/vendor/jspdf.umd.min.js?v=' in body
+        assert '<script src="/vendor/xterm.js?v=' not in body
+        assert '"xterm_js": "/vendor/xterm.js?v=' in body
+        assert '"xterm_fit_js": "/vendor/xterm-addon-fit.js?v=' in body
+        assert '"xterm_css": "/vendor/xterm.css?v=' in body
+        assert '/static/js/core/run_output_model.js?v=' in body
+        assert '/static/js/core/config.js?v=' in body
+        assert '/static/js/mobile_chrome.js?v=' in body
+
+    def test_bundle_mode_renders_built_asset_bundles(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            body = client.get("/").get_data(as_text=True)
+        assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'src="/static/build/shell-core\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'src="/static/build/shell-features\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
+        assert '/static/css/core/base.css?v=' not in body
+        assert '/static/css/mobile-chrome.css?v=' not in body
+        assert '/static/js/core/run_output_model.js?v=' not in body
+        assert '/static/js/core/config.js?v=' not in body
+        assert '/static/js/mobile_chrome.js?v=' not in body
+
+    def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            with pytest.raises(RuntimeError, match="Run assets:sync"):
+                shell_app._asset_bundle("app")
 
     def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
         client = get_client()
@@ -10722,6 +10813,14 @@ class TestVendorAssets:
         assert "text/css" in resp.content_type
         self._assert_immutable_asset_cache(resp)
 
+    def test_built_css_bundle_is_served_with_immutable_cache_header(self):
+        client = get_client()
+        built_path = shell_app._asset_bundle_entry("app")["path"]
+        resp = client.get(built_path)
+        assert resp.status_code == 200
+        assert "text/css" in resp.content_type
+        self._assert_immutable_asset_cache(resp)
+
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()
         font_dir = tmp_path / "fonts"
@@ -10821,6 +10920,20 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag")
         assert resp.status_code == 200
+
+    def test_bundle_mode_renders_diag_css_bundles(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "asset_bundle_mode": "bundle",
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+        }):
+            body = client.get("/diag").get_data(as_text=True)
+        assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'href="/static/build/diag\.[a-f0-9]{12}\.css"', body)
+        assert '/static/css/core/base.css?v=' not in body
+        assert '/static/css/terminal_export.css?v=' not in body
+        assert '/static/css/diag.css?v=' not in body
 
     def test_response_has_expected_top_level_keys(self):
         client = self._allowed_client()
@@ -18976,6 +19089,27 @@ class TestShareRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/features/history.css?v=' in body
         assert '/static/css/terminal_export.css?v=' in body
+        assert '/static/js/core/utils.js?v=' in body
+        assert '/static/js/permalink.js?v=' in body
+
+    def test_get_share_html_bundle_mode_renders_per_page_asset_bundles(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "bundle mode test", "content": ["line"]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            body = client.get(f"/share/{share_id}").get_data(as_text=True)
+        assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
+        assert re.search(r'src="/static/build/permalink\.[a-f0-9]{12}\.js"', body)
+        assert '/static/css/core/base.css?v=' not in body
+        assert '/static/css/features/history.css?v=' not in body
+        assert '/static/css/terminal_export.css?v=' not in body
+        assert '/static/js/core/utils.js?v=' not in body
+        assert '/static/js/permalink.js?v=' not in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()

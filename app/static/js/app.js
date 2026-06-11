@@ -200,6 +200,26 @@ function _closeMajorOverlays() {
 
 globalThis._closeMajorOverlays = _closeMajorOverlays;
 
+function _syncOptionsSessionTokenStatusFallback() {
+  const el = document.getElementById('options-session-token-status');
+  const token = localStorage.getItem('session_token');
+  const hasToken = Boolean(token);
+  if (el) {
+    el.textContent = hasToken && typeof maskSessionToken === 'function'
+      ? maskSessionToken(token)
+      : (hasToken ? token : 'No session token — anonymous session');
+    el.classList.toggle('is-active', hasToken);
+  }
+  const generateBtn = document.getElementById('options-session-token-generate-btn');
+  const rotateBtn = document.getElementById('options-session-token-rotate-btn');
+  const clearBtn = document.getElementById('options-session-token-clear-btn');
+  const copyBtn = document.getElementById('options-session-token-copy-btn');
+  if (generateBtn) generateBtn.style.display = hasToken ? 'none' : '';
+  if (rotateBtn) rotateBtn.style.display = hasToken ? '' : 'none';
+  if (clearBtn) clearBtn.style.display = hasToken ? '' : 'none';
+  if (copyBtn) copyBtn.style.display = hasToken ? '' : 'none';
+}
+
 function openOptions() {
   // Opening one major overlay should implicitly close the others so mobile and
   // desktop never stack multiple drawers/modals on top of each other.
@@ -207,13 +227,27 @@ function openOptions() {
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   syncOptionsControls();
   if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
-  if (typeof refreshOptionsSecrets === 'function') {
-    refreshOptionsSecrets().catch((err) => logClientError('failed to load options secrets', err));
-  }
+  else _syncOptionsSessionTokenStatusFallback();
   showOptionsOverlay();
   if (typeof markInteractionSurfaceReady === 'function') {
     markInteractionSurfaceReady('options', optionsOverlay, document.getElementById('options-modal'));
   }
+  const panelsReady = typeof loadOptionsPanels === 'function'
+    ? loadOptionsPanels()
+    : Promise.resolve();
+  panelsReady.then(() => {
+    if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
+    if (typeof refreshOptionsSecrets === 'function') {
+      refreshOptionsSecrets().catch((err) => logClientError('failed to load options secrets', err));
+    }
+    const activeTab = document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab;
+    if (activeTab === 'teams' && typeof refreshOptionsTeams === 'function') {
+      refreshOptionsTeams().catch((err) => logClientError('failed to load options teams', err));
+    }
+    if (activeTab === 'notifications' && typeof refreshNotificationChannels === 'function') {
+      refreshNotificationChannels().catch((err) => logClientError('failed to load notification channels', err));
+    }
+  }).catch((err) => logClientError('failed to load options panels', err));
 }
 
 function closeOptions() {

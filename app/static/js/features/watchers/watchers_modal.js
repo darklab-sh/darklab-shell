@@ -1467,6 +1467,8 @@ async function _newWatcher(baselineRun = null) {
 function _bindWatchersModal() {
   const { overlay, newBtn, refreshBtn } = _watcherEls();
   if (!overlay) return;
+  if (overlay.dataset.watchersModalBound === '1') return;
+  overlay.dataset.watchersModalBound = '1';
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
       closeWatchersModal();
@@ -1511,7 +1513,8 @@ function _bindWatchersModal() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', _bindWatchersModal);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _bindWatchersModal);
+else _bindWatchersModal();
 
 window.openWatchersModal = openWatchersModal;
 window.closeWatchersModal = closeWatchersModal;

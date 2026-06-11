@@ -663,7 +663,7 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   if (baseRegistry.wordlist) {
     context.wordlist = _runtimeMergeContextSpec(baseRegistry.wordlist, _runtimeWordlistContext());
   }
-  if (baseRegistry.workflow) {
+  if (baseRegistry.workflow && typeof _runtimeWorkflowContext === 'function') {
     context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, _runtimeWorkflowContext());
   }
   if (baseRegistry.project) {

@@ -23,7 +23,14 @@ app/static/js/vendor/*
 !app/static/js/vendor/xterm-addon-fit.js
 !app/static/js/vendor/xterm.css
 !app/static/js/vendor/xterm.js
- 
+
+# Built app bundles are committed so read-only Compose mounts can serve them.
+# Regenerate with npm run assets:sync; drift is checked by npm run assets:check.
+app/static/build/*
+!app/static/build/*.css
+!app/static/build/*.js
+!app/static/build/manifest.json
+
 # Persistent workspaces bind mount, if in use
 workspaces/
 

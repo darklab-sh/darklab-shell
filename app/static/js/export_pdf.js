@@ -7,6 +7,53 @@
     { filename: 'JetBrainsMono-700.ttf', family: 'JetBrains Mono', style: 'bold' },
   ];
   let _cachedPdfFontFiles = null;
+  let _jspdfLoadPromise = null;
+
+  function lazyAssetUrl(name) {
+    if (typeof document !== 'undefined') {
+      const node = document.getElementById('lazy-assets-json');
+      if (node && node.textContent) {
+        try {
+          const parsed = JSON.parse(node.textContent);
+          if (parsed && typeof parsed[name] === 'string' && parsed[name]) return parsed[name];
+        } catch (_) {
+          // Fall back to the stable route below; export should still work.
+        }
+      }
+    }
+    const configUrls = typeof window !== 'undefined'
+      && window.APP_CONFIG
+      && window.APP_CONFIG.lazy_asset_urls;
+    if (configUrls && typeof configUrls[name] === 'string' && configUrls[name]) {
+      return configUrls[name];
+    }
+    return name === 'jspdf' ? '/vendor/jspdf.umd.min.js' : '';
+  }
+
+  function loadScriptOnce(src, globalCheck) {
+    if (globalCheck()) return Promise.resolve();
+    if (_jspdfLoadPromise) return _jspdfLoadPromise;
+    _jspdfLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = () => {
+        if (globalCheck()) resolve();
+        else reject(new Error(`Lazy asset did not expose its expected global: ${src}`));
+      };
+      script.onerror = () => reject(new Error(`Failed to load lazy asset: ${src}`));
+      (document.head || document.documentElement).appendChild(script);
+    }).catch((err) => {
+      _jspdfLoadPromise = null;
+      throw err;
+    });
+    return _jspdfLoadPromise;
+  }
+
+  async function loadJsPdf() {
+    await loadScriptOnce(lazyAssetUrl('jspdf'), () => !!(window.jspdf && window.jspdf.jsPDF));
+    return window.jspdf.jsPDF;
+  }
 
   function parseCssColor(cssColor) {
     // Normalise any CSS color string to [r, g, b] by painting it onto a canvas.
@@ -414,6 +461,7 @@
   }
 
   window.ExportPdfUtils = {
+    loadJsPdf,
     parseCssColor,
     themeColors,
     buildTerminalExportPdf,

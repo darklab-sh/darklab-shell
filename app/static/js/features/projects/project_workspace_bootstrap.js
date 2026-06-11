@@ -33,13 +33,16 @@
 
     function bindPackageWizard() {
       ctx.projectPackageWizardOverlay?.addEventListener('input', (event) => {
-        ctx.projectPackagesController?.()?.handleInput(event);
+        const controller = ctx.projectPackagesController?.();
+        controller?.handleInput(event);
       });
       ctx.projectPackageWizardOverlay?.addEventListener('change', (event) => {
-        ctx.projectPackagesController?.()?.handleChange(event);
+        const controller = ctx.projectPackagesController?.();
+        controller?.handleChange(event);
       });
       ctx.projectPackageWizardOverlay?.addEventListener('click', async (event) => {
-        await ctx.projectPackagesController?.()?.handleWizardOverlayClick(event);
+        const controller = ctx.projectPackagesController?.();
+        if (controller) await controller.handleWizardOverlayClick(event);
       });
     }
 

@@ -3,7 +3,9 @@
 const WORKFLOW_TOKEN_RE = /{{\s*([a-z][a-z0-9_]*)\s*}}/g;
 const WORKFLOW_INPUT_STATE_KEY = 'workflow_input_state_v1';
 const _workflowRunQueueByTab = new Map();
-let workflowCatalogItems = [];
+let workflowCatalogItems = (
+  typeof window !== 'undefined' && Array.isArray(window.__workflowCatalogItems)
+) ? window.__workflowCatalogItems.slice() : [];
 let workflowCatalogLoadPromise = null;
 let _workflowEditorWorkflow = null;
 
@@ -602,6 +604,7 @@ function isMobileWorkflowSheetMode() {
 function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
   const list = Array.isArray(items) ? items : [];
   workflowCatalogItems = list.slice();
+  if (typeof window !== 'undefined') window.__workflowCatalogItems = workflowCatalogItems.slice();
   const body = document.querySelector('.workflows-body');
   if (!body) return;
   body.innerHTML = '';
@@ -1099,6 +1102,8 @@ function _runtimeWorkflowContext() {
 }
 
 document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(btn => {
+  if (btn.dataset.workflowEditorOpenBound === '1') return;
+  btn.dataset.workflowEditorOpenBound = '1';
   btn.addEventListener('click', () => openWorkflowEditor());
 });
 document.getElementById('workflow-editor-add-step')?.addEventListener('click', () => addWorkflowEditorStep());
@@ -1112,3 +1117,13 @@ document.querySelectorAll('.workflow-editor-close').forEach(btn => {
 document.getElementById('workflow-editor-overlay')?.addEventListener('click', (event) => {
   if (event.target === event.currentTarget) closeWorkflowEditor();
 });
+
+if (typeof window !== 'undefined') {
+  window.renderWorkflowItems = renderWorkflowItems;
+  window.reloadWorkflowCatalog = reloadWorkflowCatalog;
+  window.ensureWorkflowCatalogLoaded = ensureWorkflowCatalogLoaded;
+  window.handleWorkflowTerminalCommand = handleWorkflowTerminalCommand;
+  window.openWorkflowEditor = openWorkflowEditor;
+  window.closeWorkflowEditor = closeWorkflowEditor;
+  if (workflowCatalogItems.length) renderWorkflowItems(workflowCatalogItems, { emitCatalogEvent: false });
+}

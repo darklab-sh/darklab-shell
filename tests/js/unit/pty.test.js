@@ -11,6 +11,7 @@ const {
   _ptyInputPayload,
   _ptyInstallKeyboardHandlers,
   _loadPtyScriptOnce,
+  _ensureXtermAssets,
   _ptyApplyLiveTheme,
   _ptyCloseModal,
   _ptyDisplaceSession,
@@ -34,6 +35,7 @@ const {
   '_ptyInputPayload',
   '_ptyInstallKeyboardHandlers',
   '_loadPtyScriptOnce',
+  '_ensureXtermAssets',
   '_ptyApplyLiveTheme',
   '_ptyCloseModal',
   '_ptyDisplaceSession',
@@ -145,6 +147,38 @@ describe('interactive PTY terminal', () => {
     expect(replacement?.dataset.ptyLoadState).toBe('loading')
     replacement?.dispatchEvent(new Event('load'))
     await expect(promise).resolves.toBeUndefined()
+  })
+
+  it('loads xterm assets from the shared lazy asset manifest when available', async () => {
+    globalThis.window.lazyAssetUrl = vi.fn(name => ({
+      xterm_css: '/vendor/xterm.css?v=css-hash',
+      xterm_js: '/vendor/xterm.js?v=js-hash',
+      xterm_fit_js: '/vendor/xterm-addon-fit.js?v=fit-hash',
+    })[name] || '')
+
+    const promise = _ensureXtermAssets()
+    const stylesheet = document.querySelector('link[href="/vendor/xterm.css?v=css-hash"]')
+    expect(stylesheet).not.toBeNull()
+    stylesheet.dispatchEvent(new Event('load'))
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('script[src="/vendor/xterm.js?v=js-hash"]')).not.toBeNull()
+    })
+    document.querySelector('script[src="/vendor/xterm.js?v=js-hash"]')
+      .dispatchEvent(new Event('load'))
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('script[src="/vendor/xterm-addon-fit.js?v=fit-hash"]')).not.toBeNull()
+    })
+    globalThis.Terminal = function FakeTerminal() {}
+    globalThis.FitAddon = { FitAddon: function FakeFitAddon() {} }
+    document.querySelector('script[src="/vendor/xterm-addon-fit.js?v=fit-hash"]')
+      .dispatchEvent(new Event('load'))
+
+    await expect(promise).resolves.toBeUndefined()
+    expect(globalThis.window.lazyAssetUrl).toHaveBeenCalledWith('xterm_css')
+    expect(globalThis.window.lazyAssetUrl).toHaveBeenCalledWith('xterm_js')
+    expect(globalThis.window.lazyAssetUrl).toHaveBeenCalledWith('xterm_fit_js')
   })
 
   it('detects mobile terminal mode as unsupported for interactive PTY shells', () => {

@@ -11,6 +11,7 @@ from pathlib import Path
 import signal  # noqa: F401 — re-exported for test compatibility
 import time
 import hashlib
+import json
 
 from flask import Flask, jsonify, request
 
@@ -124,6 +125,8 @@ _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
 _ASSET_VERSION_CACHE: dict[str, str] = {}
+_ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "manifest.json"
+_VALID_ASSET_BUNDLE_MODES = frozenset({"source", "bundle"})
 
 
 def _should_log_request_completed() -> bool:
@@ -167,7 +170,11 @@ def _asset_version(path: str) -> str:
     if path.startswith("/static/"):
         local_path = Path(app.static_folder or "") / path.removeprefix("/static/")
     elif path.startswith("/vendor/"):
-        local_path = Path(app.static_folder or "") / path.removeprefix("/vendor/")
+        vendor_path = path.removeprefix("/vendor/")
+        if vendor_path.startswith("fonts/"):
+            local_path = Path(app.static_folder or "") / vendor_path
+        else:
+            local_path = Path(app.static_folder or "") / "js/vendor" / vendor_path
     if local_path is None:
         return APP_VERSION
     try:
@@ -176,7 +183,62 @@ def _asset_version(path: str) -> str:
         return APP_VERSION
 
 
+def _asset_bundle_mode() -> str:
+    mode = str(CFG.get("asset_bundle_mode") or "bundle").strip().lower()
+    return mode if mode in _VALID_ASSET_BUNDLE_MODES else "bundle"
+
+
+def _asset_manifest_error(message: str) -> RuntimeError:
+    return RuntimeError(f"{message}. Run assets:sync.")
+
+
+def _load_asset_manifest() -> dict:
+    try:
+        with _ASSET_MANIFEST_PATH.open("r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except OSError as exc:
+        raise _asset_manifest_error(f"Asset manifest is missing at {_ASSET_MANIFEST_PATH}") from exc
+    except json.JSONDecodeError as exc:
+        raise _asset_manifest_error(f"Asset manifest is invalid JSON at {_ASSET_MANIFEST_PATH}") from exc
+    if not isinstance(manifest, dict):
+        raise _asset_manifest_error("Asset manifest must be a JSON object")
+    bundles = manifest.get("bundles")
+    if not isinstance(bundles, dict):
+        raise _asset_manifest_error("Asset manifest is incomplete: missing bundles")
+    return manifest
+
+
+def _asset_bundle_entry(logical_name: str) -> dict:
+    bundle_name = str(logical_name or "").strip()
+    if not bundle_name:
+        raise _asset_manifest_error("Asset bundle name is required")
+    bundles = _load_asset_manifest()["bundles"]
+    entry = bundles.get(bundle_name)
+    if not isinstance(entry, dict):
+        raise _asset_manifest_error(f"Asset manifest is incomplete: missing bundle {bundle_name}")
+    return entry
+
+
+def _asset_bundle(logical_name: str) -> list[str]:
+    entry = _asset_bundle_entry(logical_name)
+    bundle_type = str(entry.get("type") or "").strip()
+    mode = _asset_bundle_mode()
+    if bundle_type not in {"css", "js"}:
+        raise _asset_manifest_error(f"Unsupported asset bundle type for {logical_name}: {bundle_type}")
+    if mode == "bundle":
+        built_path = str(entry.get("path") or "").strip()
+        if not built_path:
+            raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no built path")
+        return [built_path]
+
+    sources = entry.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no sources")
+    return [_versioned_asset_url(str(source)) for source in sources]
+
+
 app.jinja_env.globals["static_asset"] = _versioned_asset_url
+app.jinja_env.globals["asset_bundle"] = _asset_bundle
 
 
 def _cleanup_active_run_metadata_on_startup():

@@ -1,20 +1,3 @@
-<link rel="stylesheet" href="{{ static_asset('/static/css/core/fonts.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/core/base.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/shell.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/primitives/components.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/welcome.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/shell-chrome.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/mobile.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/projects.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/atlas.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/atlas-mobile.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/command-registry.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/faq-shortcuts.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/history.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/run-comparison.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/schedules.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/status-monitor.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/watchers.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/workflows.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/features/workspace.css') }}">
-<link rel="stylesheet" href="{{ static_asset('/static/css/mobile-chrome.css') }}">
+{% for href in asset_bundle('app') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}

@@ -36,6 +36,14 @@
 # If unset or invalid, the built-in fallback palette is used.
 # default_theme: darklab_obsidian.yaml
 
+# Frontend asset rendering mode. `bundle` renders content-hashed files from
+# app/static/build/ and fails loudly if the committed build output is missing
+# or incomplete. Set `source` in config.local.yaml for local edit-and-refresh
+# development with ordered source-file tags and version query strings.
+# ASSET_BUNDLE_MODE can also override this setting.
+# Server default if unset: bundle
+# asset_bundle_mode: bundle
+
 # ── History & Retention ───────────────────────────────────────────────────────
 
 # Number of runs shown in the history drawer per session (UI display limit only —

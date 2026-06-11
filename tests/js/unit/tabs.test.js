@@ -1497,6 +1497,7 @@ describe('tabs helpers', () => {
 
   it('exportTabPdf shows a toast when jsPDF is not loaded', () => {
     delete window.jspdf
+    delete window.ExportPdfUtils
     const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
     const id = createTab('tab 1')
     _getTabs()[0].rawLines.push({ text: 'hello', cls: '', tsC: '', tsE: '' })
@@ -1519,12 +1520,12 @@ describe('tabs helpers', () => {
       }),
     }
     window.ExportPdfUtils = {
+      loadJsPdf: vi.fn(() => Promise.resolve(vi.fn())),
       buildTerminalExportPdf: vi.fn((args) => {
         captured.rawLines = args.rawLines
         return Promise.resolve({ save: vi.fn() })
       }),
     }
-    window.jspdf = { jsPDF: vi.fn() }
     const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
     const id = createTab('intel ip 8.8.8.8')
     _getTabs()[0].rawLines.push(
@@ -1541,7 +1542,6 @@ describe('tabs helpers', () => {
     ])
     delete window.ExportHtmlUtils
     delete window.ExportPdfUtils
-    delete window.jspdf
   })
 
   it('permalinkTab applies configured redaction rules before creating a snapshot', async () => {

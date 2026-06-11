@@ -4,9 +4,8 @@
 //
 // Server-rendered data is provided via window.PermData, set by the inline
 // <script> block in the template before this module loads.
-// Shared helpers come from ExportHtmlUtils (export_html.js), ExportPdfUtils
-// (export_pdf.js), copyTextToClipboard and showToast (utils.js) — all loaded
-// in permalink_base.html before this file.
+// Shared helpers come from ExportHtmlUtils (export_html.js), copyTextToClipboard,
+// showToast (utils.js), and the lazy PDF loader loaded before this file.
 (function () {
   var pd = window.PermData || {};
   var transcriptModel = pd.transcript || {};
@@ -261,8 +260,22 @@
   }
 
   async function savePdf() {
-    if (!window.jspdf) { alert('PDF library not loaded'); return; }
-    var jsPDF = window.jspdf.jsPDF;
+    var existingPdfUtils = (typeof ExportPdfUtils !== 'undefined' && ExportPdfUtils) || window.ExportPdfUtils;
+    if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
+      alert('PDF library not loaded');
+      return;
+    }
+    var pdfUtils;
+    var jsPDF;
+    try {
+      pdfUtils = existingPdfUtils || await window.loadExportPdfUtils();
+      jsPDF = typeof window.loadJsPdf === 'function'
+        ? await window.loadJsPdf()
+        : await pdfUtils.loadJsPdf();
+    } catch (_) {
+      alert('PDF library not loaded');
+      return;
+    }
     var exportModel = ExportHtmlUtils.buildExportDocumentModel({
       appName: appName,
       title: label,
@@ -275,7 +288,7 @@
     });
     var ansiUpPdf = new AnsiUp();
     ansiUpPdf.use_classes = false;
-    var doc = await ExportPdfUtils.buildTerminalExportPdf({
+    var doc = await pdfUtils.buildTerminalExportPdf({
       jsPDF: jsPDF,
       appName: exportModel.appName,
       metaLine: exportModel.metaLine,

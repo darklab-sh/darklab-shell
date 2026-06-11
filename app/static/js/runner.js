@@ -821,7 +821,7 @@ function _streamOutputMetadata(msg) {
   return Object.keys(metadata).length ? metadata : null;
 }
 
-function _runOutputModel() {
+function _runnerRunOutputModel() {
   return typeof DarklabRunOutputModel !== 'undefined' ? DarklabRunOutputModel : null;
 }
 
@@ -847,7 +847,7 @@ function _warnRunStreamSchema(streamState, family, value) {
 
 function _handleRunStreamSchema(msg, streamState) {
   if (!msg || typeof msg !== 'object') return;
-  const model = _runOutputModel();
+  const model = _runnerRunOutputModel();
   const supported = model ? Number(model.LINE_EVENT_SCHEMA_VERSION || 1) : 1;
   const version = Number(msg.v || 0);
   if (version > supported) _warnRunStreamSchema(streamState, 'version', msg.v);
@@ -856,7 +856,7 @@ function _handleRunStreamSchema(msg, streamState) {
 
 function _typedRunStreamLineMessage(msg, streamState) {
   if (!msg || typeof msg !== 'object') return msg;
-  const model = _runOutputModel();
+  const model = _runnerRunOutputModel();
   if (!model || typeof model.fromWireLineEvent !== 'function') return msg;
   const hasTypedFields = msg.v !== undefined || msg.kind !== undefined || msg.role !== undefined || msg.signals !== undefined;
   if (!hasTypedFields) return msg;

@@ -790,6 +790,15 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── __init__.py     # Workspace service package marker
 │   │       └── files.py        # App-mediated personal/team workspace path, quota, and cleanup helpers
 │   ├── static/
+│   │   ├── build/             # Committed generated CSS/JS bundles and manifest; regenerate with npm run assets:sync
+│   │   │   ├── app.<hash>.css # Generated shared app CSS bundle
+│   │   │   ├── diag.<hash>.css # Generated diagnostics CSS bundle
+│   │   │   ├── manifest.json  # Generated asset bundle manifest read by Flask
+│   │   │   ├── permalink.<hash>.js # Generated self-contained permalink JS bundle
+│   │   │   ├── shell-bootstrap.<hash>.js # Generated shell bootstrap JS bundle
+│   │   │   ├── shell-core.<hash>.js # Generated shell core JS bundle
+│   │   │   ├── shell-features.<hash>.js # Generated shell feature JS bundle
+│   │   │   └── terminal-export.<hash>.css # Generated permalink/export CSS bundle
 │   │   ├── css/
 │   │   │   ├── core/
 │   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
@@ -829,6 +838,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── config.js   # APP_CONFIG bootstrap reader
 │   │       │   ├── dom.js      # Shared DOM element references
 │   │       │   ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
+│   │       │   ├── lazy_assets.js # Small loader for rarely-used classic scripts
 │   │       │   ├── output_core.js # Pure output prompt/signal helpers shared by output.js and unit harnesses
 │   │       │   ├── run_output_model.js # Browser-side typed run-output line-event schema and legacy compatibility helpers
 │   │       │   ├── runner_core.js # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
@@ -838,22 +848,23 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
 │   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
-│   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
+│   │       ├── export_pdf.js   # Lazy-loaded shared PDF export module
 │   │       ├── features/
 │   │       │   ├── atlas/
-│   │       │   │   ├── atlas_entity_detail.js # Session Entity Atlas entity detail rendering helpers
-│   │       │   │   ├── atlas_entity_row.js # Shared Atlas entity rows used by Atlas and Projects
-│   │       │   │   ├── atlas_mobile.js # Mobile Session Entity Atlas list/detail, filters, and action-sheet controller
-│   │       │   │   ├── atlas_overlay.js # Session Entity Atlas overlay controller and route wiring
+│   │       │   │   ├── atlas_entity_detail.js # Lazy-loaded Session Entity Atlas entity detail rendering helpers
+│   │       │   │   ├── atlas_entity_row.js # Lazy-loaded shared Atlas entity rows used by Atlas and Projects
+│   │       │   │   ├── atlas_mobile.js # Lazy-loaded mobile Session Entity Atlas list/detail, filters, and action-sheet controller
+│   │       │   │   ├── atlas_overlay.js # Lazy-loaded Session Entity Atlas overlay controller and route wiring
 │   │       │   │   └── atlas_tabs.js # Session Entity Atlas tab metadata and count helpers
 │   │       │   ├── autocomplete/
 │   │       │   │   ├── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
 │   │       │   │   └── suggestions.js # Command autocomplete suggestion resolution, recent values, and value-slot application
 │   │       │   ├── command-registry/
-│   │       │   │   └── command_registry.js # FAQ command helpers plus Command Registry and Command Catalog modal logic
+│   │       │   │   ├── command_registry.js # Lazy-loaded Command Registry and Command Catalog modal logic
+│   │       │   │   └── faq_helpers.js # FAQ command chips, allowed-command summary, and limits rendering
 │   │       │   ├── findings/
 │   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
-│   │       │   │   └── findings_board_modal.js # Top-level Findings Board modal and drag/drop review updates
+│   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
 │   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
 │   │       │   │   ├── history_links.js # History run permalink and snapshot link helpers
@@ -862,7 +873,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── history_recall.js # Command recall history and prompt navigation helpers
 │   │       │   │   ├── history_restore.js # Restoring saved runs into terminal tabs and source-line highlighting
 │   │       │   │   ├── history_rows.js # History drawer run/snapshot rows, metadata badges, and row action menus
-│   │       │   │   ├── history_run_details.js # Run Details modal rendering, tabs, loading, and actions
+│   │       │   │   ├── history_run_details.js # Lazy-loaded Run Details modal rendering, tabs, loading, and actions
 │   │       │   │   └── history_search.js # Ctrl+R reverse-history search dropdown and keyboard handling
 │   │       │   ├── mobile/
 │   │       │   │   ├── mobile_menu_actions.js # Mobile hamburger menu action dispatch
@@ -876,8 +887,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   └── teams_panel.js # Options modal team creation, members, invites, recovery, and scope actions
 │   │       │   ├── projects/
 │   │       │   │   ├── project_active_context.js # Active Project HUD context, refresh, and target discovery helpers
-│   │       │   │   ├── project_activity.js # Project Activity tab filters, paging, rows, and safe audit details
-│   │       │   │   ├── project_artifacts.js # Project Artifacts rows, status badges, preview, and download helpers
+│   │       │   │   ├── project_activity.js # Lazy-loaded Project Activity tab filters, paging, rows, and safe audit details
+│   │       │   │   ├── project_artifacts.js # Lazy-loaded Project Artifacts rows, status badges, preview, and download helpers
 │   │       │   │   ├── project_details.js # Project Details labels, notes autosave, and target section rendering
 │   │       │   │   ├── project_entities.js # Project Entities rows, rules, picker, export, and Atlas handoff helpers
 │   │       │   │   ├── project_entity_editor.js # Project metadata editor lifecycle and save flow
@@ -891,8 +902,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_mobile_shell.js # Project mobile view state, create form, and project list composition
 │   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
 │   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
-│   │       │   │   ├── project_packages.js # Evidence package rows, manifest preview, wizard, and download helpers
-│   │       │   │   ├── project_report.js # Project Report tab editor, preview, export, and print/PDF helpers
+│   │       │   │   ├── project_packages.js # Lazy-loaded evidence package rows, manifest preview, wizard, and download helpers
+│   │       │   │   ├── project_report.js # Lazy-loaded Project Report tab editor, preview, export, and print/PDF helpers
 │   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
 │   │       │   │   ├── project_shared_ui.js # Shared Project formatting, metadata chips, rows, and button helpers
 │   │       │   │   ├── project_target_validation.js # Project target editor copy and value validation helpers
@@ -917,14 +928,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── runner_persistence.js # Client-side saved-run persistence for local runner commands
 │   │       │   │   └── runner_workspace.js # Workspace-terminal command parsing and path helpers
 │   │       │   ├── schedules/
-│   │       │   │   └── schedules_modal.js # Schedules modal state, cadence preview, schedule actions, and run handoffs
+│   │       │   │   └── schedules_modal.js # Lazy-loaded Schedules modal state, cadence preview, schedule actions, and run handoffs
 │   │       │   ├── shortcuts/
 │   │       │   │   ├── global_shortcuts.js # Global tab/action/chrome shortcut matching and dispatch
 │   │       │   │   └── shortcuts_key_handler.js # Global ? keyboard shortcut for the shortcuts overlay
 │   │       │   ├── status-monitor/
-│   │       │   │   ├── status_monitor_core.js # Pure Status Monitor formatting, date, hashing, and telemetry helpers
-│   │       │   │   ├── status_monitor_data.js # Status Monitor endpoint loading and dashboard data aggregation
-│   │       │   │   └── status_monitor_resources.js # Status Monitor CPU/memory resource sampling and sparkline helpers
+│   │       │   │   ├── status_monitor_core.js # Lazy-loaded Status Monitor formatting, date, hashing, and telemetry helpers
+│   │       │   │   ├── status_monitor_data.js # Lazy-loaded Status Monitor endpoint loading and dashboard data aggregation
+│   │       │   │   └── status_monitor_resources.js # Lazy-loaded Status Monitor CPU/memory resource sampling and sparkline helpers
 │   │       │   ├── tabs/
 │   │       │   │   ├── tab_close_lifecycle.js # Tab close, detach, kill-confirmation, and deferred-removal helpers
 │   │       │   │   ├── tab_drag_reorder.js # Tab pointer/touch drag reordering behavior
@@ -941,7 +952,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── tour/
 │   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
 │   │       │   ├── watchers/
-│   │       │   │   └── watchers_modal.js # Watchers modal state, diff summary, cadence preview, fire audit, and run handoffs
+│   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
 │   │       │   │   └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
 │   │       │   └── workspace/
@@ -952,14 +963,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── mobile_chrome.js # Mobile shell chrome — peek/menu routing, viewport mode, pull-to-refresh suppression
 │   │       ├── output.js       # ANSI rendering and line management
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
-│   │       ├── pty.js          # Browser-side interactive PTY controller backed by xterm.js
+│   │       ├── pty.js          # Lazy-loaded interactive PTY controller backed by xterm.js
 │   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
 │   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
 │   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller (loads last)
-│   │       ├── status_monitor.js  # Status Monitor modal/sheet controller
+│   │       ├── status_monitor.js  # Lazy-loaded Status Monitor modal/sheet controller
 │   │       ├── tabs.js         # Tab lifecycle management
-│   │       ├── tour_modal.js   # Desktop visual onboarding tour carousel
+│   │       ├── tour_modal.js   # Lazy-loaded desktop visual onboarding tour carousel
 │   │       ├── ui/
 │   │       │   ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
 │   │       │   ├── ui_action_sheet.js # Shared mobile action-sheet primitive for contextual row/detail actions
@@ -972,7 +983,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── ui_outside_click.js # Ambient outside-click dismissal helper
 │   │       │   ├── ui_pressable.js # Unified pointer/click/keyboard activation contract
 │   │       │   └── ui_tab_strip_edges.js # Shared horizontal tab-strip overflow edge indicators
-│   │       ├── vendor/         # Committed browser builds — generated by scripts/build_vendor.mjs
+│   │       ├── vendor/         # Committed browser vendor builds — generated by scripts/build_vendor.mjs
 │   │       │                   #   from npm packages in package.json; regenerate with npm run vendor:sync
 │   │       │   ├── ansi_up.js          # ANSI-to-HTML (ansi_up v6, ESM-only — wrapped as IIFE browser global)
 │   │       │   ├── jspdf.umd.min.js    # PDF generation (jsPDF UMD build, copied as-is from npm)
@@ -982,7 +993,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
 │   │       └── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
 │   └── templates/
-│       ├── app_stylesheets.html # Shared direct CSS link list for shell, permalink, and diagnostics pages
+│       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
 │       ├── diag_audit.html     # Operator audit-log viewer and export links (IP-gated)
 │       ├── index.html          # Frontend HTML shell rendered by Flask
@@ -991,6 +1002,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       ├── permalink_error.html # Missing/expired permalink template
 │       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
 │       └── theme_vars_style.html # Injected CSS variable block for the active theme
+├── assets.config.json         # Frontend asset bundle membership/order for scripts/build_assets.mjs
 ├── assets/                     # README media assets (demo videos)
 ├── data/                       # Writable volume — SQLite database, artifacts, body-store files, and secret key file
 │   └── history.db              #   stores run history and tab snapshots
@@ -1021,6 +1033,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
 ├── scripts/
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
+│   ├── build_assets.mjs       # Generates committed frontend bundles in app/static/build/ (run via npm run assets:sync)
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper

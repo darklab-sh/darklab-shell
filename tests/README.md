@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,666
-- docs/inventory meta-tests: 34
-- `pytest`: 2069 (2035 behavior + 34 meta)
-- `vitest`: 1368
+- behavior tests: 3,678
+- docs/inventory meta-tests: 35
+- `pytest`: 2075 (2040 behavior + 35 meta)
+- `vitest`: 1375
 - `playwright`: 263
-- total: 3,700
+- total: 3,713
 
 This document is organized in two parts:
 
@@ -120,7 +120,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
@@ -1096,6 +1096,7 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestDocumentedCombinedTotals.test_tests_readme` | Checks that the combined total recorded in tests/README.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestDocumentedCombinedTotals.test_contributing` | Checks that the combined total recorded in CONTRIBUTING.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestProjectStructureCoverage.test_asset_manifest_source_hashes_match_current_sources` | Checks that the committed asset manifest's source hashes match the current CSS and JavaScript source files, catching stale bundles before runtime. |
 | `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
 | `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
@@ -1494,6 +1495,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
+| `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
+| `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
 | `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
 | `TestHealthRoute.test_returns_200_when_db_ok` | Returns 200 when database ok. |
@@ -1646,12 +1649,14 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
+| `TestVendorAssets.test_built_css_bundle_is_served_with_immutable_cache_header` | Verifies generated CSS bundles are served with the immutable static-asset cache header. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
 | `TestDiagRoute.test_returns_404_when_cidrs_not_set` | Returns 404 when cidrs not set. |
 | `TestDiagRoute.test_returns_404_when_client_ip_not_in_cidrs` | Returns 404 when client IP not in cidrs. |
 | `TestDiagRoute.test_returns_200_when_client_ip_in_cidrs` | Returns 200 when client IP in cidrs. |
+| `TestDiagRoute.test_bundle_mode_renders_diag_css_bundles` | Verifies diagnostics pages render generated shared and page-specific CSS bundles in bundle mode. |
 | `TestDiagRoute.test_response_has_expected_top_level_keys` | Checks that response has expected top level keys. |
 | `TestDiagRoute.test_app_section_has_version_and_name` | Checks that app section has version and name. |
 | `TestDiagRoute.test_config_section_contains_operational_keys` | Checks that config section contains operational keys. |
@@ -1890,6 +1895,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestShareRoute.test_get_share_json_returns_content` | Checks that get share JSON returns content. |
 | `TestShareRoute.test_get_share_html_returns_page` | Checks that get share HTML returns page. |
 | `TestShareRoute.test_get_share_html_honors_theme_name_cookie` | Checks that get share HTML honors theme name cookie. |
+| `TestShareRoute.test_get_share_html_bundle_mode_renders_per_page_asset_bundles` | Verifies permalink pages render generated shared CSS and permalink JavaScript bundles in bundle mode. |
 | `TestShareRoute.test_get_share_html_contains_label` | Checks that get share HTML contains label. |
 | `TestShareRoute.test_get_share_html_does_not_prepend_label_for_structured_snapshot_content` | Checks that get share HTML does not prepend label for structured snapshot content. |
 | `TestShareRoute.test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content` | Checks that get share HTML includes prompt echo renderer for snapshot content. |
@@ -2726,6 +2732,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reads APP_CONFIG from the server-rendered bootstrap JSON` | Verifies that `config.js` initializes `APP_CONFIG` from the inline JSON emitted by the Flask index route. |
 | `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
 | `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
+| `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
+| `lazy-loads the project workspace controller cluster in order` | Verifies that the Projects workspace controllers load in manifest order only when the workspace opens. |
+| `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
+| `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens. |
+| `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens. |
+| `lazy-loads workflow controllers while keeping the catalog cache eager` | Verifies that workflow catalog data can render the rail eagerly while terminal workflow commands lazy-load the heavier workflow controller. |
 
 #### `diag_audit.test.js`
 
@@ -3104,6 +3116,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `preloads xterm assets at boot when interactive PTY is enabled` | Verifies that enabled interactive PTY mode schedules xterm asset preloading during browser startup. |
 | `does not schedule xterm preloading when interactive PTY is disabled` | Verifies that disabled interactive PTY mode leaves xterm assets unloaded until the feature is enabled. |
 | `replaces failed xterm script tags before retrying vendor asset loads` | Verifies that failed xterm vendor script tags are removed before a retry attaches to a fresh script load. |
+| `loads xterm assets from the shared lazy asset manifest when available` | Verifies that interactive PTY lazy-loads xterm assets through manifest-provided cache-busted URLs. |
 | `detects mobile terminal mode as unsupported for interactive PTY shells` | Verifies that mobile terminal mode blocks interactive PTY shell startup before opening xterm or starting a backend run. |
 | `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
 | `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |

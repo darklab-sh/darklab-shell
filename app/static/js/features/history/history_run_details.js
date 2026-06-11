@@ -1822,7 +1822,11 @@ async function _exportHistoryRunHtml() {
 }
 
 async function _exportHistoryRunPdf() {
-  if (!window.jspdf || !window.ExportPdfUtils) throw new Error('PDF library not loaded');
+  const existingPdfUtils = (typeof ExportPdfUtils !== 'undefined' && ExportPdfUtils) || window.ExportPdfUtils;
+  if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
+    throw new Error('PDF library not loaded');
+  }
+  const pdfUtils = existingPdfUtils || await window.loadExportPdfUtils();
   const run = await _historyRunLoadExportRun();
   const exportModel = _historyRunBuildExportModel(run);
   if (!exportModel.rawLines.length) {
@@ -1830,8 +1834,11 @@ async function _exportHistoryRunPdf() {
     return;
   }
   const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
-  const doc = await ExportPdfUtils.buildTerminalExportPdf({
-    jsPDF: window.jspdf.jsPDF,
+  const jsPDF = typeof window.loadJsPdf === 'function'
+    ? await window.loadJsPdf()
+    : await pdfUtils.loadJsPdf();
+  const doc = await pdfUtils.buildTerminalExportPdf({
+    jsPDF,
     appName: exportModel.appName,
     metaLine: exportModel.metaLine,
     runMeta: exportModel.runMeta,

@@ -12,7 +12,7 @@
     "test:e2e:ui": "bash scripts/run_playwright.sh --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
-    "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
+    "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check && npm run assets:check",
     "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ && bandit -r app/ -ll -q",
     "lint:js": "npx eslint --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/**/*.js",
     "lint:css": "stylelint \"app/static/css/**/*.css\" --config .tooling/stylelint.config.mjs",
@@ -25,7 +25,9 @@
     "audit:py": "pip-audit -r app/requirements.txt",
     "audit:js": "npm audit --audit-level=high",
     "vendor:sync": "node scripts/build_vendor.mjs",
-    "vendor:check": "tmp=$(mktemp -d) && node scripts/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/"
+    "vendor:check": "tmp=$(mktemp -d) && node scripts/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/",
+    "assets:sync": "node scripts/build_assets.mjs",
+    "assets:check": "tmp=$(mktemp -d) && node scripts/build_assets.mjs --out-dir \"$tmp\" --check"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

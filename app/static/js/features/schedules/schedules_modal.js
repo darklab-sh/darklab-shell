@@ -1101,6 +1101,8 @@ async function _newSchedule(command = '') {
 function _bindSchedulesModal() {
   const { overlay, newBtn, refreshBtn } = _scheduleEls();
   if (!overlay) return;
+  if (overlay.dataset.schedulesModalBound === '1') return;
+  overlay.dataset.schedulesModalBound = '1';
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
       closeSchedulesModal();
@@ -1144,7 +1146,8 @@ function _bindSchedulesModal() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', _bindSchedulesModal);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _bindSchedulesModal);
+else _bindSchedulesModal();
 
 window.openSchedulesModal = openSchedulesModal;
 window.closeSchedulesModal = closeSchedulesModal;

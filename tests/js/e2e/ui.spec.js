@@ -771,15 +771,25 @@ test.describe('project workspace modal', () => {
     expect(projectId).toBeTruthy()
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
-    const linkResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'POST'
-        && url.pathname === `/projects/${projectId}/links`
-    })
-    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
-    expect((await linkResponse).ok()).toBe(true)
+    const [linkResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return response.request().method() === 'POST'
+          && url.pathname === `/projects/${projectId}/links`
+      }),
+      page.locator('#confirm-host [data-confirm-action-id="add"]').click(),
+    ])
+    expect(linkResponse.ok()).toBe(true)
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     const runRow = page.locator('.project-explorer-item').filter({ hasText: seededRun.command }).first()
+    await expect.poll(async () => page.evaluate(async ({ id, command }) => {
+      const params = new URLSearchParams({ page_size: '25' })
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/runs?${params.toString()}`, { cache: 'no-store' })
+      if (!resp.ok) return false
+      const data = await resp.json()
+      const runs = Array.isArray(data.runs) ? data.runs : []
+      return runs.some(run => String(run && run.command || '') === command)
+    }, { id: projectId, command: seededRun.command })).toBe(true)
     await expect(runRow).toBeVisible()
     return { runRow, command: seededRun.command }
   }
@@ -1325,19 +1335,20 @@ test.describe('project workspace modal', () => {
     }
 
     await expect(artifactFilter).toBeVisible({ timeout: 20_000 })
+    await expect(artifactsGroup.locator('.project-report-selection-row')).toHaveCount(50, { timeout: 15_000 })
+    await expect(nextArtifacts).toBeEnabled()
     const filteredArtifactsResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
-      return response.request().method() === 'GET'
+      return response.ok()
         && url.pathname === `/projects/${projectId}/artifacts`
-        && url.searchParams.get('q') === fixture.artifactFilterQuery
         && url.searchParams.get('offset') === '0'
+        && url.searchParams.get('q') === fixture.artifactFilterQuery
     })
     await artifactFilter.fill(fixture.artifactFilterQuery)
-    expect((await filteredArtifactsResponse).ok()).toBe(true)
+    await filteredArtifactsResponse
     await expect(artifactFilter).toHaveValue(fixture.artifactFilterQuery)
     await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
     await expect(artifactsGroup).toContainText('large-evidence-059.txt')
-    await page.waitForTimeout(250)
 
     await clickAndKeepScroll(noArtifacts)
     await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('0 selected')

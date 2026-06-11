@@ -85,6 +85,14 @@ function _interactivePtyMobileUnsupported() {
   );
 }
 
+function _ptyLazyAssetUrl(name, fallback) {
+  if (typeof window !== 'undefined' && typeof window.lazyAssetUrl === 'function') {
+    const configured = window.lazyAssetUrl(name);
+    if (configured) return configured;
+  }
+  return fallback;
+}
+
 function _loadPtyStylesheetOnce(href) {
   const selector = `link[rel="stylesheet"][href="${href}"]`;
   const existing = document.querySelector(selector);
@@ -146,9 +154,12 @@ function _loadPtyScriptOnce(src, globalReady) {
 
 function _ensureXtermAssets() {
   if (!_xtermAssetsPromise) {
-    _xtermAssetsPromise = _loadPtyStylesheetOnce('/vendor/xterm.css')
-      .then(() => _loadPtyScriptOnce('/vendor/xterm.js', () => typeof globalThis.Terminal === 'function'))
-      .then(() => _loadPtyScriptOnce('/vendor/xterm-addon-fit.js', () => (
+    const xtermCssUrl = _ptyLazyAssetUrl('xterm_css', '/vendor/xterm.css');
+    const xtermJsUrl = _ptyLazyAssetUrl('xterm_js', '/vendor/xterm.js');
+    const xtermFitJsUrl = _ptyLazyAssetUrl('xterm_fit_js', '/vendor/xterm-addon-fit.js');
+    _xtermAssetsPromise = _loadPtyStylesheetOnce(xtermCssUrl)
+      .then(() => _loadPtyScriptOnce(xtermJsUrl, () => typeof globalThis.Terminal === 'function'))
+      .then(() => _loadPtyScriptOnce(xtermFitJsUrl, () => (
         globalThis.FitAddon && typeof globalThis.FitAddon.FitAddon === 'function'
       )))
       .then(() => {

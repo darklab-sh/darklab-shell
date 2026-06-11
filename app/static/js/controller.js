@@ -22,14 +22,22 @@ function openWorkflows() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkflowsOverlay();
-  if (typeof ensureWorkflowCatalogLoaded === 'function') {
-    ensureWorkflowCatalogLoaded().catch(err => {
+  const workflowsReady = typeof loadWorkflows === 'function'
+    ? loadWorkflows()
+    : Promise.resolve();
+  workflowsReady.then(() => {
+    if (typeof ensureWorkflowCatalogLoaded !== 'function') return null;
+    return ensureWorkflowCatalogLoaded().catch(err => {
       logClientError('failed to load /workflows while opening modal', err);
+      return null;
     });
-  }
-  if (typeof markInteractionSurfaceReady === 'function') {
-    markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
-  }
+  }).catch(err => {
+    logClientError('failed to load workflows controller', err);
+  }).finally(() => {
+    if (typeof markInteractionSurfaceReady === 'function') {
+      markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
+    }
+  });
 }
 
 function closeWorkflows() {
@@ -37,6 +45,26 @@ function closeWorkflows() {
   if (typeof emitUiEvent === 'function') emitUiEvent('app:workflows-closed', {});
   refocusComposerAfterAction({ defer: true });
 }
+
+function openWorkflowEditorFromButton() {
+  if (typeof openWorkflowEditor === 'function') {
+    openWorkflowEditor();
+  } else if (typeof loadWorkflows === 'function') {
+    loadWorkflows()
+      .then(() => {
+        if (typeof openWorkflowEditor === 'function') openWorkflowEditor();
+      })
+      .catch(err => {
+        logClientError('failed to load workflow editor', err);
+      });
+  }
+}
+
+document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(btn => {
+  if (btn.dataset.workflowEditorOpenBound === '1') return;
+  btn.dataset.workflowEditorOpenBound = '1';
+  btn.addEventListener('click', openWorkflowEditorFromButton);
+});
 
 function openFaq() {
   _closeMajorOverlays();
@@ -462,14 +490,19 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   logClientError('failed to load /allowed-commands', err);
 });
 
+function setCommandRegistryData(data) {
+  globalThis.commandRegistryData = data;
+  if (typeof window !== 'undefined') window.commandRegistryData = data;
+}
+
 apiFetch('/commands/catalog').then(r => r.json()).then(data => {
-  commandRegistryData = data;
+  setCommandRegistryData(data);
   if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
     renderCommandRegistry();
   }
 }).catch(err => {
   logClientError('failed to load /commands/catalog', err);
-  commandRegistryData = { restricted: false, commands: [], groups: [] };
+  setCommandRegistryData({ restricted: false, commands: [], groups: [] });
 });
 
 apiFetch('/faq').then(r => r.json()).then(data => {
@@ -484,12 +517,10 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
   logClientError('failed to load /shortcuts', err);
 });
 
-const workflowsLoad = typeof reloadWorkflowCatalog === 'function'
-  ? reloadWorkflowCatalog()
-  : apiFetch('/workflows').then(r => r.json()).then(data => {
-      const items = data.items || [];
-      renderWorkflowItems(items);
-    });
+const workflowsLoad = apiFetch('/workflows').then(r => r.json()).then(data => {
+  const items = data.items || [];
+  if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
+});
 workflowsLoad.catch(err => {
   logClientError('failed to load /workflows', err);
 });
