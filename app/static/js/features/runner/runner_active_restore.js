@@ -65,3 +65,12 @@ function _pruneDetachedActiveRunRestoreIds(activeRunIds) {
   });
   if (changed) _writeDetachedActiveRunIds(detached);
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    markActiveRunDetachedForRestore,
+    clearActiveRunDetachedForRestore,
+    _isActiveRunDetachedForRestore,
+    _pruneDetachedActiveRunRestoreIds,
+  });
+}

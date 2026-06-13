@@ -583,6 +583,7 @@ export async function loadAppFns({
       'app/static/js/core/output_core.js',
       'app/static/js/output.js',
       'app/static/js/core/app_preferences_core.js',
+      'app/static/js/core/state.js',
       'app/static/js/features/team_scope.js',
       'app/static/js/app.js',
       'app/static/js/features/mobile/mobile_shell_layout.js',
@@ -591,6 +592,7 @@ export async function loadAppFns({
       'app/static/js/features/preferences/secrets_panel.js',
       'app/static/js/features/preferences/teams_panel.js',
       'app/static/js/features/preferences/session_token_controls.js',
+      'app/static/js/ui/ui_helpers.js',
       'app/static/js/features/command-registry/faq_helpers.js',
       'app/static/js/features/command-registry/command_registry.js',
       'app/static/js/features/theme/theme.js',
@@ -830,6 +832,7 @@ export async function loadAppFns({
     syncShellPrompt,
     _getAcIndex: () => acIndex,
     _getWelcomeBootPending: () => _welcomeBootPending,
+    _getTabSessionRestoreInProgress: () => _tabSessionRestoreInProgress,
   }`,
     `setTabs(tabs); setActiveTabId(activeTabId);
      if (typeof bindMobileSheet === 'function') window.bindMobileSheet = bindMobileSheet;`,

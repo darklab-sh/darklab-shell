@@ -4,6 +4,33 @@ let _tabSeq = 0;
 const _RUNNING_LABEL_DELAY_MS = 500;
 const _OUTPUT_USER_SCROLL_GRACE_MS = 800;
 
+function _tabWelcomeApi(name) {
+  return (typeof window !== 'undefined' && window[name])
+    || (typeof globalThis !== 'undefined' && globalThis[name])
+    || (name === 'welcomeOwnsTab' && typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null)
+    || (name === 'cancelWelcome' && typeof cancelWelcome !== 'undefined' ? cancelWelcome : null);
+}
+
+function _tabWelcomeActive() {
+  return !!((typeof _welcomeActive !== 'undefined' && _welcomeActive)
+    || (typeof window !== 'undefined' && typeof window.welcomeOwnsTab === 'function' && window._welcomeActive));
+}
+
+function _tabWelcomeBootPending() {
+  return !!((typeof _welcomeBootPending !== 'undefined' && _welcomeBootPending)
+    || (typeof window !== 'undefined' && typeof window.welcomeOwnsTab === 'function' && window._welcomeBootPending));
+}
+
+function _tabWelcomeOwns(tabId) {
+  const owns = _tabWelcomeApi('welcomeOwnsTab');
+  return typeof owns === 'function' && owns(tabId);
+}
+
+function _tabCancelWelcome(tabId) {
+  const cancel = _tabWelcomeApi('cancelWelcome');
+  if (typeof cancel === 'function') cancel(tabId);
+}
+
 function _getTabEl(id) {
   return tabsBar ? tabsBar.querySelector(`.tab[data-id="${id}"]`) : null;
 }
@@ -278,7 +305,7 @@ function mountShellPrompt(tabId, force = false) {
     unmountShellPrompt();
     return;
   }
-  if (!force && !mobileMode && _welcomeBootPending) {
+  if (!force && !mobileMode && _tabWelcomeBootPending()) {
     unmountShellPrompt();
     return;
   }
@@ -296,7 +323,7 @@ function mountShellPrompt(tabId, force = false) {
     unmountShellPrompt();
     return;
   }
-  if (!force && _welcomeActive && welcomeOwnsTab(tabId)) {
+  if (!force && _tabWelcomeActive() && _tabWelcomeOwns(tabId)) {
     unmountShellPrompt();
     return;
   }
@@ -453,8 +480,8 @@ function _createTabPanel(id) {
     const out = getOutput(id);
     if (!tab || !out) return;
     tab.followOutput = true;
-    if (typeof _stickOutputToBottom === 'function') {
-      _stickOutputToBottom(out, tab);
+    if (typeof window._stickOutputToBottom === 'function') {
+      window._stickOutputToBottom(out, tab);
     } else {
       out.scrollTop = out.scrollHeight;
     }
@@ -515,7 +542,7 @@ function createTab(label) {
 
   const { tab, labelEl } = _createTabHeader(id, stableLabel);
   tab.addEventListener('click', e => {
-    if (Date.now() < _tabDragSuppressClickUntil) return;
+    if (Date.now() < Number(window._tabDragSuppressClickUntil || 0)) return;
     if (e.target.classList.contains('tab-close')) {
       closeTab(id);
       blurActiveElement();
@@ -589,7 +616,7 @@ function createTab(label) {
           blurVisibleComposerInputIfMobile();
         }
         if (action === 'kill')      confirmKill(id);
-        if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
+        if (action === 'clear')     { _tabCancelWelcome(id); clearTab(id, { preserveRunState: true }); }
         if (action === 'copy')      copyTab(id);
         if (action === 'permalink') permalinkTab(id);
         if (action === 'save-menu') {
@@ -662,7 +689,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   }
   // Flush the current composer value into the leaving tab's draftInput before switching.
   const prevId = activeTabId;
-  if (!_tabSessionRestoreInProgress && prevId && prevId !== id) {
+  if (!window._tabSessionRestoreInProgress && prevId && prevId !== id) {
     const prevTab = getTab(prevId);
     if (prevTab && prevTab.st === 'running') {
       prevTab.draftInput = '';
@@ -678,10 +705,10 @@ function activateTab(id, { focusComposer = true } = {}) {
   setStatus(t ? (t.st || 'idle') : 'idle');
   if (t && t.followOutput !== false) {
     const out = getOutput(id);
-    if (out && typeof _restoreOutputTailAfterLayout === 'function') {
-      _restoreOutputTailAfterLayout(out, t);
-    } else if (out && typeof _stickOutputToBottom === 'function') {
-      _stickOutputToBottom(out, t);
+    if (out && typeof window._restoreOutputTailAfterLayout === 'function') {
+      window._restoreOutputTailAfterLayout(out, t);
+    } else if (out && typeof window._stickOutputToBottom === 'function') {
+      window._stickOutputToBottom(out, t);
     }
   }
   ensureActiveTabVisible(id);
@@ -778,7 +805,7 @@ function getOutput(id) {
 }
 
 function clearTab(id, { preserveRunState = false } = {}) {
-  if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
+  if (typeof window._cancelPendingOutputBatch === 'function') window._cancelPendingOutputBatch(id);
   if (typeof resetAnsiRendererForTab === 'function') resetAnsiRendererForTab(id);
   const out = getOutput(id);
   if (out) {
@@ -794,7 +821,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     t.deferPromptMount = false;
     t.rawLines = [];
     t.commandOutcomeSummary = null;
-    if (typeof _resetTabOutputSignalCounts === 'function') _resetTabOutputSignalCounts(t);
+    if (typeof window._resetTabOutputSignalCounts === 'function') window._resetTabOutputSignalCounts(t);
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
@@ -896,3 +923,59 @@ document.addEventListener('app:scope-changed', () => {
 document.addEventListener('app:scope-capabilities-changed', () => {
   refreshShareSnapshotActions();
 });
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _tabWelcomeApi,
+    _tabWelcomeActive,
+    _tabWelcomeBootPending,
+    _tabWelcomeOwns,
+    _tabCancelWelcome,
+    _getTabEl,
+    _getTabPanelEl,
+    _getTabStatusEl,
+    _getTabLabelEl,
+    _nextDefaultTabNumber,
+    createDefaultTabLabel,
+    _truncateTabLabel,
+    _tabDisplayLabel,
+    _renderTabLabel,
+    _clearTabRunningLabelTimer,
+    _getTabOutputEl,
+    _markOutputUserScrollIntent,
+    _getNeighborTabIdAfterClose,
+    updateTabScrollButtons,
+    _readTabbarChromePref,
+    _tabsIntrinsicWidth,
+    _decideTabbarChromeCollapsed,
+    _shouldShowTabbarChromeToggle,
+    _applyTabbarChromeState,
+    updateTabbarChromeFit,
+    _toggleTabbarChrome,
+    ensureActiveTabVisible,
+    scrollTabsBar,
+    setupTabScrollControls,
+    syncTabOrderFromDom,
+    unmountShellPrompt,
+    mountShellPrompt,
+    updateNewTabBtn,
+    _createTabHeader,
+    _createTabActionButton,
+    _canCreateTabShareSnapshot,
+    _tabShareSnapshotDeniedTitle,
+    _updateTabShareSnapshotActionButton,
+    refreshShareSnapshotActions,
+    _getOutputFollowButton,
+    _isOutputAtTail,
+    updateOutputFollowButton,
+    _createTabPanel,
+    createTab,
+    activateTab,
+    setTabStatus,
+    setTabLabel,
+    setTabRunningCommand,
+    getOutput,
+    clearTab,
+    startTabRename,
+  });
+}

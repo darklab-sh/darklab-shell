@@ -8,7 +8,37 @@ const _stalledTimeouts = new Map();
 const _stalledRuns = new Set();
 const _runStreamStateByTabId = new Map();
 const _streamRecoveryTimers = new Map();
-const _runnerCore = typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null;
+function _runnerCore() {
+  return (typeof window !== 'undefined' && window.DarklabRunnerCore)
+    || (typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null);
+}
+function _welcomeApi(name) {
+  return (typeof window !== 'undefined' && window[name])
+    || (typeof globalThis !== 'undefined' && globalThis[name])
+    || (name === 'welcomeOwnsTab' && typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null)
+    || (name === 'cancelWelcome' && typeof cancelWelcome !== 'undefined' ? cancelWelcome : null)
+    || (name === 'requestWelcomeSettle' && typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
+}
+
+function _isWelcomeActive() {
+  return !!((typeof _welcomeActive !== 'undefined' && _welcomeActive)
+    || (typeof window !== 'undefined' && window._welcomeActive));
+}
+
+function _welcomeOwns(tabId) {
+  const owns = _welcomeApi('welcomeOwnsTab');
+  return typeof owns === 'function' && owns(tabId);
+}
+
+function _cancelWelcome(tabId) {
+  const cancel = _welcomeApi('cancelWelcome');
+  if (typeof cancel === 'function') cancel(tabId);
+}
+
+function _requestWelcomeSettle(tabId) {
+  const settle = _welcomeApi('requestWelcomeSettle');
+  return typeof settle === 'function' ? settle(tabId) : false;
+}
 const _RUN_STREAM_MESSAGE_BATCH_LIMIT = 750;
 const _RUN_STREAM_MESSAGE_BATCH_MS = 12;
 let _runnerPersistence = null;
@@ -244,7 +274,7 @@ function _maybeNotify(command, codeOrStatus, elapsed) {
 // ── Run timer ──
 
 function _formatElapsed(totalSecs) {
-  return _runnerCore.formatElapsed(totalSecs);
+  return _runnerCore().formatElapsed(totalSecs);
 }
 
 function startTimer(startMs = Date.now()) {
@@ -545,8 +575,11 @@ function killActiveRunFromMonitor(run) {
 }
 
 function _restoreCompletedReconnectedRun(tab, run) {
-  if (!tab || !run || typeof restoreHistoryRunIntoTab !== 'function') return Promise.resolve();
-  return restoreHistoryRunIntoTab(run, { targetTabId: tab.id, hidePanelOnSuccess: false })
+  const restore = (typeof window !== 'undefined' && window.restoreHistoryRunIntoTab)
+    || (typeof globalThis !== 'undefined' && globalThis.restoreHistoryRunIntoTab)
+    || (typeof restoreHistoryRunIntoTab !== 'undefined' ? restoreHistoryRunIntoTab : null);
+  if (!tab || !run || typeof restore !== 'function') return Promise.resolve();
+  return restore(run, { targetTabId: tab.id, hidePanelOnSuccess: false })
     .then(() => {
       const refreshed = getTab(tab.id);
       if (refreshed) refreshed.reconnectedRun = false;
@@ -1216,8 +1249,8 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
       addToRecentPreview(t.command);
     }
     if (t && t.command) _refreshProjectContextAfterCommand(t.command, msg.code);
-    if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof loadSessionVariables === 'function') {
-      loadSessionVariables().catch(() => {});
+    if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof window.loadSessionVariables === 'function') {
+      window.loadSessionVariables().catch(() => {});
     }
     if (t) t.syntheticClear = false;
     _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
@@ -1532,39 +1565,39 @@ function doKill(tabId) {
 //   true      — command submitted; caller should clear input and focus
 //   false     — rejected or blocked; caller should leave input as-is
 function _parseSyntheticPostFilterCommand(cmd) {
-  return _runnerCore.parseSyntheticPostFilterCommand(cmd);
+  return _runnerCore().parseSyntheticPostFilterCommand(cmd);
 }
 
 function _applySyntheticPostFilterLines(lineItems, spec) {
-  return _runnerCore.applySyntheticPostFilterLines(lineItems, spec);
+  return _runnerCore().applySyntheticPostFilterLines(lineItems, spec);
 }
 
 function _isSyntheticPostFilterCommand(cmd) {
-  return _runnerCore.isSyntheticPostFilterCommand(cmd);
+  return _runnerCore().isSyntheticPostFilterCommand(cmd);
 }
 
 function _isSyntheticSortCommand(cmd) {
-  return _runnerCore.isSyntheticSortCommand(cmd);
+  return _runnerCore().isSyntheticSortCommand(cmd);
 }
 
 function _isSyntheticUniqCommand(cmd) {
-  return _runnerCore.isSyntheticUniqCommand(cmd);
+  return _runnerCore().isSyntheticUniqCommand(cmd);
 }
 
 function _isSyntheticGrepCommand(cmd) {
-  return _runnerCore.isSyntheticGrepCommand(cmd);
+  return _runnerCore().isSyntheticGrepCommand(cmd);
 }
 
 function _isSyntheticHeadCommand(cmd) {
-  return _runnerCore.isSyntheticHeadCommand(cmd);
+  return _runnerCore().isSyntheticHeadCommand(cmd);
 }
 
 function _isSyntheticTailCommand(cmd) {
-  return _runnerCore.isSyntheticTailCommand(cmd);
+  return _runnerCore().isSyntheticTailCommand(cmd);
 }
 
 function _isSyntheticWcLineCountCommand(cmd) {
-  return _runnerCore.isSyntheticWcLineCountCommand(cmd);
+  return _runnerCore().isSyntheticWcLineCountCommand(cmd);
 }
 
 function _isExactSpecialBuiltInCommand(cmd) {
@@ -2973,8 +3006,8 @@ function submitCommand(rawCmd) {
   // feed output into the active tab while mirroring completion into persistence.
   const cmd = (rawCmd || '').trim();
   if (!cmd) {
-    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
-      requestWelcomeSettle(activeTabId);
+    if (_isWelcomeActive() && _welcomeOwns(activeTabId)) {
+      _requestWelcomeSettle(activeTabId);
       return 'settle';
     }
     const _activeTab = getActiveTab();
@@ -3025,8 +3058,8 @@ function submitCommand(rawCmd) {
   // asynchronously via SSE) to avoid a race condition where rapid Enter presses
   // fire before the server's 'started' message arrives.
   // If the welcome typeout is still running, cancel it and clear partial output
-  if (welcomeOwnsTab(activeTabId)) {
-    cancelWelcome(activeTabId);
+  if (_welcomeOwns(activeTabId)) {
+    _cancelWelcome(activeTabId);
     clearTab(activeTabId);
   }
 
@@ -3277,4 +3310,175 @@ function runCommand() {
   if (typeof isRunButtonDisabled === 'function' && isRunButtonDisabled()) return;
   const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput ? cmdInput.value : '');
   submitComposerCommand(value, { dismissKeyboard: true });
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _runnerCore,
+    _welcomeApi,
+    _isWelcomeActive,
+    _welcomeOwns,
+    _cancelWelcome,
+    _requestWelcomeSettle,
+    _runnerPersistenceHelpers,
+    _resetStalledTimeout,
+    _clearStalledTimeout,
+    _clearStreamRecoveryTimer,
+    _recoverStalledRun,
+    _tabRunGeneration,
+    _isRunStillActive,
+    _activeRunsUrl,
+    _fetchActiveRun,
+    _markStalledButRunning,
+    _markStalledAndInactive,
+    _handleStreamEndedWithoutExit,
+    _scheduleActiveRunStreamRecovery,
+    _shouldSuppressStreamOutputLine,
+    setStatus,
+    _maybeNotify,
+    _formatElapsed,
+    startTimer,
+    stopTimer,
+    syncActiveRunTimer,
+    _activeReconnectTabs,
+    _shouldAutoRestoreActiveRun,
+    _activeRunIsInteractivePty,
+    _startedAtLabel,
+    _activeRunTabForRestore,
+    _activeRunReattachNotice,
+    _reattachActiveRunToTab,
+    restoreActiveRunsAfterReload,
+    _attachActiveRunToTab,
+    attachActiveRunFromMonitor,
+    _tabForActiveRunId,
+    _requestKillActiveRun,
+    killActiveRunFromMonitor,
+    _restoreCompletedReconnectedRun,
+    _markReconnectedRunUnavailable,
+    pollActiveRunsAfterReload,
+    startPollingActiveRunsAfterReload,
+    stopPollingActiveRunsAfterReload,
+    elapsedSeconds,
+    _setRunButtonDisabled,
+    _describeRunnerFetchError,
+    _logRunnerError,
+    _handleKillRequestFailure,
+    _handleKillRequestDenied,
+    _currentClientId,
+    _handleRunOwnerChanged,
+    _handleRunKilled,
+    _markTabKilledByUser,
+    _handleRunTransportFailure,
+    _appendHighVolumeOutputFinalSummary,
+    _readRunErrorMessage,
+    _runActiveTeamScopeCan,
+    _runTeamScopeDeniedMessage,
+    _runStartDeniedMessage,
+    _workspaceTerminalCanWrite,
+    _workspaceTerminalDeniedMessage,
+    _previewTruncationNotice,
+    _streamOutputMetadata,
+    _runnerRunOutputModel,
+    _streamUnknownCollector,
+    _warnRunStreamSchema,
+    _handleRunStreamSchema,
+    _typedRunStreamLineMessage,
+    _appendStreamLine,
+    _forEachStreamTextLine,
+    _recordRunOutputCoalescing,
+    _batchedStreamLineEntry,
+    _handleRunOutputBatch,
+    _runStreamQueueLength,
+    _runStreamNow,
+    _finishRunStreamIfQueueDrained,
+    _scheduleRunStreamMessageDrain,
+    _enqueueRunStreamMessages,
+    _drainRunStreamMessageQueue,
+    appendCommandEcho,
+    appendPromptNewline,
+    _brokerStreamUrl,
+    _sseMessageFromChunk,
+    _markTabRunStarted,
+    _handleRunStreamMessage,
+    _sameTabRunStillActive,
+    _streamResumeAfterId,
+    _finishPausedRunStream,
+    detachRunStreamForTab,
+    pauseBackgroundRunStreamsForStatusMonitor,
+    resumeBackgroundRunStreamsAfterStatusMonitor,
+    _streamRunResponse,
+    _subscribeRunStream,
+    _clearDesktopInput,
+    interruptPromptLine,
+    confirmKill,
+    doKill,
+    _parseSyntheticPostFilterCommand,
+    _applySyntheticPostFilterLines,
+    _isSyntheticPostFilterCommand,
+    _isSyntheticSortCommand,
+    _isSyntheticUniqCommand,
+    _isSyntheticGrepCommand,
+    _isSyntheticHeadCommand,
+    _isSyntheticTailCommand,
+    _isSyntheticWcLineCountCommand,
+    _isExactSpecialBuiltInCommand,
+    _isSessionTokenSubcommand,
+    _isClientSideUiCommand,
+    _isClientSideSecretSetCommand,
+    _isTabCloseCommand,
+    _historySafeCommand,
+    _recordSuccessfulLocalCommand,
+    _isProjectWorkspaceCommand,
+    _runnerProjectWorkspaceSyncStorageKey,
+    _broadcastProjectWorkspaceChanged,
+    _refreshProjectContextAfterCommand,
+    _clientSideRunExitCodeFromStatus,
+    _finalizeClientSideCommandStatus,
+    _persistClientSideRun,
+    _persistSessionTokenRun,
+    _sessionMigrationCountLabel,
+    _sessionMigrationResultText,
+    _doSessionMigration,
+    _seedLocalStorageStarsToServer,
+    _setPendingTerminalConfirm,
+    hasPendingTerminalConfirm,
+    _runPendingTerminalConfirmHandler,
+    cancelPendingTerminalConfirm,
+    _appendSessionTokenSetLines,
+    _clearVisibleSessionHistoryState,
+    _activateSessionTokenIdentity,
+    _sessionTokenGenerate,
+    _sessionTokenSet,
+    _sessionTokenCopy,
+    _sessionTokenClear,
+    _sessionTokenRotate,
+    _sessionTokenList,
+    _sessionTokenRevoke,
+    _sessionTokenRevokeConfirmed,
+    _workspacePlainLine,
+    _workspaceSplitLines,
+    _workspaceFileDescription,
+    _workspaceListLines,
+    _workspaceShortListLines,
+    _workspaceListNames,
+    _workspaceRelativeListName,
+    _workspaceDirectListEntries,
+    _workspaceRecursiveEntries,
+    _workspaceDeleteUsageForCommand,
+    _workspaceReadLines,
+    _workspaceStandaloneFilterSpec,
+    _runWorkspaceListCommand,
+    _workspacePipeInputLinesForCommand,
+    _handleWorkspaceTerminalCommand,
+    _handleSessionTokenCommand,
+    _handleWorkspaceDeleteCommand,
+    _handleWorkspaceMoveCommand,
+    _handleWorkspaceEditorCommand,
+    _handleWorkspaceDownloadCommand,
+    _runClientSideCommandWithOptionalPipe,
+    submitCommand,
+    submitComposerCommand,
+    submitVisibleComposerCommand,
+    runCommand,
+  });
 }

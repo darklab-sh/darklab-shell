@@ -1,7 +1,6 @@
 // darklab_shell Status Monitor pure helpers.
 // Rendering, polling, and action wiring stay in status_monitor.js.
 
-(function () {
   const GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
 
   function normalizedExitCode(exitCode) {
@@ -153,4 +152,3 @@
     formatIsoDateOnly,
     isoWeekdayRow,
   };
-})();

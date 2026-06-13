@@ -1,5 +1,5 @@
 function _historyRelativeTime(startedAt, now = new Date()) {
-  return _historyCore.relativeTime(startedAt, now);
+  return _historyCore().relativeTime(startedAt, now);
 }
 
 function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
@@ -50,23 +50,23 @@ function _appendHistoryMetadataBadges(parent, entity) {
 }
 
 function _historyExitCodeNumber(exitCode) {
-  return _historyCore.exitCodeNumber(exitCode);
+  return _historyCore().exitCodeNumber(exitCode);
 }
 
 function _historyIsGracefulTerminationExitCode(exitCode) {
-  return _historyCore.isGracefulTerminationExitCode(exitCode);
+  return _historyCore().isGracefulTerminationExitCode(exitCode);
 }
 
 function _historyIsFailedExitCode(exitCode) {
-  return _historyCore.isFailedExitCode(exitCode);
+  return _historyCore().isFailedExitCode(exitCode);
 }
 
 function _historyExitLabel(exitCode) {
-  return _historyCore.exitLabel(exitCode);
+  return _historyCore().exitLabel(exitCode);
 }
 
 function _historyExitClass(exitCode) {
-  return _historyCore.exitClass(exitCode);
+  return _historyCore().exitClass(exitCode);
 }
 
 function _historyCountLabel(count, singular, plural) {
@@ -75,11 +75,11 @@ function _historyCountLabel(count, singular, plural) {
 }
 
 function _historyElapsedSeconds(run) {
-  return _historyCore.elapsedSeconds(run);
+  return _historyCore().elapsedSeconds(run);
 }
 
 function _historyElapsedLabel(run) {
-  return _historyCore.elapsedLabel(run);
+  return _historyCore().elapsedLabel(run);
 }
 
 function _historyCanEditMetadata() {
@@ -401,5 +401,26 @@ function _historyEditEntityMetadata(entityType, entity) {
       refreshHistoryPanel();
       showToast('Metadata saved');
     },
+  });
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _historyRelativeTime,
+    _historyMetaKindBadge,
+    _historyEntityLabelValues,
+    _historyEntityNoteBody,
+    _appendHistoryMetadataBadges,
+    _historyExitCodeNumber,
+    _historyIsGracefulTerminationExitCode,
+    _historyIsFailedExitCode,
+    _historyExitLabel,
+    _historyExitClass,
+    _historyElapsedSeconds,
+    _historyElapsedLabel,
+    _createHistoryEntry,
+    _createSnapshotHistoryEntry,
+    _historyActionKeepsPanelOpen,
+    _historyEditEntityMetadata,
   });
 }

@@ -1,4 +1,3 @@
-(function () {
   function createStatusMonitorResources({ core, svgEl, pathFromPoints }) {
     const resourceStateByRunId = new Map();
     const resourceTrendByRunId = new Map();
@@ -151,4 +150,3 @@
   }
 
   window.DarklabStatusMonitorResources = { create: createStatusMonitorResources };
-})();

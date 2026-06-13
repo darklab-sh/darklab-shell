@@ -146,7 +146,7 @@ function closeTab(id) {
   // persistence finishes, so final removal is sometimes deferred.
   cancelWelcome(id);
   const idx = tabs.findIndex(t => t.id === id);
-  if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
+  if (typeof window._cancelPendingOutputBatch === 'function') window._cancelPendingOutputBatch(id);
   const closingTab = tabs[idx];
   if (closingTab) {
     closingTab._outputFollowToken = (closingTab._outputFollowToken || 0) + 1;
@@ -211,4 +211,17 @@ function finalizeClosingTab(id) {
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   return true;
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _resetPreservedSingleTabState,
+    _activateNeighborAfterClose,
+    _removeClosedTabView,
+    detachRunningTabAndClose,
+    _deferRunningTabCloseForKill,
+    confirmCloseRunningTab,
+    closeTab,
+    finalizeClosingTab,
+  });
 }

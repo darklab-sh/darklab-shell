@@ -250,3 +250,22 @@ function showToast(msg, tone = 'success', action = null) {
     toast.classList.remove('toast-has-action');
   }, action ? 5000 : 2500);
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    escapeHtml,
+    escapeRegex,
+    normalizeRedactionRules,
+    applyRedactionRules,
+    redactLineEntries,
+    omitRawOnlyLineEntries,
+    renderMotd,
+    copyTextToClipboard,
+    downloadUrlAsAttachment,
+    shareUrl,
+    showToast,
+  });
+  if (typeof window.downloadBlobAsAttachment !== 'function') {
+    window.downloadBlobAsAttachment = downloadBlobAsAttachment;
+  }
+}

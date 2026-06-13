@@ -95,3 +95,10 @@ function isHistoryCompareOverlayOpen() {
   const overlay = document.getElementById('history-compare-overlay');
   return !!(overlay && overlay.classList.contains('open'));
 }
+
+window._ensureHistoryCompareOverlay = _ensureHistoryCompareOverlay;
+window.closeHistoryCompareOverlay = closeHistoryCompareOverlay;
+window._focusHistoryCompareOverlay = _focusHistoryCompareOverlay;
+window._queueHistoryCompareInitialFocus = _queueHistoryCompareInitialFocus;
+window._openHistoryCompareOverlay = _openHistoryCompareOverlay;
+window.isHistoryCompareOverlayOpen = isHistoryCompareOverlayOpen;

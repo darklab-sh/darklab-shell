@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest.mock as mock
 from contextlib import contextmanager
 from copy import deepcopy
@@ -15424,6 +15425,57 @@ class TestAuditEvents:
         assert report_extra["target_count"] == 5
         assert "customer" not in json.dumps(package_extra)
         assert "customer" not in json.dumps(report_extra)
+
+    def test_report_export_job_read_failures_warn_without_raw_json(self, tmp_path, monkeypatch):
+        import services.reports.jobs as report_jobs
+
+        monkeypatch.setattr(report_jobs, "_JOB_DIR", tmp_path)
+        job_id = "rpj_0123456789abcdef01234567"
+        (tmp_path / f"{job_id}.json").write_text('{"token": "secret"', encoding="utf-8")
+
+        with mock.patch.object(report_jobs.log, "warning") as warning:
+            assert report_jobs._read_job(job_id) is None
+
+        warning.assert_called_once()
+        assert warning.call_args.args == ("REPORT_EXPORT_JOB_READ_FAILED",)
+        assert warning.call_args.kwargs["exc_info"] is True
+        extra = warning.call_args.kwargs["extra"]
+        assert extra["job_id"] == job_id
+        assert extra["operation"] == "read"
+        assert extra["exception_type"] == "JSONDecodeError"
+        assert "secret" not in json.dumps(extra)
+
+    def test_report_export_cleanup_warns_when_archive_delete_fails(self, tmp_path, monkeypatch):
+        import services.reports.jobs as report_jobs
+
+        monkeypatch.setattr(report_jobs, "_JOB_DIR", tmp_path)
+        job_id = "rpj_0123456789abcdef01234567"
+        job_path = tmp_path / f"{job_id}.json"
+        archive_path = tmp_path / "missing.zip"
+        job_path.write_text(json.dumps({
+            "id": job_id,
+            "project_id": "proj_1",
+            "team_id": "team_1",
+            "actor_member_id": "tmem_1",
+            "archive_path": str(archive_path),
+            "updated_at": "2026-01-01T00:00:00Z",
+        }), encoding="utf-8")
+        old_time = time.time() - (3 * 60 * 60)
+        os.utime(job_path, (old_time, old_time))
+
+        with mock.patch.object(report_jobs.log, "warning") as warning:
+            report_jobs.cleanup_report_export_jobs()
+
+        archive_warning = next(
+            call for call in warning.call_args_list
+            if call.args == ("REPORT_EXPORT_JOB_CLEANUP_FAILED",)
+        )
+        assert archive_warning.kwargs["exc_info"] is True
+        extra = archive_warning.kwargs["extra"]
+        assert extra["job_id"] == job_id
+        assert extra["path"] == str(archive_path)
+        assert extra["operation"] == "unlink_archive"
+        assert extra["exception_type"] == "FileNotFoundError"
 
     def test_run_now_audit_details_do_not_copy_last_error(self):
         from services.audit.automation import record_watcher_event, run_now_details

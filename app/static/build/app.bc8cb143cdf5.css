@@ -39,6 +39,7 @@
   src: url('/vendor/fonts/Syne-800.ttf') format('truetype');
 }
 
+
 /* /static/css/core/base.css */
 /* darklab_shell CSS module: base
    Theme tokens, reset, base layout, header, input, and dropdown foundations. */
@@ -687,6 +688,7 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 #run-btn:hover:not(:disabled) { opacity: 0.85; }
 #run-btn:active:not(:disabled) { transform: scale(0.97); }
 #run-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
 
 /* /static/css/shell.css */
 /* darklab_shell CSS module: shell
@@ -3089,6 +3091,7 @@ body .allowed-chip { background: var(--theme-inline-surface-bg); }
 body .form-select { background-color: var(--theme-chrome-control-bg); }
 body .tab .tab-status.ok { background: var(--green); }
 
+
 /* /static/css/primitives/components.css */
 /* darklab_shell CSS module: components
    Reusable shell components: tabs, search, toast, permalink/history surfaces, and menus. */
@@ -4585,6 +4588,7 @@ body.permalink-page .permalink-error-state {
   color: var(--green);
 }
 
+
 /* /static/css/welcome.css */
 /* darklab_shell CSS module: welcome
    Welcome animation, operator notice, and onboarding-specific presentation. */
@@ -5449,6 +5453,7 @@ body.modal-overlay-active .wlc-cursor {
     align-self: flex-start;
   }
 }
+
 
 /* /static/css/shell-chrome.css */
 /* darklab_shell CSS module: shell-chrome
@@ -6448,6 +6453,7 @@ body.modal-overlay-active .wlc-cursor {
   .hud-save-wrap.open .save-menu { display: flex; }
 }
 
+
 /* /static/css/mobile.css */
 /* darklab_shell CSS module: mobile
    Mobile composer, mobile shell layout, bottom sheets, and viewport-specific overrides. */
@@ -7395,6 +7401,7 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
   #landscape-overlay { display: flex; }
 }
+
 
 /* /static/css/features/projects.css */
 /* Projects modal, mobile project workspace, entity editors, compare picker, and package wizard. */
@@ -12753,6 +12760,7 @@ body.mobile-terminal-mode .project-target-editor-form .form-select {
   border-top: 1px solid var(--theme-border);
 }
 
+
 /* /static/css/features/atlas.css */
 /* darklab_shell CSS module: Session Entity Atlas overlay, list tabs, and entity detail sheet. */
 
@@ -13856,6 +13864,7 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   width: min(640px, 94vw);
 }
 
+
 /* /static/css/features/atlas-mobile.css */
 /* Mobile Atlas — list/detail drill-in surface.
  *
@@ -14311,6 +14320,7 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
   width: auto;
 }
 
+
 /* /static/css/features/command-registry.css */
 /* darklab_shell CSS module: command-registry
    Command Registry modal, command catalog detail modal, and source-line highlighting. */
@@ -14555,6 +14565,7 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
     max-width: 100%;
   }
 }
+
 
 /* /static/css/features/faq-shortcuts.css */
 /* darklab_shell CSS module: faq-shortcuts
@@ -14899,6 +14910,7 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
   padding: 2px 6px;
 }
 .shortcuts-close:hover { color: var(--green); }
+
 
 /* /static/css/features/history.css */
 /* darklab_shell CSS module: history
@@ -16069,6 +16081,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
   box-shadow: 0 0 6px color-mix(in srgb, var(--green) 24%, transparent);
 }
 
+
 /* /static/css/features/run-comparison.css */
 /* Run Comparison modal, controls, and transcript diff view. */
 
@@ -16997,6 +17010,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
   }
 }
 
+
 /* /static/css/features/schedules.css */
 /* Schedules modal and recurring-run controls. */
 
@@ -17328,6 +17342,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
     gap: 8px;
   }
 }
+
 
 /* /static/css/features/status-monitor.css */
 /* darklab_shell CSS module: status-monitor
@@ -18898,6 +18913,7 @@ body.status-monitor-mobile-open .status-monitor-close {
   display: none !important;
 }
 
+
 /* /static/css/features/watchers.css */
 /* Watchers modal and change-detection controls. */
 
@@ -19289,6 +19305,7 @@ body.status-monitor-mobile-open .status-monitor-close {
     flex-direction: column;
   }
 }
+
 
 /* /static/css/features/workflows.css */
 /* Workflows modal, workflow cards, editor, and rendered step controls. */
@@ -19808,6 +19825,7 @@ body #workflows-modal {
     margin-top: 1px;
   }
 }
+
 
 /* /static/css/features/workspace.css */
 /* darklab_shell CSS module: workspace
@@ -20348,6 +20366,7 @@ body #workflows-modal {
   backdrop-filter: blur(1px);
   -webkit-backdrop-filter: blur(1px);
 }
+
 
 /* /static/css/mobile-chrome.css */
 /* Mobile chrome — progress bar, recents peek + pull-up sheet,
@@ -21132,4 +21151,5 @@ body.mobile-terminal-mode {
   }
 
 }
+
 

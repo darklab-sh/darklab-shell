@@ -1,5 +1,7 @@
 // ── Shared autocomplete logic ──
-const autocompleteCore = typeof DarklabAutocompleteCore !== 'undefined' ? DarklabAutocompleteCore : null;
+const autocompleteCore = (typeof window !== 'undefined' && window.DarklabAutocompleteCore)
+  ? window.DarklabAutocompleteCore
+  : (typeof DarklabAutocompleteCore !== 'undefined' ? DarklabAutocompleteCore : null);
 
 function _isAutocompleteBlockedByTerminalConfirm() {
   return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
@@ -895,8 +897,8 @@ function _workspaceAutocompleteHintsForFlag(spec, trigger, ctx = null) {
   const flags = Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [];
   const normalizedTrigger = String(trigger || '');
   if (!flags.some(flag => String(flag || '') === normalizedTrigger)) return null;
-  if (ctx && typeof getWorkspaceAutocompleteFlagFileHints === 'function') {
-    const hints = getWorkspaceAutocompleteFlagFileHints(ctx.currentToken);
+  if (ctx && typeof window.getWorkspaceAutocompleteFlagFileHints === 'function') {
+    const hints = window.getWorkspaceAutocompleteFlagFileHints(ctx.currentToken);
     return Array.isArray(hints) ? hints : [];
   }
   if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
@@ -1455,4 +1457,30 @@ function getAutocompleteMatches(value, cursorPos) {
 
 function limitAutocompleteMatchesForDisplay(items, maxItems = 12) {
   return autocompleteCore.limitItemsForDisplay(items, maxItems);
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _autocompleteTokenContext,
+    _autocompletePipeContext,
+    _readRecentValues,
+    _readProjectTargets,
+    _readAutocompleteProjects,
+    _readAutocompleteSchedules,
+    _readAutocompleteWatchers,
+    setRecentValues,
+    setProjectAutocompleteTargets,
+    setProjectAutocompleteProjects,
+    setScheduleAutocompleteSchedules,
+    setWatcherAutocompleteWatchers,
+    loadProjectAutocompleteTargets,
+    loadScheduleAutocompleteHints,
+    loadWatcherAutocompleteHints,
+    loadRecentValues,
+    flushRecentValues,
+    rememberRecentValuesFromCommand,
+    processPendingRecentValueCommands,
+    getAutocompleteMatches,
+    limitAutocompleteMatchesForDisplay,
+  });
 }

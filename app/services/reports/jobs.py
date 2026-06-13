@@ -88,6 +88,16 @@ def _archive_path(job_id):
     return _JOB_DIR / f"{safe}.zip"
 
 
+def _job_log_extra(job, **extra):
+    return {
+        "job_id": str(job.get("id") or ""),
+        "project_id": str(job.get("project_id") or ""),
+        "team_id": str(job.get("team_id") or ""),
+        "actor_member_id": str(job.get("actor_member_id") or ""),
+        **extra,
+    }
+
+
 def _read_job(job_id):
     path = _job_path(job_id)
     if path is None or not path.exists():
@@ -95,7 +105,13 @@ def _read_job(job_id):
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("REPORT_EXPORT_JOB_READ_FAILED", exc_info=True, extra={
+            "job_id": _safe_job_id(job_id),
+            "path": str(path),
+            "operation": "read",
+            "exception_type": type(exc).__name__,
+        })
         return None
     return data if isinstance(data, dict) else None
 
@@ -140,7 +156,13 @@ def cleanup_report_export_jobs():
     for path in _JOB_DIR.glob("rpj_*.json"):
         try:
             updated = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        except OSError:
+        except OSError as exc:
+            log.warning("REPORT_EXPORT_JOB_CLEANUP_FAILED", exc_info=True, extra={
+                "job_id": _safe_job_id(path.stem),
+                "path": str(path),
+                "operation": "stat",
+                "exception_type": type(exc).__name__,
+            })
             continue
         if updated >= cutoff:
             continue
@@ -149,11 +171,23 @@ def cleanup_report_export_jobs():
         if archive_path:
             try:
                 Path(archive_path).unlink()
-            except OSError:
+            except OSError as exc:
+                log.warning("REPORT_EXPORT_JOB_CLEANUP_FAILED", exc_info=True, extra={
+                    "job_id": _safe_job_id(path.stem),
+                    "path": str(archive_path),
+                    "operation": "unlink_archive",
+                    "exception_type": type(exc).__name__,
+                })
                 pass
         try:
             path.unlink()
-        except OSError:
+        except OSError as exc:
+            log.warning("REPORT_EXPORT_JOB_CLEANUP_FAILED", exc_info=True, extra={
+                "job_id": _safe_job_id(path.stem),
+                "path": str(path),
+                "operation": "unlink",
+                "exception_type": type(exc).__name__,
+            })
             pass
 
 
@@ -206,13 +240,25 @@ def discard_report_export_job(job_id, *, archive=True):
     if archive and isinstance(job, dict) and job.get("archive_path"):
         try:
             Path(str(job["archive_path"])).unlink()
-        except OSError:
+        except OSError as exc:
+            log.warning("REPORT_EXPORT_JOB_CLEANUP_FAILED", exc_info=True, extra={
+                "job_id": _safe_job_id(job_id),
+                "path": str(job["archive_path"]),
+                "operation": "unlink_archive",
+                "exception_type": type(exc).__name__,
+            })
             pass
     path = _job_path(job_id)
     if path is not None:
         try:
             path.unlink()
-        except OSError:
+        except OSError as exc:
+            log.warning("REPORT_EXPORT_JOB_CLEANUP_FAILED", exc_info=True, extra={
+                "job_id": _safe_job_id(job_id),
+                "path": str(path),
+                "operation": "unlink",
+                "exception_type": type(exc).__name__,
+            })
             pass
 
 
@@ -310,6 +356,7 @@ def _run_job(job_id, cfg_snapshot):
     if not isinstance(job, dict):
         return
     started = time.perf_counter()
+    log.info("REPORT_EXPORT_JOB_STARTED", extra=_job_log_extra(job))
 
     def _update(status, phase, message, **extra):
         current = _read_job(job_id) or job
@@ -424,6 +471,7 @@ def _run_job(job_id, cfg_snapshot):
         "archive_bytes": archive_bytes,
         **_metrics_log_extra(metrics),
     })
+    _record_job_audit(job, status="complete", archive_bytes=archive_bytes, metrics=metrics)
     _update(
         "complete",
         "complete",
@@ -434,7 +482,6 @@ def _run_job(job_id, cfg_snapshot):
         archive_bytes=archive_bytes,
         metrics=metrics,
     )
-    _record_job_audit(job, status="complete", archive_bytes=archive_bytes, metrics=metrics)
 
 
 def start_report_export_job(session_id, project_id, draft, *, cfg=None, team_id="", actor_member_id=""):
@@ -455,6 +502,7 @@ def start_report_export_job(session_id, project_id, draft, *, cfg=None, team_id=
         "updated_at": created,
     }
     _write_job(job)
+    log.info("REPORT_EXPORT_JOB_QUEUED", extra=_job_log_extra(job))
     cfg_snapshot = dict(CFG if cfg is None else cfg)
     _EXECUTOR.submit(_run_job, job["id"], cfg_snapshot)
     return _public_job(job)

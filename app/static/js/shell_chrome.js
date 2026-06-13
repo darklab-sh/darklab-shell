@@ -1086,7 +1086,9 @@
     hudActions.appendChild(_makeHudBtn('clear', 'clear', () => {
       const id = _currentTabId();
       if (!id) return;
-      if (typeof cancelWelcome === 'function') cancelWelcome(id);
+      const cancelWelcomeFn = (typeof window !== 'undefined' && window.cancelWelcome)
+        || (typeof cancelWelcome !== 'undefined' ? cancelWelcome : null);
+      if (typeof cancelWelcomeFn === 'function') cancelWelcomeFn(id);
       if (typeof clearTab === 'function') clearTab(id, { preserveRunState: true });
     }, 'btn btn-secondary btn-compact', 'Clear active tab (Ctrl+L)'));
 

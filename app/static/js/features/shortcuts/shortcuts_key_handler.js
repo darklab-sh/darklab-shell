@@ -5,6 +5,7 @@
 document.addEventListener('keydown', e => {
   if (e.key !== '?') return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const global = typeof window !== 'undefined' ? window : {};
   const ae = document.activeElement;
   if (ae) {
     const tag = (ae.tagName || '').toLowerCase();
@@ -16,10 +17,10 @@ document.addEventListener('keydown', e => {
     if (tag === 'select') return;
     if (isTextInput) {
       if (
-        (ae === cmdInput || ae === mobileCmdInput)
-        && typeof syncFocusedComposerState === 'function'
+        (ae === global.cmdInput || ae === global.mobileCmdInput)
+        && typeof global.syncFocusedComposerState === 'function'
       ) {
-        syncFocusedComposerState(ae);
+        global.syncFocusedComposerState(ae);
       }
       const raw = isEditable ? (ae.textContent || '') : (ae.value || '');
       if (raw.length > 0) return;
@@ -28,17 +29,17 @@ document.addEventListener('keydown', e => {
   e.preventDefault();
   e.stopImmediatePropagation();
   if (
-    typeof _welcomeActive !== 'undefined' && _welcomeActive
-    && typeof activeTabId !== 'undefined'
-    && typeof welcomeOwnsTab === 'function'
-    && welcomeOwnsTab(activeTabId)
-    && typeof requestWelcomeSettle === 'function'
+    global._welcomeActive
+    && typeof global.activeTabId !== 'undefined'
+    && typeof global.welcomeOwnsTab === 'function'
+    && global.welcomeOwnsTab(global.activeTabId)
+    && typeof global.requestWelcomeSettle === 'function'
   ) {
-    requestWelcomeSettle(activeTabId);
+    global.requestWelcomeSettle(global.activeTabId);
   }
-  if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
-    closeShortcuts();
+  if (typeof global.isShortcutsOverlayOpen === 'function' && global.isShortcutsOverlayOpen()) {
+    if (typeof global.closeShortcuts === 'function') global.closeShortcuts();
   } else {
-    openShortcuts();
+    if (typeof global.openShortcuts === 'function') global.openShortcuts();
   }
 }, true);

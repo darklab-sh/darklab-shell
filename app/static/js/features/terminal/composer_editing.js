@@ -87,3 +87,18 @@ function findWordBoundaryRight(value, index) {
   while (next < value.length && isTerminalWordChar(value[next])) next++;
   return next;
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    getComposerStateSnapshot,
+    getCmdSelection,
+    getInputSelection,
+    replaceCmdRange,
+    moveCmdCaret,
+    moveCmdCaretByWord,
+    handleComposerWordArrowShortcut,
+    isTerminalWordChar,
+    findWordBoundaryLeft,
+    findWordBoundaryRight,
+  });
+}

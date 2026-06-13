@@ -1,6 +1,21 @@
-// Shared lazy asset loader for rarely-used classic scripts.
+// Shared lazy asset loader for rarely-used scripts and modules.
 (function () {
   const _lazyAssetPromises = {};
+  let _lazyAssetConfigInvalidLogged = false;
+
+  function _logLazyAssetConfigInvalid(err) {
+    if (
+      _lazyAssetConfigInvalidLogged
+      || typeof window === 'undefined'
+      || typeof window.logClientError !== 'function'
+    ) return;
+    _lazyAssetConfigInvalidLogged = true;
+    window.logClientError('lazy asset config invalid', err, {
+      event: 'LAZY_ASSET_CONFIG_INVALID',
+      level: 'warning',
+      source: 'lazy-assets-json',
+    });
+  }
 
   function _lazyAssetConfig() {
     let urls = {};
@@ -10,7 +25,8 @@
         try {
           const parsed = JSON.parse(node.textContent);
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) urls = parsed;
-        } catch (_) {
+        } catch (err) {
+          _logLazyAssetConfigInvalid(err);
           urls = {};
         }
       }
@@ -24,67 +40,112 @@
     return urls;
   }
 
-  function _lazyAssetUrl(name) {
+  function _normalizeLazyAssetEntry(value) {
+    if (typeof value === 'string' && value) return { url: value, type: 'classic' };
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const url = typeof value.url === 'string' ? value.url : '';
+      const type = value.type === 'module' ? 'module' : 'classic';
+      if (url) return { url, type };
+    }
+    return { url: '', type: 'classic' };
+  }
+
+  function _lazyAssetEntry(name) {
     const configured = _lazyAssetConfig()[name];
-    if (typeof configured === 'string' && configured) return configured;
-    if (name === 'export_pdf') return '/static/js/export_pdf.js';
-    if (name === 'atlas_tabs') return '/static/js/features/atlas/atlas_tabs.js';
-    if (name === 'atlas_entity_row') return '/static/js/features/atlas/atlas_entity_row.js';
-    if (name === 'atlas_entity_detail') return '/static/js/features/atlas/atlas_entity_detail.js';
-    if (name === 'atlas_overlay') return '/static/js/features/atlas/atlas_overlay.js';
-    if (name === 'atlas_mobile') return '/static/js/features/atlas/atlas_mobile.js';
-    if (name === 'findings_board') return '/static/js/features/findings/findings_board_modal.js';
-    if (name === 'project_activity') return '/static/js/features/projects/project_activity.js';
-    if (name === 'project_artifacts') return '/static/js/features/projects/project_artifacts.js';
-    if (name === 'project_details') return '/static/js/features/projects/project_details.js';
-    if (name === 'project_list') return '/static/js/features/projects/project_list.js';
-    if (name === 'project_navigation') return '/static/js/features/projects/project_navigation.js';
-    if (name === 'project_entity_editor') return '/static/js/features/projects/project_entity_editor.js';
-    if (name === 'project_workspace_actions') return '/static/js/features/projects/project_workspace_actions.js';
-    if (name === 'project_workspace_shell') return '/static/js/features/projects/project_workspace_shell.js';
-    if (name === 'project_workspace_lifecycle') return '/static/js/features/projects/project_workspace_lifecycle.js';
-    if (name === 'project_workspace_renderer') return '/static/js/features/projects/project_workspace_renderer.js';
-    if (name === 'project_workspace_bootstrap') return '/static/js/features/projects/project_workspace_bootstrap.js';
-    if (name === 'project_nested_sheets') return '/static/js/features/projects/project_nested_sheets.js';
-    if (name === 'project_workspace_events') return '/static/js/features/projects/project_workspace_events.js';
-    if (name === 'project_targets') return '/static/js/features/projects/project_targets.js';
-    if (name === 'project_runs') return '/static/js/features/projects/project_runs.js';
-    if (name === 'project_mobile_compare') return '/static/js/features/projects/project_mobile_compare.js';
-    if (name === 'project_mobile_shell') return '/static/js/features/projects/project_mobile_shell.js';
-    if (name === 'project_mobile_detail') return '/static/js/features/projects/project_mobile_detail.js';
-    if (name === 'project_findings_data') return '/static/js/features/projects/project_findings_data.js';
-    if (name === 'project_filters') return '/static/js/features/projects/project_filters.js';
-    if (name === 'project_entities') return '/static/js/features/projects/project_entities.js';
-    if (name === 'project_findings') return '/static/js/features/projects/project_findings.js';
-    if (name === 'project_findings_board') return '/static/js/features/projects/project_findings_board.js';
-    if (name === 'project_packages') return '/static/js/features/projects/project_packages.js';
-    if (name === 'project_report') return '/static/js/features/projects/project_report.js';
-    if (name === 'history_compare_core') return '/static/js/features/run-comparison/history_compare_core.js';
-    if (name === 'history_compare_overlay') return '/static/js/features/run-comparison/history_compare_overlay.js';
-    if (name === 'history_compare_controls') return '/static/js/features/run-comparison/history_compare_controls.js';
-    if (name === 'history_compare_navigation') return '/static/js/features/run-comparison/history_compare_navigation.js';
-    if (name === 'history_compare_renderer') return '/static/js/features/run-comparison/history_compare_renderer.js';
-    if (name === 'history_compare_launcher') return '/static/js/features/run-comparison/history_compare_launcher.js';
-    if (name === 'history_run_details') return '/static/js/features/history/history_run_details.js';
-    if (name === 'options_session_token_controls') return '/static/js/features/preferences/session_token_controls.js';
-    if (name === 'options_secrets_panel') return '/static/js/features/preferences/secrets_panel.js';
-    if (name === 'options_teams_panel') return '/static/js/features/preferences/teams_panel.js';
-    if (name === 'options_notification_channels') return '/static/js/features/preferences/notification_channels.js';
-    if (name === 'command_registry') return '/static/js/features/command-registry/command_registry.js';
-    if (name === 'workflows') return '/static/js/features/workflows/workflows.js';
-    if (name === 'pty_controller') return '/static/js/pty.js';
-    if (name === 'schedules_modal') return '/static/js/features/schedules/schedules_modal.js';
-    if (name === 'tour_modal') return '/static/js/tour_modal.js';
-    if (name === 'watchers_modal') return '/static/js/features/watchers/watchers_modal.js';
-    if (name === 'status_monitor_core') return '/static/js/features/status-monitor/status_monitor_core.js';
-    if (name === 'status_monitor_data') return '/static/js/features/status-monitor/status_monitor_data.js';
-    if (name === 'status_monitor_resources') return '/static/js/features/status-monitor/status_monitor_resources.js';
-    if (name === 'status_monitor') return '/static/js/status_monitor.js';
-    if (name === 'jspdf') return '/vendor/jspdf.umd.min.js';
-    if (name === 'xterm_css') return '/vendor/xterm.css';
-    if (name === 'xterm_js') return '/vendor/xterm.js';
-    if (name === 'xterm_fit_js') return '/vendor/xterm-addon-fit.js';
-    return '';
+    const normalized = _normalizeLazyAssetEntry(configured);
+    if (normalized.url) return normalized;
+    if (name === 'export_pdf') return { url: '/static/js/export_pdf.js', type: 'module' };
+    if (name === 'atlas_tabs') return { url: '/static/js/features/atlas/atlas_tabs.js', type: 'module' };
+    if (name === 'atlas_entity_row') return { url: '/static/js/features/atlas/atlas_entity_row.js', type: 'module' };
+    if (name === 'atlas_entity_detail') return { url: '/static/js/features/atlas/atlas_entity_detail.js', type: 'module' };
+    if (name === 'atlas_overlay') return { url: '/static/js/features/atlas/atlas_overlay.js', type: 'module' };
+    if (name === 'atlas_mobile') return { url: '/static/js/features/atlas/atlas_mobile.js', type: 'module' };
+    if (name === 'findings_board') return { url: '/static/js/features/findings/findings_board_modal.js', type: 'module' };
+    if (name === 'project_activity') return { url: '/static/js/features/projects/project_activity.js', type: 'module' };
+    if (name === 'project_artifacts') return { url: '/static/js/features/projects/project_artifacts.js', type: 'module' };
+    if (name === 'project_details') return { url: '/static/js/features/projects/project_details.js', type: 'module' };
+    if (name === 'project_list') return { url: '/static/js/features/projects/project_list.js', type: 'module' };
+    if (name === 'project_navigation') return { url: '/static/js/features/projects/project_navigation.js', type: 'module' };
+    if (name === 'project_entity_editor') return { url: '/static/js/features/projects/project_entity_editor.js', type: 'module' };
+    if (name === 'project_workspace_actions') return { url: '/static/js/features/projects/project_workspace_actions.js', type: 'module' };
+    if (name === 'project_workspace_shell') return { url: '/static/js/features/projects/project_workspace_shell.js', type: 'module' };
+    if (name === 'project_workspace_lifecycle') return { url: '/static/js/features/projects/project_workspace_lifecycle.js', type: 'module' };
+    if (name === 'project_workspace_renderer') return { url: '/static/js/features/projects/project_workspace_renderer.js', type: 'module' };
+    if (name === 'project_workspace_bootstrap') return { url: '/static/js/features/projects/project_workspace_bootstrap.js', type: 'module' };
+    if (name === 'project_nested_sheets') return { url: '/static/js/features/projects/project_nested_sheets.js', type: 'module' };
+    if (name === 'project_workspace_events') return { url: '/static/js/features/projects/project_workspace_events.js', type: 'module' };
+    if (name === 'project_targets') return { url: '/static/js/features/projects/project_targets.js', type: 'module' };
+    if (name === 'project_runs') return { url: '/static/js/features/projects/project_runs.js', type: 'module' };
+    if (name === 'project_mobile_compare') return { url: '/static/js/features/projects/project_mobile_compare.js', type: 'module' };
+    if (name === 'project_mobile_shell') return { url: '/static/js/features/projects/project_mobile_shell.js', type: 'module' };
+    if (name === 'project_mobile_detail') return { url: '/static/js/features/projects/project_mobile_detail.js', type: 'module' };
+    if (name === 'project_findings_data') return { url: '/static/js/features/projects/project_findings_data.js', type: 'module' };
+    if (name === 'project_filters') return { url: '/static/js/features/projects/project_filters.js', type: 'module' };
+    if (name === 'project_entities') return { url: '/static/js/features/projects/project_entities.js', type: 'module' };
+    if (name === 'project_findings') return { url: '/static/js/features/projects/project_findings.js', type: 'module' };
+    if (name === 'project_findings_board') return { url: '/static/js/features/projects/project_findings_board.js', type: 'module' };
+    if (name === 'project_packages') return { url: '/static/js/features/projects/project_packages.js', type: 'module' };
+    if (name === 'project_report') return { url: '/static/js/features/projects/project_report.js', type: 'module' };
+    if (name === 'history_compare_core') return { url: '/static/js/features/run-comparison/history_compare_core.js', type: 'module' };
+    if (name === 'history_compare_overlay') return { url: '/static/js/features/run-comparison/history_compare_overlay.js', type: 'module' };
+    if (name === 'history_compare_controls') return { url: '/static/js/features/run-comparison/history_compare_controls.js', type: 'module' };
+    if (name === 'history_compare_navigation') return { url: '/static/js/features/run-comparison/history_compare_navigation.js', type: 'module' };
+    if (name === 'history_compare_renderer') return { url: '/static/js/features/run-comparison/history_compare_renderer.js', type: 'module' };
+    if (name === 'history_compare_launcher') return { url: '/static/js/features/run-comparison/history_compare_launcher.js', type: 'module' };
+    if (name === 'history_run_details') return { url: '/static/js/features/history/history_run_details.js', type: 'module' };
+    if (name === 'options_session_token_controls') return { url: '/static/js/features/preferences/session_token_controls.js', type: 'module' };
+    if (name === 'options_secrets_panel') return { url: '/static/js/features/preferences/secrets_panel.js', type: 'module' };
+    if (name === 'options_teams_panel') return { url: '/static/js/features/preferences/teams_panel.js', type: 'module' };
+    if (name === 'options_notification_channels') return { url: '/static/js/features/preferences/notification_channels.js', type: 'module' };
+    if (name === 'command_registry') return { url: '/static/js/features/command-registry/command_registry.js', type: 'module' };
+    if (name === 'workflows') return { url: '/static/js/features/workflows/workflows.js', type: 'module' };
+    if (name === 'pty_controller') return { url: '/static/js/pty.js', type: 'module' };
+    if (name === 'schedules_modal') return { url: '/static/js/features/schedules/schedules_modal.js', type: 'module' };
+    if (name === 'mobile_running_indicator') {
+      return { url: '/static/js/features/mobile/mobile_running_indicator.js', type: 'module' };
+    }
+    if (name === 'tour_modal') return { url: '/static/js/tour_modal.js', type: 'module' };
+    if (name === 'watchers_modal') return { url: '/static/js/features/watchers/watchers_modal.js', type: 'module' };
+    if (name === 'status_monitor_core') return { url: '/static/js/features/status-monitor/status_monitor_core.js', type: 'module' };
+    if (name === 'status_monitor_data') return { url: '/static/js/features/status-monitor/status_monitor_data.js', type: 'module' };
+    if (name === 'status_monitor_resources') return { url: '/static/js/features/status-monitor/status_monitor_resources.js', type: 'module' };
+    if (name === 'status_monitor') return { url: '/static/js/status_monitor.js', type: 'module' };
+    if (name === 'jspdf') return { url: '/vendor/jspdf.umd.min.js', type: 'classic' };
+    if (name === 'xterm_css') return { url: '/vendor/xterm.css', type: 'classic' };
+    if (name === 'xterm_js') return { url: '/vendor/xterm.js', type: 'classic' };
+    if (name === 'xterm_fit_js') return { url: '/vendor/xterm-addon-fit.js', type: 'classic' };
+    return { url: '', type: 'classic' };
+  }
+
+  function _lazyAssetUrl(name) {
+    return _lazyAssetEntry(name).url;
+  }
+
+  function _safeLazyAssetLogSrc(src) {
+    const raw = String(src || '');
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw, typeof window !== 'undefined' && window.location ? window.location.href : 'http://localhost/');
+      const version = parsed.searchParams.get('v');
+      return version ? `${parsed.pathname}?v=${encodeURIComponent(version)}` : parsed.pathname;
+    } catch (_) {
+      return raw.split('?', 1)[0].slice(0, 300);
+    }
+  }
+
+  function _logLazyAssetLoadFailed(name, entry, err, globalCheck) {
+    if (
+      typeof window === 'undefined'
+      || typeof window.logClientError !== 'function'
+    ) return;
+    window.logClientError('lazy asset load failed', err, {
+      event: 'LAZY_ASSET_LOAD_FAILED',
+      level: 'error',
+      asset_name: String(name || '').slice(0, 120),
+      asset_type: entry && entry.type === 'module' ? 'module' : 'classic',
+      src: _safeLazyAssetLogSrc(entry && entry.url),
+      expected_global: typeof globalCheck === 'function',
+    });
   }
 
   function lazyAssetUrl(name) {
@@ -94,8 +155,13 @@
   function loadLazyClassicScript(name, globalCheck) {
     if (typeof globalCheck === 'function' && globalCheck()) return Promise.resolve();
     if (_lazyAssetPromises[name]) return _lazyAssetPromises[name];
-    const src = _lazyAssetUrl(name);
-    if (!src) return Promise.reject(new Error(`Unknown lazy asset: ${name}`));
+    const entry = _lazyAssetEntry(name);
+    const src = entry.url;
+    if (!src) {
+      const err = new Error(`Unknown lazy asset: ${name}`);
+      _logLazyAssetLoadFailed(name, entry, err, globalCheck);
+      return Promise.reject(err);
+    }
     _lazyAssetPromises[name] = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = src;
@@ -108,14 +174,48 @@
       (document.head || document.documentElement).appendChild(script);
     }).catch((err) => {
       delete _lazyAssetPromises[name];
+      _logLazyAssetLoadFailed(name, entry, err, globalCheck);
       throw err;
     });
     return _lazyAssetPromises[name];
   }
 
+  function loadLazyModule(name, globalCheck) {
+    if (typeof globalCheck === 'function' && globalCheck()) return Promise.resolve();
+    if (_lazyAssetPromises[name]) return _lazyAssetPromises[name];
+    const entry = _lazyAssetEntry(name);
+    const src = entry.url;
+    if (!src) {
+      const err = new Error(`Unknown lazy asset: ${name}`);
+      _logLazyAssetLoadFailed(name, entry, err, globalCheck);
+      return Promise.reject(err);
+    }
+    const importer = typeof window !== 'undefined' && typeof window.__darklabImportModule === 'function'
+      ? window.__darklabImportModule
+      : (url) => import(url);
+    _lazyAssetPromises[name] = Promise.resolve()
+      .then(() => importer(src))
+      .then(() => {
+        if (typeof globalCheck !== 'function' || globalCheck()) return undefined;
+        throw new Error(`Lazy module did not expose its expected global: ${src}`);
+      })
+      .catch((err) => {
+        delete _lazyAssetPromises[name];
+        _logLazyAssetLoadFailed(name, entry, err, globalCheck);
+        throw err;
+      });
+    return _lazyAssetPromises[name];
+  }
+
+  function loadLazyAsset(name, globalCheck) {
+    return _lazyAssetEntry(name).type === 'module'
+      ? loadLazyModule(name, globalCheck)
+      : loadLazyClassicScript(name, globalCheck);
+  }
+
   function loadLazyClassicScripts(items) {
     return items.reduce(
-      (promise, item) => promise.then(() => loadLazyClassicScript(item.name, item.globalCheck)),
+      (promise, item) => promise.then(() => loadLazyAsset(item.name, item.globalCheck)),
       Promise.resolve(),
     );
   }
@@ -126,7 +226,7 @@
   }
 
   async function loadExportPdfUtils() {
-    await loadLazyClassicScript('export_pdf', () => !!(
+    await loadLazyAsset('export_pdf', () => !!(
       window.ExportPdfUtils
       && typeof window.ExportPdfUtils.buildTerminalExportPdf === 'function'
     ));
@@ -134,7 +234,7 @@
   }
 
   async function loadFindingsBoard() {
-    await loadLazyClassicScript('findings_board', () => !!(
+    await loadLazyAsset('findings_board', () => !!(
       window.openFindingsBoard
       && window.openFindingsBoard !== lazyOpenFindingsBoard
     ));
@@ -174,7 +274,7 @@
   }
 
   async function loadWatchersModal() {
-    await loadLazyClassicScript('watchers_modal', () => !!(
+    await loadLazyAsset('watchers_modal', () => !!(
       window.openWatchersModal
       && window.openWatchersModal !== lazyOpenWatchersModal
     ));
@@ -182,7 +282,7 @@
   }
 
   async function loadProjectReport() {
-    await loadLazyClassicScript('project_report', () => !!(
+    await loadLazyAsset('project_report', () => !!(
       window.DarklabProjectReport
       && typeof window.DarklabProjectReport.createProjectReportController === 'function'
     ));
@@ -190,7 +290,7 @@
   }
 
   async function loadProjectActivity() {
-    await loadLazyClassicScript('project_activity', () => !!(
+    await loadLazyAsset('project_activity', () => !!(
       window.DarklabProjectActivity
       && typeof window.DarklabProjectActivity.createProjectActivityController === 'function'
     ));
@@ -198,7 +298,7 @@
   }
 
   async function loadProjectArtifacts() {
-    await loadLazyClassicScript('project_artifacts', () => !!(
+    await loadLazyAsset('project_artifacts', () => !!(
       window.DarklabProjectArtifacts
       && typeof window.DarklabProjectArtifacts.createProjectArtifactsController === 'function'
     ));
@@ -206,7 +306,7 @@
   }
 
   async function loadProjectPackages() {
-    await loadLazyClassicScript('project_packages', () => !!(
+    await loadLazyAsset('project_packages', () => !!(
       window.DarklabProjectPackages
       && typeof window.DarklabProjectPackages.createProjectPackagesController === 'function'
     ));
@@ -367,7 +467,7 @@
   }
 
   async function loadHistoryRunDetails() {
-    await loadLazyClassicScript('history_run_details', () => !!(
+    await loadLazyAsset('history_run_details', () => !!(
       window.openHistoryRunDetails
       && window.openHistoryRunDetails !== lazyOpenHistoryRunDetails
     ));
@@ -378,7 +478,7 @@
     await loadLazyClassicScripts([
       {
         name: 'options_session_token_controls',
-        globalCheck: () => typeof _updateOptionsSessionTokenStatus === 'function',
+        globalCheck: () => typeof window._updateOptionsSessionTokenStatus === 'function',
       },
       {
         name: 'options_secrets_panel',
@@ -408,7 +508,7 @@
   }
 
   async function loadCommandRegistry() {
-    await loadLazyClassicScript('command_registry', () => !!(
+    await loadLazyAsset('command_registry', () => !!(
       window.openCommandRegistry
       && window.openCommandRegistry !== lazyOpenCommandRegistry
     ));
@@ -416,7 +516,7 @@
   }
 
   async function loadWorkflows() {
-    await loadLazyClassicScript('workflows', () => !!(
+    await loadLazyAsset('workflows', () => !!(
       window.renderWorkflowItems
       && window.renderWorkflowItems !== lazyRenderWorkflowItems
       && window.handleWorkflowTerminalCommand
@@ -453,11 +553,11 @@
       },
       {
         name: 'history_compare_controls',
-        globalCheck: () => typeof _closeHistoryCompareActionMenus === 'function',
+        globalCheck: () => typeof window._closeHistoryCompareActionMenus === 'function',
       },
       {
         name: 'history_compare_navigation',
-        globalCheck: () => typeof _historyCompareScrollToLine === 'function',
+        globalCheck: () => typeof window._historyCompareScrollToLine === 'function',
       },
       {
         name: 'history_compare_renderer',
@@ -478,7 +578,7 @@
   }
 
   async function loadPtyController() {
-    await loadLazyClassicScript('pty_controller', () => !!(
+    await loadLazyAsset('pty_controller', () => !!(
       window.startInteractivePtyCommand
       && window.startInteractivePtyCommand !== lazyStartInteractivePtyCommand
       && window.attachInteractivePtyCommand
@@ -494,7 +594,7 @@
   }
 
   async function loadSchedulesModal() {
-    await loadLazyClassicScript('schedules_modal', () => !!(
+    await loadLazyAsset('schedules_modal', () => !!(
       window.openSchedulesModal
       && window.openSchedulesModal !== lazyOpenSchedulesModal
     ));
@@ -502,7 +602,7 @@
   }
 
   async function loadTourModal() {
-    await loadLazyClassicScript('tour_modal', () => !!(
+    await loadLazyAsset('tour_modal', () => !!(
       window.openTourModal
       && window.openTourModal !== lazyOpenTourModal
     ));
@@ -834,6 +934,8 @@
   }
 
   window.loadLazyClassicScript = loadLazyClassicScript;
+  window.loadLazyModule = loadLazyModule;
+  window.loadLazyAsset = loadLazyAsset;
   window.lazyAssetUrl = lazyAssetUrl;
   window.loadJsPdf = loadJsPdf;
   window.loadLazyClassicScripts = loadLazyClassicScripts;

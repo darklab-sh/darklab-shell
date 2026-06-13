@@ -1043,10 +1043,10 @@ function _renderHistoryRunSummary(body, run) {
   } else if (projectState.attached) {
     projectStatus.className = 'badge badge-tone-cyan';
     projectStatus.textContent = 'Attached';
-    projectName = _historyProjectDisplayName(projectState.project);
+    projectName = window._historyProjectDisplayName(projectState.project);
   } else {
     projectStatus.textContent = 'Not attached';
-    projectName = _historyProjectDisplayName(projectState.project);
+    projectName = window._historyProjectDisplayName(projectState.project);
   }
   projectFields.appendChild(_historyRunField('Status', projectStatus));
   projectFields.appendChild(_historyRunField('Project', projectName));
@@ -1186,8 +1186,8 @@ function _renderHistoryRunOutput(body, run) {
     const line = document.createElement('span');
     line.className = 'history-run-output-line';
     const text = String(entry.text || '');
-    if (typeof _renderAnsiWithEntityTokens === 'function') {
-      _renderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '');
+    if (typeof window._renderAnsiWithEntityTokens === 'function') {
+      window._renderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '');
     } else {
       line.textContent = text;
     }
@@ -1880,7 +1880,7 @@ async function _loadHistoryRunProjectState(runId, token) {
   _historyRunModalState.loadingProject = true;
   _renderHistoryRunModal();
   try {
-    const project = await _historyLoadActiveProject();
+    const project = await window._historyLoadActiveProject();
     if (token !== _historyRunModalToken) return;
     if (!project || !project.id) {
       _historyRunModalState.projectState = { project: null, attached: false };
@@ -2125,7 +2125,7 @@ async function _handleHistoryRunModalAction(action) {
       return;
     }
     _setHistoryLoadState(true);
-    restoreHistoryRunIntoTab(run, {
+    window.restoreHistoryRunIntoTab(run, {
       targetTabId: canUpgradeExisting ? existing.id : null,
       hidePanelOnSuccess: true,
     })
@@ -2183,9 +2183,9 @@ async function _handleHistoryRunModalAction(action) {
     const project = projectState && projectState.project;
     if (!project || projectState.attached) return;
     try {
-      const confirmed = await _historyConfirmAddRunToProject(run, project);
+      const confirmed = await window._historyConfirmAddRunToProject(run, project);
       if (!confirmed) return;
-      await _historyLinkRunToProject(run, project, confirmed);
+      await window._historyLinkRunToProject(run, project, confirmed);
       _historyRunModalState.projectState = { project, attached: true };
       _renderHistoryRunModal();
       refreshHistoryPanel();
@@ -2194,7 +2194,7 @@ async function _handleHistoryRunModalAction(action) {
     }
   } else if (action === 'add-project') {
     try {
-      await _historyAddRunToProject(run);
+      await window._historyAddRunToProject(run);
       const projectState = _historyRunModalState.projectState;
       if (projectState && projectState.project) {
         const activeProjectId = String(projectState.project.id || '');
@@ -2209,7 +2209,7 @@ async function _handleHistoryRunModalAction(action) {
     }
   } else if (action === 'remove-project') {
     try {
-      await _historyRemoveRunFromProject(run);
+      await window._historyRemoveRunFromProject(run);
       const projectState = _historyRunModalState.projectState;
       if (projectState && projectState.project) {
         const activeProjectId = String(projectState.project.id || '');
@@ -2229,7 +2229,17 @@ async function _handleHistoryRunModalAction(action) {
   }
 }
 
-window.openHistoryRunDetails = openHistoryRunDetails;
-window.closeHistoryRunOverlay = closeHistoryRunOverlay;
-window.isHistoryRunOverlayOpen = isHistoryRunOverlayOpen;
-window.cycleHistoryRunOverlayTab = cycleHistoryRunOverlayTab;
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '_historyRunModalState', {
+    configurable: true,
+    enumerable: false,
+    get: () => _historyRunModalState,
+    set: value => {
+      if (value && typeof value === 'object') _historyRunModalState = value;
+    },
+  });
+  window.openHistoryRunDetails = openHistoryRunDetails;
+  window.closeHistoryRunOverlay = closeHistoryRunOverlay;
+  window.isHistoryRunOverlayOpen = isHistoryRunOverlayOpen;
+  window.cycleHistoryRunOverlayTab = cycleHistoryRunOverlayTab;
+}

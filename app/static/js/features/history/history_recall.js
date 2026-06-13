@@ -1,5 +1,8 @@
 // Command recall history shared by the prompt, mobile composer, and History chips.
-const _historyRecallCore = typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null;
+function _historyRecallCore() {
+  return (typeof window !== 'undefined' && window.DarklabHistoryCore)
+    || (typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null);
+}
 
 function _activeTabCommandHistoryState() {
   const tab = typeof getActiveTab === 'function' ? getActiveTab() : null;
@@ -11,11 +14,11 @@ function _activeTabCommandHistoryState() {
 }
 
 function _historyLimit() {
-  return _historyRecallCore.historyLimit(APP_CONFIG);
+  return _historyRecallCore().historyLimit(APP_CONFIG);
 }
 
 function _commandRecallHistory(tab) {
-  return _historyRecallCore.commandRecallHistory(tab, cmdHistory, _historyLimit());
+  return _historyRecallCore().commandRecallHistory(tab, cmdHistory, _historyLimit());
 }
 
 function resetCmdHistoryNav() {
@@ -119,4 +122,17 @@ function hydrateCmdHistory(runs) {
     .slice(0, APP_CONFIG.recent_commands_limit);
   resetCmdHistoryNav();
   renderHistory();
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _activeTabCommandHistoryState,
+    _historyLimit,
+    _commandRecallHistory,
+    resetCmdHistoryNav,
+    navigateCmdHistory,
+    addToHistory,
+    addToRecentPreview,
+    hydrateCmdHistory,
+  });
 }

@@ -178,3 +178,14 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
     }, 0);
   });
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    syncMobileViewportHeight,
+    queueMobileOutputTailRefresh,
+    syncMobileComposerKeyboard,
+    queueMobileComposerKeyboardSync,
+    bindMobileComposerKeyboardListeners,
+    bindMobileComposerSubmitAndInputListeners,
+  });
+}

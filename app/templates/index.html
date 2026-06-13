@@ -11,59 +11,222 @@
 {% include "theme_vars_script.html" %}
 <script src="{{ static_asset('/vendor/ansi_up.js') }}"></script>
 <script id="lazy-assets-json" type="application/json">{{ {
-  'export_pdf': static_asset('/static/js/export_pdf.js'),
-  'atlas_tabs': static_asset('/static/js/features/atlas/atlas_tabs.js'),
-  'atlas_entity_row': static_asset('/static/js/features/atlas/atlas_entity_row.js'),
-  'atlas_entity_detail': static_asset('/static/js/features/atlas/atlas_entity_detail.js'),
-  'atlas_overlay': static_asset('/static/js/features/atlas/atlas_overlay.js'),
-  'atlas_mobile': static_asset('/static/js/features/atlas/atlas_mobile.js'),
-  'findings_board': static_asset('/static/js/features/findings/findings_board_modal.js'),
-  'project_activity': static_asset('/static/js/features/projects/project_activity.js'),
-  'project_artifacts': static_asset('/static/js/features/projects/project_artifacts.js'),
-  'project_details': static_asset('/static/js/features/projects/project_details.js'),
-  'project_list': static_asset('/static/js/features/projects/project_list.js'),
-  'project_navigation': static_asset('/static/js/features/projects/project_navigation.js'),
-  'project_entity_editor': static_asset('/static/js/features/projects/project_entity_editor.js'),
-  'project_workspace_actions': static_asset('/static/js/features/projects/project_workspace_actions.js'),
-  'project_workspace_shell': static_asset('/static/js/features/projects/project_workspace_shell.js'),
-  'project_workspace_lifecycle': static_asset('/static/js/features/projects/project_workspace_lifecycle.js'),
-  'project_workspace_renderer': static_asset('/static/js/features/projects/project_workspace_renderer.js'),
-  'project_workspace_bootstrap': static_asset('/static/js/features/projects/project_workspace_bootstrap.js'),
-  'project_nested_sheets': static_asset('/static/js/features/projects/project_nested_sheets.js'),
-  'project_workspace_events': static_asset('/static/js/features/projects/project_workspace_events.js'),
-  'project_targets': static_asset('/static/js/features/projects/project_targets.js'),
-  'project_runs': static_asset('/static/js/features/projects/project_runs.js'),
-  'project_mobile_compare': static_asset('/static/js/features/projects/project_mobile_compare.js'),
-  'project_mobile_shell': static_asset('/static/js/features/projects/project_mobile_shell.js'),
-  'project_mobile_detail': static_asset('/static/js/features/projects/project_mobile_detail.js'),
-  'project_findings_data': static_asset('/static/js/features/projects/project_findings_data.js'),
-  'project_filters': static_asset('/static/js/features/projects/project_filters.js'),
-  'project_entities': static_asset('/static/js/features/projects/project_entities.js'),
-  'project_findings': static_asset('/static/js/features/projects/project_findings.js'),
-  'project_findings_board': static_asset('/static/js/features/projects/project_findings_board.js'),
-  'project_packages': static_asset('/static/js/features/projects/project_packages.js'),
-  'project_report': static_asset('/static/js/features/projects/project_report.js'),
-  'history_compare_core': static_asset('/static/js/features/run-comparison/history_compare_core.js'),
-  'history_compare_overlay': static_asset('/static/js/features/run-comparison/history_compare_overlay.js'),
-  'history_compare_controls': static_asset('/static/js/features/run-comparison/history_compare_controls.js'),
-  'history_compare_navigation': static_asset('/static/js/features/run-comparison/history_compare_navigation.js'),
-  'history_compare_renderer': static_asset('/static/js/features/run-comparison/history_compare_renderer.js'),
-  'history_compare_launcher': static_asset('/static/js/features/run-comparison/history_compare_launcher.js'),
-  'history_run_details': static_asset('/static/js/features/history/history_run_details.js'),
-  'options_session_token_controls': static_asset('/static/js/features/preferences/session_token_controls.js'),
-  'options_secrets_panel': static_asset('/static/js/features/preferences/secrets_panel.js'),
-  'options_teams_panel': static_asset('/static/js/features/preferences/teams_panel.js'),
-  'options_notification_channels': static_asset('/static/js/features/preferences/notification_channels.js'),
-  'command_registry': static_asset('/static/js/features/command-registry/command_registry.js'),
-  'workflows': static_asset('/static/js/features/workflows/workflows.js'),
-  'pty_controller': static_asset('/static/js/pty.js'),
-  'schedules_modal': static_asset('/static/js/features/schedules/schedules_modal.js'),
-  'status_monitor_core': static_asset('/static/js/features/status-monitor/status_monitor_core.js'),
-  'status_monitor_data': static_asset('/static/js/features/status-monitor/status_monitor_data.js'),
-  'status_monitor_resources': static_asset('/static/js/features/status-monitor/status_monitor_resources.js'),
-  'status_monitor': static_asset('/static/js/status_monitor.js'),
-  'tour_modal': static_asset('/static/js/tour_modal.js'),
-  'watchers_modal': static_asset('/static/js/features/watchers/watchers_modal.js'),
+  'export_pdf': {
+    'url': static_asset('/static/js/export_pdf.js'),
+    'type': 'module'
+  },
+  'atlas_tabs': {
+    'url': static_asset('/static/js/features/atlas/atlas_tabs.js'),
+    'type': 'module'
+  },
+  'atlas_entity_row': {
+    'url': static_asset('/static/js/features/atlas/atlas_entity_row.js'),
+    'type': 'module'
+  },
+  'atlas_entity_detail': {
+    'url': static_asset('/static/js/features/atlas/atlas_entity_detail.js'),
+    'type': 'module'
+  },
+  'atlas_overlay': {
+    'url': static_asset('/static/js/features/atlas/atlas_overlay.js'),
+    'type': 'module'
+  },
+  'atlas_mobile': {
+    'url': static_asset('/static/js/features/atlas/atlas_mobile.js'),
+    'type': 'module'
+  },
+  'findings_board': {
+    'url': static_asset('/static/js/features/findings/findings_board_modal.js'),
+    'type': 'module'
+  },
+  'project_activity': {
+    'url': static_asset('/static/js/features/projects/project_activity.js'),
+    'type': 'module'
+  },
+  'project_artifacts': {
+    'url': static_asset('/static/js/features/projects/project_artifacts.js'),
+    'type': 'module'
+  },
+  'project_details': {
+    'url': static_asset('/static/js/features/projects/project_details.js'),
+    'type': 'module'
+  },
+  'project_list': {
+    'url': static_asset('/static/js/features/projects/project_list.js'),
+    'type': 'module'
+  },
+  'project_navigation': {
+    'url': static_asset('/static/js/features/projects/project_navigation.js'),
+    'type': 'module'
+  },
+  'project_entity_editor': {
+    'url': static_asset('/static/js/features/projects/project_entity_editor.js'),
+    'type': 'module'
+  },
+  'project_workspace_actions': {
+    'url': static_asset('/static/js/features/projects/project_workspace_actions.js'),
+    'type': 'module'
+  },
+  'project_workspace_shell': {
+    'url': static_asset('/static/js/features/projects/project_workspace_shell.js'),
+    'type': 'module'
+  },
+  'project_workspace_lifecycle': {
+    'url': static_asset('/static/js/features/projects/project_workspace_lifecycle.js'),
+    'type': 'module'
+  },
+  'project_workspace_renderer': {
+    'url': static_asset('/static/js/features/projects/project_workspace_renderer.js'),
+    'type': 'module'
+  },
+  'project_workspace_bootstrap': {
+    'url': static_asset('/static/js/features/projects/project_workspace_bootstrap.js'),
+    'type': 'module'
+  },
+  'project_nested_sheets': {
+    'url': static_asset('/static/js/features/projects/project_nested_sheets.js'),
+    'type': 'module'
+  },
+  'project_workspace_events': {
+    'url': static_asset('/static/js/features/projects/project_workspace_events.js'),
+    'type': 'module'
+  },
+  'project_targets': {
+    'url': static_asset('/static/js/features/projects/project_targets.js'),
+    'type': 'module'
+  },
+  'project_runs': {
+    'url': static_asset('/static/js/features/projects/project_runs.js'),
+    'type': 'module'
+  },
+  'project_mobile_compare': {
+    'url': static_asset('/static/js/features/projects/project_mobile_compare.js'),
+    'type': 'module'
+  },
+  'project_mobile_shell': {
+    'url': static_asset('/static/js/features/projects/project_mobile_shell.js'),
+    'type': 'module'
+  },
+  'project_mobile_detail': {
+    'url': static_asset('/static/js/features/projects/project_mobile_detail.js'),
+    'type': 'module'
+  },
+  'project_findings_data': {
+    'url': static_asset('/static/js/features/projects/project_findings_data.js'),
+    'type': 'module'
+  },
+  'project_filters': {
+    'url': static_asset('/static/js/features/projects/project_filters.js'),
+    'type': 'module'
+  },
+  'project_entities': {
+    'url': static_asset('/static/js/features/projects/project_entities.js'),
+    'type': 'module'
+  },
+  'project_findings': {
+    'url': static_asset('/static/js/features/projects/project_findings.js'),
+    'type': 'module'
+  },
+  'project_findings_board': {
+    'url': static_asset('/static/js/features/projects/project_findings_board.js'),
+    'type': 'module'
+  },
+  'project_packages': {
+    'url': static_asset('/static/js/features/projects/project_packages.js'),
+    'type': 'module'
+  },
+  'project_report': {
+    'url': static_asset('/static/js/features/projects/project_report.js'),
+    'type': 'module'
+  },
+  'history_compare_core': {
+    'url': static_asset('/static/js/features/run-comparison/history_compare_core.js'),
+    'type': 'module'
+  },
+  'history_compare_overlay': {
+    'url': static_asset('/static/js/features/run-comparison/history_compare_overlay.js'),
+    'type': 'module'
+  },
+  'history_compare_controls': {
+    'url': static_asset('/static/js/features/run-comparison/history_compare_controls.js'),
+    'type': 'module'
+  },
+  'history_compare_navigation': {
+    'url': static_asset('/static/js/features/run-comparison/history_compare_navigation.js'),
+    'type': 'module'
+  },
+  'history_compare_renderer': {
+    'url': static_asset('/static/js/features/run-comparison/history_compare_renderer.js'),
+    'type': 'module'
+  },
+  'history_compare_launcher': {
+    'url': static_asset('/static/js/features/run-comparison/history_compare_launcher.js'),
+    'type': 'module'
+  },
+  'history_run_details': {
+    'url': static_asset('/static/js/features/history/history_run_details.js'),
+    'type': 'module'
+  },
+  'options_session_token_controls': {
+    'url': static_asset('/static/js/features/preferences/session_token_controls.js'),
+    'type': 'module'
+  },
+  'options_secrets_panel': {
+    'url': static_asset('/static/js/features/preferences/secrets_panel.js'),
+    'type': 'module'
+  },
+  'options_teams_panel': {
+    'url': static_asset('/static/js/features/preferences/teams_panel.js'),
+    'type': 'module'
+  },
+  'options_notification_channels': {
+    'url': static_asset('/static/js/features/preferences/notification_channels.js'),
+    'type': 'module'
+  },
+  'command_registry': {
+    'url': static_asset('/static/js/features/command-registry/command_registry.js'),
+    'type': 'module'
+  },
+  'workflows': {
+    'url': static_asset('/static/js/features/workflows/workflows.js'),
+    'type': 'module'
+  },
+  'pty_controller': {
+    'url': static_asset('/static/js/pty.js'),
+    'type': 'module'
+  },
+  'schedules_modal': {
+    'url': static_asset('/static/js/features/schedules/schedules_modal.js'),
+    'type': 'module'
+  },
+  'mobile_running_indicator': {
+    'url': static_asset('/static/js/features/mobile/mobile_running_indicator.js'),
+    'type': 'module'
+  },
+  'status_monitor_core': {
+    'url': static_asset('/static/js/features/status-monitor/status_monitor_core.js'),
+    'type': 'module'
+  },
+  'status_monitor_data': {
+    'url': static_asset('/static/js/features/status-monitor/status_monitor_data.js'),
+    'type': 'module'
+  },
+  'status_monitor_resources': {
+    'url': static_asset('/static/js/features/status-monitor/status_monitor_resources.js'),
+    'type': 'module'
+  },
+  'status_monitor': {
+    'url': static_asset('/static/js/status_monitor.js'),
+    'type': 'module'
+  },
+  'tour_modal': {
+    'url': static_asset('/static/js/tour_modal.js'),
+    'type': 'module'
+  },
+  'watchers_modal': {
+    'url': static_asset('/static/js/features/watchers/watchers_modal.js'),
+    'type': 'module'
+  },
   'jspdf': static_asset('/vendor/jspdf.umd.min.js'),
   'xterm_css': static_asset('/vendor/xterm.css'),
   'xterm_js': static_asset('/vendor/xterm.js'),
@@ -1494,15 +1657,81 @@
   </div>
 </div>
 
-{% for src in asset_bundle('shell-core') %}
-<script src="{{ src }}"></script>
-{% endfor %}
 <script id="app-config-json" type="application/json">{{ frontend_config|tojson }}</script>
-{% for src in asset_bundle('shell-features') %}
-<script src="{{ src }}"></script>
-{% endfor %}
+<script>
+(function () {
+  if (window.__darklabBootstrapAsset) return;
+  const active = {};
+  function safeSrc(src) {
+    try {
+      const parsed = new URL(String(src || ''), window.location.href);
+      const version = parsed.searchParams.get('v');
+      return version ? `${parsed.pathname}?v=${encodeURIComponent(version)}` : parsed.pathname;
+    } catch (_) {
+      return String(src || '').split('?', 1)[0].slice(0, 300);
+    }
+  }
+  function errorMessage(err) {
+    if (!err) return '';
+    if (err.message) return String(err.message).slice(0, 500);
+    if (err.reason && err.reason.message) return String(err.reason.message).slice(0, 500);
+    return String(err).slice(0, 500);
+  }
+  function report(page, bundle, src, err, phase) {
+    const details = {
+      event: 'ESM_BOOTSTRAP_LOAD_FAILED',
+      level: 'error',
+      page,
+      bundle,
+      src: safeSrc(src),
+      phase,
+    };
+    const payload = {
+      event: details.event,
+      level: details.level,
+      context: details.event,
+      message: errorMessage(err),
+      details,
+    };
+    try {
+      fetch('/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(function () {});
+    } catch (_) {}
+  }
+  window.__darklabBootstrapAsset = {
+    start(page, bundle, src) {
+      active[bundle] = { page, bundle, src };
+    },
+    loaded(bundle) {
+      delete active[bundle];
+    },
+    failed(page, bundle, src, err) {
+      report(page, bundle, src, err, 'load');
+      delete active[bundle];
+    },
+  };
+  window.addEventListener('error', function (event) {
+    const src = event && event.filename ? event.filename : '';
+    const match = Object.values(active).find((item) => src && safeSrc(item.src) === safeSrc(src))
+      || Object.values(active)[0];
+    if (!match) return;
+    report(match.page, match.bundle, match.src, event.error || event.message || event, 'evaluate');
+  }, true);
+  window.addEventListener('unhandledrejection', function (event) {
+    const match = Object.values(active)[0];
+    if (!match) return;
+    report(match.page, match.bundle, match.src, event.reason || event, 'promise');
+  });
+}());
+</script>
+{% set shell_bootstrap_script_type = asset_bundle_script_type('shell-bootstrap') %}
 {% for src in asset_bundle('shell-bootstrap') %}
-<script src="{{ src }}"></script>
+<script>window.__darklabBootstrapAsset.start('index', 'shell-bootstrap', {{ src|tojson }});</script>
+<script{% if shell_bootstrap_script_type %} type="{{ shell_bootstrap_script_type }}"{% endif %} src="{{ src }}" onload="window.__darklabBootstrapAsset.loaded('shell-bootstrap')" onerror="window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"></script>
 {% endfor %}
 </body>
 </html>

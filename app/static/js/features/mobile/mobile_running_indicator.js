@@ -2,8 +2,9 @@
 //
 // The mobile status pill reflects the active tab only; this surface gives a
 // system-level signal that work is happening on a backgrounded tab.
-(function initMobileRunningIndicator(global) {
-  if (typeof document === 'undefined') return;
+const global = typeof window !== 'undefined' ? window : globalThis;
+
+if (typeof document !== 'undefined') {
 
   function createMobileRunningIndicator({
     tabsBarEl = null,
@@ -180,4 +181,4 @@
   global.DarklabMobileRunningIndicator = {
     create: createMobileRunningIndicator,
   };
-})(typeof window !== 'undefined' ? window : this);
+}

@@ -266,6 +266,14 @@ function loadTabsAndOutputFns({
 
 describe('tabs helpers', () => {
   beforeEach(() => {
+    ;[
+      '_stickOutputToBottom',
+      '_restoreOutputTailAfterLayout',
+      '_cancelPendingOutputBatch',
+      '_resetTabOutputSignalCounts',
+    ].forEach((name) => {
+      delete window[name]
+    })
     document.body.className = ''
     document.body.innerHTML = `
       <div id="shell-input-row" data-mobile-label="$">

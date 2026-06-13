@@ -23,10 +23,10 @@ export default defineConfig({
     launchOptions: HEADED_DEMO
       ? {
         args: [
-            '--force-color-profile=srgb',
-            '--window-size=1700,1000',
-          ],
-        }
+          '--force-color-profile=srgb',
+          '--window-size=1700,1000',
+        ],
+      }
       : {},
     slowMo: 60,
     // Playwright video is disabled. The wrapper records through OBS; the spec

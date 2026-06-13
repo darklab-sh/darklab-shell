@@ -347,7 +347,7 @@ function renderWorkflowInputCard(card, workflow) {
     hint.textContent = rendered.ready
       ? 'Rendered commands are live. Click a chip to load it, use ▶ to run one step, or Run all to execute the full workflow here in sequence.'
       : 'Fill the required fields to render runnable commands.';
-    wireFaqCommandChips(card);
+    if (typeof window.wireFaqCommandChips === 'function') window.wireFaqCommandChips(card);
     wireWorkflowStepRunButtons(card);
   };
 
@@ -753,7 +753,7 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
     body.appendChild(card);
   });
 
-  wireFaqCommandChips(body);
+  if (typeof window.wireFaqCommandChips === 'function') window.wireFaqCommandChips(body);
   wireWorkflowStepRunButtons(body);
 
   if (emitCatalogEvent && typeof emitUiEvent === 'function') {
@@ -1123,6 +1123,7 @@ if (typeof window !== 'undefined') {
   window.reloadWorkflowCatalog = reloadWorkflowCatalog;
   window.ensureWorkflowCatalogLoaded = ensureWorkflowCatalogLoaded;
   window.handleWorkflowTerminalCommand = handleWorkflowTerminalCommand;
+  window._runtimeWorkflowContext = _runtimeWorkflowContext;
   window.openWorkflowEditor = openWorkflowEditor;
   window.closeWorkflowEditor = closeWorkflowEditor;
   if (workflowCatalogItems.length) renderWorkflowItems(workflowCatalogItems, { emitCatalogEvent: false });

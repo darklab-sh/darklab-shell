@@ -796,8 +796,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── manifest.json  # Generated asset bundle manifest read by Flask
 │   │   │   ├── permalink.<hash>.js # Generated self-contained permalink JS bundle
 │   │   │   ├── shell-bootstrap.<hash>.js # Generated shell bootstrap JS bundle
-│   │   │   ├── shell-core.<hash>.js # Generated shell core JS bundle
-│   │   │   ├── shell-features.<hash>.js # Generated shell feature JS bundle
 │   │   │   └── terminal-export.<hash>.css # Generated permalink/export CSS bundle
 │   │   ├── css/
 │   │   │   ├── core/
@@ -831,14 +829,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
 │   │       ├── autocomplete.js # Command autocomplete dropdown
-│   │       ├── controller.js   # Initialization and event wiring (loads after app.js)
+│   │       ├── controller.js   # Initialization and event wiring imported by shell_bootstrap.entry.js
 │   │       ├── core/
 │   │       │   ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
 │   │       │   ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
 │   │       │   ├── config.js   # APP_CONFIG bootstrap reader
 │   │       │   ├── dom.js      # Shared DOM element references
 │   │       │   ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
-│   │       │   ├── lazy_assets.js # Small loader for rarely-used classic scripts
+│   │       │   ├── lazy_assets.js # Small loader for rarely-used scripts and modules
 │   │       │   ├── output_core.js # Pure output prompt/signal helpers shared by output.js and unit harnesses
 │   │       │   ├── run_output_model.js # Browser-side typed run-output line-event schema and legacy compatibility helpers
 │   │       │   ├── runner_core.js # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
@@ -962,12 +960,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── history.js      # Command history chips, drawer rows, filters, and compare entry points
 │   │       ├── mobile_chrome.js # Mobile shell chrome — peek/menu routing, viewport mode, pull-to-refresh suppression
 │   │       ├── output.js       # ANSI rendering and line management
+│   │       ├── permalink.entry.js # Module entry for the permalink page bundle
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
 │   │       ├── pty.js          # Lazy-loaded interactive PTY controller backed by xterm.js
 │   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
 │   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
-│   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller (loads last)
+│   │       ├── shell_bootstrap.entry.js # Module entry for shell bootstrap controllers
+│   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller
 │   │       ├── status_monitor.js  # Lazy-loaded Status Monitor modal/sheet controller
 │   │       ├── tabs.js         # Tab lifecycle management
 │   │       ├── tour_modal.js   # Lazy-loaded desktop visual onboarding tour carousel
@@ -1014,9 +1014,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   ├── notifications.md       # Outbound notification channels, payloads, retries, and setup guide
 │   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-│   ├── release-drafts/
-│   │   ├── v2.2-merge-request.md # Draft v2.2 merge request summary
-│   │   └── v2.2-release-notes.md # Draft v2.2 release notes
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 │   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
@@ -1044,6 +1041,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
+│   ├── inventory_frontend_modules.mjs # Reports/checks frontend globals, publish paths, and cross-file reads
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
 │   ├── migrate_sqlite_to_postgres.py # Offline SQLite-to-Postgres cutover helper with row-count and file-reference validation
 │   ├── obs_recording.mjs       # Minimal OBS WebSocket helper used by the demo recording wrappers
@@ -1120,6 +1118,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── notification_channels.test.js # Options Notifications tab refresh, editor validation, and channel action coverage
     │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
     │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
+    │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
     │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
     │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
     │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
@@ -1128,6 +1127,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
     │       ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
     │       ├── shell_chrome.test.js  # Desktop HUD status/Redis pill behavior
+    │       ├── shell_entry_module.test.js # Native shell ES module startup smoke test
     │       ├── state.test.js       # composer state store accessors and reset behavior
     │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
     │       ├── tabbar_chrome_collapse.test.js # tab-bar chrome auto-collapse behavior and persisted pinning coverage
@@ -1154,6 +1154,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
     │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
     │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
+    │   ├── test_check_versions.py # Dependency version-check helper coverage
     │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
     │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
     │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage

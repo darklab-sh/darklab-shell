@@ -129,7 +129,15 @@ function makeCommandRegistryRow(command) {
   chev.textContent = '›';
 
   row.append(rootEl, text, chev);
-  row.addEventListener('click', () => openCommandCatalogModal(root));
+  const openDetails = () => openCommandCatalogModal(root);
+  if (typeof bindPressable === 'function') {
+    bindPressable(row, {
+      onActivate: openDetails,
+      clearPressStyle: true,
+    });
+  } else {
+    row.addEventListener('click', openDetails);
+  }
   return row;
 }
 
@@ -371,7 +379,11 @@ function wireCommandCatalogExamples(root = commandCatalogBody) {
   root.querySelectorAll('[data-command-example]').forEach(chip => {
     if (chip.dataset.commandExampleWired === '1') return;
     chip.dataset.commandExampleWired = '1';
-    const activate = () => activateFaqCommandChip(chip.dataset.commandExample || '');
+    const activate = () => {
+      if (typeof window.activateFaqCommandChip === 'function') {
+        window.activateFaqCommandChip(chip.dataset.commandExample || '');
+      }
+    };
     chip.addEventListener('click', activate);
     chip.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -439,3 +451,17 @@ async function openCommandCatalogModal(cmd) {
     commandCatalogBody.textContent = 'Command details are unavailable right now.';
   }
 }
+
+window.showCommandRegistryOverlay = showCommandRegistryOverlay;
+window.hideCommandRegistryOverlay = hideCommandRegistryOverlay;
+window.isCommandRegistryOverlayOpen = isCommandRegistryOverlayOpen;
+window.closeCommandRegistry = closeCommandRegistry;
+window.renderCommandRegistry = renderCommandRegistry;
+window.openCommandRegistry = openCommandRegistry;
+window.showCommandCatalogOverlay = showCommandCatalogOverlay;
+window.hideCommandCatalogOverlay = hideCommandCatalogOverlay;
+window.closeCommandCatalogModal = closeCommandCatalogModal;
+window.isCommandCatalogOverlayOpen = isCommandCatalogOverlayOpen;
+window.wireCommandCatalogExamples = wireCommandCatalogExamples;
+window.renderCommandCatalogModal = renderCommandCatalogModal;
+window.openCommandCatalogModal = openCommandCatalogModal;

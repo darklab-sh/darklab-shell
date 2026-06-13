@@ -1045,3 +1045,13 @@ async function runWelcome() {
     includeBlocks: true,
   });
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    welcomeOwnsTab,
+    cancelWelcome,
+    requestWelcomeSettle,
+    settleWelcome,
+    runWelcome,
+  });
+}

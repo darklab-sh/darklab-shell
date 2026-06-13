@@ -272,3 +272,13 @@ function handleHistSearchKey(e) {
   // Let printable characters and backspace fall through to the input event
   return false;
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    isHistSearchMode,
+    enterHistSearch,
+    exitHistSearch,
+    handleHistSearchInput,
+    handleHistSearchKey,
+  });
+}

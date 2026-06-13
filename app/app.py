@@ -127,6 +127,8 @@ _IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
 _ASSET_VERSION_CACHE: dict[str, str] = {}
 _ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "manifest.json"
 _VALID_ASSET_BUNDLE_MODES = frozenset({"source", "bundle"})
+_WARNED_INVALID_ASSET_BUNDLE_MODES: set[str] = set()
+_LOGGED_ASSET_BUNDLE_MODES: set[str] = set()
 
 
 def _should_log_request_completed() -> bool:
@@ -180,16 +182,47 @@ def _asset_version(path: str) -> str:
     try:
         return hashlib.sha256(local_path.read_bytes()).hexdigest()[:12]
     except OSError:
+        log.warning("ASSET_VERSION_FALLBACK", exc_info=True, extra={
+            "asset_path": path,
+            "local_path": str(local_path),
+            "fallback_version": APP_VERSION,
+        })
         return APP_VERSION
 
 
 def _asset_bundle_mode() -> str:
     mode = str(CFG.get("asset_bundle_mode") or "bundle").strip().lower()
-    return mode if mode in _VALID_ASSET_BUNDLE_MODES else "bundle"
+    if mode in _VALID_ASSET_BUNDLE_MODES:
+        if mode not in _LOGGED_ASSET_BUNDLE_MODES:
+            _LOGGED_ASSET_BUNDLE_MODES.add(mode)
+            log.info("ASSET_BUNDLE_MODE_SELECTED", extra={"asset_bundle_mode": mode})
+        return mode
+    if mode not in _WARNED_INVALID_ASSET_BUNDLE_MODES:
+        _WARNED_INVALID_ASSET_BUNDLE_MODES.add(mode)
+        log.warning("ASSET_BUNDLE_MODE_INVALID", extra={
+            "configured_mode": mode,
+            "fallback_mode": "bundle",
+        })
+    return "bundle"
 
 
 def _asset_manifest_error(message: str) -> RuntimeError:
     return RuntimeError(f"{message}. Run assets:sync.")
+
+
+def _log_asset_manifest_resolution_failed(
+    *,
+    logical_name: str,
+    bundle_type: str = "",
+    mode: str = "",
+    exc_info=False,
+) -> None:
+    log.error("ASSET_MANIFEST_RESOLUTION_FAILED", exc_info=exc_info, extra={
+        "bundle": logical_name,
+        "bundle_type": bundle_type,
+        "asset_bundle_mode": mode or _asset_bundle_mode(),
+        "manifest_path": str(_ASSET_MANIFEST_PATH),
+    })
 
 
 def _load_asset_manifest() -> dict:
@@ -211,10 +244,16 @@ def _load_asset_manifest() -> dict:
 def _asset_bundle_entry(logical_name: str) -> dict:
     bundle_name = str(logical_name or "").strip()
     if not bundle_name:
+        _log_asset_manifest_resolution_failed(logical_name=bundle_name)
         raise _asset_manifest_error("Asset bundle name is required")
-    bundles = _load_asset_manifest()["bundles"]
+    try:
+        bundles = _load_asset_manifest()["bundles"]
+    except RuntimeError:
+        _log_asset_manifest_resolution_failed(logical_name=bundle_name, exc_info=True)
+        raise
     entry = bundles.get(bundle_name)
     if not isinstance(entry, dict):
+        _log_asset_manifest_resolution_failed(logical_name=bundle_name)
         raise _asset_manifest_error(f"Asset manifest is incomplete: missing bundle {bundle_name}")
     return entry
 
@@ -223,22 +262,43 @@ def _asset_bundle(logical_name: str) -> list[str]:
     entry = _asset_bundle_entry(logical_name)
     bundle_type = str(entry.get("type") or "").strip()
     mode = _asset_bundle_mode()
-    if bundle_type not in {"css", "js"}:
+    if bundle_type not in {"css", "js", "esm"}:
+        _log_asset_manifest_resolution_failed(
+            logical_name=logical_name,
+            bundle_type=bundle_type,
+            mode=mode,
+        )
         raise _asset_manifest_error(f"Unsupported asset bundle type for {logical_name}: {bundle_type}")
     if mode == "bundle":
         built_path = str(entry.get("path") or "").strip()
         if not built_path:
+            _log_asset_manifest_resolution_failed(
+                logical_name=logical_name,
+                bundle_type=bundle_type,
+                mode=mode,
+            )
             raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no built path")
         return [built_path]
 
-    sources = entry.get("sources")
+    sources = entry.get("entries") if bundle_type == "esm" else entry.get("sources")
     if not isinstance(sources, list) or not sources:
+        _log_asset_manifest_resolution_failed(
+            logical_name=logical_name,
+            bundle_type=bundle_type,
+            mode=mode,
+        )
         raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no sources")
     return [_versioned_asset_url(str(source)) for source in sources]
 
 
+def _asset_bundle_script_type(logical_name: str) -> str:
+    entry = _asset_bundle_entry(logical_name)
+    return "module" if str(entry.get("type") or "").strip() == "esm" else ""
+
+
 app.jinja_env.globals["static_asset"] = _versioned_asset_url
 app.jinja_env.globals["asset_bundle"] = _asset_bundle
+app.jinja_env.globals["asset_bundle_script_type"] = _asset_bundle_script_type
 
 
 def _cleanup_active_run_metadata_on_startup():
@@ -381,7 +441,7 @@ def _log_request():
         ip = get_client_ip()
         extra: dict = {"ip": ip, "method": request.method, "path": request.path}
         if request.query_string:
-            extra["qs"] = request.query_string.decode(errors="replace")
+            extra["query_keys"] = sorted(request.args.keys())
         log.debug("REQUEST", extra=extra)
 
 

@@ -912,17 +912,18 @@ class TestRequestResponseDebugEvents:
         finally:
             shell_app.log.setLevel(original_level)
 
-    def test_query_string_included_in_request_debug_when_present(self):
+    def test_request_debug_logs_query_keys_without_raw_query_values(self):
         original_level = shell_app.log.level
         shell_app.log.setLevel(logging.DEBUG)
         try:
             with mock.patch.object(shell_app.log, "debug") as mock_debug:
-                get_client().get("/history/nonexistent?json")
+                get_client().get("/history/nonexistent?json&token=secret-token&debug=1")
             request_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
             assert len(request_calls) >= 1
             call = request_calls[0]
-            assert "qs" in call.kwargs["extra"]
-            assert "json" in call.kwargs["extra"]["qs"]
+            assert call.kwargs["extra"]["query_keys"] == ["debug", "json", "token"]
+            assert "qs" not in call.kwargs["extra"]
+            assert "secret-token" not in json.dumps(call.kwargs["extra"])
         finally:
             shell_app.log.setLevel(original_level)
 

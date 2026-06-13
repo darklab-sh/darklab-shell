@@ -203,7 +203,10 @@ function isChromeIOS() {
 }
 
 function getMobileKeyboardOffset() {
-  if (!useMobileTerminalViewportMode() || !window.visualViewport) return 0;
+  const isMobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
+  if (!isMobileMode || !window.visualViewport) return 0;
   const liveInnerHeight = Math.round(window.innerHeight || 0);
   const visualHeight = Math.round(window.visualViewport.height || 0);
   const offsetTop = Math.round(window.visualViewport.offsetTop || 0);
@@ -217,7 +220,10 @@ function getMobileKeyboardOffset() {
 }
 
 function isMobileKeyboardOpen(offset = null) {
-  if (!useMobileTerminalViewportMode()) return false;
+  const isMobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
+  if (!isMobileMode) return false;
   const mobileInputEl = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
   const mobileInputFocused = !!(mobileInputEl && typeof document !== 'undefined' && document.activeElement === mobileInputEl);
   if (!mobileInputFocused) return false;
@@ -238,14 +244,26 @@ function isMobileKeyboardOpen(offset = null) {
 
 function syncMobileViewportState() {
   if (typeof document === 'undefined') return;
-  const mobileMode = useMobileTerminalViewportMode();
+  const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
   const hasMobileShell = !!(_mobileUiLayoutRefs && _mobileUiLayoutRefs.shell);
   const activeMobileMode = mobileMode && hasMobileShell;
-  const keyboardOffset = getMobileKeyboardOffset();
-  const keyboardOpen = isMobileKeyboardOpen(keyboardOffset);
+  const keyboardOffset = typeof window.getMobileKeyboardOffset === 'function'
+    ? window.getMobileKeyboardOffset()
+    : getMobileKeyboardOffset();
+  const keyboardOpen = typeof window.isMobileKeyboardOpen === 'function'
+    ? window.isMobileKeyboardOpen(keyboardOffset)
+    : isMobileKeyboardOpen(keyboardOffset);
   const wasMobileKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
+  const wasMobileTerminalMode = document.body.classList.contains('mobile-terminal-mode');
   if (!hasMobileShell) return;
   document.body.classList.toggle('mobile-terminal-mode', activeMobileMode);
+  if (wasMobileTerminalMode !== activeMobileMode && typeof document.dispatchEvent === 'function') {
+    document.dispatchEvent(new CustomEvent('app:mobile-terminal-mode-changed', {
+      detail: { active: activeMobileMode },
+    }));
+  }
   document.body.classList.toggle('mobile-chrome-ios', activeMobileMode && isChromeIOS());
   if (typeof syncMobileComposerKeyboardState === 'function') {
     syncMobileComposerKeyboardState(keyboardOffset, {
@@ -271,8 +289,30 @@ function syncMobileViewportState() {
 }
 
 function dismissMobileKeyboardAfterSubmit() {
-  if (!useMobileTerminalViewportMode()) return;
+  const isMobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
+  if (!isMobileMode) return;
   if (typeof blurVisibleComposerInputIfMobile === 'function') {
     setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
   }
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    useMobileTerminalViewportMode,
+    syncMobileShellChromeLayout,
+    syncMobileShellTranscriptLayout,
+    syncMobileShellOverlayLayout,
+    _bindMobileComposerInteractions,
+    _mobileUiLayoutRefs,
+    _uiOverlayRefs,
+    syncMobileShellLayout,
+    syncMobileComposerLayout,
+    isChromeIOS,
+    getMobileKeyboardOffset,
+    isMobileKeyboardOpen,
+    syncMobileViewportState,
+    dismissMobileKeyboardAfterSubmit,
+  });
 }

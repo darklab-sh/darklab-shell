@@ -8,11 +8,12 @@
  * kill switch, chip visibility, chip count, active-tab exclusion, cycle-tap
  * dispatch — is fully jsdom-testable and pinned here.
  *
- * The module is a single IIFE so the tests re-load the source into a fresh
- * Function scope per case via `mountModule()`. A synchronous
- * requestAnimationFrame stub collapses the rAF-coalesced `syncRunningIndicator`
- * into one sync pass, and `location.search` is set before module load so the
- * `?ri=off` / `?ri=0` kill switch (read once at IIFE init) can be exercised.
+ * The indicator is a lazy module, so the tests load the module source into a
+ * fresh Function scope per case and stub `loadLazyAsset()` before evaluating
+ * mobile_chrome.js. A synchronous requestAnimationFrame stub collapses the
+ * rAF-coalesced `syncRunningIndicator` into one sync pass, and
+ * `location.search` is set before mobile chrome loads so the `?ri=off` /
+ * `?ri=0` kill switch can be exercised.
  */
 
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
@@ -110,6 +111,22 @@ function mountModule({
     document.addEventListener(name, handler, options)
     return () => document.removeEventListener(name, handler, options)
   }
+  injectedGlobal.loadLazyAsset = vi.fn((name, globalCheck) => {
+    if (name !== 'mobile_running_indicator') return Promise.reject(new Error(`Unexpected lazy asset: ${name}`))
+    if (typeof globalCheck === 'function' && !globalCheck()) {
+      new Function('window', MOBILE_RUNNING_INDICATOR_SRC)(injectedGlobal)
+    }
+    return {
+      then(onResolve) {
+        onResolve()
+        return {
+          catch() {
+            return this
+          },
+        }
+      },
+    }
+  })
 
   // Collapse rAF to sync so syncRunningIndicator resolves inside the test tick.
   const origRaf = window.requestAnimationFrame
@@ -118,18 +135,17 @@ function mountModule({
     return 0
   }
 
-  // Execute the feature IIFE, then the mobile chrome IIFE. mobile_chrome.js
-  // owns the mobile-DOM guard and wires the feature to the real tab bar.
-  new Function('window', MOBILE_RUNNING_INDICATOR_SRC)(injectedGlobal)
   // Execute the IIFE. The file wraps itself in
   // `(function initMobileChrome(global) {...})(typeof window !== 'undefined' ? window : this);`
-  // so re-evaluating the source runs the init block once against our DOM.
+  // so re-evaluating the source runs the init block once against our DOM. The
+  // harness loadLazyAsset stub above evaluates the lazy indicator on demand.
   new Function('window', MOBILE_CHROME_SRC)(injectedGlobal)
 
   return {
     activateTab,
     openStatusMonitor,
     tabs,
+    loadLazyAsset: injectedGlobal.loadLazyAsset,
     restore() {
       window.requestAnimationFrame = origRaf
       window.matchMedia = origMatchMedia
@@ -488,20 +504,36 @@ describe('mobile running-state indicator', () => {
     expect(chip.querySelector('.mobile-running-count').textContent).toBe('2')
   })
 
-  it('hides the chip and edge glows when the body is not in mobile-terminal-mode', () => {
+  it('does not load the lazy indicator before mobile terminal mode is active', () => {
     ctx = mountModule({
       mobileMode: false,
       tabs: [{ id: 'tab-a', st: 'running' }],
       activeTabId: 'tab-b',
     })
 
+    expect(ctx.loadLazyAsset).not.toHaveBeenCalled()
+    expect(document.getElementById('mobile-running-chip')).toBeNull()
+    expect(document.querySelector('.tab-edge-glow-left')).toBeNull()
+    expect(document.querySelector('.tab-edge-glow-right')).toBeNull()
+  })
+
+  it('loads the lazy indicator when mobile terminal mode activates after startup', () => {
+    ctx = mountModule({
+      mobileMode: false,
+      tabs: [{ id: 'tab-a', st: 'running' }],
+      activeTabId: 'tab-b',
+    })
+
+    document.body.classList.add('mobile-terminal-mode')
+    document.dispatchEvent(new CustomEvent('app:mobile-terminal-mode-changed', {
+      detail: { active: true },
+    }))
+
+    expect(ctx.loadLazyAsset).toHaveBeenCalledWith('mobile_running_indicator', expect.any(Function))
     const chip = document.getElementById('mobile-running-chip')
-    // Chip is mounted but carries u-hidden when the desktop layout is active.
     expect(chip).not.toBeNull()
-    expect(chip.classList.contains('u-hidden')).toBe(true)
-    const left = document.querySelector('.tab-edge-glow-left')
-    const right = document.querySelector('.tab-edge-glow-right')
-    expect(left.classList.contains('is-active')).toBe(false)
-    expect(right.classList.contains('is-active')).toBe(false)
+    expect(chip.classList.contains('u-hidden')).toBe(false)
+    expect(document.querySelectorAll('.tab-edge-glow.tab-edge-glow-left').length).toBe(1)
+    expect(document.querySelectorAll('.tab-edge-glow.tab-edge-glow-right').length).toBe(1)
   })
 })

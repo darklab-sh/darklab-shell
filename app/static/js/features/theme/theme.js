@@ -95,13 +95,13 @@ function _applyThemePreviewVars(target, vars) {
 
 function _persistThemeEntry(entry) {
   if (!entry) return;
-  try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist theme preference', err); }
+  try { void window._persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist theme preference', err); }
 }
 
 function _savedThemeName() {
-  return getPreference('pref_theme_name')
+  return window.getPreference('pref_theme_name')
     || localStorage.getItem('theme')
-    || getPreference('pref_theme')
+    || window.getPreference('pref_theme')
     || '';
 }
 
@@ -289,4 +289,20 @@ function applyThemeSelection(themeName, persist = true) {
   if (typeof emitUiEvent === 'function') {
     emitUiEvent('app:theme-changed', { theme: entry.name });
   }
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _getThemeRegistry,
+    _getThemeThemes,
+    _normalizeThemeName,
+    _compareThemeEntries,
+    _findThemeEntry,
+    _defaultThemeEntry,
+    _savedThemeName,
+    _resolveThemeEntry,
+    renderThemeSelectionOptions,
+    syncThemeSelectionControls,
+    applyThemeSelection,
+  });
 }

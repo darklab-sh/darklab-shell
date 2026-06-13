@@ -101,15 +101,38 @@ describe('frontend config bootstrap', () => {
       getElementById: (id) => id === 'lazy-assets-json'
         ? {
             textContent: JSON.stringify({
-              findings_board: '/static/js/features/findings/findings_board_modal.js?v=board-hash',
-              atlas_tabs: '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
-              atlas_entity_row: '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
-              atlas_entity_detail: '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
-              atlas_overlay: '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
-              atlas_mobile: '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
-              schedules_modal: '/static/js/features/schedules/schedules_modal.js?v=schedules-hash',
-              project_activity: '/static/js/features/projects/project_activity.js?v=activity-hash',
-              project_artifacts: '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
+              findings_board: {
+                url: '/static/js/features/findings/findings_board_modal.js?v=board-hash',
+                type: 'module',
+              },
+              atlas_tabs: {
+                url: '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
+                type: 'module',
+              },
+              atlas_entity_row: {
+                url: '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
+                type: 'module',
+              },
+              atlas_entity_detail: {
+                url: '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
+                type: 'module',
+              },
+              atlas_overlay: {
+                url: '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
+                type: 'module',
+              },
+              atlas_mobile: {
+                url: '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
+                type: 'module',
+              },
+              project_activity: {
+                url: '/static/js/features/projects/project_activity.js?v=activity-hash',
+                type: 'module',
+              },
+              project_artifacts: {
+                url: '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
+                type: 'module',
+              },
               project_details: '/static/js/features/projects/project_details.js?v=details-hash',
               project_list: '/static/js/features/projects/project_list.js?v=list-hash',
               project_navigation: '/static/js/features/projects/project_navigation.js?v=navigation-hash',
@@ -131,23 +154,85 @@ describe('frontend config bootstrap', () => {
               project_entities: '/static/js/features/projects/project_entities.js?v=entities-hash',
               project_findings: '/static/js/features/projects/project_findings.js?v=findings-hash',
               project_findings_board: '/static/js/features/projects/project_findings_board.js?v=findings-board-hash',
-              project_packages: '/static/js/features/projects/project_packages.js?v=packages-hash',
-              project_report: '/static/js/features/projects/project_report.js?v=report-hash',
-              history_run_details: '/static/js/features/history/history_run_details.js?v=history-details-hash',
-              pty_controller: '/static/js/pty.js?v=pty-hash',
-              status_monitor_core: '/static/js/features/status-monitor/status_monitor_core.js?v=status-core-hash',
-              status_monitor_data: '/static/js/features/status-monitor/status_monitor_data.js?v=status-data-hash',
-              status_monitor_resources: '/static/js/features/status-monitor/status_monitor_resources.js?v=status-resources-hash',
-              status_monitor: '/static/js/status_monitor.js?v=status-hash',
-              tour_modal: '/static/js/tour_modal.js?v=tour-hash',
-              watchers_modal: '/static/js/features/watchers/watchers_modal.js?v=watchers-hash',
+              project_packages: {
+                url: '/static/js/features/projects/project_packages.js?v=packages-hash',
+                type: 'module',
+              },
+              project_report: {
+                url: '/static/js/features/projects/project_report.js?v=report-hash',
+                type: 'module',
+              },
+              history_run_details: {
+                url: '/static/js/features/history/history_run_details.js?v=history-details-hash',
+                type: 'module',
+              },
+              pty_controller: {
+                url: '/static/js/pty.js?v=pty-hash',
+                type: 'module',
+              },
+              schedules_modal: {
+                url: '/static/js/features/schedules/schedules_modal.js?v=schedules-hash',
+                type: 'module',
+              },
+              status_monitor_core: {
+                url: '/static/js/features/status-monitor/status_monitor_core.js?v=status-core-hash',
+                type: 'module',
+              },
+              status_monitor_data: {
+                url: '/static/js/features/status-monitor/status_monitor_data.js?v=status-data-hash',
+                type: 'module',
+              },
+              status_monitor_resources: {
+                url: '/static/js/features/status-monitor/status_monitor_resources.js?v=status-resources-hash',
+                type: 'module',
+              },
+              status_monitor: {
+                url: '/static/js/status_monitor.js?v=status-hash',
+                type: 'module',
+              },
+              tour_modal: {
+                url: '/static/js/tour_modal.js?v=tour-hash',
+                type: 'module',
+              },
+              watchers_modal: {
+                url: '/static/js/features/watchers/watchers_modal.js?v=watchers-hash',
+                type: 'module',
+              },
             }),
           }
         : id === 'atlas-mobile-root'
           ? {}
         : null,
     }
-    const window = {}
+    const imported = []
+    const window = {
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        if (url.includes('/atlas_tabs.js')) window.DarklabAtlasTabs = {}
+        if (url.includes('/atlas_entity_row.js')) window.DarklabAtlasEntityRow = {}
+        if (url.includes('/atlas_entity_detail.js')) window.DarklabAtlasDetail = {}
+        if (url.includes('/atlas_overlay.js')) window.openAtlas = vi.fn(async options => ({ atlas: options.source }))
+        if (url.includes('/atlas_mobile.js')) window.DarklabAtlasMobile = {}
+        if (url.includes('/findings_board_modal.js')) window.openFindingsBoard = vi.fn(async options => ({ opened: options.source }))
+        if (url.includes('/status_monitor_core.js')) window.DarklabStatusMonitorCore = {}
+        if (url.includes('/status_monitor_data.js')) window.DarklabStatusMonitorData = {}
+        if (url.includes('/status_monitor_resources.js')) window.DarklabStatusMonitorResources = {}
+        if (url.includes('/status_monitor.js')) window.openStatusMonitor = vi.fn(async options => ({ status: options.source }))
+        if (url.includes('/tour_modal.js')) window.openTourModal = vi.fn(options => ({ tour: options.source }))
+        if (url.includes('/history_run_details.js')) window.openHistoryRunDetails = vi.fn(run => ({ runId: run.id }))
+        if (url.includes('/project_report.js')) window.DarklabProjectReport = { createProjectReportController: vi.fn() }
+        if (url.includes('/project_activity.js')) window.DarklabProjectActivity = { createProjectActivityController: vi.fn() }
+        if (url.includes('/project_artifacts.js')) window.DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
+        if (url.includes('/project_packages.js')) window.DarklabProjectPackages = { createProjectPackagesController: vi.fn() }
+        if (url.includes('/pty.js')) {
+          window.startInteractivePtyCommand = vi.fn(async (cmd, tabId) => ({ cmd, tabId }))
+          window.attachInteractivePtyCommand = vi.fn(async (run, tabId) => ({ run, tabId }))
+          window.isInteractivePtyCommand = vi.fn((cmd) => cmd.includes('--interactive'))
+        }
+        if (url.includes('/schedules_modal.js')) window.openSchedulesModal = vi.fn(async options => ({ schedule: options.scheduleId }))
+        if (url.includes('/watchers_modal.js')) window.openWatchersModal = vi.fn(async options => ({ watcher: options.watcherId }))
+      }),
+    }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
@@ -156,93 +241,51 @@ describe('frontend config bootstrap', () => {
     )
 
     const openPromise = window.openFindingsBoard({ source: 'unit' })
-    expect(appended).toHaveLength(1)
-    expect(appended[0].src).toBe('/static/js/features/findings/findings_board_modal.js?v=board-hash')
-
-    const realOpen = vi.fn(async options => ({ opened: options.source }))
-    window.openFindingsBoard = realOpen
-    appended[0].onload()
-
     await expect(openPromise).resolves.toEqual({ opened: 'unit' })
-    expect(realOpen).toHaveBeenCalledWith({ source: 'unit' })
+    expect(window.openFindingsBoard).toHaveBeenCalledWith({ source: 'unit' })
 
     const atlasPromise = window.openAtlas({ source: 'rail' })
-    await vi.waitFor(() => expect(appended).toHaveLength(2))
-    expect(appended[1].src).toBe('/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash')
-
-    window.DarklabAtlasTabs = {}
-    appended[1].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(3))
-    expect(appended[2].src).toBe('/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash')
-
-    window.DarklabAtlasEntityRow = {}
-    appended[2].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(4))
-    expect(appended[3].src).toBe('/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash')
-
-    window.DarklabAtlasDetail = {}
-    appended[3].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(5))
-    expect(appended[4].src).toBe('/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash')
-
-    const realAtlasOpen = vi.fn(async options => ({ atlas: options.source }))
-    window.openAtlas = realAtlasOpen
-    appended[4].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(6))
-    expect(appended[5].src).toBe('/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash')
-
-    window.DarklabAtlasMobile = {}
-    appended[5].onload()
+    await vi.waitFor(() => expect(imported).toEqual([
+      '/static/js/features/findings/findings_board_modal.js?v=board-hash',
+      '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
+      '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
+      '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
+      '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
+      '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
+    ]))
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash')
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash')
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash')
+    await vi.waitFor(() => expect(imported).toContain('/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash'))
+    expect(appended).toHaveLength(0)
 
     await expect(atlasPromise).resolves.toEqual({ atlas: 'rail' })
-    expect(realAtlasOpen).toHaveBeenCalledWith({ source: 'rail' })
+    expect(window.openAtlas).toHaveBeenCalledWith({ source: 'rail' })
 
     const reportPromise = window.loadProjectReport()
-    await vi.waitFor(() => expect(appended).toHaveLength(7))
-    expect(appended[6].src).toBe('/static/js/features/projects/project_report.js?v=report-hash')
-
-    window.DarklabProjectReport = { createProjectReportController: vi.fn() }
-    appended[6].onload()
-
-    await expect(reportPromise).resolves.toBe(window.DarklabProjectReport)
+    const reportApi = await reportPromise
+    expect(reportApi).toBe(window.DarklabProjectReport)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_report.js?v=report-hash')
 
     const activityPromise = window.loadProjectActivity()
-    await vi.waitFor(() => expect(appended).toHaveLength(8))
-    expect(appended[7].src).toBe('/static/js/features/projects/project_activity.js?v=activity-hash')
-
-    window.DarklabProjectActivity = { createProjectActivityController: vi.fn() }
-    appended[7].onload()
-
-    await expect(activityPromise).resolves.toBe(window.DarklabProjectActivity)
+    const activityApi = await activityPromise
+    expect(activityApi).toBe(window.DarklabProjectActivity)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_activity.js?v=activity-hash')
 
     const artifactsPromise = window.loadProjectArtifacts()
-    await vi.waitFor(() => expect(appended).toHaveLength(9))
-    expect(appended[8].src).toBe('/static/js/features/projects/project_artifacts.js?v=artifacts-hash')
-
-    window.DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
-    appended[8].onload()
-
-    await expect(artifactsPromise).resolves.toBe(window.DarklabProjectArtifacts)
+    const artifactsApi = await artifactsPromise
+    expect(artifactsApi).toBe(window.DarklabProjectArtifacts)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_artifacts.js?v=artifacts-hash')
 
     const packagesPromise = window.loadProjectPackages()
-    await vi.waitFor(() => expect(appended).toHaveLength(10))
-    expect(appended[9].src).toBe('/static/js/features/projects/project_packages.js?v=packages-hash')
-
-    window.DarklabProjectPackages = { createProjectPackagesController: vi.fn() }
-    appended[9].onload()
-
-    await expect(packagesPromise).resolves.toBe(window.DarklabProjectPackages)
+    const packagesApi = await packagesPromise
+    expect(packagesApi).toBe(window.DarklabProjectPackages)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_packages.js?v=packages-hash')
 
     const historyDetailsPromise = window.openHistoryRunDetails({ id: 'run-1' })
-    await vi.waitFor(() => expect(appended).toHaveLength(11))
-    expect(appended[10].src).toBe('/static/js/features/history/history_run_details.js?v=history-details-hash')
-
-    const realHistoryDetailsOpen = vi.fn(run => ({ runId: run.id }))
-    window.openHistoryRunDetails = realHistoryDetailsOpen
-    appended[10].onload()
-
     await expect(historyDetailsPromise).resolves.toEqual({ runId: 'run-1' })
-    expect(realHistoryDetailsOpen).toHaveBeenCalledWith({ id: 'run-1' })
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/history/history_run_details.js?v=history-details-hash')
+    expect(window.openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run-1' })
 
     window.APP_CONFIG = {
       interactive_pty_commands: [{ root: 'mtr', trigger_flag: '--interactive' }],
@@ -251,89 +294,56 @@ describe('frontend config bootstrap', () => {
     expect(window.isInteractivePtyCommand('mtr darklab.sh')).toBe(false)
 
     const ptyPromise = window.startInteractivePtyCommand('mtr --interactive darklab.sh', 'tab-1')
-    await vi.waitFor(() => expect(appended).toHaveLength(12))
-    expect(appended[11].src).toBe('/static/js/pty.js?v=pty-hash')
-
-    const realPtyStart = vi.fn(async (cmd, tabId) => ({ cmd, tabId }))
-    const realPtyAttach = vi.fn(async (run, tabId) => ({ run, tabId }))
-    window.startInteractivePtyCommand = realPtyStart
-    window.attachInteractivePtyCommand = realPtyAttach
-    appended[11].onload()
 
     await expect(ptyPromise).resolves.toEqual({
       cmd: 'mtr --interactive darklab.sh',
       tabId: 'tab-1',
     })
-    expect(realPtyStart).toHaveBeenCalledWith('mtr --interactive darklab.sh', 'tab-1')
+    expect(window.startInteractivePtyCommand).toHaveBeenCalledWith('mtr --interactive darklab.sh', 'tab-1')
 
     await expect(window.attachInteractivePtyCommand({ run_id: 'pty-run-1' }, 'tab-2')).resolves.toEqual({
       run: { run_id: 'pty-run-1' },
       tabId: 'tab-2',
     })
-    expect(realPtyAttach).toHaveBeenCalledWith({ run_id: 'pty-run-1' }, 'tab-2')
+    expect(window.attachInteractivePtyCommand).toHaveBeenCalledWith({ run_id: 'pty-run-1' }, 'tab-2')
 
     const schedulesPromise = window.openSchedulesModal({ scheduleId: 'sch_1' })
-    expect(appended).toHaveLength(13)
-    expect(appended[12].src).toBe('/static/js/features/schedules/schedules_modal.js?v=schedules-hash')
-
-    const realSchedulesOpen = vi.fn(async options => ({ schedule: options.scheduleId }))
-    window.openSchedulesModal = realSchedulesOpen
-    appended[12].onload()
-
     await expect(schedulesPromise).resolves.toEqual({ schedule: 'sch_1' })
-    expect(realSchedulesOpen).toHaveBeenCalledWith({ scheduleId: 'sch_1' })
+    expect(window.openSchedulesModal).toHaveBeenCalledWith({ scheduleId: 'sch_1' })
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/schedules/schedules_modal.js?v=schedules-hash')
 
     const tourPromise = window.openTourModal({ source: 'welcome' })
-    expect(appended).toHaveLength(14)
-    expect(appended[13].src).toBe('/static/js/tour_modal.js?v=tour-hash')
-
-    const realTourOpen = vi.fn(options => ({ tour: options.source }))
-    window.openTourModal = realTourOpen
-    appended[13].onload()
-
     await expect(tourPromise).resolves.toEqual({ tour: 'welcome' })
-    expect(realTourOpen).toHaveBeenCalledWith({ source: 'welcome' })
+    expect(window.openTourModal).toHaveBeenCalledWith({ source: 'welcome' })
 
     const statusPromise = window.openStatusMonitor({ source: 'unit' })
-    await vi.waitFor(() => expect(appended).toHaveLength(15))
-    expect(appended).toHaveLength(15)
-    expect(appended[14].src).toBe('/static/js/features/status-monitor/status_monitor_core.js?v=status-core-hash')
-
-    window.DarklabStatusMonitorCore = {}
-    appended[14].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(16))
-    expect(appended).toHaveLength(16)
-    expect(appended[15].src).toBe('/static/js/features/status-monitor/status_monitor_data.js?v=status-data-hash')
-
-    window.DarklabStatusMonitorData = {}
-    appended[15].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(17))
-    expect(appended).toHaveLength(17)
-    expect(appended[16].src).toBe('/static/js/features/status-monitor/status_monitor_resources.js?v=status-resources-hash')
-
-    window.DarklabStatusMonitorResources = {}
-    appended[16].onload()
-    await vi.waitFor(() => expect(appended).toHaveLength(18))
-    expect(appended).toHaveLength(18)
-    expect(appended[17].src).toBe('/static/js/status_monitor.js?v=status-hash')
-
-    const realStatusOpen = vi.fn(async options => ({ status: options.source }))
-    window.openStatusMonitor = realStatusOpen
-    appended[17].onload()
-
     await expect(statusPromise).resolves.toEqual({ status: 'unit' })
-    expect(realStatusOpen).toHaveBeenCalledWith({ source: 'unit' })
+    expect(imported).toEqual([
+      '/static/js/features/findings/findings_board_modal.js?v=board-hash',
+      '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
+      '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
+      '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
+      '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
+      '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
+      '/static/js/features/projects/project_report.js?v=report-hash',
+      '/static/js/features/projects/project_activity.js?v=activity-hash',
+      '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
+      '/static/js/features/projects/project_packages.js?v=packages-hash',
+      '/static/js/features/history/history_run_details.js?v=history-details-hash',
+      '/static/js/pty.js?v=pty-hash',
+      '/static/js/features/schedules/schedules_modal.js?v=schedules-hash',
+      '/static/js/tour_modal.js?v=tour-hash',
+      '/static/js/features/status-monitor/status_monitor_core.js?v=status-core-hash',
+      '/static/js/features/status-monitor/status_monitor_data.js?v=status-data-hash',
+      '/static/js/features/status-monitor/status_monitor_resources.js?v=status-resources-hash',
+      '/static/js/status_monitor.js?v=status-hash',
+    ])
+    expect(window.openStatusMonitor).toHaveBeenCalledWith({ source: 'unit' })
 
     const watchersPromise = window.openWatchersModal({ watcherId: 'wat_1' })
-    expect(appended).toHaveLength(19)
-    expect(appended[18].src).toBe('/static/js/features/watchers/watchers_modal.js?v=watchers-hash')
-
-    const realWatchersOpen = vi.fn(async options => ({ watcher: options.watcherId }))
-    window.openWatchersModal = realWatchersOpen
-    appended[18].onload()
-
     await expect(watchersPromise).resolves.toEqual({ watcher: 'wat_1' })
-    expect(realWatchersOpen).toHaveBeenCalledWith({ watcherId: 'wat_1' })
+    expect(window.openWatchersModal).toHaveBeenCalledWith({ watcherId: 'wat_1' })
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/watchers/watchers_modal.js?v=watchers-hash')
   })
 
   it('lazy-loads the project workspace controller cluster in order', async () => {
@@ -374,13 +384,25 @@ describe('frontend config bootstrap', () => {
             textContent: JSON.stringify(Object.fromEntries(
               projectWorkspaceScripts.map(([name]) => [
                 name,
-                `/static/js/features/projects/${name}.js?v=${name}-hash`,
+                {
+                  url: `/static/js/features/projects/${name}.js?v=${name}-hash`,
+                  type: 'module',
+                },
               ]),
             )),
           }
         : null,
     }
-    const window = {}
+    const imported = []
+    const window = {
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        const script = projectWorkspaceScripts.find(([name]) => url.includes(`/${name}.js`))
+        if (!script) return
+        const [, globalName, factoryName] = script
+        window[globalName] = { [factoryName]: vi.fn() }
+      }),
+    }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
@@ -389,14 +411,12 @@ describe('frontend config bootstrap', () => {
     )
 
     const loadPromise = window.loadProjectWorkspace()
-    for (const [index, [name, globalName, factoryName]] of projectWorkspaceScripts.entries()) {
-      await vi.waitFor(() => expect(appended).toHaveLength(index + 1))
-      expect(appended[index].src).toBe(`/static/js/features/projects/${name}.js?v=${name}-hash`)
-      window[globalName] = { [factoryName]: vi.fn() }
-      appended[index].onload()
-    }
-
-    await expect(loadPromise).resolves.toBe(window.DarklabProjectWorkspaceShell)
+    const workspaceApi = await loadPromise
+    expect(workspaceApi).toBe(window.DarklabProjectWorkspaceShell)
+    expect(imported).toEqual(projectWorkspaceScripts.map(([name]) => (
+      `/static/js/features/projects/${name}.js?v=${name}-hash`
+    )))
+    expect(appended).toEqual([])
   })
 
   it('lazy-loads the history comparison controller cluster in order', async () => {
@@ -419,11 +439,30 @@ describe('frontend config bootstrap', () => {
       createElement: (tagName) => ({ tagName, dataset: {} }),
       getElementById: (id) => id === 'lazy-assets-json'
         ? {
-            textContent: JSON.stringify(Object.fromEntries(historyCompareScripts)),
+            textContent: JSON.stringify(Object.fromEntries(historyCompareScripts.map(([name, url]) => [
+              name,
+              { url, type: 'module' },
+            ]))),
           }
         : null,
     }
-    const window = {}
+    const imported = []
+    const window = {
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        if (url.includes('/history_compare_core.js')) window.DarklabHistoryCompareCore = {}
+        if (url.includes('/history_compare_overlay.js')) {
+          window.closeHistoryCompareOverlay = vi.fn()
+          window.isHistoryCompareOverlayOpen = vi.fn()
+        }
+        if (url.includes('/history_compare_controls.js')) window._closeHistoryCompareActionMenus = vi.fn()
+        if (url.includes('/history_compare_navigation.js')) window._historyCompareScrollToLine = vi.fn()
+        if (url.includes('/history_compare_renderer.js')) window.fetchAndRenderHistoryComparison = vi.fn()
+        if (url.includes('/history_compare_launcher.js')) {
+          window.openHistoryCompareLauncher = vi.fn(run => ({ runId: run.id }))
+        }
+      }),
+    }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
@@ -433,52 +472,110 @@ describe('frontend config bootstrap', () => {
 
     const openPromise = window.openHistoryCompareLauncher({ id: 'run-1' })
 
-    await vi.waitFor(() => expect(appended).toHaveLength(1))
-    expect(appended[0].src).toBe('/static/js/features/run-comparison/history_compare_core.js?v=compare-core-hash')
-    window.DarklabHistoryCompareCore = {}
-    appended[0].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(2))
-    expect(appended[1].src).toBe('/static/js/features/run-comparison/history_compare_overlay.js?v=compare-overlay-hash')
-    window.closeHistoryCompareOverlay = vi.fn()
-    window.isHistoryCompareOverlayOpen = vi.fn()
-    appended[1].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(3))
-    expect(appended[2].src).toBe('/static/js/features/run-comparison/history_compare_controls.js?v=compare-controls-hash')
-    globalThis._closeHistoryCompareActionMenus = vi.fn()
-    appended[2].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(4))
-    expect(appended[3].src).toBe('/static/js/features/run-comparison/history_compare_navigation.js?v=compare-navigation-hash')
-    globalThis._historyCompareScrollToLine = vi.fn()
-    appended[3].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(5))
-    expect(appended[4].src).toBe('/static/js/features/run-comparison/history_compare_renderer.js?v=compare-renderer-hash')
-    window.fetchAndRenderHistoryComparison = vi.fn()
-    appended[4].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(6))
-    expect(appended[5].src).toBe('/static/js/features/run-comparison/history_compare_launcher.js?v=compare-launcher-hash')
-    const realOpen = vi.fn(run => ({ runId: run.id }))
-    window.openHistoryCompareLauncher = realOpen
-    appended[5].onload()
-
     await expect(openPromise).resolves.toEqual({ runId: 'run-1' })
-    expect(realOpen).toHaveBeenCalledWith({ id: 'run-1' })
+    expect(window.openHistoryCompareLauncher).toHaveBeenCalledWith({ id: 'run-1' })
+    expect(imported).toEqual(historyCompareScripts.map(([, url]) => url))
+    expect(appended).toEqual([])
+  })
 
-    delete globalThis._closeHistoryCompareActionMenus
-    delete globalThis._historyCompareScrollToLine
+  it('logs lazy module load failures with safe asset context', async () => {
+    const document = {
+      documentElement: {},
+      head: { appendChild: vi.fn() },
+      createElement: (tagName) => ({ tagName, dataset: {} }),
+      getElementById: (id) => id === 'lazy-assets-json'
+        ? {
+            textContent: JSON.stringify({
+              project_report: {
+                url: '/static/js/features/projects/project_report.js?v=report-hash&token=secret',
+                type: 'module',
+              },
+            }),
+          }
+        : null,
+    }
+    const failure = new Error('network failed')
+    const window = {
+      location: { href: 'http://127.0.0.1/' },
+      __darklabImportModule: vi.fn(async () => {
+        throw failure
+      }),
+      logClientError: vi.fn(),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      { document, window },
+      'window',
+    )
+
+    await expect(window.loadProjectReport()).rejects.toThrow('network failed')
+    expect(window.logClientError).toHaveBeenCalledWith('lazy asset load failed', failure, {
+      event: 'LAZY_ASSET_LOAD_FAILED',
+      level: 'error',
+      asset_name: 'project_report',
+      asset_type: 'module',
+      src: '/static/js/features/projects/project_report.js?v=report-hash',
+      expected_global: true,
+    })
+  })
+
+  it('logs invalid lazy asset config without including the raw JSON body', async () => {
+    const document = {
+      documentElement: {},
+      head: { appendChild: vi.fn() },
+      createElement: (tagName) => ({ tagName, dataset: {} }),
+      getElementById: (id) => id === 'lazy-assets-json'
+        ? { textContent: '{"project_report": "secret-token"' }
+        : null,
+    }
+    const window = {
+      location: { href: 'http://127.0.0.1/' },
+      DarklabProjectReport: { createProjectReportController: vi.fn() },
+      __darklabImportModule: vi.fn(async () => {}),
+      logClientError: vi.fn(),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      { document, window },
+      'window',
+    )
+
+    expect(window.lazyAssetUrl('project_report')).toBe('/static/js/features/projects/project_report.js')
+    expect(window.lazyAssetUrl('project_report')).toBe('/static/js/features/projects/project_report.js')
+    expect(window.__darklabImportModule).not.toHaveBeenCalled()
+    expect(window.logClientError).toHaveBeenCalledTimes(1)
+    const [context, err, details] = window.logClientError.mock.calls[0]
+    expect(context).toBe('lazy asset config invalid')
+    expect(err).toBeInstanceOf(SyntaxError)
+    expect(details).toEqual({
+      event: 'LAZY_ASSET_CONFIG_INVALID',
+      level: 'warning',
+      source: 'lazy-assets-json',
+    })
+    expect(JSON.stringify(window.logClientError.mock.calls)).not.toContain('secret-token')
   })
 
   it('lazy-loads the Options panel controller cluster in order', async () => {
     const appended = []
     const optionsPanelScripts = [
-      ['options_session_token_controls', '/static/js/features/preferences/session_token_controls.js?v=session-token-hash'],
-      ['options_secrets_panel', '/static/js/features/preferences/secrets_panel.js?v=secrets-hash'],
-      ['options_teams_panel', '/static/js/features/preferences/teams_panel.js?v=teams-hash'],
-      ['options_notification_channels', '/static/js/features/preferences/notification_channels.js?v=notifications-hash'],
+      ['options_session_token_controls', {
+        url: '/static/js/features/preferences/session_token_controls.js?v=session-token-hash',
+        type: 'module',
+      }],
+      ['options_secrets_panel', {
+        url: '/static/js/features/preferences/secrets_panel.js?v=secrets-hash',
+        type: 'module',
+      }],
+      ['options_teams_panel', {
+        url: '/static/js/features/preferences/teams_panel.js?v=teams-hash',
+        type: 'module',
+      }],
+      ['options_notification_channels', {
+        url: '/static/js/features/preferences/notification_channels.js?v=notifications-hash',
+        type: 'module',
+      }],
     ]
     const document = {
       documentElement: {},
@@ -494,7 +591,19 @@ describe('frontend config bootstrap', () => {
           }
         : null,
     }
-    const window = {}
+    const imported = []
+    const window = {
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        if (url.includes('/session_token_controls.js')) window._updateOptionsSessionTokenStatus = vi.fn()
+        if (url.includes('/secrets_panel.js')) {
+          window.refreshOptionsSecrets = vi.fn(async () => true)
+          window.invalidateOptionsSecrets = vi.fn()
+        }
+        if (url.includes('/teams_panel.js')) window.refreshOptionsTeams = vi.fn(async () => true)
+        if (url.includes('/notification_channels.js')) window.refreshNotificationChannels = vi.fn(async () => true)
+      }),
+    }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
@@ -504,30 +613,15 @@ describe('frontend config bootstrap', () => {
 
     const loadPromise = window.loadOptionsPanels()
 
-    await vi.waitFor(() => expect(appended).toHaveLength(1))
-    expect(appended[0].src).toBe('/static/js/features/preferences/session_token_controls.js?v=session-token-hash')
-    globalThis._updateOptionsSessionTokenStatus = vi.fn()
-    appended[0].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(2))
-    expect(appended[1].src).toBe('/static/js/features/preferences/secrets_panel.js?v=secrets-hash')
-    window.refreshOptionsSecrets = vi.fn(async () => true)
-    window.invalidateOptionsSecrets = vi.fn()
-    appended[1].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(3))
-    expect(appended[2].src).toBe('/static/js/features/preferences/teams_panel.js?v=teams-hash')
-    window.refreshOptionsTeams = vi.fn(async () => true)
-    appended[2].onload()
-
-    await vi.waitFor(() => expect(appended).toHaveLength(4))
-    expect(appended[3].src).toBe('/static/js/features/preferences/notification_channels.js?v=notifications-hash')
-    window.refreshNotificationChannels = vi.fn(async () => true)
-    appended[3].onload()
+    await vi.waitFor(() => expect(imported).toEqual([
+      '/static/js/features/preferences/session_token_controls.js?v=session-token-hash',
+      '/static/js/features/preferences/secrets_panel.js?v=secrets-hash',
+      '/static/js/features/preferences/teams_panel.js?v=teams-hash',
+      '/static/js/features/preferences/notification_channels.js?v=notifications-hash',
+    ]))
+    expect(appended).toEqual([])
 
     await expect(loadPromise).resolves.toBe(true)
-
-    delete globalThis._updateOptionsSessionTokenStatus
   })
 
   it('lazy-loads the command registry modal on first open', async () => {
@@ -543,12 +637,21 @@ describe('frontend config bootstrap', () => {
       getElementById: (id) => id === 'lazy-assets-json'
         ? {
             textContent: JSON.stringify({
-              command_registry: '/static/js/features/command-registry/command_registry.js?v=registry-hash',
+              command_registry: {
+                url: '/static/js/features/command-registry/command_registry.js?v=registry-hash',
+                type: 'module',
+              },
             }),
           }
         : null,
     }
-    const window = {}
+    const imported = []
+    const window = {
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        window.openCommandRegistry = vi.fn(() => ({ opened: true }))
+      }),
+    }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
@@ -557,15 +660,11 @@ describe('frontend config bootstrap', () => {
     )
 
     const openPromise = window.openCommandRegistry()
-    expect(appended).toHaveLength(1)
-    expect(appended[0].src).toBe('/static/js/features/command-registry/command_registry.js?v=registry-hash')
-
-    const realOpen = vi.fn(() => ({ opened: true }))
-    window.openCommandRegistry = realOpen
-    appended[0].onload()
 
     await expect(openPromise).resolves.toEqual({ opened: true })
-    expect(realOpen).toHaveBeenCalledTimes(1)
+    expect(window.openCommandRegistry).toHaveBeenCalledTimes(1)
+    expect(imported).toEqual(['/static/js/features/command-registry/command_registry.js?v=registry-hash'])
+    expect(appended).toEqual([])
   })
 
   it('lazy-loads workflow controllers while keeping the catalog cache eager', async () => {
@@ -582,15 +681,25 @@ describe('frontend config bootstrap', () => {
       getElementById: (id) => id === 'lazy-assets-json'
         ? {
             textContent: JSON.stringify({
-              workflows: '/static/js/features/workflows/workflows.js?v=workflows-hash',
+              workflows: {
+                url: '/static/js/features/workflows/workflows.js?v=workflows-hash',
+                type: 'module',
+              },
             }),
           }
         : null,
     }
+    const imported = []
+    const realHandler = vi.fn(async () => true)
     const window = {
       emitUiEvent: (name, detail) => {
         events.push({ name, detail })
       },
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        window.renderWorkflowItems = vi.fn()
+        window.handleWorkflowTerminalCommand = realHandler
+      }),
     }
 
     fromDomScripts(
@@ -610,15 +719,10 @@ describe('frontend config bootstrap', () => {
     ])
 
     const commandPromise = window.handleWorkflowTerminalCommand('workflow list', 'tab-1')
-    expect(appended).toHaveLength(1)
-    expect(appended[0].src).toBe('/static/js/features/workflows/workflows.js?v=workflows-hash')
-
-    const realHandler = vi.fn(async () => true)
-    window.renderWorkflowItems = vi.fn()
-    window.handleWorkflowTerminalCommand = realHandler
-    appended[0].onload()
 
     await expect(commandPromise).resolves.toBe(true)
     expect(realHandler).toHaveBeenCalledWith('workflow list', 'tab-1')
+    expect(imported).toEqual(['/static/js/features/workflows/workflows.js?v=workflows-hash'])
+    expect(appended).toEqual([])
   })
 })

@@ -195,6 +195,13 @@ function loadPermalink({
   })
   const win = Object.assign({}, window, {
     PermData: window.PermData,
+    AnsiUp: ansiUp.Ctor,
+    ExportHtmlUtils,
+    ExportPdfUtils,
+    copyTextToClipboard,
+    showToast,
+    URL,
+    downloadBlobAsAttachment,
     innerWidth: window.innerWidth,
     jspdf: jspdf ?? { jsPDF: vi.fn(() => ({ save: vi.fn() })) },
     matchMedia: window.matchMedia || (() => ({ matches: false })),

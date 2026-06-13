@@ -169,3 +169,15 @@ function _renderHistoryCompareMinimap(buckets = []) {
   });
   return rail;
 }
+
+window._historyCompareFindPaneRow = _historyCompareFindPaneRow;
+window._historyComparePulseRows = _historyComparePulseRows;
+window._historyCompareScrollPaneRowIntoView = _historyCompareScrollPaneRowIntoView;
+window._historyCompareScrollToLine = _historyCompareScrollToLine;
+window._historyCompareScrollToRow = _historyCompareScrollToRow;
+window._historyCompareRenderedChangeTargets = _historyCompareRenderedChangeTargets;
+window._historyCompareScrollToBucket = _historyCompareScrollToBucket;
+window._historyCompareChangeBucketIndexes = _historyCompareChangeBucketIndexes;
+window._historyCompareGoToChangeBucket = _historyCompareGoToChangeBucket;
+window._renderHistoryCompareNav = _renderHistoryCompareNav;
+window._renderHistoryCompareMinimap = _renderHistoryCompareMinimap;

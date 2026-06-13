@@ -51,6 +51,7 @@ async function loadTeamScopeHarness({
   })
   window.refreshActiveProjectContext = surfaceSpies.refreshActiveProjectContext
   window.refreshStatusMonitor = surfaceSpies.refreshStatusMonitor
+  window.refreshActiveRuns = surfaceSpies.refreshActiveRuns
   window.invalidateOptionsSecrets = surfaceSpies.invalidateOptionsSecrets
   return { ...harness, surfaces: surfaceSpies }
 }

@@ -1,5 +1,7 @@
 // ── Shared output logic ──
-const _outputCore = typeof DarklabOutputCore !== 'undefined' ? DarklabOutputCore : null;
+const _outputCore = (typeof window !== 'undefined' && window.DarklabOutputCore)
+  ? window.DarklabOutputCore
+  : (typeof DarklabOutputCore !== 'undefined' ? DarklabOutputCore : null);
 
 function createAnsiUpRenderer() {
   // ANSI rendering is optional. If the vendored parser fails to load, fall back
@@ -57,6 +59,29 @@ let tsMode = 'off';
 // Cycles: 'off' → 'on' → 'off'
 // Body class 'ln-on' enables shared prefix rendering for output rows.
 let lnMode = 'off';
+
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'tsMode', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return tsMode;
+    },
+    set(value) {
+      tsMode = String(value || 'off');
+    },
+  });
+  Object.defineProperty(window, 'lnMode', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return lnMode;
+    },
+    set(value) {
+      lnMode = String(value || 'off');
+    },
+  });
+}
 
 const _OUTPUT_SYNC_BURST_LIMIT = 60;
 const _OUTPUT_BATCH_SIZE = 300;
@@ -1896,5 +1921,39 @@ function appendLines(lines, tabId) {
       resolve();
     };
     queueChunk();
+  });
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    createAnsiUpRenderer,
+    resetAnsiRendererForTab,
+    dropAnsiRendererForTab,
+    promptIdentityPrefix,
+    currentPromptWorkspacePath,
+    buildPromptLabel,
+    stripPromptLabelFromEchoText,
+    hasPendingOutputBatch,
+    discardPendingOutputBatch,
+    resetHighVolumeOutputState,
+    appendHighVolumeOutputFinalSummary,
+    _maybeMountDeferredPrompt,
+    recordLiveOutputCoalescedLines,
+    disableHighVolumeOutputResumeControls,
+    renderCommandOutcomeSummary,
+    setTabCommandOutcomeSummary,
+    refreshCommandOutcomeSummaries,
+    renderRestoredTabOutput,
+    _refreshFollowingOutputsAfterLayout,
+    syncOutputPrefixes,
+    _resetTabOutputSignalCounts,
+    _cancelPendingOutputBatch,
+    _renderAnsiWithEntityTokens,
+    _stickOutputToBottom,
+    _restoreOutputTailAfterLayout,
+    _setLnMode,
+    _setOutputTsMode: _setTsMode,
+    appendLine,
+    appendLines,
   });
 }

@@ -154,7 +154,7 @@ Before merging a version branch back to `main`:
 
 **Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
-**JavaScript and CSS assets** — the frontend stays in the classic-script pattern: no ES modules, no framework dependencies. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
+**JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports frontend globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks a compatibility-global publish path. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
@@ -185,11 +185,12 @@ Run the three suites directly:
 ```bash
 npm run test:pytest
 npm run test:unit
+npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2075 pytest + 1375 Vitest + 263 Playwright = 3,713 tests**.
-That total includes 3,678 behavior tests plus 35 docs/inventory meta-tests.
+Current totals: **2088 pytest + 1383 Vitest + 263 Playwright = 3,734 tests**.
+That total includes 3,697 behavior tests plus 37 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -202,7 +203,7 @@ profile-gated Compose Postgres service without publishing the database port.
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
-- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. Pass `--asset-bundle-mode source` when debugging source-file loading without putting an environment variable before the approved helper command.
+- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. `npm run test:e2e:source` runs the fast source-mode boot/share browser slice that is also part of `npm test`; pass `--asset-bundle-mode source` to the wrapper when debugging other source-file loading paths without putting an environment variable before the approved helper command.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
@@ -301,13 +302,13 @@ The `volumes` entry must be inside `[runners.docker]` — a top-level `volumes` 
 
 ## Dependency Version Tracking
 
-`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, Go, pip, and gem versions versus the latest published versions it can find. Run it locally any time you are about to bump a dependency:
+`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, Go, pip, gem, and GitHub-release versions versus the latest published versions it can find. Run it locally any time you are about to bump a dependency:
 
 ```bash
 ./scripts/check_versions.sh
 ```
 
-The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, and `--debug` flags to isolate a single surface. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
+The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
 
 ---
 

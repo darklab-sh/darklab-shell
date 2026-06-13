@@ -952,10 +952,10 @@ function _renderWatcherDiffSummary(summary = {}, { kind = '', truncated = false,
   const metrics = document.createElement('div');
   metrics.className = 'history-compare-metrics watchers-diff-metrics';
   const classifier = String(summary.classifier || 'unknown');
-  if (typeof _compareMetricCell === 'function') {
-    metrics.appendChild(_compareMetricCell('Classifier', classifier));
+  if (typeof window._compareMetricCell === 'function') {
+    metrics.appendChild(window._compareMetricCell('Classifier', classifier));
     _watcherSummaryCounts(summary).forEach(([label, value]) => {
-      metrics.appendChild(_compareMetricCell(label, Number(value || 0).toLocaleString(), Number(value || 0) ? 'is-changed' : ''));
+      metrics.appendChild(window._compareMetricCell(label, Number(value || 0).toLocaleString(), Number(value || 0) ? 'is-changed' : ''));
     });
   } else {
     const classifierCell = document.createElement('div');

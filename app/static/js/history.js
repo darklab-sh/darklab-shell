@@ -1,5 +1,8 @@
 // ── Shared history drawer logic ──
-const _historyCore = typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null;
+function _historyCore() {
+  return (typeof window !== 'undefined' && window.DarklabHistoryCore)
+    || (typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null);
+}
 
 // History drawer filters are deliberately simple in the first pass:
 // server-backed search/filtering for persisted run attributes, plus a local
@@ -72,6 +75,73 @@ const _historyRunOnlyFilterKeys = new Set([
   'starredOnly',
 ]);
 const _historyStructuredFilterKeys = new Set(['signal', 'kind', 'entity', 'entityType']);
+
+function _historyGlobal() {
+  return typeof window !== 'undefined' ? window : globalThis;
+}
+
+function _publishHistoryState() {
+  const global = _historyGlobal();
+  if (!global || global.DarklabHistoryState) return;
+  Object.defineProperties(global, {
+    DarklabHistoryState: {
+      configurable: true,
+      value: {},
+    },
+    _historyFilters: {
+      configurable: true,
+      get: () => _historyFilters,
+      set: value => { _historyFilters = value && typeof value === 'object' ? value : _historyFilters; },
+    },
+    _historyProjectOptions: {
+      configurable: true,
+      get: () => _historyProjectOptions,
+      set: value => { _historyProjectOptions = Array.isArray(value) ? value : []; },
+    },
+    _historyProjectOptionsLoaded: {
+      configurable: true,
+      get: () => _historyProjectOptionsLoaded,
+      set: value => { _historyProjectOptionsLoaded = value === true; },
+    },
+    _historyProjectOptionsLoading: {
+      configurable: true,
+      get: () => _historyProjectOptionsLoading,
+      set: value => { _historyProjectOptionsLoading = value || null; },
+    },
+    _historyCompareState: {
+      configurable: true,
+      get: () => _historyCompareState,
+      set: value => { _historyCompareState = value && typeof value === 'object' ? value : _historyCompareState; },
+    },
+    _historyCompareRowPairSequence: {
+      configurable: true,
+      get: () => _historyCompareRowPairSequence,
+      set: value => { _historyCompareRowPairSequence = Number(value) || 0; },
+    },
+    _historyCompareUnitSequence: {
+      configurable: true,
+      get: () => _historyCompareUnitSequence,
+      set: value => { _historyCompareUnitSequence = Number(value) || 0; },
+    },
+    _historyCompareRowHeightFrame: {
+      configurable: true,
+      get: () => _historyCompareRowHeightFrame,
+      set: value => { _historyCompareRowHeightFrame = value; },
+    },
+    _historyCompareRowResizeObserver: {
+      configurable: true,
+      get: () => _historyCompareRowResizeObserver,
+      set: value => { _historyCompareRowResizeObserver = value || null; },
+    },
+    _historyPaging: {
+      configurable: true,
+      get: () => _historyPaging,
+      set: value => { _historyPaging = value && typeof value === 'object' ? value : _historyPaging; },
+    },
+  });
+}
+
+_publishHistoryState();
 
 function _historyCompareCoreCall(name, ...args) {
   const _historyCompareCore = typeof DarklabHistoryCompareCore !== 'undefined' ? DarklabHistoryCompareCore : null;
@@ -169,7 +239,7 @@ function _historyCompareAnchorTone(items = []) {
 }
 
 function _normalizeHistoryFilterValue(value) {
-  return _historyCore.normalizeFilterValue(value);
+  return _historyCore().normalizeFilterValue(value);
 }
 
 function _historyDefaultFilterValue(key) {
@@ -212,7 +282,7 @@ function _syncHistoryFilterControls() {
   }
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
   if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
-  _syncHistoryProjectFilterOptions();
+  if (typeof window._syncHistoryProjectFilterOptions === 'function') window._syncHistoryProjectFilterOptions();
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
   const runOnlyEnabled = _historyFilters.type !== 'snapshots';
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
@@ -239,27 +309,27 @@ function _syncHistoryFilterControls() {
 }
 
 function _historyHasActiveServerFilters() {
-  return _historyCore.hasActiveServerFilters(_historyFilters);
+  return _historyCore().hasActiveServerFilters(_historyFilters);
 }
 
 function _historyHasAnyFilters() {
-  return _historyCore.hasAnyFilters(_historyFilters);
+  return _historyCore().hasAnyFilters(_historyFilters);
 }
 
 function _historyResetRunOnlyFilters() {
-  _historyFilters = _historyCore.resetRunOnlyFilters(_historyFilters);
+  _historyFilters = _historyCore().resetRunOnlyFilters(_historyFilters);
 }
 
 function _historyLabelForType(type = _historyFilters.type) {
-  return _historyCore.labelForType(type);
+  return _historyCore().labelForType(type);
 }
 
 function _historySummaryLabel(totalCount = _historyPaging.totalCount) {
-  return _historyCore.summaryLabel(_historyFilters.type, totalCount);
+  return _historyCore().summaryLabel(_historyFilters.type, totalCount);
 }
 
 function _historyCommandRootsFromRuns(runs) {
-  return _historyCore.commandRootsFromRuns(runs);
+  return _historyCore().commandRootsFromRuns(runs);
 }
 
 function _renderHistoryRootSuggestions(runs) {
@@ -322,7 +392,7 @@ function _hideHistoryRootDropdown() {
 }
 
 function _historyRootMatches(query) {
-  return _historyCore.rootMatches(_historyRootSuggestions, query, 12);
+  return _historyCore().rootMatches(_historyRootSuggestions, query, 12);
 }
 
 function _acceptHistoryRootSuggestion(root) {
@@ -384,9 +454,12 @@ function _historyRefreshRootDropdown() {
 }
 
 function _historyActiveFilterItems() {
-  return _historyCore.activeFilterItems({
+  const projectLabel = typeof window._historyProjectLabelForId === 'function'
+    ? window._historyProjectLabelForId(_historyFilters.projectId)
+    : '';
+  return _historyCore().activeFilterItems({
     ..._historyFilters,
-    projectLabel: _historyProjectLabelForId(_historyFilters.projectId),
+    projectLabel,
   });
 }
 
@@ -707,7 +780,7 @@ async function _historyBulkPostProject(project, action, options = {}) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const counts = _historyBulkCountsFromResponse(data);
-    const projectName = _historyProjectDisplayName(project) || 'project';
+    const projectName = window._historyProjectDisplayName(project) || 'project';
     _historySelection.selected.clear();
     const reasonSummary = _historyBulkReasonSummary(data.results);
     const entityAdded = Number(data && data.linked_entities && data.linked_entities.added || 0);
@@ -783,16 +856,16 @@ async function _historyBulkRemoveFromAllProjects() {
 }
 
 async function _historyBulkAddToActiveProject() {
-  const project = await _historyLoadActiveProject();
+  const project = await window._historyLoadActiveProject();
   if (!project || !project.id) {
     showToast('No active project selected', 'error');
     return;
   }
   const runIds = _historySelectedRunIds();
-  const entityOption = _historyProjectRunEntityOptionContent();
-  await _historyRefreshProjectRunEntityOption(entityOption, project, runIds);
+  const entityOption = window._historyProjectRunEntityOptionContent();
+  await window._historyRefreshProjectRunEntityOption(entityOption, project, runIds);
   const choice = await showConfirm({
-    body: `Add ${runIds.length} selected ${runIds.length === 1 ? 'run' : 'runs'} to ${_historyProjectDisplayName(project) || 'the active project'}?`,
+    body: `Add ${runIds.length} selected ${runIds.length === 1 ? 'run' : 'runs'} to ${window._historyProjectDisplayName(project) || 'the active project'}?`,
     content: entityOption.wrap.classList.contains('u-hidden') ? null : entityOption.wrap,
     tone: null,
     actions: [
@@ -812,10 +885,10 @@ async function _historyBulkChooseProject(action) {
   let projects;
   try {
     const [loadedProjects, activeProject] = await Promise.all([
-      _historyLoadProjects(),
-      _historyLoadActiveProject().catch(() => null),
+      window._historyLoadProjects(),
+      window._historyLoadActiveProject().catch(() => null),
     ]);
-    projects = _historyOrderProjectsForPicker(loadedProjects, activeProject);
+    projects = window._historyOrderProjectsForPicker(loadedProjects, activeProject);
   } catch (_) {
     showToast('Failed to load projects', 'error');
     return;
@@ -824,13 +897,13 @@ async function _historyBulkChooseProject(action) {
     showToast('No projects available', 'error');
     return;
   }
-  const { wrap, select } = _historyProjectPickerContent(projects);
-  const entityOption = _historyProjectRunEntityOptionContent();
+  const { wrap, select } = window._historyProjectPickerContent(projects);
+  const entityOption = window._historyProjectRunEntityOptionContent();
   wrap.appendChild(entityOption.wrap);
   const runIds = _historySelectedRunIds();
   const updateEntityOption = () => {
     const selectedProject = projects.find(item => String(item.id || '') === select.value);
-    _historyRefreshProjectRunEntityOption(entityOption, selectedProject, runIds);
+    window._historyRefreshProjectRunEntityOption(entityOption, selectedProject, runIds);
   };
   select.addEventListener('change', updateEntityOption);
   updateEntityOption();
@@ -1187,7 +1260,7 @@ function _renderHistoryBulkToolbar() {
 }
 
 function _buildHistoryRequestUrl() {
-  return _historyCore.buildRequestUrl(_historyFilters, _historyPaging);
+  return _historyCore().buildRequestUrl(_historyFilters, _historyPaging);
 }
 
 function _applyHistoryClientFilters(runs) {
@@ -1626,7 +1699,7 @@ function _historyRenderPanelData(data) {
           const cmdEl = entry.querySelector('.history-entry-cmd');
           cmdEl.textContent = 'loading…';
           _setHistoryLoadState(true);
-          restoreHistoryRunIntoTab(run, {
+          window.restoreHistoryRunIntoTab(run, {
             targetTabId: canUpgradeExisting ? existing.id : null,
             hidePanelOnSuccess: true,
           })
@@ -1699,7 +1772,7 @@ function _historyRenderPanelData(data) {
           event.preventDefault();
           event.stopPropagation();
           _closeHistoryActionMenus();
-          _historyAddRunToActiveProject(run).catch(() => showToast('Failed to add run to active project', 'error'));
+          window._historyAddRunToActiveProject(run).catch(() => showToast('Failed to add run to active project', 'error'));
         },
       });
       bindPressable(entry.querySelector('[data-action="add-project"]'), {
@@ -1708,7 +1781,7 @@ function _historyRenderPanelData(data) {
           event.preventDefault();
           event.stopPropagation();
           _closeHistoryActionMenus();
-          _historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
+          window._historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
         },
       });
       bindPressable(entry.querySelector('[data-action="remove-project"]'), {
@@ -1717,7 +1790,7 @@ function _historyRenderPanelData(data) {
           event.preventDefault();
           event.stopPropagation();
           _closeHistoryActionMenus();
-          _historyRemoveRunFromProject(run).catch(() => showToast('Failed to remove run from project', 'error'));
+          window._historyRemoveRunFromProject(run).catch(() => showToast('Failed to remove run from project', 'error'));
         },
       });
       bindPressable(entry.querySelector('[data-action="copy-run-id"]'), {
@@ -1929,3 +2002,107 @@ if (typeof historyClearFiltersBtn !== 'undefined' && historyClearFiltersBtn) {
 }
 
 _syncHistoryFilterControls();
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _historyCore,
+    _closeHistoryCompareActionMenusIfLoaded,
+    _compareFormatDate,
+    _compareDateGroupLabel,
+    _compareFormatDuration,
+    _compareFormatDelta,
+    _historyCompareTotalChangedLines,
+    _historyCompareOmittedTotal,
+    _historyCompareLineLimit,
+    _historyCompareCoerceViewMode,
+    _historyCompareCoerceContext,
+    _historyCompareStoredViewMode,
+    _historyCompareStoredContext,
+    _historyCompareViewportMode,
+    _historyCompareResolveViewMode,
+    _historyCompareViewModeOptions,
+    _historyCompareContextLimit,
+    _historyCompareNumber,
+    _historyCompareCssEscape,
+    _historyCompareBucketTone,
+    _historyCompareBuildAnchorMap,
+    _historyCompareAnchorTone,
+    _normalizeHistoryFilterValue,
+    _historyDefaultFilterValue,
+    _historyRunOnlyFilterIsActive,
+    _historyHasActiveRunOnlyFilters,
+    _syncHistoryFilterControls,
+    _historyHasActiveServerFilters,
+    _historyHasAnyFilters,
+    _historyResetRunOnlyFilters,
+    _historyLabelForType,
+    _historySummaryLabel,
+    _historyCommandRootsFromRuns,
+    _renderHistoryRootSuggestions,
+    _appendHistoryCommandEcho,
+    _historyOutputLineMetadata,
+    _appendHistoryOutputLine,
+    _hideHistoryRootDropdown,
+    _historyRootMatches,
+    _acceptHistoryRootSuggestion,
+    _renderHistoryRootDropdown,
+    _historyRefreshRootDropdown,
+    _historyActiveFilterItems,
+    _historySetPage,
+    _historyRenderPagination,
+    _renderHistoryActiveFilters,
+    _historyItemType,
+    _historyIsSelectableItem,
+    _historyIsSelectableRun,
+    _historySelectionKey,
+    _historySelectedRuns,
+    _historySelectedSnapshots,
+    _historyClearSelection,
+    _historyResetSelectionOnClose,
+    _historySetSelectMode,
+    _historyToggleItemSelection,
+    _historyToggleRunSelection,
+    _historySelectAllVisibleItems,
+    _historySetBulkBusy,
+    _historyBulkCountsFromResponse,
+    _historyBulkToast,
+    _historyBulkReasonSummary,
+    _historyBulkResultText,
+    _historySelectedRunIds,
+    _historySelectedSnapshotIds,
+    _historyRefreshAfterBulk,
+    _closeHistoryBulkActionMenu,
+    _historyProjectsForSelectedLinks,
+    _historyMergeBulkProjectResponses,
+    _historyBulkPostProject,
+    _historyBulkRemoveFromAllProjects,
+    _historyBulkAddToActiveProject,
+    _historyBulkChooseProject,
+    _historyBulkDeleteLabel,
+    _historyBulkDeletedNoun,
+    _historyMergeBulkDeleteResponses,
+    _historyPostBulkDelete,
+    _historyBulkExportFilename,
+    _historyFilenameFromDisposition,
+    _historyBulkExportSelectedItems,
+    _historyBulkDeleteSelectedItems,
+    _historyBuildBulkActionMenu,
+    _renderHistoryBulkToolbar,
+    _buildHistoryRequestUrl,
+    _applyHistoryClientFilters,
+    _renderHistoryEmptyState,
+    _scheduleHistoryPanelRefresh,
+    _setHistoryFilter,
+    openHistoryWithFilters,
+    clearHistoryFilters,
+    resetHistoryMobileFilters,
+    toggleHistoryMobileFilters,
+    _makeOverflowChip,
+    _applyDesktopChipOverflow,
+    _emitHistoryRendered,
+    renderHistory,
+    _historyRenderPanelData,
+    _historyRenderCurrentPanel,
+    refreshHistoryPanel,
+  });
+}

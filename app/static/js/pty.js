@@ -1378,3 +1378,10 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
     window.requestAnimationFrame(_ptyFitVisibleSessions);
   });
 }
+
+window.isInteractivePtyCommand = isInteractivePtyCommand;
+window.preloadInteractivePtyAssets = preloadInteractivePtyAssets;
+window.detachInteractivePtyForTab = detachInteractivePtyForTab;
+window.focusActiveInteractivePty = focusActiveInteractivePty;
+window.attachInteractivePtyCommand = attachInteractivePtyCommand;
+window.startInteractivePtyCommand = startInteractivePtyCommand;

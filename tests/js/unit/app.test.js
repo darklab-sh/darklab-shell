@@ -329,6 +329,20 @@ function shippedThemeRegistry() {
 describe('app helpers', () => {
   beforeEach(() => {
     ;[
+      '_runtimeHint',
+      '_runtimePlaceholderHint',
+      '_runtimeContextSpec',
+      'isWorkspaceFeatureEnabled',
+      'isTourFeatureEnabled',
+      'getWorkspaceAutocompletePathHints',
+      'getRuntimeAutocompleteContext',
+      'getRuntimeAutocompleteItems',
+      'extractGrepOutputTokens',
+      'getGrepOutputSuggestions',
+    ].forEach((name) => {
+      delete window[name]
+    })
+    ;[
       'pref_theme',
       'pref_active_project_id',
       'pref_theme_name',
@@ -3019,6 +3033,47 @@ describe('app helpers', () => {
       runId: '',
       historyRunId: 'run-1',
     })
+  })
+
+  it('uses one accessor-backed tab restore flag for window and module guards', async () => {
+    const tabs = [
+      {
+        id: 'tab-1',
+        label: 'tab 1',
+        command: '',
+        renamed: false,
+        draftInput: 'nuclei -u https://darklab.sh',
+        st: 'idle',
+        exitCode: null,
+        historyRunId: '',
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [],
+        closing: false,
+      },
+    ]
+    const {
+      persistTabSessionStateNow,
+      sessionStorage,
+      _getTabSessionStateKey,
+      _getTabSessionRestoreInProgress,
+    } = await loadAppFns({
+      tabs,
+      activeTabId: 'tab-1',
+    })
+
+    expect(window._tabSessionRestoreInProgress).toBe(false)
+    window._tabSessionRestoreInProgress = true
+    expect(_getTabSessionRestoreInProgress()).toBe(true)
+
+    persistTabSessionStateNow()
+    expect(sessionStorage.getItem(_getTabSessionStateKey())).toBe(null)
+
+    window._tabSessionRestoreInProgress = false
+    expect(_getTabSessionRestoreInProgress()).toBe(false)
+    persistTabSessionStateNow()
+    expect(JSON.parse(sessionStorage.getItem(_getTabSessionStateKey())).tabs).toHaveLength(1)
   })
 
   it('persists output signal metadata for session restore', async () => {

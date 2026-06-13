@@ -168,7 +168,7 @@ async function handleTourCommand(cmd, tabId = null) {
     return true;
   }
 
-  await _recordTourOpenedOnceThisSession();
+  await window._recordTourOpenedOnceThisSession();
   const chapters = _tourChaptersForCurrentViewport();
   if (!chapters.length) {
     _cliAppendLine('tour: no onboarding chapters are visible for this shell', 'exit-fail', tabId);
@@ -197,4 +197,8 @@ async function handleTourCommand(cmd, tabId = null) {
   _cliRecordSuccess(cmd);
   _cliSetStatus('ok');
   return true;
+}
+
+if (typeof window !== 'undefined') {
+  window.handleTourCommand = handleTourCommand;
 }

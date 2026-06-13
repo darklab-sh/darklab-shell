@@ -169,37 +169,37 @@ function _syncHistoryCompareRowPairHeights(wrap) {
 
 function _scheduleHistoryCompareRowPairHeightSync(wrap) {
   if (!wrap) return;
-  if (_historyCompareRowHeightFrame !== null) {
+  if (window._historyCompareRowHeightFrame !== null) {
     const cancel = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
-    cancel(_historyCompareRowHeightFrame);
+    cancel(window._historyCompareRowHeightFrame);
   }
   const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : callback => setTimeout(callback, 0);
-  _historyCompareRowHeightFrame = raf(() => {
-    _historyCompareRowHeightFrame = null;
+  window._historyCompareRowHeightFrame = raf(() => {
+    window._historyCompareRowHeightFrame = null;
     _syncHistoryCompareRowPairHeights(wrap);
   });
 }
 
 function _bindHistoryCompareRowPairHeightSync(wrap) {
-  if (_historyCompareRowResizeObserver) {
-    _historyCompareRowResizeObserver.disconnect();
-    _historyCompareRowResizeObserver = null;
+  if (window._historyCompareRowResizeObserver) {
+    window._historyCompareRowResizeObserver.disconnect();
+    window._historyCompareRowResizeObserver = null;
   }
   if (typeof ResizeObserver === 'function' && wrap) {
-    _historyCompareRowResizeObserver = new ResizeObserver(() => _scheduleHistoryCompareRowPairHeightSync(wrap));
-    _historyCompareRowResizeObserver.observe(wrap);
+    window._historyCompareRowResizeObserver = new ResizeObserver(() => _scheduleHistoryCompareRowPairHeightSync(wrap));
+    window._historyCompareRowResizeObserver.observe(wrap);
   }
   _scheduleHistoryCompareRowPairHeightSync(wrap);
 }
 
 function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow, unitTone = '') {
-  const pair = String(_historyCompareRowPairSequence);
-  _historyCompareRowPairSequence += 1;
+  const pair = String(window._historyCompareRowPairSequence);
+  window._historyCompareRowPairSequence += 1;
   leftRow.dataset.comparePair = pair;
   rightRow.dataset.comparePair = pair;
   if (unitTone) {
-    const unit = String(_historyCompareUnitSequence);
-    _historyCompareUnitSequence += 1;
+    const unit = String(window._historyCompareUnitSequence);
+    window._historyCompareUnitSequence += 1;
     leftRow.dataset.compareUnitIndex = unit;
     rightRow.dataset.compareUnitIndex = unit;
     leftRow.dataset.compareUnitTone = unitTone;
@@ -210,7 +210,7 @@ function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow, un
 }
 
 function _advanceHistoryCompareUnits(count) {
-  _historyCompareUnitSequence += Math.max(0, Number(count || 0));
+  window._historyCompareUnitSequence += Math.max(0, Number(count || 0));
 }
 
 function _historyCompareReplaceRenderEvents(hunk) {
@@ -648,8 +648,8 @@ function _renderHistoryCompareSplitPane(data, options = {}) {
   const renderPanes = () => {
     leftPane.replaceChildren();
     rightPane.replaceChildren();
-    _historyCompareRowPairSequence = 0;
-    _historyCompareUnitSequence = 0;
+    window._historyCompareRowPairSequence = 0;
+    window._historyCompareUnitSequence = 0;
     const leftTitle = document.createElement('div');
     leftTitle.className = 'history-compare-pane-title';
     leftTitle.textContent = 'Run A';
@@ -1082,8 +1082,8 @@ function _restoreBothHistoryCompareRuns(left, right) {
   const rightTabId = createTab(`B: ${right.command || 'run'}`);
   if (!rightTabId) return Promise.reject(new Error('failed to create Run B tab'));
   return Promise.all([
-    restoreHistoryRunIntoTab(left, { targetTabId: leftTabId, hidePanelOnSuccess: false }),
-    restoreHistoryRunIntoTab(right, { targetTabId: rightTabId, hidePanelOnSuccess: false }),
+    window.restoreHistoryRunIntoTab(left, { targetTabId: leftTabId, hidePanelOnSuccess: false }),
+    window.restoreHistoryRunIntoTab(right, { targetTabId: rightTabId, hidePanelOnSuccess: false }),
   ]).then(() => {
     if (typeof activateTab === 'function') activateTab(rightTabId, { focusComposer: false });
     return [leftTabId, rightTabId];
@@ -1111,8 +1111,8 @@ function _renderHistoryComparison(data) {
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
-  runs.appendChild(_historyCompareRunCard(data.left, 'Run A'));
-  runs.appendChild(_historyCompareRunCard(data.right, 'Run B'));
+  runs.appendChild(window._historyCompareRunCard(data.left, 'Run A'));
+  runs.appendChild(window._historyCompareRunCard(data.right, 'Run B'));
   body.appendChild(runs);
 
   const deltas = data.deltas || {};
@@ -1258,8 +1258,13 @@ function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
       if (typeof console !== 'undefined' && typeof console.error === 'function') {
         console.error('[history compare] failed', err);
       }
-      if (_historyCompareState && _historyCompareState.source) _renderHistoryCompareLauncher();
+      if (window._historyCompareState && window._historyCompareState.source) window._renderHistoryCompareLauncher();
       const detail = err && err.compareRequestError && err.message ? `: ${err.message}` : '';
       showToast(`Failed to compare runs${detail}`, 'error');
     });
 }
+
+window._compareMetricCell = _compareMetricCell;
+window._restoreBothHistoryCompareRuns = _restoreBothHistoryCompareRuns;
+window._renderHistoryComparison = _renderHistoryComparison;
+window.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison;

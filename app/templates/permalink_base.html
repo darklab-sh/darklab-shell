@@ -31,8 +31,80 @@
 </main>
 {% block footer %}{% endblock %}
 {% block scripts %}{% endblock %}
+<script>
+(function () {
+  if (window.__darklabBootstrapAsset) return;
+  const active = {};
+  function safeSrc(src) {
+    try {
+      const parsed = new URL(String(src || ''), window.location.href);
+      const version = parsed.searchParams.get('v');
+      return version ? `${parsed.pathname}?v=${encodeURIComponent(version)}` : parsed.pathname;
+    } catch (_) {
+      return String(src || '').split('?', 1)[0].slice(0, 300);
+    }
+  }
+  function errorMessage(err) {
+    if (!err) return '';
+    if (err.message) return String(err.message).slice(0, 500);
+    if (err.reason && err.reason.message) return String(err.reason.message).slice(0, 500);
+    return String(err).slice(0, 500);
+  }
+  function report(page, bundle, src, err, phase) {
+    const details = {
+      event: 'ESM_BOOTSTRAP_LOAD_FAILED',
+      level: 'error',
+      page,
+      bundle,
+      src: safeSrc(src),
+      phase,
+    };
+    const payload = {
+      event: details.event,
+      level: details.level,
+      context: details.event,
+      message: errorMessage(err),
+      details,
+    };
+    try {
+      fetch('/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(function () {});
+    } catch (_) {}
+  }
+  window.__darklabBootstrapAsset = {
+    start(page, bundle, src) {
+      active[bundle] = { page, bundle, src };
+    },
+    loaded(bundle) {
+      delete active[bundle];
+    },
+    failed(page, bundle, src, err) {
+      report(page, bundle, src, err, 'load');
+      delete active[bundle];
+    },
+  };
+  window.addEventListener('error', function (event) {
+    const src = event && event.filename ? event.filename : '';
+    const match = Object.values(active).find((item) => src && safeSrc(item.src) === safeSrc(src))
+      || Object.values(active)[0];
+    if (!match) return;
+    report(match.page, match.bundle, match.src, event.error || event.message || event, 'evaluate');
+  }, true);
+  window.addEventListener('unhandledrejection', function (event) {
+    const match = Object.values(active)[0];
+    if (!match) return;
+    report(match.page, match.bundle, match.src, event.reason || event, 'promise');
+  });
+}());
+</script>
+{% set permalink_script_type = asset_bundle_script_type('permalink') %}
 {% for src in asset_bundle('permalink') %}
-<script src="{{ src }}"></script>
+<script>window.__darklabBootstrapAsset.start('permalink', 'permalink', {{ src|tojson }});</script>
+<script{% if permalink_script_type %} type="{{ permalink_script_type }}"{% endif %} src="{{ src }}" onload="window.__darklabBootstrapAsset.loaded('permalink')" onerror="window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)"></script>
 {% endfor %}
 </body>
 </html>

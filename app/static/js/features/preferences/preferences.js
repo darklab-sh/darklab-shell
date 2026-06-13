@@ -4,6 +4,9 @@ const PreferenceCore = window.DarklabPreferenceCore;
 const _welcomeIntroModes = PreferenceCore.WELCOME_INTRO_MODES;
 const _shareRedactionDefaultModes = PreferenceCore.SHARE_REDACTION_DEFAULT_MODES;
 const _hudClockModes = PreferenceCore.HUD_CLOCK_MODES;
+function _timestampModes() {
+  return Array.isArray(window._tsModes) ? window._tsModes : ['off', 'elapsed', 'clock'];
+}
 
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const _sessionPreferenceKeys = PreferenceCore.SESSION_PREFERENCE_KEYS;
@@ -45,7 +48,7 @@ function _defaultSessionPreferences() {
 
 function _normalizeSessionPreferences(raw) {
   return PreferenceCore.normalizeSessionPreferences(raw, _defaultSessionPreferences(), {
-    timestampModes: _tsModes,
+    timestampModes: _timestampModes(),
   });
 }
 
@@ -322,10 +325,10 @@ async function recordTourOpened() {
 }
 
 async function _recordTourOpenedOnceThisSession() {
-  if (_tourOpenedRecordedThisSession) return true;
+  if (window._tourOpenedRecordedThisSession) return true;
   try {
     await recordTourOpened();
-    _tourOpenedRecordedThisSession = true;
+    window._tourOpenedRecordedThisSession = true;
     return true;
   } catch (err) {
     if (typeof logClientError === 'function') logClientError('failed to record tour open', err);
@@ -425,8 +428,8 @@ function applyThemePreference(theme, persist = true) {
 }
 
 function applyTimestampPreference(mode, persist = true) {
-  const nextMode = PreferenceCore.coerceTimestampMode(mode, _tsModes);
-  _setTsMode(nextMode);
+  const nextMode = PreferenceCore.coerceTimestampMode(mode, _timestampModes());
+  window._setTsMode(nextMode);
   if (persist) {
     _primePreferenceValue('pref_timestamps', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist timestamp preference', err); }
@@ -541,7 +544,7 @@ function applyPromptUsernamePreference(username, persist = true) {
   const rawUsername = String(username || '').trim();
   const nextUsername = PreferenceCore.normalizePromptUsername(rawUsername);
   if (rawUsername && !nextUsername) {
-    hidePromptUsernameSavedIndicator();
+    window.hidePromptUsernameSavedIndicator?.();
     syncPromptUsernameValidation();
     return false;
   }
@@ -549,20 +552,64 @@ function applyPromptUsernamePreference(username, persist = true) {
     _primePreferenceValue('pref_prompt_username', nextUsername);
     try {
       void _persistCurrentSessionPreferences()
-        .then(() => showPromptUsernameSavedIndicator())
+        .then(() => window.showPromptUsernameSavedIndicator?.())
         .catch((err) => {
-          hidePromptUsernameSavedIndicator();
+          window.hidePromptUsernameSavedIndicator?.();
           logClientError('failed to persist prompt username preference', err);
         });
     } catch (err) {
-      hidePromptUsernameSavedIndicator();
+      window.hidePromptUsernameSavedIndicator?.();
       logClientError('failed to persist prompt username preference', err);
     }
   } else {
     _primePreferenceValue('pref_prompt_username', nextUsername);
   }
   syncOptionsControls();
-  if (typeof setComposerPromptMode === 'function') setComposerPromptMode(_composerPromptMode);
-  else if (typeof syncShellPrompt === 'function') syncShellPrompt();
+  if (typeof window.setComposerPromptMode === 'function') window.setComposerPromptMode(window._composerPromptMode);
+  else if (typeof window.syncShellPrompt === 'function') window.syncShellPrompt();
   return true;
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    getPreferenceCookie,
+    setPreferenceCookie,
+    getPreference,
+    _persistCurrentSessionPreferences,
+    loadSessionPreferences,
+    getWelcomeIntroPreference,
+    getShareRedactionDefaultPreference,
+    getProjectAutoLinkExternalRunsPreference,
+    getProjectAutoLinkRunEntitiesPreference,
+    getRunNotifyPreference,
+    getCommandOutcomeSummariesPreference,
+    getConstellationFullDayPreference,
+    getHudClockPreference,
+    getPromptUsernamePreference,
+    getCompareViewModePreference,
+    getCompareContextPreference,
+    getTourSeenVersionPreference,
+    getOptionsModalLastTabPreference,
+    activateOptionsTab,
+    cycleOptionsTab,
+    syncOptionsTabFromPreference,
+    recordTourOpened,
+    _recordTourOpenedOnceThisSession,
+    syncPromptUsernameValidation,
+    applyRunNotifyPreference,
+    applyHudClockPreference,
+    syncOptionsControls,
+    applyThemePreference,
+    applyTimestampPreference,
+    applyLineNumberPreference,
+    applyWelcomeIntroPreference,
+    applyShareRedactionDefaultPreference,
+    applyProjectAutoLinkExternalRunsPreference,
+    applyProjectAutoLinkRunEntitiesPreference,
+    applyCommandOutcomeSummariesPreference,
+    applyConstellationFullDayPreference,
+    applyCompareViewModePreference,
+    applyCompareContextPreference,
+    applyPromptUsernamePreference,
+  });
 }

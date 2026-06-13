@@ -2,10 +2,10 @@
 /**
  * Build committed app CSS/JS bundles from assets.config.json.
  *
- * The build is deliberately dependency-free and unminified: preserve source
- * order, keep each classic script as its own execution unit, write
- * content-hashed filenames, and record enough manifest metadata for Flask
- * source/bundle rendering plus CI drift checks.
+ * The build is deliberately unminified: preserve configured CSS source order,
+ * inline ESM import graphs with pinned esbuild settings, write content-hashed
+ * filenames, and record enough manifest metadata for Flask source/bundle
+ * rendering plus CI drift checks.
  */
 
 import {
@@ -20,9 +20,11 @@ import {
 import { createHash } from 'crypto';
 import { dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { build as esbuild } from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
+const ESBUILD_WORKING_DIR = ROOT;
 const args = process.argv.slice(2);
 let outDir = resolve(ROOT, 'app/static/build');
 let checkOnly = false;
@@ -73,14 +75,8 @@ function assertSourceExists(source) {
 
 function outputExtension(type) {
   if (type === 'css') return 'css';
-  if (type === 'js') return 'js';
+  if (type === 'esm') return 'js';
   throw new Error(`Unsupported bundle type: ${type}`);
-}
-
-function classicScriptBundleText(source, content) {
-  if (!source.endsWith('.js')) return content;
-  const sourceUrl = `\n//# sourceURL=${source}`;
-  return `_runBundledClassicScript(${JSON.stringify(source)}, ${JSON.stringify(`${content}${sourceUrl}`)});`;
 }
 
 function normalizeBundles(rawBundles) {
@@ -92,6 +88,16 @@ function normalizeBundles(rawBundles) {
       throw new Error(`Bundle ${name} must be an object`);
     }
     const type = String(bundle.type || '');
+    if (type !== 'css' && type !== 'esm') {
+      throw new Error(`Bundle ${name} has unsupported type ${type}`);
+    }
+    if (type === 'esm') {
+      const entries = Array.isArray(bundle.entries) ? bundle.entries : [];
+      if (entries.length !== 1) {
+        throw new Error(`ESM bundle ${name} must list exactly one entry`);
+      }
+      return { name, type, entries, sources: entries };
+    }
     const sources = Array.isArray(bundle.sources) ? bundle.sources : [];
     if (!sources.length) {
       throw new Error(`Bundle ${name} must list at least one source`);
@@ -160,6 +166,75 @@ function assertJsCoverage(configuredSources) {
   }
 }
 
+function fileToAppSource(file) {
+  const absolute = resolve(file);
+  const staticRoot = resolve(ROOT, 'app/static');
+  const vendorRoot = resolve(ROOT, 'app/static/js/vendor');
+  const relStatic = relative(staticRoot, absolute);
+  if (relStatic && !relStatic.startsWith('..') && !relStatic.startsWith('/')) {
+    if (relStatic.startsWith('js/vendor/')) {
+      const relVendor = relative(vendorRoot, absolute);
+      if (relVendor && !relVendor.startsWith('..') && !relVendor.startsWith('/')) {
+        return `/vendor/${relVendor.split('\\').join('/')}`;
+      }
+    }
+    return `/static/${relStatic.split('\\').join('/')}`;
+  }
+  throw new Error(`ESM bundle reached a file outside app/static: ${relative(ROOT, absolute)}`);
+}
+
+function sourceHashMap(sources) {
+  const hashes = {};
+  for (const source of sources) {
+    const file = assertSourceExists(source);
+    hashes[source] = sha256(readFileSync(file));
+  }
+  return hashes;
+}
+
+async function buildEsmBundle(bundle) {
+  const entry = bundle.entries[0];
+  const entryFile = assertSourceExists(entry);
+  let result;
+  try {
+    result = await esbuild({
+      entryPoints: [entryFile],
+      bundle: true,
+      write: false,
+      format: 'esm',
+      target: 'es2022',
+      charset: 'utf8',
+      platform: 'browser',
+      minify: false,
+      sourcemap: false,
+      legalComments: 'none',
+      metafile: true,
+      absWorkingDir: ESBUILD_WORKING_DIR,
+      logLevel: 'silent',
+    });
+  } catch (err) {
+    console.error('[assets] ESM bundle failed', {
+      bundle: bundle.name,
+      entry,
+      out_dir: relative(ROOT, outDir),
+      check_only: checkOnly,
+      message: err && err.message ? err.message : String(err),
+    });
+    throw err;
+  }
+  if (!result.outputFiles || result.outputFiles.length !== 1) {
+    throw new Error(`ESM bundle ${bundle.name} must produce exactly one output file`);
+  }
+  const reachedSources = Object.keys(result.metafile?.inputs || {})
+    .map((input) => fileToAppSource(resolve(ESBUILD_WORKING_DIR, input)))
+    .sort();
+  return {
+    output: `${result.outputFiles[0].text.replace(/\s*$/, '')}\n`,
+    sourceHashes: sourceHashMap(reachedSources),
+    sources: reachedSources,
+  };
+}
+
 function assertOrderChecks(bundlesByName) {
   const rawChecks = config.order_checks || {};
   if (!rawChecks || typeof rawChecks !== 'object' || Array.isArray(rawChecks)) {
@@ -195,66 +270,68 @@ function assertOrderChecks(bundlesByName) {
   }
 }
 
+function assertLazySourcesStayOutOfEsmBundle(bundleName, sources) {
+  const lazySources = new Set(Array.isArray(config.lazy) ? config.lazy : []);
+  const eagerLazySources = sources.filter((source) => lazySources.has(source));
+  if (!eagerLazySources.length) return;
+  throw new Error(
+    `ESM bundle ${bundleName} eagerly includes lazy assets:\n${
+      eagerLazySources.map((source) => `  ${source}`).join('\n')
+    }\nRemove the eager import or remove the source from assets.config.json lazy.`,
+  );
+}
+
 const bundles = normalizeBundles(config.bundles);
 const bundlesByName = new Map(bundles.map((bundle) => [bundle.name, bundle]));
-const allSources = bundles.flatMap((bundle) => bundle.sources);
-assertCssCoverage(allSources);
-assertJsCoverage(allSources);
+const configuredSources = bundles.flatMap((bundle) => bundle.sources);
+assertCssCoverage(configuredSources);
 assertOrderChecks(bundlesByName);
 
 const buildEntries = {};
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
+const builtBundleRecords = [];
+
 for (const bundle of bundles) {
-  const sourceHashes = {};
+  let sourceHashes = {};
+  let output = '';
+  let manifestSources = bundle.sources;
   const parts = [];
-  if (bundle.type === 'js') {
-    parts.push(`;(function () {
-  var _bundleAnchorScript = document.currentScript;
-  var _bundleScriptParent = (_bundleAnchorScript && _bundleAnchorScript.parentNode)
-    || document.head
-    || document.documentElement;
-  function _runBundledClassicScript(source, body) {
-    var script = document.createElement('script');
-    script.text = body;
-    script.setAttribute('data-bundled-source', source);
-    try {
-      _bundleScriptParent.insertBefore(script, _bundleAnchorScript ? _bundleAnchorScript.nextSibling : null);
-    } catch (err) {
-      setTimeout(function () { throw err; }, 0);
-    } finally {
-      if (script.parentNode) script.parentNode.removeChild(script);
+  if (bundle.type === 'esm') {
+    const builtEsm = await buildEsmBundle(bundle);
+    output = builtEsm.output;
+    sourceHashes = builtEsm.sourceHashes;
+    manifestSources = builtEsm.sources;
+    assertLazySourcesStayOutOfEsmBundle(bundle.name, manifestSources);
+  } else {
+    for (const source of bundle.sources) {
+      const file = assertSourceExists(source);
+      const content = readFileSync(file);
+      sourceHashes[source] = sha256(content);
+      parts.push(`/* ${source} */\n${content.toString('utf8')}\n`);
     }
-  }`);
+    output = `${parts.join('\n')}\n`;
   }
-  for (const source of bundle.sources) {
-    const file = assertSourceExists(source);
-    const content = readFileSync(file);
-    sourceHashes[source] = sha256(content);
-    const body = classicScriptBundleText(source, content.toString('utf8')).replace(/\s*$/, '');
-    if (bundle.type === 'js') {
-      parts.push(`;\n/* ${source} */\n${body}\n;`);
-    } else {
-      parts.push(`/* ${source} */\n${body}\n`);
-    }
-  }
-  if (bundle.type === 'js') {
-    parts.push('}());');
-  }
-  const output = `${parts.join('\n')}\n`;
   const hash = sha256(output);
   const ext = outputExtension(bundle.type);
   const filename = `${bundle.name}.${hash.slice(0, 12)}.${ext}`;
   writeFileSync(resolve(outDir, filename), output);
-  buildEntries[bundle.name] = {
+  const entry = {
     type: bundle.type,
     path: `/static/build/${filename}`,
     hash,
-    sources: bundle.sources,
+    sources: manifestSources,
     source_hashes: sourceHashes,
   };
+  if (bundle.type === 'esm') {
+    entry.entries = bundle.entries;
+  }
+  buildEntries[bundle.name] = entry;
+  builtBundleRecords.push(entry);
 }
+
+assertJsCoverage(builtBundleRecords.flatMap((bundle) => bundle.sources));
 
 const manifest = {
   version: 1,

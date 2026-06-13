@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,678
-- docs/inventory meta-tests: 35
-- `pytest`: 2075 (2040 behavior + 35 meta)
-- `vitest`: 1375
+- behavior tests: 3,697
+- docs/inventory meta-tests: 37
+- `pytest`: 2088 (2051 behavior + 37 meta)
+- `vitest`: 1383
 - `playwright`: 263
-- total: 3,713
+- total: 3,734
 
 This document is organized in two parts:
 
@@ -106,6 +106,7 @@ Run the full sets:
 ```bash
 npm run test:pytest
 npm run test:unit
+npm run test:e2e:source
 npm run test:e2e
 ```
 
@@ -121,6 +122,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 Playwright notes:
 
 - `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e:source` runs a fast source-mode Playwright slice against boot resilience and share/permalink flows. It is included in `npm test` so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
@@ -961,6 +963,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_retention_prunes_old_rows_and_disabled_warning_is_once` | Verifies audit retention removes expired rows and the disabled-audit warning logs only once. |
 | `TestAuditEvents.test_event_registry_covers_policy_for_every_event_type` | Verifies every audit event type has a registry policy, target type, and centralized recording mode. |
 | `TestAuditEvents.test_build_audit_reason_codes_do_not_copy_raw_errors` | Verifies package and report build audit details store stable reason codes instead of raw failure strings. |
+| `TestAuditEvents.test_report_export_job_read_failures_warn_without_raw_json` | Verifies corrupt report-export job JSON logs a warning without copying raw job file contents. |
+| `TestAuditEvents.test_report_export_cleanup_warns_when_archive_delete_fails` | Verifies report-export cleanup logs archive delete failures with job, path, operation, and exception type context. |
 | `TestAuditEvents.test_run_now_audit_details_do_not_copy_last_error` | Verifies schedule and watcher run-now audit details avoid copying stale last-error text. |
 | `TestAuditEvents.test_same_transaction_rollback_removes_fail_closed_audit_row` | Verifies fail-closed audit rows roll back with their product mutation when the shared transaction rolls back. |
 | `TestAuditEvents.test_best_effort_recorder_failure_logs_sanitized_fallback` | Verifies best-effort audit recorder failures emit only sanitized fallback log details. |
@@ -1048,6 +1052,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSecretsVault.test_storage_legacy_duplicate_consumer_env_uses_most_recent_update` | Verifies legacy duplicate consumer-env rows resolve to the most recently updated secret. |
 | `TestSecretsVault.test_storage_rejects_duplicate_consumer_env_bindings` | Verifies a session cannot bind the same consumer env name to two different encrypted secrets. |
 
+#### `test_check_versions.py`
+
+| Test | Description |
+| --- | --- |
+| `test_urlscan_cli_uses_github_releases_for_calendar_versions` | Verifies that the dependency version checker reads urlscan-cli's calendar-versioned releases from GitHub Releases instead of the Go module proxy. |
+| `test_generic_go_lookup_still_uses_module_proxy` | Verifies that generic Go tool pins still resolve `/cmd/...` package paths to their module root and read versions from the Go module proxy. |
+
 #### `test_container_smoke_test.py`
 
 | Test | Description |
@@ -1097,6 +1108,9 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestDocumentedCombinedTotals.test_contributing` | Checks that the combined total recorded in CONTRIBUTING.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestProjectStructureCoverage.test_asset_manifest_source_hashes_match_current_sources` | Checks that the committed asset manifest's source hashes match the current CSS and JavaScript source files, catching stale bundles before runtime. |
+| `TestProjectStructureCoverage.test_asset_manifest_esm_bundles_do_not_include_lazy_sources` | Checks that committed ESM asset bundles do not include sources configured as lazy assets, catching lazy/eager drift before startup. |
+| `TestProjectStructureCoverage.test_asset_build_output_does_not_depend_on_cwd` | Checks that asset bundle output is identical when the build runs from the repo root or from the scripts directory. |
+| `TestProjectStructureCoverage.test_asset_build_logs_esm_bundle_failure_context` | Checks that ESM asset build failures include bundle, entry, output directory, check mode, and message context. |
 | `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
 | `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
@@ -1208,7 +1222,7 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRequestResponseDebugEvents.test_request_debug_extra_has_method` | Checks that request debug extra has method. |
 | `TestRequestResponseDebugEvents.test_response_logged_at_debug_level` | Checks that response logged at debug level. |
 | `TestRequestResponseDebugEvents.test_response_debug_extra_has_status` | Checks that response debug extra has status. |
-| `TestRequestResponseDebugEvents.test_query_string_included_in_request_debug_when_present` | Checks that query string included in request debug when present. |
+| `TestRequestResponseDebugEvents.test_request_debug_logs_query_keys_without_raw_query_values` | Verifies request DEBUG events log sorted query keys without raw query values. |
 | `TestWorkerEntrypointLoggingSetup.test_notification_worker_main_configures_logging` | Verifies the notification worker entrypoint configures structured logging before running. |
 | `TestWorkerEntrypointLoggingSetup.test_scheduler_worker_main_configures_logging` | Verifies the scheduler worker entrypoint configures structured logging before running. |
 | `TestDbPrunedEvent.test_db_pruned_emits_info_when_records_deleted` | Checks that database pruned emits info when records deleted. |
@@ -1495,8 +1509,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
+| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest with module/classic types and versioned URLs. |
 | `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
 | `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
+| `TestIndexRoute.test_esm_asset_bundle_uses_module_type_and_source_entries` | Verifies ESM asset bundles render module script tags and source mode emits only the entry module. |
+| `TestIndexRoute.test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back` | Verifies invalid asset bundle modes warn once and fall back to bundle mode. |
+| `TestIndexRoute.test_asset_bundle_mode_selection_logs_info_once_per_mode` | Verifies valid asset bundle modes log the selected mode once per process. |
+| `TestIndexRoute.test_asset_version_fallback_logs_warning` | Verifies asset URL version fallback logs the missing source path before using `APP_VERSION`. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
 | `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
 | `TestHealthRoute.test_returns_200_when_db_ok` | Returns 200 when database ok. |
@@ -1606,6 +1625,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
+| `TestClientLogRoute.test_accepts_safe_asset_failure_context_without_query_values` | Verifies asset failure client logs preserve safe asset context while dropping arbitrary query values. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
 | `TestStatusRoute.test_uptime_is_non_negative_integer` | Uptime is a non-negative integer count of seconds since app boot. |
@@ -2401,6 +2421,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `does not let welcome playback steal Space from schedules form fields` | Verifies that the global welcome keyboard handler leaves Schedules modal form input alone while the modal is open. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
 | `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
+| `uses one accessor-backed tab restore flag for window and module guards` | Verifies that the session-restore guard is a single accessor-backed value shared by module code and `window`. |
 | `persists output signal metadata for session restore` | Verifies that findings, warning, error, and summary metadata survives browser refresh state snapshots. |
 | `restores saved non-running tabs and active draft state from session storage` | Verifies that saved tab labels, drafts, and transcript previews rebuild from browser session storage after reload. |
 | `preserves a non-active tab draft even when createTab activation would overwrite it during restore` | Verifies that the restore flow reapplies saved drafts after tab creation so a non-active tab draft survives restore-time activation churn. |
@@ -2724,6 +2745,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders disclaimer text` | Verifies that the pipe-helpers section renders the app-managed-filters, not-arbitrary-pipelines disclaimer. |
 | `returns null when pipe_helpers is an empty array` | Verifies that the pipe-helpers section builder returns null for an empty pipe list. |
 | `returns null when pipe_helpers is absent` | Verifies that the pipe-helpers section builder returns null for null or undefined input. |
+| `binds generated command rows through the shared pressable primitive` | Verifies that generated Command Registry rows compose through the shared pressable activation helper. |
 
 #### `config.test.js`
 
@@ -2735,6 +2757,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
 | `lazy-loads the project workspace controller cluster in order` | Verifies that the Projects workspace controllers load in manifest order only when the workspace opens. |
 | `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
+| `logs lazy module load failures with safe asset context` | Verifies failed lazy module imports send a client log with asset name, type, sanitized cache-busted path, and expected-global state. |
+| `logs invalid lazy asset config without including the raw JSON body` | Verifies malformed lazy asset JSON logs a warning once while falling back to built-in lazy asset paths. |
 | `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens. |
 | `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens. |
 | `lazy-loads workflow controllers while keeping the catalog cache eager` | Verifies that workflow catalog data can render the rail eagerly while terminal workflow commands lazy-load the heavier workflow controller. |
@@ -2963,7 +2987,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `chip tap activates the next running non-active tab in tab-row order` | Checks that chip tap activates the next running non-active tab in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
 | `re-syncs the chip count from tab lifecycle events instead of DOM mutation observers` | Checks that re-syncs the chip count from tab lifecycle events instead of DOM mutation observers. |
-| `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Checks that hides the chip and edge glows when the body is not in mobile-terminal-mode. |
+| `does not load the lazy indicator before mobile terminal mode is active` | Verifies that desktop startup does not download or mount the mobile-only running indicator. |
+| `loads the lazy indicator when mobile terminal mode activates after startup` | Verifies that the lazy running indicator still loads and mounts when the shell enters mobile mode after startup. |
 
 #### `notification_channels.test.js`
 
@@ -3073,6 +3098,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `save-html download uses appName and exportTimestamp` | Verifies that save-html download uses appName and exportTimestamp. |
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
+
+#### `permalink_module.test.js`
+
+| Test | Description |
+| --- | --- |
+| `loads the source-mode import graph and renders output` | Verifies that the permalink module entry loads its source-mode import graph and renders transcript output. |
 
 #### `project_activity.test.js`
 
@@ -3369,6 +3400,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `falls back to getRandomValues UUID generation when randomUUID throws (insecure HTTP context)` | Verifies that `_generateUUID` falls back to `crypto.getRandomValues` and produces a valid UUID v4 when `crypto.randomUUID()` throws (e.g. Safari iOS on http://). |
 | `apiFetch injects the X-Session-ID and X-Client-ID headers` | Verifies that apiFetch injects the session and browser-client headers. |
 | `apiFetch preserves existing headers while adding the session header` | Verifies that apiFetch preserves existing headers while adding the session header. |
+| `logClientError forwards safe event and level fields to the client log endpoint` | Verifies client error logs forward safe top-level event and level fields alongside details for `/log`. |
 | `describeFetchError returns a friendly offline message for network failures` | Verifies that describeFetchError returns a friendly offline message for network failures. |
 | `describeFetchError preserves non-network error details` | Verifies that describeFetchError preserves non-network error details. |
 | `prefers session_token over session_id when both are in localStorage` | Verifies that `SESSION_ID` is initialised from `session_token` when both keys are present in localStorage. |
@@ -3423,6 +3455,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `loads Findings Board project data with a separate cap for each review column` | Verifies that the Findings Board loads each Project review column with its own page cap so a large New column does not hide reviewed, false-positive, or follow-up findings. |
 | `locks finding review dropdowns and board dragging for view-only team members` | Verifies that view-only team scope disables Projects select mode, finding review controls, and Findings Board drag/drop triage. |
 | `refreshes an open Projects modal after a cross-tab project broadcast` | Verifies that a project-workspace storage broadcast refreshes an already-open Projects modal. |
+
+#### `shell_entry_module.test.js`
+
+| Test | Description |
+| --- | --- |
+| `loads the source-mode shell graph and keeps cross-module bridges live` | Verifies that the native shell ES module entry imports successfully and preserves tab output, theme preference, and FAQ autocomplete bridge behavior. |
 
 #### `state.test.js`
 

@@ -187,6 +187,7 @@ function _onTouchDragEnd(e) {
   updateTabScrollButtons();
   ensureActiveTabVisible(activeTabId);
   _tabDragSuppressClickUntil = Date.now() + (state.source === 'touch' ? 220 : 140);
+  if (typeof window !== 'undefined') window._tabDragSuppressClickUntil = _tabDragSuppressClickUntil;
   if (state.id === activeTabId) refocusComposerAfterAction();
 }
 
@@ -242,4 +243,25 @@ function bindTabDragReorder(tab, id) {
   _syncTabDraggable(tab);
   tab.addEventListener('pointerdown', e => _startTouchTabDrag(tab, id, e));
   tab.addEventListener('touchstart', e => _startTouchTabDrag(tab, id, e), { passive: false });
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _tabDragSuppressClickUntil,
+    _TOUCH_TAB_DRAG_THRESHOLD,
+    _TOUCH_TAB_DRAG_HOLD_MS,
+    _POINTER_TAB_DRAG_THRESHOLD,
+    _syncTabDraggable,
+    _clearTabDropIndicators,
+    _tabFromClientX,
+    _edgeTabFromClientX,
+    _reorderDraggedTab,
+    _touchDragAutoScroll,
+    _getTrackedTouchPoint,
+    _cleanupTouchDrag,
+    _onTouchDragMove,
+    _onTouchDragEnd,
+    _startTouchTabDrag,
+    bindTabDragReorder,
+  });
 }

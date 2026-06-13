@@ -69,6 +69,7 @@ function _applyComposerPromptMode() {
 
 function setComposerPromptMode(mode = null) {
   _composerPromptMode = mode === 'confirm' ? 'confirm' : null;
+  if (typeof window !== 'undefined') window._composerPromptMode = _composerPromptMode;
   _applyComposerPromptMode();
 }
 
@@ -151,11 +152,11 @@ function focusCommandInputFromGesture({ preventScroll = true } = {}) {
 }
 
 function _closeMajorOverlays() {
-  if (typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen()) {
-    hideCommandCatalogOverlay();
+  if (typeof window.isCommandCatalogOverlayOpen === 'function' && window.isCommandCatalogOverlayOpen()) {
+    if (typeof window.hideCommandCatalogOverlay === 'function') window.hideCommandCatalogOverlay();
   }
-  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
-    hideCommandRegistryOverlay();
+  if (typeof window.isCommandRegistryOverlayOpen === 'function' && window.isCommandRegistryOverlayOpen()) {
+    if (typeof window.hideCommandRegistryOverlay === 'function') window.hideCommandRegistryOverlay();
   }
   if (globalThis.isProjectWorkspaceOpen && globalThis.isProjectWorkspaceOpen()) {
     globalThis.closeProjectWorkspace({ refocus: false });
@@ -188,7 +189,7 @@ function _closeMajorOverlays() {
     else hideWorkspaceOverlay();
   }
   if (isFaqOverlayOpen()) {
-    if (typeof clearFaqHash === 'function') clearFaqHash();
+    if (typeof window.clearFaqHash === 'function') window.clearFaqHash();
     hideFaqOverlay();
   }
   if (isThemeOverlayOpen()) hideThemeOverlay();
@@ -320,7 +321,9 @@ function copyActiveShortcutTab() {
 
 function clearActiveShortcutTab() {
   if (!activeTabId) return;
-  cancelWelcome(activeTabId);
+  const cancel = (typeof window !== 'undefined' && window.cancelWelcome)
+    || (typeof cancelWelcome !== 'undefined' ? cancelWelcome : null);
+  if (typeof cancel === 'function') cancel(activeTabId);
   const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
   clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
 }
@@ -487,16 +490,54 @@ const _tsLabels = { off: 'timestamps', elapsed: 'timestamps: elapsed', clock: 't
 function _setTsMode(mode) {
   // Timestamp mode is expressed via body classes so both active transcript
   // rendering and exported/permalink views can share the same styling model.
-  tsMode = mode;
-  document.body.classList.remove('ts-elapsed', 'ts-clock');
-  if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
-  if (mode === 'clock')   document.body.classList.add('ts-clock');
+  if (typeof window._setOutputTsMode === 'function' && window._setOutputTsMode !== _setTsMode) {
+    window._setOutputTsMode(mode);
+  } else {
+    window.tsMode = mode;
+    document.body.classList.remove('ts-elapsed', 'ts-clock');
+    if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
+    if (mode === 'clock')   document.body.classList.add('ts-clock');
+    if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
+    try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
+  }
   const label = _tsLabels[mode];
   if (tsBtn) {
     tsBtn.textContent = label;
     tsBtn.classList.toggle('active', mode !== 'off');
     tsBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
   }
-  if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
-  try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _composerPromptMode,
+    _tourOpenedRecordedThisSession,
+    hidePromptUsernameSavedIndicator,
+    showPromptUsernameSavedIndicator,
+    _compactMobileComposerPath,
+    _mobileComposerPlaceholder,
+    _applyComposerPromptMode,
+    setComposerPromptMode,
+    syncShellPrompt,
+    focusCommandInputFromGesture,
+    _closeMajorOverlays,
+    openOptions,
+    closeOptions,
+    openThemeSelector,
+    closeThemeSelector,
+    isEditableTarget,
+    shouldIgnoreGlobalShortcutTarget,
+    createNextTabLabel,
+    createShortcutTab,
+    activateRelativeTab,
+    closeActiveShortcutTab,
+    permalinkActiveShortcutTab,
+    copyActiveShortcutTab,
+    clearActiveShortcutTab,
+    isStatusMonitorShortcutOpen,
+    confirmPermalinkRedactionChoice,
+    performMobileEditAction,
+    _tsModes,
+    _setTsMode,
+  });
 }

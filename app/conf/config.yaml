@@ -39,7 +39,8 @@
 # Frontend asset rendering mode. `bundle` renders content-hashed files from
 # app/static/build/ and fails loudly if the committed build output is missing
 # or incomplete. Set `source` in config.local.yaml for local edit-and-refresh
-# development with ordered source-file tags and version query strings.
+# development with ordered CSS source tags and ES module entry tags that let
+# the browser follow source imports directly.
 # ASSET_BUNDLE_MODE can also override this setting.
 # Server default if unset: bundle
 # asset_bundle_mode: bundle

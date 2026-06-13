@@ -139,6 +139,30 @@ class _CapturedThread:
 # ── / ─────────────────────────────────────────────────────────────────────────
 
 class TestIndexRoute:
+    @staticmethod
+    def _lazy_assets_from_body(body: str) -> dict[str, Any]:
+        match = re.search(
+            r'<script id="lazy-assets-json" type="application/json">(.+?)</script>',
+            body,
+            flags=re.S,
+        )
+        assert match, "missing lazy asset JSON"
+        parsed = json.loads(match.group(1))
+        assert isinstance(parsed, dict)
+        return parsed
+
+    @staticmethod
+    def _asset_path_without_version(url: str) -> str:
+        return url.split("?", 1)[0]
+
+    @staticmethod
+    def _normalize_lazy_asset_entry(entry: Any) -> dict[str, str]:
+        if isinstance(entry, str):
+            return {"url": entry, "type": "classic"}
+        assert isinstance(entry, dict)
+        assert isinstance(entry.get("url"), str)
+        return {"url": entry["url"], "type": entry.get("type", "classic")}
+
     def test_returns_200(self):
         client = get_client()
         resp = client.get("/")
@@ -155,84 +179,162 @@ class TestIndexRoute:
         assert '/static/css/mobile-chrome.css?v=' in body
         assert '/vendor/ansi_up.js?v=' in body
         assert '<script src="/static/js/export_pdf.js?v=' not in body
-        assert '"export_pdf": "/static/js/export_pdf.js?v=' in body
+        assert '"export_pdf": {' in body
+        assert '"url": "/static/js/export_pdf.js?v=' in body
         assert '<script src="/static/js/features/atlas/atlas_tabs.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_entity_detail.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_entity_row.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_overlay.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_mobile.js?v=' not in body
-        assert '"atlas_tabs": "/static/js/features/atlas/atlas_tabs.js?v=' in body
-        assert '"atlas_entity_row": "/static/js/features/atlas/atlas_entity_row.js?v=' in body
-        assert '"atlas_entity_detail": "/static/js/features/atlas/atlas_entity_detail.js?v=' in body
-        assert '"atlas_overlay": "/static/js/features/atlas/atlas_overlay.js?v=' in body
-        assert '"atlas_mobile": "/static/js/features/atlas/atlas_mobile.js?v=' in body
+        assert '"atlas_tabs": {' in body
+        assert '"url": "/static/js/features/atlas/atlas_tabs.js?v=' in body
+        assert '"type": "module"' in body
+        assert body.count('"type": "module"') >= 3
+        assert '"atlas_entity_row": {' in body
+        assert '"url": "/static/js/features/atlas/atlas_entity_row.js?v=' in body
+        assert '"atlas_entity_detail": {' in body
+        assert '"url": "/static/js/features/atlas/atlas_entity_detail.js?v=' in body
+        assert '"atlas_overlay": {' in body
+        assert '"url": "/static/js/features/atlas/atlas_overlay.js?v=' in body
+        assert '"atlas_mobile": {' in body
+        assert '"url": "/static/js/features/atlas/atlas_mobile.js?v=' in body
         assert '<script src="/static/js/features/findings/findings_board_modal.js?v=' not in body
-        assert '"findings_board": "/static/js/features/findings/findings_board_modal.js?v=' in body
+        assert '"findings_board": {' in body
+        assert '"url": "/static/js/features/findings/findings_board_modal.js?v=' in body
         assert '<script src="/static/js/features/projects/project_activity.js?v=' not in body
-        assert '"project_activity": "/static/js/features/projects/project_activity.js?v=' in body
+        assert '"project_activity": {' in body
+        assert '"url": "/static/js/features/projects/project_activity.js?v=' in body
         assert '<script src="/static/js/features/projects/project_artifacts.js?v=' not in body
-        assert '"project_artifacts": "/static/js/features/projects/project_artifacts.js?v=' in body
+        assert '"project_artifacts": {' in body
+        assert '"url": "/static/js/features/projects/project_artifacts.js?v=' in body
         assert '<script src="/static/js/features/projects/project_workspace_shell.js?v=' not in body
-        assert '"project_workspace_shell": "/static/js/features/projects/project_workspace_shell.js?v=' in body
+        assert '"project_workspace_shell": {' in body
+        assert '"url": "/static/js/features/projects/project_workspace_shell.js?v=' in body
         assert '<script src="/static/js/features/projects/project_workspace_events.js?v=' not in body
-        assert '"project_workspace_events": "/static/js/features/projects/project_workspace_events.js?v=' in body
+        assert '"project_workspace_events": {' in body
+        assert '"url": "/static/js/features/projects/project_workspace_events.js?v=' in body
         assert '<script src="/static/js/features/projects/project_entities.js?v=' not in body
-        assert '"project_entities": "/static/js/features/projects/project_entities.js?v=' in body
+        assert '"project_entities": {' in body
+        assert '"url": "/static/js/features/projects/project_entities.js?v=' in body
         assert '<script src="/static/js/features/projects/project_packages.js?v=' not in body
-        assert '"project_packages": "/static/js/features/projects/project_packages.js?v=' in body
+        assert '"project_packages": {' in body
+        assert '"url": "/static/js/features/projects/project_packages.js?v=' in body
         assert '<script src="/static/js/features/projects/project_report.js?v=' not in body
-        assert '"project_report": "/static/js/features/projects/project_report.js?v=' in body
+        assert '"project_report": {' in body
+        assert '"url": "/static/js/features/projects/project_report.js?v=' in body
         assert '<script src="/static/js/features/run-comparison/history_compare_renderer.js?v=' not in body
-        assert '"history_compare_core": "/static/js/features/run-comparison/history_compare_core.js?v=' in body
-        assert '"history_compare_overlay": "/static/js/features/run-comparison/history_compare_overlay.js?v=' in body
-        assert '"history_compare_controls": "/static/js/features/run-comparison/history_compare_controls.js?v=' in body
-        assert '"history_compare_navigation": "/static/js/features/run-comparison/history_compare_navigation.js?v=' in body
-        assert '"history_compare_renderer": "/static/js/features/run-comparison/history_compare_renderer.js?v=' in body
-        assert '"history_compare_launcher": "/static/js/features/run-comparison/history_compare_launcher.js?v=' in body
+        assert '"history_compare_core": {' in body
+        assert '"url": "/static/js/features/run-comparison/history_compare_core.js?v=' in body
+        assert '"history_compare_overlay": {' in body
+        assert '"url": "/static/js/features/run-comparison/history_compare_overlay.js?v=' in body
+        assert '"history_compare_controls": {' in body
+        assert '"url": "/static/js/features/run-comparison/history_compare_controls.js?v=' in body
+        assert '"history_compare_navigation": {' in body
+        assert '"url": "/static/js/features/run-comparison/history_compare_navigation.js?v=' in body
+        assert '"history_compare_renderer": {' in body
+        assert '"url": "/static/js/features/run-comparison/history_compare_renderer.js?v=' in body
+        assert '"history_compare_launcher": {' in body
+        assert '"url": "/static/js/features/run-comparison/history_compare_launcher.js?v=' in body
         assert '<script src="/static/js/features/history/history_run_details.js?v=' not in body
-        assert '"history_run_details": "/static/js/features/history/history_run_details.js?v=' in body
+        assert '"history_run_details": {' in body
+        assert '"url": "/static/js/features/history/history_run_details.js?v=' in body
         assert '<script src="/static/js/features/preferences/teams_panel.js?v=' not in body
-        assert '"options_session_token_controls": "/static/js/features/preferences/session_token_controls.js?v=' in body
-        assert '"options_secrets_panel": "/static/js/features/preferences/secrets_panel.js?v=' in body
-        assert '"options_teams_panel": "/static/js/features/preferences/teams_panel.js?v=' in body
-        assert '"options_notification_channels": "/static/js/features/preferences/notification_channels.js?v=' in body
-        assert '/static/js/features/command-registry/faq_helpers.js?v=' in body
+        assert '"options_session_token_controls": {' in body
+        assert '"url": "/static/js/features/preferences/session_token_controls.js?v=' in body
+        assert '"options_secrets_panel": {' in body
+        assert '"url": "/static/js/features/preferences/secrets_panel.js?v=' in body
+        assert '"options_teams_panel": {' in body
+        assert '"url": "/static/js/features/preferences/teams_panel.js?v=' in body
+        assert '"options_notification_channels": {' in body
+        assert '"url": "/static/js/features/preferences/notification_channels.js?v=' in body
         assert '<script src="/static/js/features/command-registry/command_registry.js?v=' not in body
-        assert '"command_registry": "/static/js/features/command-registry/command_registry.js?v=' in body
+        assert '"command_registry": {' in body
+        assert '"url": "/static/js/features/command-registry/command_registry.js?v=' in body
         assert '<script src="/static/js/features/workflows/workflows.js?v=' not in body
-        assert '"workflows": "/static/js/features/workflows/workflows.js?v=' in body
+        assert '"workflows": {' in body
+        assert '"url": "/static/js/features/workflows/workflows.js?v=' in body
         assert '<script src="/static/js/pty.js?v=' not in body
-        assert '"pty_controller": "/static/js/pty.js?v=' in body
+        assert '"pty_controller": {' in body
+        assert '"url": "/static/js/pty.js?v=' in body
         assert '<script src="/static/js/features/schedules/schedules_modal.js?v=' not in body
-        assert '"schedules_modal": "/static/js/features/schedules/schedules_modal.js?v=' in body
+        assert '"schedules_modal": {' in body
+        assert '"url": "/static/js/features/schedules/schedules_modal.js?v=' in body
         assert '<script src="/static/js/features/status-monitor/status_monitor_core.js?v=' not in body
         assert '<script src="/static/js/status_monitor.js?v=' not in body
-        assert '"status_monitor_core": "/static/js/features/status-monitor/status_monitor_core.js?v=' in body
-        assert '"status_monitor_data": "/static/js/features/status-monitor/status_monitor_data.js?v=' in body
-        assert '"status_monitor_resources": "/static/js/features/status-monitor/status_monitor_resources.js?v=' in body
-        assert '"status_monitor": "/static/js/status_monitor.js?v=' in body
+        assert '"status_monitor_core": {' in body
+        assert '"url": "/static/js/features/status-monitor/status_monitor_core.js?v=' in body
+        assert '"status_monitor_data": {' in body
+        assert '"url": "/static/js/features/status-monitor/status_monitor_data.js?v=' in body
+        assert '"status_monitor_resources": {' in body
+        assert '"url": "/static/js/features/status-monitor/status_monitor_resources.js?v=' in body
+        assert '"status_monitor": {' in body
+        assert '"url": "/static/js/status_monitor.js?v=' in body
+        assert '<script src="/static/js/features/mobile/mobile_running_indicator.js?v=' not in body
+        assert '"mobile_running_indicator": {' in body
+        assert '"url": "/static/js/features/mobile/mobile_running_indicator.js?v=' in body
         assert '<script src="/static/js/tour_modal.js?v=' not in body
-        assert '"tour_modal": "/static/js/tour_modal.js?v=' in body
+        assert '"tour_modal": {' in body
+        assert '"url": "/static/js/tour_modal.js?v=' in body
         assert '<script src="/static/js/features/watchers/watchers_modal.js?v=' not in body
-        assert '"watchers_modal": "/static/js/features/watchers/watchers_modal.js?v=' in body
+        assert '"watchers_modal": {' in body
+        assert '"url": "/static/js/features/watchers/watchers_modal.js?v=' in body
         assert '<script src="/vendor/jspdf.umd.min.js?v=' not in body
         assert '"jspdf": "/vendor/jspdf.umd.min.js?v=' in body
         assert '<script src="/vendor/xterm.js?v=' not in body
         assert '"xterm_js": "/vendor/xterm.js?v=' in body
         assert '"xterm_fit_js": "/vendor/xterm-addon-fit.js?v=' in body
         assert '"xterm_css": "/vendor/xterm.css?v=' in body
-        assert '/static/js/core/run_output_model.js?v=' in body
-        assert '/static/js/core/config.js?v=' in body
-        assert '/static/js/mobile_chrome.js?v=' in body
+        assert '/static/js/core/run_output_model.js?v=' not in body
+        assert '/static/js/core/config.js?v=' not in body
+        assert 'type="module" src="/static/js/shell_bootstrap.entry.js?v=' in body
+        assert "__darklabBootstrapAsset" in body
+        assert "ESM_BOOTSTRAP_LOAD_FAILED" in body
+        assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
+        assert (
+            "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
+            in body
+        )
+        assert '/static/js/mobile_chrome.js?v=' not in body
+
+    def test_source_mode_lazy_asset_json_matches_configured_lazy_manifest(self):
+        client = get_client()
+        body = client.get("/").get_data(as_text=True)
+        lazy_assets = self._lazy_assets_from_body(body)
+        configured_lazy = json.loads(
+            (Path(__file__).resolve().parents[2] / "assets.config.json").read_text(encoding="utf-8")
+        )["lazy"]
+        normalized_assets = {
+            name: self._normalize_lazy_asset_entry(entry)
+            for name, entry in lazy_assets.items()
+        }
+        rendered_paths = {
+            name: self._asset_path_without_version(entry["url"])
+            for name, entry in normalized_assets.items()
+        }
+        assert set(rendered_paths.values()) == set(configured_lazy)
+        assert len(rendered_paths) == len(configured_lazy)
+
+        for name, entry in normalized_assets.items():
+            assert set(entry) == {"url", "type"}
+            assert entry["url"].startswith(("/static/js/", "/vendor/"))
+            assert "?v=" in entry["url"]
+            path = self._asset_path_without_version(entry["url"])
+            if path.startswith("/static/js/"):
+                assert entry["type"] == "module", name
+            else:
+                assert entry["type"] == "classic", name
 
     def test_bundle_mode_renders_built_asset_bundles(self):
         client = get_client()
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
             body = client.get("/").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
-        assert re.search(r'src="/static/build/shell-core\.[a-f0-9]{12}\.js"', body)
-        assert re.search(r'src="/static/build/shell-features\.[a-f0-9]{12}\.js"', body)
-        assert re.search(r'src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'type="module" src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
+        assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
+        assert (
+            "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
+            in body
+        )
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/mobile-chrome.css?v=' not in body
         assert '/static/js/core/run_output_model.js?v=' not in body
@@ -242,8 +344,85 @@ class TestIndexRoute:
     def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
-            with pytest.raises(RuntimeError, match="Run assets:sync"):
-                shell_app._asset_bundle("app")
+            with mock.patch.object(shell_app.log, "error") as mock_error:
+                with pytest.raises(RuntimeError, match="Run assets:sync"):
+                    shell_app._asset_bundle("app")
+        mock_error.assert_called_once()
+        assert mock_error.call_args[0][0] == "ASSET_MANIFEST_RESOLUTION_FAILED"
+        assert mock_error.call_args.kwargs["exc_info"] is True
+        extra = mock_error.call_args.kwargs["extra"]
+        assert extra["bundle"] == "app"
+        assert extra["bundle_type"] == ""
+        assert extra["asset_bundle_mode"] == "bundle"
+        assert extra["manifest_path"] == str(tmp_path / "manifest.json")
+
+    def test_esm_asset_bundle_uses_module_type_and_source_entries(self, tmp_path, monkeypatch):
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps({
+            "version": 1,
+            "bundles": {
+                "module-fixture": {
+                    "type": "esm",
+                    "path": "/static/build/module-fixture.123456789abc.js",
+                    "hash": "123456789abc",
+                    "entries": ["/static/js/core/utils.js"],
+                    "sources": [
+                        "/static/js/core/utils.js",
+                        "/static/js/core/output_core.js",
+                    ],
+                    "source_hashes": {},
+                },
+            },
+        }), encoding="utf-8")
+        monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", manifest_path)
+
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            assert shell_app._asset_bundle("module-fixture") == [
+                "/static/build/module-fixture.123456789abc.js"
+            ]
+            assert shell_app._asset_bundle_script_type("module-fixture") == "module"
+
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
+            sources = shell_app._asset_bundle("module-fixture")
+        assert len(sources) == 1
+        assert sources[0].startswith("/static/js/core/utils.js?v=")
+
+    def test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back(self):
+        shell_app._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "sideways"}):
+            with mock.patch.object(shell_app.log, "warning") as mock_warning:
+                assert shell_app._asset_bundle_mode() == "bundle"
+                assert shell_app._asset_bundle_mode() == "bundle"
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args[0][0] == "ASSET_BUNDLE_MODE_INVALID"
+        assert mock_warning.call_args.kwargs["extra"] == {
+            "configured_mode": "sideways",
+            "fallback_mode": "bundle",
+        }
+        shell_app._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
+
+    def test_asset_bundle_mode_selection_logs_info_once_per_mode(self):
+        shell_app._LOGGED_ASSET_BUNDLE_MODES.clear()
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                assert shell_app._asset_bundle_mode() == "source"
+                assert shell_app._asset_bundle_mode() == "source"
+        mock_info.assert_called_once()
+        assert mock_info.call_args[0][0] == "ASSET_BUNDLE_MODE_SELECTED"
+        assert mock_info.call_args.kwargs["extra"] == {"asset_bundle_mode": "source"}
+        shell_app._LOGGED_ASSET_BUNDLE_MODES.clear()
+
+    def test_asset_version_fallback_logs_warning(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warning:
+            version = shell_app._asset_version("/static/js/does-not-exist.js")
+        assert version == shell_app.APP_VERSION
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args[0][0] == "ASSET_VERSION_FALLBACK"
+        assert mock_warning.call_args.kwargs["exc_info"] is True
+        extra = mock_warning.call_args.kwargs["extra"]
+        assert extra["asset_path"] == "/static/js/does-not-exist.js"
+        assert extra["local_path"].endswith("static/js/does-not-exist.js")
+        assert extra["fallback_version"] == shell_app.APP_VERSION
 
     def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
         client = get_client()
@@ -9443,6 +9622,20 @@ class TestProjectRoutes:
             call for call in export_info.call_args_list
             if call.args == ("REPORT_EXPORT_JOB_COMPLETE",)
         )
+        queued_call = next(
+            call for call in export_info.call_args_list
+            if call.args == ("REPORT_EXPORT_JOB_QUEUED",)
+        )
+        started_call = next(
+            call for call in export_info.call_args_list
+            if call.args == ("REPORT_EXPORT_JOB_STARTED",)
+        )
+        queued_extra = queued_call.kwargs["extra"]
+        started_extra = started_call.kwargs["extra"]
+        assert queued_extra["job_id"] == job["id"]
+        assert started_extra["job_id"] == job["id"]
+        assert queued_extra["project_id"] == project["id"]
+        assert started_extra["project_id"] == project["id"]
         complete_extra = complete_call.kwargs["extra"]
         assert complete_extra["run_count"] == 0
         assert complete_extra["target_count"] == 0
@@ -10387,6 +10580,39 @@ class TestClientLogRoute:
         debug_extra = mock_debug.call_args.kwargs["extra"]
         assert debug_extra["context"] == "TEAM_SCOPE_CHANGED"
         assert debug_extra["client_message"] == '{"scope":"team"}'
+
+    def test_accepts_safe_asset_failure_context_without_query_values(self):
+        client = get_client()
+        with mock.patch.object(shell_assets.log, "error") as mock_error:
+            resp = client.post("/log", json={
+                "event": "ESM_BOOTSTRAP_LOAD_FAILED",
+                "level": "error",
+                "context": "ESM_BOOTSTRAP_LOAD_FAILED",
+                "message": "failed to load module",
+                "details": {
+                    "page": "index",
+                    "bundle": "shell-bootstrap",
+                    "src": "http://localhost/static/build/shell-bootstrap.123456789abc.js?v=abc123&token=secret",
+                    "phase": "load",
+                    "asset_name": "shell-bootstrap",
+                    "asset_type": "module",
+                    "expected_global": True,
+                },
+            })
+        assert resp.status_code == 200
+        mock_error.assert_called_once()
+        assert mock_error.call_args[0][0] == "ESM_BOOTSTRAP_LOAD_FAILED"
+        extra = mock_error.call_args.kwargs["extra"]
+        assert extra["client_details"] == {
+            "asset_name": "shell-bootstrap",
+            "asset_type": "module",
+            "bundle": "shell-bootstrap",
+            "page": "index",
+            "phase": "load",
+            "src": "/static/build/shell-bootstrap.123456789abc.js?v=abc123",
+            "expected_global": True,
+        }
+        assert "secret" not in json.dumps(extra)
 
 
 # ── /status ───────────────────────────────────────────────────────────────────
@@ -19089,8 +19315,16 @@ class TestShareRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/features/history.css?v=' in body
         assert '/static/css/terminal_export.css?v=' in body
-        assert '/static/js/core/utils.js?v=' in body
-        assert '/static/js/permalink.js?v=' in body
+        assert 'type="module" src="/static/js/permalink.entry.js?v=' in body
+        assert "__darklabBootstrapAsset" in body
+        assert "ESM_BOOTSTRAP_LOAD_FAILED" in body
+        assert "window.__darklabBootstrapAsset.start('permalink', 'permalink'," in body
+        assert (
+            "window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)"
+            in body
+        )
+        assert '/static/js/core/utils.js?v=' not in body
+        assert '/static/js/permalink.js?v=' not in body
 
     def test_get_share_html_bundle_mode_renders_per_page_asset_bundles(self):
         client = get_client()
@@ -19104,7 +19338,12 @@ class TestShareRoute:
             body = client.get(f"/share/{share_id}").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
-        assert re.search(r'src="/static/build/permalink\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'type="module" src="/static/build/permalink\.[a-f0-9]{12}\.js"', body)
+        assert "window.__darklabBootstrapAsset.start('permalink', 'permalink'," in body
+        assert (
+            "window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)"
+            in body
+        )
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/features/history.css?v=' not in body
         assert '/static/css/terminal_export.css?v=' not in body
@@ -19164,9 +19403,9 @@ class TestShareRoute:
 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        # renderPromptEcho is now in the external permalink.js module; the page
+        # renderPromptEcho is now loaded by the external permalink module entry; the page
         # loads it and bridges data via window.PermData.  Confirm both are present.
-        assert "permalink.js" in body
+        assert "permalink.entry.js" in body
         assert "prompt-echo" in body
 
     def test_get_share_html_content_type(self):

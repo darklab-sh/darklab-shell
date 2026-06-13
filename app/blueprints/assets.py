@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, stream_with_context
 
@@ -983,6 +983,15 @@ def client_log():
             }
         if "has_active_filter" in details:
             client_details["has_active_filter"] = bool(details.get("has_active_filter"))
+        for key in ("asset_name", "asset_type", "bundle", "page", "phase", "source"):
+            value = str(details.get(key) or "").strip()[:120]
+            if value:
+                client_details[key] = value
+        src = _sanitize_client_asset_src(details.get("src"))
+        if src:
+            client_details["src"] = src
+        if "expected_global" in details:
+            client_details["expected_global"] = bool(details.get("expected_global"))
         if client_details:
             extra["client_details"] = client_details
     if level == "debug":
@@ -994,6 +1003,21 @@ def client_log():
         app_metrics.record_client_error(context or event or "unknown")
         log.warning(event, extra=extra)
     return jsonify({"ok": True})
+
+
+def _sanitize_client_asset_src(value) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return raw.split("?", 1)[0][:300]
+    path = parsed.path or raw.split("?", 1)[0]
+    query = parse_qs(parsed.query, keep_blank_values=False)
+    version = str((query.get("v") or [""])[0] or "")[:80]
+    suffix = f"?{urlencode({'v': version})}" if version else ""
+    return f"{path[:300]}{suffix}"
 
 
 @assets_bp.route("/vendor/ansi_up.js")

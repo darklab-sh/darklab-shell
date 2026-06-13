@@ -23,3 +23,11 @@ function copySnapshotLink(snapshot) {
 function copyHistoryRunPermalink(run) {
   return shareUrl(_historyRunPermalinkUrl(run));
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    openSnapshotLink,
+    copySnapshotLink,
+    copyHistoryRunPermalink,
+  });
+}

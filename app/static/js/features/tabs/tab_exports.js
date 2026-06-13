@@ -365,3 +365,31 @@ async function permalinkTab(id) {
       refocusComposerAfterAction();
     });
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _getExportableRawLines,
+    _getShareRedactionRules,
+    _shareRedactionEnabled,
+    _getRedactedLines,
+    _refocusAfterTabAction,
+    _stripTabExportAnsi,
+    _commandOutcomeSummariesEnabledForExport,
+    _appendTabCommandOutcomeSummaryLines,
+    copyTab,
+    saveTab,
+    _exportPrefix,
+    _normalizeTabTranscriptLine,
+    _normalizeTabTranscriptLines,
+    _omitRawOnlyExportLines,
+    _buildTabExportModel,
+    exportTabHtml,
+    exportTabPdf,
+    _shareLinesWithoutTruncationNotices,
+    _extractLatestFullRunShareContent,
+    _shareSnapshotLabel,
+    _canCreateShareSnapshot,
+    _shareSnapshotDeniedMessage,
+    permalinkTab,
+  });
+}

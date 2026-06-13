@@ -16,6 +16,61 @@ let _workspaceOwner = {
   read_only: false,
   read_only_reason: '',
 };
+
+function _workspaceGlobal() {
+  return typeof window !== 'undefined' ? window : globalThis;
+}
+
+function _publishWorkspaceState() {
+  const global = _workspaceGlobal();
+  if (!global || global.DarklabWorkspaceState) return;
+  Object.defineProperties(global, {
+    DarklabWorkspaceState: {
+      configurable: true,
+      value: {},
+    },
+  });
+  Object.defineProperties(global.DarklabWorkspaceState, {
+    files: {
+      configurable: true,
+      get: () => _workspaceFiles,
+      set: value => { _workspaceFiles = Array.isArray(value) ? value : []; },
+    },
+    dirs: {
+      configurable: true,
+      get: () => _workspaceDirs,
+      set: value => { _workspaceDirs = Array.isArray(value) ? value : []; },
+    },
+    limits: {
+      configurable: true,
+      get: () => _workspaceLimits,
+      set: value => { _workspaceLimits = value && typeof value === 'object' ? value : {}; },
+    },
+    loaded: {
+      configurable: true,
+      get: () => _workspaceLoaded,
+      set: value => { _workspaceLoaded = value === true; },
+    },
+    owner: {
+      configurable: true,
+      get: () => _workspaceOwner,
+      set: value => { _workspaceOwner = value && typeof value === 'object' ? value : _workspaceOwner; },
+    },
+    currentDir: {
+      configurable: true,
+      get: () => _workspaceCurrentDir,
+      set: value => { _workspaceCurrentDir = _normalizeWorkspaceDir(value); },
+    },
+    currentScopeKey: {
+      configurable: true,
+      get: () => _workspaceCurrentScopeKey,
+      set: value => { _workspaceCurrentScopeKey = String(value || 'personal'); },
+    },
+  });
+}
+
+_publishWorkspaceState();
+
 let _workspaceViewedPath = '';
 let _workspaceViewerPayloadCache = null;
 let _workspaceViewerSearchController = null;
@@ -25,12 +80,18 @@ let _workspaceViewerRefreshSpinTimer = null;
 let _workspaceViewerRefreshInFlight = false;
 let _workspaceViewerAutoRefreshEnabled = false;
 let _workspaceViewedSize = null;
-const WorkspaceCore = window.DarklabWorkspaceCore;
-const EntityMetadataClient = (
-  typeof window !== 'undefined' && window.DarklabEntityMetadata
-) || (
-  typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
-) || {};
+function WorkspaceCore() {
+  return (typeof window !== 'undefined' && window.DarklabWorkspaceCore)
+    || (typeof DarklabWorkspaceCore !== 'undefined' ? DarklabWorkspaceCore : null);
+}
+
+function _workspaceEntityMetadataClient() {
+  return (
+    typeof window !== 'undefined' && window.DarklabEntityMetadata
+  ) || (
+    typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
+  ) || {};
+}
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
 const WORKSPACE_PREVIEW_TABLE_LIMIT = 250;
@@ -51,7 +112,7 @@ function isWorkspaceEnabled() {
 }
 
 function _formatWorkspaceBytes(bytes) {
-  return WorkspaceCore.formatBytes(bytes);
+  return WorkspaceCore().formatBytes(bytes);
 }
 
 function _workspaceErrorMessage(err, fallback = 'Files request failed') {
@@ -256,8 +317,9 @@ function _workspaceMetadataChips(file) {
 }
 
 async function _syncWorkspaceFileMetadata(path, { labels = [], noteBody = '' } = {}) {
-  await EntityMetadataClient.syncEntityLabels('workspace_file', path, Array.isArray(labels) ? labels : []);
-  await EntityMetadataClient.syncEntityNote('workspace_file', path, noteBody);
+  const metadataClient = _workspaceEntityMetadataClient();
+  await metadataClient.syncEntityLabels('workspace_file', path, Array.isArray(labels) ? labels : []);
+  await metadataClient.syncEntityNote('workspace_file', path, noteBody);
 }
 
 function _workspaceAutoRefreshDisabledReason() {
@@ -830,23 +892,23 @@ async function refreshWorkspaceViewedFile({ auto = false, suppressErrorToast = f
 }
 
 function _normalizeWorkspaceDir(path = '') {
-  return WorkspaceCore.normalizeDir(path);
+  return WorkspaceCore().normalizeDir(path);
 }
 
 function normalizeWorkspaceCommandPath(path = '', cwd = '') {
-  return WorkspaceCore.normalizeCommandPath(path, cwd);
+  return WorkspaceCore().normalizeCommandPath(path, cwd);
 }
 
 function workspaceDisplayPath(path = '') {
-  return WorkspaceCore.displayPath(path);
+  return WorkspaceCore().displayPath(path);
 }
 
 function _workspaceParentDir(path = '') {
-  return WorkspaceCore.parentDir(path);
+  return WorkspaceCore().parentDir(path);
 }
 
 function _workspaceFileBasename(path = '') {
-  return WorkspaceCore.basename(path);
+  return WorkspaceCore().basename(path);
 }
 
 function _activateWorkspaceFolderRow(path, event = null) {
@@ -1625,7 +1687,7 @@ workspaceEditor?.addEventListener('submit', async (event) => {
       _workspacePathInCurrentDir(workspacePathInput?.value || ''),
       workspaceTextInput?.value || '',
       {
-        labels: EntityMetadataClient.parseLabelInput(
+        labels: _workspaceEntityMetadataClient().parseLabelInput(
           typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput ? workspaceLabelsInput.value : '',
         ),
         noteBody: typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput ? workspaceNotesInput.value : '',
@@ -1652,7 +1714,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     if (workspaceSummary) workspaceSummary.textContent = 'Loading...';
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (isWorkspaceEnabled()) {
-      refreshWorkspaceFileCache().catch(() => {});
+      window.refreshWorkspaceFileCache?.().catch(() => {});
     }
   });
   window.addEventListener('app:scope-capabilities-changed', () => {
@@ -1661,20 +1723,51 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   });
 }
 if (typeof window !== 'undefined') {
-  window.openWorkspace = openWorkspace;
-  window.closeWorkspace = closeWorkspace;
-  window.refreshWorkspaceFiles = refreshWorkspaceFiles;
-  window.refreshWorkspaceFileCache = refreshWorkspaceFileCache;
-  window.getWorkspaceAutocompleteFileHints = getWorkspaceAutocompleteFileHints;
-  window.renderWorkspaceFiles = renderWorkspaceFiles;
-  window.renderWorkspaceBrowser = renderWorkspaceBrowser;
-  window.createWorkspaceDirectory = createWorkspaceDirectory;
-  window.moveWorkspacePath = moveWorkspacePath;
-  window.deleteWorkspacePath = deleteWorkspacePath;
-  window.downloadWorkspaceFile = downloadWorkspaceFile;
-  window.showWorkspaceViewer = showWorkspaceViewer;
-  window.isWorkspaceReadOnly = isWorkspaceReadOnly;
-  window.workspaceCanWrite = workspaceCanWrite;
-  window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
-  if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
+  Object.assign(window, {
+    WorkspaceCore,
+    isWorkspaceEnabled,
+    _formatWorkspaceBytes,
+    _workspaceErrorMessage,
+    _workspaceActiveScopeKeyFromOwner,
+    _workspaceReadOnlyReason,
+    isWorkspaceReadOnly,
+    workspaceCanWrite,
+    _workspaceOwnerFromPayload,
+    _workspaceSetCurrentDir,
+    _workspaceApplyOwner,
+    _workspaceOwnerLabel,
+    _workspaceSyncWriteControls,
+    _workspaceResetForScopeChange,
+    _workspaceJson,
+    setWorkspaceMessage,
+    _showWorkspaceToast,
+    _workspaceDirectEntries,
+    _normalizeWorkspaceDir,
+    normalizeWorkspaceCommandPath,
+    workspaceDisplayPath,
+    renderWorkspaceFiles,
+    renderWorkspaceBrowser,
+    refreshWorkspaceFiles,
+    refreshWorkspaceFilesFromButton,
+    saveWorkspaceFile,
+    createWorkspaceDirectory,
+    promptWorkspaceFolderName,
+    promptWorkspaceMove,
+    readWorkspaceFile,
+    deleteWorkspacePath,
+    moveWorkspacePath,
+    deleteWorkspaceFile,
+    downloadWorkspaceFile,
+    openWorkspace,
+    openWorkspaceEditorFromCommand,
+    closeWorkspace,
+    handleWorkspaceFileAction,
+    hideWorkspaceEditor,
+    hideWorkspaceViewer,
+    showWorkspaceViewerLoading,
+    showWorkspaceEditor,
+    showWorkspaceViewer,
+    refreshWorkspaceViewedFile,
+  });
+  if (isWorkspaceEnabled()) setTimeout(() => { window.refreshWorkspaceFileCache?.(); }, 0);
 }

@@ -108,10 +108,42 @@
     } catch (_) { return false; }
   })();
   const tabsBarEl = runningIndicatorDisabled ? null : document.getElementById('tabs-bar');
-  global.DarklabMobileRunningIndicator?.create({
-    tabsBarEl,
-    terminalBarEl: tabsBarEl ? tabsBarEl.closest('.terminal-bar') : null,
-  });
+  let mobileRunningIndicatorPromise = null;
+  function mobileRunningIndicatorActive() {
+    return !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  }
+  function ensureMobileRunningIndicator() {
+    if (
+      !tabsBarEl
+      || (typeof tabsBarEl.isConnected === 'boolean' && !tabsBarEl.isConnected)
+      || !mobileRunningIndicatorActive()
+      || typeof global.loadLazyAsset !== 'function'
+    ) return null;
+    if (mobileRunningIndicatorPromise) return mobileRunningIndicatorPromise;
+    mobileRunningIndicatorPromise = global.loadLazyAsset(
+      'mobile_running_indicator',
+      () => !!global.DarklabMobileRunningIndicator,
+    )
+      .then(() => {
+        global.DarklabMobileRunningIndicator?.create({
+          tabsBarEl,
+          terminalBarEl: tabsBarEl.closest('.terminal-bar'),
+        });
+      })
+      .catch((err) => {
+        mobileRunningIndicatorPromise = null;
+        if (typeof logClientError === 'function') {
+          logClientError('failed to load mobile running indicator', err);
+        }
+      });
+    return mobileRunningIndicatorPromise;
+  }
+  ensureMobileRunningIndicator();
+  if (tabsBarEl && typeof document.addEventListener === 'function') {
+    document.addEventListener('app:mobile-terminal-mode-changed', (event) => {
+      if (event?.detail?.active) ensureMobileRunningIndicator();
+    });
+  }
 
   // ── 2C: Menu sheet ───────────────────────────────────────────────
   function setActionHint(el, text) {

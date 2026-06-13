@@ -234,3 +234,20 @@ function _setHistoryLoadState(loading) {
   if (loading) showHistoryLoadOverlay();
   else hideHistoryLoadOverlay();
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _historyActiveScopeCan,
+    _historyScopeDeniedMessage,
+    _historyCanManageHistory,
+    _historyShowPermissionDenied,
+    _historyMutationError,
+    _historyCleanupLabel,
+    _historyCuratedCleanupLabel,
+    _buildHistoryAtlasCleanupContent,
+    _loadHistoryAtlasCleanup,
+    confirmHistAction,
+    executeHistAction,
+    _setHistoryLoadState,
+  });
+}

@@ -15,6 +15,29 @@ let CLIENT_ID = SessionCore.getOrCreateStorageValue(localStorage, 'client_id', _
 
 let SESSION_ID = SessionCore.resolveSessionId(localStorage, _sessionUuid);
 
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'SESSION_ID', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return SESSION_ID;
+    },
+    set(value) {
+      SESSION_ID = String(value || '');
+    },
+  });
+  Object.defineProperty(window, 'CLIENT_ID', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return CLIENT_ID;
+    },
+    set(value) {
+      CLIENT_ID = String(value || '');
+    },
+  });
+}
+
 // Update SESSION_ID at runtime after a session token is set, changed, or
 // cleared.  Called by the session-token terminal commands after they update
 // localStorage — avoids a page reload to apply the new identity.
@@ -23,8 +46,8 @@ function updateSessionId(newId) {
   if (typeof loadSessionPreferences === 'function') {
     loadSessionPreferences().catch(() => {});
   }
-  if (typeof loadSessionVariables === 'function') {
-    loadSessionVariables().catch(() => {});
+  if (typeof window.loadSessionVariables === 'function') {
+    window.loadSessionVariables().catch(() => {});
   }
   if (typeof loadRecentValues === 'function') {
     loadRecentValues().catch(() => {});
@@ -62,7 +85,7 @@ window.addEventListener('storage', (e) => {
     SESSION_ID = e.newValue || _sessionUuid;
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
     if (typeof loadSessionPreferences === 'function') loadSessionPreferences().catch(() => {});
-    if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
+    if (typeof window.loadSessionVariables === 'function') window.loadSessionVariables().catch(() => {});
     if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {});
     if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
     if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
@@ -107,10 +130,22 @@ function logClientError(context, err, details = null) {
   const body = { context, message };
   if (details && typeof details === 'object' && !Array.isArray(details)) {
     body.details = details;
+    if (typeof details.event === 'string') body.event = details.event;
+    if (typeof details.level === 'string') body.level = details.level;
   }
   apiFetch('/log', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).catch(() => {});
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    updateSessionId,
+    maskSessionToken,
+    apiFetch,
+    describeFetchError,
+    logClientError,
+  });
 }

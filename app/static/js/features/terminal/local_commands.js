@@ -15,8 +15,8 @@ function _cliPreserveOutputTail(tabId = null, shouldPreserve = true) {
   const tab = typeof getTab === 'function' ? getTab(id) : null;
   const out = typeof getOutput === 'function' ? getOutput(id) : null;
   if (tab) tab.followOutput = true;
-  if (out && typeof _stickOutputToBottom === 'function') {
-    _stickOutputToBottom(out, tab);
+  if (out && typeof window._stickOutputToBottom === 'function') {
+    window._stickOutputToBottom(out, tab);
   } else if (out) {
     out.scrollTop = out.scrollHeight;
   }
@@ -29,6 +29,12 @@ function _cliSetStatus(statusValue) {
 
 function _cliRecordSuccess(command) {
   if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(command);
+}
+
+function _cliPreferenceCore() {
+  return (typeof window !== 'undefined' && window.DarklabPreferenceCore)
+    || (typeof globalThis !== 'undefined' && globalThis.DarklabPreferenceCore)
+    || {};
 }
 
 function _cliThemeSlug(entry) {
@@ -156,10 +162,15 @@ function _cliNormalizePromptUsernameValue(value) {
   const raw = String(value || '').trim();
   const normalized = _cliNormalizeValue(raw);
   if (['default', 'clear', 'unset', 'server-default'].includes(normalized)) return '';
-  return PreferenceCore.normalizePromptUsername(raw) || null;
+  const normalize = _cliPreferenceCore().normalizePromptUsername;
+  return typeof normalize === 'function' ? normalize(raw) || null : null;
 }
 
 function _cliConfigEntries() {
+  const preferenceCore = _cliPreferenceCore();
+  const hudClockModes = Array.isArray(preferenceCore.HUD_CLOCK_MODES)
+    ? preferenceCore.HUD_CLOCK_MODES
+    : ['utc', 'local'];
   return [
     {
       key: 'line-numbers',
@@ -171,8 +182,8 @@ function _cliConfigEntries() {
     {
       key: 'timestamps',
       description: 'Timestamp display mode',
-      values: _tsModes.slice(),
-      get: () => (_tsModes.includes(tsMode) ? tsMode : 'off'),
+      values: (Array.isArray(window._tsModes) ? window._tsModes : ['off', 'elapsed', 'clock']).slice(),
+      get: () => ((Array.isArray(window._tsModes) ? window._tsModes : ['off']).includes(tsMode) ? tsMode : 'off'),
       set: (value) => applyTimestampPreference(value),
     },
     {
@@ -234,7 +245,7 @@ function _cliConfigEntries() {
     {
       key: 'hud-clock',
       description: 'HUD clock timezone',
-      values: _hudClockModes.slice(),
+      values: hudClockModes.slice(),
       get: () => getHudClockPreference(),
       set: (value) => applyHudClockPreference(value),
     },
@@ -390,4 +401,20 @@ async function handleConfigCommand(cmd, tabId = null) {
   _cliRecordSuccess(cmd);
   _cliSetStatus('ok');
   return true;
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _cliAppendLine,
+    _cliShouldPreserveOutputTail,
+    _cliPreserveOutputTail,
+    _cliSetStatus,
+    _cliRecordSuccess,
+    _cliThemeSlug,
+    _cliThemeEntries,
+    _cliThemeDescription,
+    _cliConfigEntries,
+    handleThemeCommand,
+    handleConfigCommand,
+  });
 }

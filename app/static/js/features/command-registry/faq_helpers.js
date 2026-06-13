@@ -132,6 +132,14 @@ function renderFaqLimits(cfg) {
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
 
+function setAllowedCommandsFaqData(data) {
+  allowedCommandsFaqData = data;
+}
+
+function getAllowedCommandsFaqData() {
+  return allowedCommandsFaqData;
+}
+
 function openAutocompleteForVisibleComposer() {
   if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
     if (typeof acHide === 'function') acHide();
@@ -177,7 +185,7 @@ function wireCommandRegistryOpenButtons(root = document) {
     if (btn.dataset.commandRegistryOpenWired === '1') return;
     btn.dataset.commandRegistryOpenWired = '1';
     btn.addEventListener('click', () => {
-      if (typeof openCommandRegistry === 'function') openCommandRegistry();
+      if (typeof window.openCommandRegistry === 'function') window.openCommandRegistry();
     });
   });
 }
@@ -248,7 +256,7 @@ function appendVisualTourFaqLink() {
 }
 
 function renderAllowedCommandsFaq(data) {
-  allowedCommandsFaqData = data;
+  setAllowedCommandsFaqData(data);
   const el = document.getElementById('faq-allowed-text');
   if (!el || !data) return;
   el.replaceChildren();
@@ -357,4 +365,28 @@ function renderFaqItems(items) {
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);
   wireFaqCommandChips(faqBody);
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    applyFaqHashTarget,
+    clearFaqHash,
+    renderFaqLimits,
+    setAllowedCommandsFaqData,
+    getAllowedCommandsFaqData,
+    renderAllowedCommandsFaq,
+    renderFaqItems,
+    wireFaqCommandChips,
+    wireCommandRegistryOpenButtons,
+    openAutocompleteForVisibleComposer,
+    activateFaqCommandChip,
+  });
+  Object.defineProperty(window, 'allowedCommandsFaqData', {
+    configurable: true,
+    enumerable: false,
+    get: () => allowedCommandsFaqData,
+    set: value => {
+      allowedCommandsFaqData = value;
+    },
+  });
 }

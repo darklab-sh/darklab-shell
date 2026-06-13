@@ -3,7 +3,9 @@
 // on mobile. Active-run attach/kill remains the bottom section.
 
 (function () {
-  const _statusMonitorCore = typeof DarklabStatusMonitorCore !== 'undefined' ? DarklabStatusMonitorCore : null;
+  const _statusMonitorCore = (
+    typeof window !== 'undefined' && window.DarklabStatusMonitorCore
+  ) || (typeof DarklabStatusMonitorCore !== 'undefined' ? DarklabStatusMonitorCore : null);
   if (!_statusMonitorCore) throw new Error('DarklabStatusMonitorCore is unavailable');
 
   let monitorEl = null;

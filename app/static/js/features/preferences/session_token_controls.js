@@ -423,3 +423,5 @@ document.getElementById('options-session-token-clear-btn')?.addEventListener('cl
   const result = await confirmClearSessionToken();
   if (result.cleared) showToast('Session token cleared');
 });
+
+window._updateOptionsSessionTokenStatus = _updateOptionsSessionTokenStatus;

@@ -48,7 +48,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
     void openStatusMonitor({ source: 'mobile-menu' });
   }
-  if (action === 'command-registry' && typeof openCommandRegistry === 'function') openCommandRegistry();
+  if (action === 'command-registry' && typeof window.openCommandRegistry === 'function') window.openCommandRegistry();
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
   if (action === 'schedules' && typeof openSchedulesModal === 'function') void openSchedulesModal();
@@ -57,4 +57,8 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';
+}
+
+if (typeof window !== 'undefined') {
+  window.dispatchMobileMenuAction = dispatchMobileMenuAction;
 }

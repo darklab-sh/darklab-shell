@@ -109,3 +109,17 @@ function _positionHistoryActionMenu(wrap) {
   menu.style.right = 'auto';
   menu.style.bottom = 'auto';
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _getStarred,
+    _saveStarred,
+    _toggleStar,
+    loadStarredFromServer,
+    reloadSessionHistory,
+    _closeHistoryActionMenus,
+    _closeHistoryRunActionMenus,
+    _resetHistoryActionMenuPosition,
+    _positionHistoryActionMenu,
+  });
+}

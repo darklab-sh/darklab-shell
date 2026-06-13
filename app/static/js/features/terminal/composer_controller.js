@@ -180,7 +180,9 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   });
 }
 
-_bindMobileComposerInteractions(_mobileUiLayoutRefs);
+if (typeof window._bindMobileComposerInteractions === 'function') {
+  window._bindMobileComposerInteractions(window._mobileUiLayoutRefs);
+}
 
 if (cmdInput) {
   cmdInput.addEventListener('focus', () => {
@@ -249,7 +251,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acWordlists = Array.isArray(data.wordlists) ? data.wordlists : [];
   acSpecialCommands = data.special_commands || [];
   acBuiltinCommandRoots = data.builtin_command_roots || [];
-  if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
+  if (typeof window.loadSessionVariables === 'function') window.loadSessionVariables().catch(() => {});
   if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {});
   if (typeof loadProjectAutocompleteTargets === 'function') loadProjectAutocompleteTargets().catch(() => {});
   if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
@@ -336,9 +338,15 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     e.preventDefault();
-    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+    const welcomeActive = (typeof window !== 'undefined' && window._welcomeActive)
+      || (typeof _welcomeActive !== 'undefined' && _welcomeActive);
+    const welcomeOwns = (typeof window !== 'undefined' && window.welcomeOwnsTab)
+      || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null);
+    const requestSettle = (typeof window !== 'undefined' && window.requestWelcomeSettle)
+      || (typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
+    if (welcomeActive && typeof welcomeOwns === 'function' && welcomeOwns(activeTabId)) {
       _welcomePromptAfterSettle = true;
-      requestWelcomeSettle(activeTabId);
+      if (typeof requestSettle === 'function') requestSettle(activeTabId);
       refocusComposerAfterAction({ defer: true });
       return;
     }
@@ -441,9 +449,15 @@ cmdInput.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Enter') {
-    if (_welcomeActive && welcomeOwnsTab(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
+    const welcomeActive = (typeof window !== 'undefined' && window._welcomeActive)
+      || (typeof _welcomeActive !== 'undefined' && _welcomeActive);
+    const welcomeOwns = (typeof window !== 'undefined' && window.welcomeOwnsTab)
+      || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null);
+    const requestSettle = (typeof window !== 'undefined' && window.requestWelcomeSettle)
+      || (typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
+    if (welcomeActive && typeof welcomeOwns === 'function' && welcomeOwns(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
       e.preventDefault();
-      requestWelcomeSettle(activeTabId);
+      if (typeof requestSettle === 'function') requestSettle(activeTabId);
       refocusComposerAfterAction({ defer: true });
       return;
     }
@@ -528,7 +542,12 @@ cmdInput.addEventListener('keydown', e => {
   // settle phase (the document keydown handler owns key routing while welcome is
   // active, including Space/Enter/Escape settle triggers and printable insertion).
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing
-      && !(_welcomeActive && welcomeOwnsTab(activeTabId))) {
+      && !(((typeof window !== 'undefined' && window._welcomeActive)
+        || (typeof _welcomeActive !== 'undefined' && _welcomeActive))
+        && typeof ((typeof window !== 'undefined' && window.welcomeOwnsTab)
+          || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null)) === 'function'
+        && ((typeof window !== 'undefined' && window.welcomeOwnsTab)
+          || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null))(activeTabId))) {
     e.preventDefault();
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start, end } = getCmdSelection(value);
@@ -547,8 +566,8 @@ if (typeof window !== 'undefined') {
 
 runBtn.addEventListener('click', runCommand);
 
-if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
+if (typeof window._applyComposerPromptMode === 'function') window._applyComposerPromptMode();
 syncShellPrompt();
 if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
 
-setupMobileComposer();
+if (typeof window.setupMobileComposer === 'function') window.setupMobileComposer();

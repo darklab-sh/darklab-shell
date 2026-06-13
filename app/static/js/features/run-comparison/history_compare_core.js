@@ -40,8 +40,8 @@ var DarklabHistoryCompareCore = (function (global) {
   }
 
   function preferenceCore() {
-    return (typeof PreferenceCore !== 'undefined' && PreferenceCore)
-      || (typeof DarklabPreferenceCore !== 'undefined' && DarklabPreferenceCore)
+    return (typeof window !== 'undefined' && window.DarklabPreferenceCore)
+      || (typeof globalThis !== 'undefined' && globalThis.DarklabPreferenceCore)
       || global.DarklabPreferenceCore
       || null;
   }

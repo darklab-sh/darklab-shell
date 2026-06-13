@@ -1,6 +1,6 @@
 // ── Shared search logic ──
 
-const _searchCore = typeof DarklabSearchCore !== 'undefined' ? DarklabSearchCore : null;
+const _searchCore = window.DarklabSearchCore || null;
 const _SEARCH_SCOPE_LABELS = _searchCore.SEARCH_SCOPE_LABELS;
 const _SEARCH_SUMMARY_LIMIT = _searchCore.SEARCH_SUMMARY_LIMIT;
 const _TERMINAL_SEARCH_DELAY_MS = 200;
@@ -208,7 +208,10 @@ function refreshSearchDiscoverabilityUi() {
     if (hasSignals) {
       searchSignalSummary.querySelectorAll('[data-search-signal-scope]').forEach((btn) => {
         const activate = () => {
-          if (typeof openSearchFromSignal === 'function') openSearchFromSignal(btn.dataset.searchSignalScope || 'text');
+          const openFromSignal = typeof window.openSearchFromSignal === 'function'
+            ? window.openSearchFromSignal
+            : (typeof openSearchFromSignal === 'function' ? openSearchFromSignal : null);
+          if (openFromSignal) openFromSignal(btn.dataset.searchSignalScope || 'text');
         };
         if (typeof bindPressable === 'function') {
           bindPressable(btn, {
@@ -1095,3 +1098,22 @@ function clearSearch() {
 
 syncSearchScopeUi();
 refreshSearchDiscoverabilityUi();
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    syncSearchScopeUi,
+    refreshSearchDiscoverabilityUi,
+    scheduleSearchDiscoverabilityRefresh,
+    prepareSearchBarForOpen,
+    prepareSearchBarForScope,
+    setSearchScope,
+    createTextSearchController,
+    summarizeCurrentOutputSignals,
+    runSearch,
+    scheduleRunSearch,
+    navigateSearch,
+    highlightCurrent,
+    clearHighlights,
+    clearSearch,
+  });
+}

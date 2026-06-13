@@ -41,6 +41,25 @@ function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
 
 describe('autocomplete helpers', () => {
   beforeEach(() => {
+    ;[
+      '_runtimeHint',
+      '_runtimePlaceholderHint',
+      '_runtimeContextSpec',
+      'isWorkspaceFeatureEnabled',
+      'isTourFeatureEnabled',
+      'getWorkspaceAutocompletePathHints',
+      'getRuntimeAutocompleteContext',
+      'getRuntimeAutocompleteItems',
+      'extractGrepOutputTokens',
+      'getGrepOutputSuggestions',
+      'loadSessionVariables',
+      'openAutocompleteForVisibleComposer',
+      'allowedCommandsFaqData',
+      'getWorkspaceAutocompleteFlagFileHints',
+      '_runtimeWorkflowContext',
+    ].forEach((name) => {
+      delete window[name]
+    })
     document.body.innerHTML = `
       <input id="cmd" />
       <div id="ac"></div>
@@ -301,6 +320,7 @@ describe('autocomplete helpers', () => {
     vi.useFakeTimers()
     try {
       const openAutocompleteForVisibleComposer = vi.fn(() => true)
+      window.openAutocompleteForVisibleComposer = openAutocompleteForVisibleComposer
       const { acAccept } = fromDomScripts(
         ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
         {
@@ -316,7 +336,6 @@ describe('autocomplete helpers', () => {
             input.selectionStart = start
             input.selectionEnd = end == null ? start : end
           },
-          openAutocompleteForVisibleComposer,
           acSuggestions: [],
           acContextRegistry: {},
           acFiltered: [],
@@ -2695,6 +2714,14 @@ describe('autocomplete helpers', () => {
   })
 
   it('uses cwd-relative workspace file hints for external workspace read flags', () => {
+    window.getWorkspaceAutocompleteFlagFileHints = token => (
+      String(token || '').includes('/')
+        ? [{ value: 'nested/targets.txt', description: 'session file · 24 B' }]
+        : [
+            { value: 'targets.txt', description: 'session file · 42 B' },
+            { value: 'nested/', description: 'session folder' },
+          ]
+    )
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
@@ -2715,14 +2742,6 @@ describe('autocomplete helpers', () => {
             },
           },
         },
-        getWorkspaceAutocompleteFlagFileHints: token => (
-          String(token || '').includes('/')
-            ? [{ value: 'nested/targets.txt', description: 'session file · 24 B' }]
-            : [
-                { value: 'targets.txt', description: 'session file · 42 B' },
-                { value: 'nested/', description: 'session folder' },
-              ]
-        ),
         acFiltered: [],
         acIndex: -1,
         acSuppressInputOnce: false,

@@ -4,13 +4,13 @@
 function _historyCompareApplyViewMode(mode, data) {
   const nextMode = _historyCompareCoerceViewMode(mode);
   data._compareViewModeRaw = nextMode;
-  _renderHistoryComparison(data);
+  window._renderHistoryComparison(data);
 }
 
 function _historyCompareApplyContext(mode, data) {
   const nextMode = _historyCompareCoerceContext(mode);
   data._compareContext = nextMode;
-  _renderHistoryComparison(data);
+  window._renderHistoryComparison(data);
 }
 
 function _closeHistoryCompareActionMenus(except = null) {
@@ -134,18 +134,18 @@ function _renderHistoryCompareActionsMenu(data, deltas = {}) {
     return item;
   };
   addItem('Restore A', () => {
-    restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false })
+    window.restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false })
       .then(() => closeHistoryCompareOverlay())
       .catch(() => showToast('Failed to restore run', 'error'));
   });
   addItem('Restore B', () => {
-    restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false })
+    window.restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false })
       .then(() => closeHistoryCompareOverlay())
       .catch(() => showToast('Failed to restore run', 'error'));
   });
   addItem('Restore Both', (item) => {
     item.disabled = true;
-    _restoreBothHistoryCompareRuns(data.left, data.right)
+    window._restoreBothHistoryCompareRuns(data.left, data.right)
       .then(() => closeHistoryCompareOverlay())
       .catch(err => {
         item.disabled = false;
@@ -178,3 +178,11 @@ function _renderHistoryCompareActionsMenu(data, deltas = {}) {
   wrap.append(trigger, menu);
   return wrap;
 }
+
+window._historyCompareApplyViewMode = _historyCompareApplyViewMode;
+window._historyCompareApplyContext = _historyCompareApplyContext;
+window._closeHistoryCompareActionMenus = _closeHistoryCompareActionMenus;
+window._renderHistoryCompareDisplayControls = _renderHistoryCompareDisplayControls;
+window._renderHistoryCompareContextControls = _renderHistoryCompareContextControls;
+window._historyCompareSummaryText = _historyCompareSummaryText;
+window._renderHistoryCompareActionsMenu = _renderHistoryCompareActionsMenu;

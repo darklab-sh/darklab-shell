@@ -154,9 +154,10 @@ function _runtimeBuiltinDescription(root, baseRegistry = {}) {
 
 function _runtimeAllowedCommandRoots() {
   const roots = new Set();
-  const source = allowedCommandsFaqData && Array.isArray(allowedCommandsFaqData.commands)
-    ? allowedCommandsFaqData.commands
-    : [];
+    const faqData = typeof window.getAllowedCommandsFaqData === 'function'
+      ? window.getAllowedCommandsFaqData()
+      : null;
+  const source = faqData && Array.isArray(faqData.commands) ? faqData.commands : [];
   source.forEach((command) => {
     const root = String(command || '').trim().split(/\s+/, 1)[0].toLowerCase();
     if (root) roots.add(root);
@@ -443,7 +444,22 @@ function _runtimeWorkspaceNavigableDirectoryHints() {
 }
 
 function _runtimeThemeContext() {
-  const themeHints = _cliThemeEntries().map(entry => _runtimeHint(_cliThemeSlug(entry), _cliThemeDescription(entry)));
+  const themeEntries = typeof _cliThemeEntries === 'function'
+    ? _cliThemeEntries
+    : (typeof window !== 'undefined' ? window._cliThemeEntries : null);
+  const themeSlug = typeof _cliThemeSlug === 'function'
+    ? _cliThemeSlug
+    : (typeof window !== 'undefined' ? window._cliThemeSlug : null);
+  const themeDescription = typeof _cliThemeDescription === 'function'
+    ? _cliThemeDescription
+    : (typeof window !== 'undefined' ? window._cliThemeDescription : null);
+  const themeHints = (
+    typeof themeEntries === 'function'
+    && typeof themeSlug === 'function'
+    && typeof themeDescription === 'function'
+  )
+    ? themeEntries().map(entry => _runtimeHint(themeSlug(entry), themeDescription(entry)))
+    : [];
   const argHints = {
     list: [],
     current: [],
@@ -459,7 +475,10 @@ function _runtimeThemeContext() {
 }
 
 function _runtimeConfigContext() {
-  const entries = _cliConfigEntries();
+  const configEntries = typeof _cliConfigEntries === 'function'
+    ? _cliConfigEntries
+    : (typeof window !== 'undefined' ? window._cliConfigEntries : null);
+  const entries = typeof configEntries === 'function' ? configEntries() : [];
   const optionHints = entries.map(entry => _runtimeHint(entry.key, entry.description));
   const argHints = {
     list: [],
@@ -663,8 +682,8 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   if (baseRegistry.wordlist) {
     context.wordlist = _runtimeMergeContextSpec(baseRegistry.wordlist, _runtimeWordlistContext());
   }
-  if (baseRegistry.workflow && typeof _runtimeWorkflowContext === 'function') {
-    context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, _runtimeWorkflowContext());
+  if (baseRegistry.workflow && typeof window._runtimeWorkflowContext === 'function') {
+    context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, window._runtimeWorkflowContext());
   }
   if (baseRegistry.project) {
     context.project = _runtimeProjectContext(baseRegistry.project);
@@ -890,4 +909,21 @@ function getGrepOutputSuggestions(ctx, buildItem, filterItems, maxItems = GREP_O
     insertValue: token,
   }));
   return filterItems(items, ctx.currentToken);
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _runtimeHint,
+    _runtimePlaceholderHint,
+    _runtimeContextSpec,
+    isWorkspaceFeatureEnabled,
+    isTourFeatureEnabled,
+    getWorkspaceAutocompletePathHints,
+    getWorkspaceAutocompleteFlagFileHints,
+    getRuntimeAutocompleteContext,
+    getRuntimeAutocompleteItems,
+    extractGrepOutputTokens,
+    getGrepOutputSuggestions,
+    loadSessionVariables,
+  });
 }

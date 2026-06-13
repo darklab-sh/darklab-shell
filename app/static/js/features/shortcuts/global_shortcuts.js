@@ -184,11 +184,11 @@ function handleChromeShortcut(e) {
   }
   if (eventMatchesLetter(e, 'c')) {
     if (
-      typeof isCommandRegistryOverlayOpen === 'function'
-      && isCommandRegistryOverlayOpen()
-      && typeof closeCommandRegistry === 'function'
-    ) closeCommandRegistry();
-    else if (typeof openCommandRegistry === 'function') openCommandRegistry();
+      typeof window.isCommandRegistryOverlayOpen === 'function'
+      && window.isCommandRegistryOverlayOpen()
+      && typeof window.closeCommandRegistry === 'function'
+    ) window.closeCommandRegistry();
+    else if (typeof window.openCommandRegistry === 'function') window.openCommandRegistry();
     e.preventDefault();
     return true;
   }
@@ -240,4 +240,15 @@ function handleChromeShortcut(e) {
     return true;
   }
   return false;
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    eventMatchesCode,
+    eventMatchesLetter,
+    eventMatchesDigit,
+    handleTabShortcut,
+    handleActionShortcut,
+    handleChromeShortcut,
+  });
 }

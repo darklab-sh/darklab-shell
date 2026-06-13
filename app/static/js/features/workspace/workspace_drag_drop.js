@@ -1,18 +1,27 @@
 let _workspaceDragPath = '';
 let _workspaceDragKind = '';
 
+function _workspaceDragApi() {
+  return typeof window !== 'undefined' ? window : globalThis;
+}
+
 function _workspaceDragSourceFromEvent(event) {
+  const api = _workspaceDragApi();
+  const list = api.workspaceFileList || (typeof workspaceFileList !== 'undefined' ? workspaceFileList : null);
   const row = event.target && event.target.closest ? event.target.closest('.workspace-file-row[draggable="true"]') : null;
-  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
+  return row && list && list.contains(row) ? row : null;
 }
 
 function _workspaceDropTargetFromEvent(event) {
+  const api = _workspaceDragApi();
+  const list = api.workspaceFileList || (typeof workspaceFileList !== 'undefined' ? workspaceFileList : null);
   const row = event.target && event.target.closest ? event.target.closest('[data-workspace-drop-target="folder"]') : null;
-  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
+  return row && list && list.contains(row) ? row : null;
 }
 
 function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
-  if (typeof isWorkspaceReadOnly === 'function' && isWorkspaceReadOnly()) return false;
+  const api = _workspaceDragApi();
+  if (typeof api.isWorkspaceReadOnly === 'function' && api.isWorkspaceReadOnly()) return false;
   const source = String(sourcePath || '').trim();
   const destination = String(destinationPath || '').trim();
   if (!source) return false;
@@ -21,7 +30,8 @@ function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
 }
 
 async function _handleWorkspaceDropMove(event) {
-  if (typeof workspaceCanWrite === 'function' && !workspaceCanWrite('move Files', { toast: true })) return;
+  const api = _workspaceDragApi();
+  if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) return;
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
   event.preventDefault();
@@ -44,14 +54,17 @@ async function _handleWorkspaceDropMove(event) {
     : 'move';
   if (confirmed !== 'move') return;
   try {
-    await moveWorkspacePath(source, destination);
+    await api.moveWorkspacePath(source, destination);
   } catch (err) {
-    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to move item'), 'error');
+    api._showWorkspaceToast(api._workspaceErrorMessage(err, 'Unable to move item'), 'error');
   }
 }
 
-workspaceFileList?.addEventListener('dragstart', event => {
-  if (typeof workspaceCanWrite === 'function' && !workspaceCanWrite('move Files', { toast: true })) {
+const _workspaceDragFileList = _workspaceDragApi().workspaceFileList || (typeof workspaceFileList !== 'undefined' ? workspaceFileList : null);
+
+_workspaceDragFileList?.addEventListener('dragstart', event => {
+  const api = _workspaceDragApi();
+  if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) {
     event.preventDefault();
     return;
   }
@@ -66,15 +79,15 @@ workspaceFileList?.addEventListener('dragstart', event => {
   row.classList.add('workspace-dragging');
 });
 
-workspaceFileList?.addEventListener('dragend', event => {
+_workspaceDragFileList?.addEventListener('dragend', event => {
   const row = _workspaceDragSourceFromEvent(event);
   if (row) row.classList.remove('workspace-dragging');
-  workspaceFileList.querySelectorAll('.workspace-drop-target').forEach(node => node.classList.remove('workspace-drop-target'));
+  _workspaceDragFileList.querySelectorAll('.workspace-drop-target').forEach(node => node.classList.remove('workspace-drop-target'));
   _workspaceDragPath = '';
   _workspaceDragKind = '';
 });
 
-workspaceFileList?.addEventListener('dragover', event => {
+_workspaceDragFileList?.addEventListener('dragover', event => {
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
   event.preventDefault();
@@ -82,7 +95,7 @@ workspaceFileList?.addEventListener('dragover', event => {
   target.classList.add('workspace-drop-target');
 });
 
-workspaceFileList?.addEventListener('dragleave', event => {
+_workspaceDragFileList?.addEventListener('dragleave', event => {
   const target = _workspaceDropTargetFromEvent(event);
   if (!target) return;
   const related = event.relatedTarget;
@@ -90,6 +103,15 @@ workspaceFileList?.addEventListener('dragleave', event => {
   target.classList.remove('workspace-drop-target');
 });
 
-workspaceFileList?.addEventListener('drop', event => {
+_workspaceDragFileList?.addEventListener('drop', event => {
   void _handleWorkspaceDropMove(event);
 });
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _workspaceDragSourceFromEvent,
+    _workspaceDropTargetFromEvent,
+    _workspaceCanDropOnFolder,
+    _handleWorkspaceDropMove,
+  });
+}

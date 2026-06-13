@@ -1,53 +1,80 @@
+function _workspaceApi() {
+  return typeof window !== 'undefined' ? window : globalThis;
+}
+
+function _workspaceState() {
+  return _workspaceApi().DarklabWorkspaceState || {};
+}
+
 async function refreshWorkspaceFileCache() {
-  if (!isWorkspaceEnabled()) return _workspaceFiles;
+  const api = _workspaceApi();
+  const state = _workspaceState();
+  const fetcher = typeof api.apiFetch === 'function'
+    ? api.apiFetch
+    : (typeof apiFetch === 'function' ? apiFetch : null);
+  if (typeof api.isWorkspaceEnabled !== 'function' || !api.isWorkspaceEnabled() || !fetcher) return state.files || [];
   try {
-    const resp = await apiFetch('/workspace/files');
-    const data = await _workspaceJson(resp);
-    const nextOwner = typeof _workspaceOwnerFromPayload === 'function' ? _workspaceOwnerFromPayload(data) : {};
-    const previousScopeKey = typeof _workspaceActiveScopeKeyFromOwner === 'function'
-      ? _workspaceActiveScopeKeyFromOwner(_workspaceOwner)
+    const resp = await fetcher('/workspace/files');
+    const data = await api._workspaceJson(resp);
+    const nextOwner = typeof api._workspaceOwnerFromPayload === 'function' ? api._workspaceOwnerFromPayload(data) : {};
+    const previousScopeKey = typeof api._workspaceActiveScopeKeyFromOwner === 'function'
+      ? api._workspaceActiveScopeKeyFromOwner(state.owner)
       : 'personal';
-    const nextScopeKey = typeof _workspaceActiveScopeKeyFromOwner === 'function'
-      ? _workspaceActiveScopeKeyFromOwner(nextOwner)
+    const nextScopeKey = typeof api._workspaceActiveScopeKeyFromOwner === 'function'
+      ? api._workspaceActiveScopeKeyFromOwner(nextOwner)
       : previousScopeKey;
-    if (previousScopeKey !== nextScopeKey && typeof _workspaceResetForScopeChange === 'function') {
-      _workspaceResetForScopeChange();
+    if (previousScopeKey !== nextScopeKey && typeof api._workspaceResetForScopeChange === 'function') {
+      api._workspaceResetForScopeChange();
     }
-    if (typeof renderWorkspaceFiles === 'function') {
-      renderWorkspaceFiles(data);
+    if (typeof api.renderWorkspaceFiles === 'function') {
+      api.renderWorkspaceFiles(data);
     } else {
-      _workspaceLoaded = true;
-      _workspaceDirs = Array.isArray(data.directories) ? data.directories : [];
-      _workspaceFiles = Array.isArray(data.files) ? data.files : [];
+      state.loaded = true;
+      state.dirs = Array.isArray(data.directories) ? data.directories : [];
+      state.files = Array.isArray(data.files) ? data.files : [];
     }
-    return _workspaceFiles;
+    return state.files || [];
   } catch (_) {
-    return _workspaceFiles;
+    return state.files || [];
   }
 }
 
 function getWorkspaceAutocompleteFileHints() {
-  if (!_workspaceLoaded || !Array.isArray(_workspaceFiles) || !_workspaceFiles.length) return [];
-  return _workspaceFiles.map(file => {
+  const api = _workspaceApi();
+  const state = _workspaceState();
+  const files = Array.isArray(state.files) ? state.files : [];
+  if (!state.loaded || !files.length) return [];
+  return files.map(file => {
     const path = String(file.path || '').trim();
     return {
       value: path,
-      description: `${_workspaceOwner && _workspaceOwner.scope === 'team' ? 'team' : 'personal'} file · ${_formatWorkspaceBytes(file.size)}`,
+      description: `${state.owner && state.owner.scope === 'team' ? 'team' : 'personal'} file · ${api._formatWorkspaceBytes(file.size)}`,
     };
   }).filter(item => item.value);
 }
 
 function getWorkspaceAutocompleteDirectoryHints() {
-  if (!_workspaceLoaded || !Array.isArray(_workspaceDirs) || !_workspaceDirs.length) return [];
-  return _workspaceDirs.map(directory => {
+  const state = _workspaceState();
+  const dirs = Array.isArray(state.dirs) ? state.dirs : [];
+  if (!state.loaded || !dirs.length) return [];
+  return dirs.map(directory => {
     const path = String(directory.path || '').trim();
     return {
       value: path,
-      description: `${_workspaceOwner && _workspaceOwner.scope === 'team' ? 'team' : 'personal'} folder`,
+      description: `${state.owner && state.owner.scope === 'team' ? 'team' : 'personal'} folder`,
     };
   }).filter(item => item.value);
 }
 
 function getWorkspaceDirectoryEntries(path = '') {
-  return _workspaceDirectEntries(path);
+  return _workspaceApi()._workspaceDirectEntries(path);
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    refreshWorkspaceFileCache,
+    getWorkspaceAutocompleteFileHints,
+    getWorkspaceAutocompleteDirectoryHints,
+    getWorkspaceDirectoryEntries,
+  });
 }

@@ -275,7 +275,7 @@
       ['workspace_files', () => (typeof refreshWorkspaceFileCache === 'function' ? refreshWorkspaceFileCache() : null)],
       ['active_project', () => (typeof window.refreshActiveProjectContext === 'function' ? window.refreshActiveProjectContext() : null)],
       ['options_secrets', () => (typeof global.invalidateOptionsSecrets === 'function' ? global.invalidateOptionsSecrets() : null)],
-      ['active_runs', () => (typeof refreshActiveRuns === 'function' ? refreshActiveRuns() : null)],
+      ['active_runs', () => (typeof window.refreshActiveRuns === 'function' ? window.refreshActiveRuns() : null)],
       ['status_monitor', () => (typeof window.refreshStatusMonitor === 'function' ? window.refreshStatusMonitor() : null)],
     ].forEach(([surface, refresh]) => {
       try {

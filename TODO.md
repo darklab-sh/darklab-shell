@@ -42,8 +42,9 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Incrementally move low-risk frontend modules to ESM.** The current asset pipeline intentionally keeps classic-script semantics, dependency-free concatenation, and unminified output. A future pass can move isolated leaf helpers or rarely-first-paint lazy surfaces toward ES modules one area at a time, while preserving source/bundle parity and the local edit-and-refresh workflow. Keep minification and sourcemaps as a separate decision after the ESM boundary is proven.
 - **Unify static-asset cache-busting on content-hashed filenames.** The app uses two cache-busting schemes: content-hashed filenames for bundles and `static_asset()` `?v=` query strings for non-bundled assets (fonts, images, and standalone vendor such as jspdf and xterm). The split is intentional for now because those files change rarely, but a future pass could move them to hashed filenames too for one consistent scheme and to avoid query-string URLs that some proxies and CDNs cache conservatively. This needs the build to rewrite in-CSS font/image references to the hashed paths, so it is deferred until the bundle pipeline is stable.
+
+- **Replace frontend compatibility globals with explicit imports.** The shell now ships app-owned JavaScript through ESM entry points, but many modules still publish and read the old `window.*` contracts so the migration could land without rewriting every cross-file call at once. A future cleanup can replace those compatibility globals with explicit imports area by area, keeping only intentional public browser hooks for tests, lazy loaders, and inline event bridges.
 
 ---
 

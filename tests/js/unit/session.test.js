@@ -73,6 +73,34 @@ describe('session.js', () => {
     })
   })
 
+  it('logClientError forwards safe event and level fields to the client log endpoint', async () => {
+    const { logClientError, fetchCalls } = loadSession({
+      storageData: { session_id: 'session-log', client_id: 'client-log' },
+    })
+    const err = new Error('lazy module failed')
+
+    logClientError('lazy asset load failed', err, {
+      event: 'LAZY_ASSET_LOAD_FAILED',
+      level: 'error',
+      asset_name: 'project_report',
+    })
+    await Promise.resolve()
+
+    expect(fetchCalls).toHaveLength(1)
+    expect(fetchCalls[0][0]).toBe('/log')
+    expect(JSON.parse(fetchCalls[0][1].body)).toEqual({
+      context: 'lazy asset load failed',
+      message: 'lazy module failed',
+      event: 'LAZY_ASSET_LOAD_FAILED',
+      level: 'error',
+      details: {
+        event: 'LAZY_ASSET_LOAD_FAILED',
+        level: 'error',
+        asset_name: 'project_report',
+      },
+    })
+  })
+
   it('describeFetchError returns a friendly offline message for network failures', () => {
     const { describeFetchError } = loadSession()
 

@@ -7,19 +7,19 @@ function _historyProjectDisplayName(project) {
 function _historyProjectLabelForId(projectId) {
   const normalized = _normalizeHistoryFilterValue(projectId);
   if (!normalized || normalized === 'all') return '';
-  const project = _historyProjectOptions.find(item => String(item && item.id || '') === normalized);
+  const project = window._historyProjectOptions.find(item => String(item && item.id || '') === normalized);
   return _historyProjectDisplayName(project) || normalized;
 }
 
 function _syncHistoryProjectFilterOptions() {
   if (typeof historyProjectFilter === 'undefined' || !historyProjectFilter) return;
-  const selected = _normalizeHistoryFilterValue(_historyFilters.projectId) || 'all';
+  const selected = _normalizeHistoryFilterValue(window._historyFilters.projectId) || 'all';
   historyProjectFilter.replaceChildren();
   const allOption = document.createElement('option');
   allOption.value = 'all';
   allOption.textContent = 'project: all';
   historyProjectFilter.appendChild(allOption);
-  _historyProjectOptions.forEach((project) => {
+  window._historyProjectOptions.forEach((project) => {
     const projectId = String(project && project.id || '');
     if (!projectId) return;
     const option = document.createElement('option');
@@ -27,7 +27,7 @@ function _syncHistoryProjectFilterOptions() {
     option.textContent = `project: ${_historyProjectDisplayName(project) || projectId}`;
     historyProjectFilter.appendChild(option);
   });
-  if (selected !== 'all' && !_historyProjectOptions.some(project => String(project && project.id || '') === selected)) {
+  if (selected !== 'all' && !window._historyProjectOptions.some(project => String(project && project.id || '') === selected)) {
     const stale = document.createElement('option');
     stale.value = selected;
     stale.textContent = `project: ${selected}`;
@@ -38,33 +38,33 @@ function _syncHistoryProjectFilterOptions() {
 }
 
 function _ensureHistoryProjectFilterOptions() {
-  if (_historyProjectOptionsLoaded) return Promise.resolve(_historyProjectOptions);
-  if (_historyProjectOptionsLoading) return _historyProjectOptionsLoading;
-  _historyProjectOptionsLoading = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
+  if (window._historyProjectOptionsLoaded) return Promise.resolve(window._historyProjectOptions);
+  if (window._historyProjectOptionsLoading) return window._historyProjectOptionsLoading;
+  window._historyProjectOptionsLoading = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
     .then((resp) => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       return resp.json();
     })
     .then((data) => {
-      _historyProjectOptions = (Array.isArray(data.projects) ? data.projects : [])
+      window._historyProjectOptions = (Array.isArray(data.projects) ? data.projects : [])
         .filter(project => project && project.id)
         .sort((a, b) => _historyProjectDisplayName(a).localeCompare(
           _historyProjectDisplayName(b),
           undefined,
           { sensitivity: 'base', numeric: true },
         ));
-      _historyProjectOptionsLoaded = true;
+      window._historyProjectOptionsLoaded = true;
       _syncHistoryProjectFilterOptions();
-      return _historyProjectOptions;
+      return window._historyProjectOptions;
     })
     .catch((err) => {
       if (typeof logClientError === 'function') logClientError('failed to load /projects for history filter', err);
-      return _historyProjectOptions;
+      return window._historyProjectOptions;
     })
     .finally(() => {
-      _historyProjectOptionsLoading = null;
+      window._historyProjectOptionsLoading = null;
     });
-  return _historyProjectOptionsLoading;
+  return window._historyProjectOptionsLoading;
 }
 
 async function _historyLoadActiveProject() {
@@ -372,7 +372,7 @@ function _historyProjectFromLink(link) {
 function _historyRunProjectLinks(run) {
   const links = Array.isArray(run?.project_links) ? run.project_links.slice() : [];
   try {
-    const state = typeof _historyRunModalState !== 'undefined' ? _historyRunModalState : null;
+    const state = window._historyRunModalState || null;
     const projectState = state && state.projectState;
     const project = projectState && projectState.project;
     const runId = String(run && run.id || '');
@@ -599,4 +599,28 @@ async function _historyAddRunToProject(run) {
   } catch (_) {
     showToast('Failed to add run to project', 'error');
   }
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _historyProjectDisplayName,
+    _historyProjectLabelForId,
+    _syncHistoryProjectFilterOptions,
+    _ensureHistoryProjectFilterOptions,
+    _historyLoadActiveProject,
+    _historyLoadProjects,
+    _historyOrderProjectsForPicker,
+    _historyLinkRunToProject,
+    _historyProjectRunEntityOptionContent,
+    _historyRefreshProjectRunEntityOption,
+    _historyRefreshProjectRunEntityRemoveOption,
+    _historyConfirmAddRunToProject,
+    _historyProjectFromLink,
+    _historyRunProjectLinks,
+    _historyUnlinkRunFromProject,
+    _historyProjectPickerContent,
+    _historyAddRunToActiveProject,
+    _historyRemoveRunFromProject,
+    _historyAddRunToProject,
+  });
 }

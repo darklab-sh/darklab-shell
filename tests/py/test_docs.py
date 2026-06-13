@@ -68,7 +68,9 @@ _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
 _CONFIGURATION = _REPO_ROOT / "CONFIGURATION.md"
 _DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
+_FEATURES = _REPO_ROOT / "FEATURES.md"
 _README = _REPO_ROOT / "README.md"
+_THEME = _REPO_ROOT / "THEME.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
 _ASSET_MANIFEST = _REPO_ROOT / "app" / "static" / "build" / "manifest.json"
@@ -415,7 +417,7 @@ def _tracked_markdown_docs() -> list[str]:
     return [
         path for path in _git_tracked_files()
         if path.endswith(".md")
-        and not path.startswith("docs/release-drafts/")
+        and not _is_release_draft_path(path)
     ]
 
 
@@ -842,8 +844,6 @@ class TestDocumentedCombinedTotals:
 # parent directory below).
 _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
     "app/blueprints/__init__.py",     # empty package marker
-    "docs/release-drafts/v2.1-merge-request.md",   # temporary branch artifact
-    "docs/release-drafts/v2.1-release-notes.md",   # temporary branch artifact
 })
 
 # Directories whose individual files are intentionally collapsed into a
@@ -984,6 +984,10 @@ def _is_under_opaque_dir(path: str) -> bool:
     return any(path == d or path.startswith(d + "/") for d in _PROJECT_STRUCTURE_OPAQUE_DIRS)
 
 
+def _is_release_draft_path(path: str) -> bool:
+    return path.startswith("docs/release-drafts/")
+
+
 def _canonical_project_structure_path(path: str) -> str:
     match = _PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE.match(path)
     if match:
@@ -993,7 +997,7 @@ def _canonical_project_structure_path(path: str) -> str:
 
 
 def _display_target_for_project_structure(path: str) -> str | None:
-    if path in _PROJECT_STRUCTURE_EXCLUSIONS:
+    if path in _PROJECT_STRUCTURE_EXCLUSIONS or _is_release_draft_path(path):
         return None
     for opaque_dir in sorted(_PROJECT_STRUCTURE_OPAQUE_DIRS):
         if path == opaque_dir or path.startswith(opaque_dir + "/"):
@@ -1066,6 +1070,70 @@ class TestProjectStructureCoverage:
             "Asset manifest source hashes are stale. Run assets:sync:\n"
             + "\n".join(f"  {item}" for item in stale)
         )
+
+    def test_asset_manifest_esm_bundles_do_not_include_lazy_sources(self):
+        manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
+        config = json.loads((_REPO_ROOT / "assets.config.json").read_text(encoding="utf-8"))
+        lazy_sources = set(config.get("lazy") or [])
+        eager_lazy_sources = []
+        for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
+            if bundle.get("type") != "esm":
+                continue
+            for source in sorted(bundle.get("sources") or []):
+                if source in lazy_sources:
+                    eager_lazy_sources.append(f"{bundle_name}: {source}")
+        assert not eager_lazy_sources, (
+            "ESM bundles include assets configured as lazy. Run assets:sync "
+            "after removing the eager import, or remove the source from "
+            "assets.config.json lazy:\n"
+            + "\n".join(f"  {item}" for item in eager_lazy_sources)
+        )
+
+    def test_asset_build_output_does_not_depend_on_cwd(self, tmp_path):
+        if shutil.which("node") is None:
+            pytest.skip("node is not available")
+        if not (_REPO_ROOT / "node_modules" / "esbuild").exists():
+            pytest.skip("node dependencies are not installed")
+
+        root_out = tmp_path / "from-root"
+        scripts_out = tmp_path / "from-scripts"
+        script = _REPO_ROOT / "scripts" / "build_assets.mjs"
+        subprocess.run(
+            ["node", str(script), "--out-dir", str(root_out)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["node", str(script), "--out-dir", str(scripts_out)],
+            cwd=str(_REPO_ROOT / "scripts"),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        root_files = sorted(path.relative_to(root_out) for path in root_out.rglob("*") if path.is_file())
+        scripts_files = sorted(path.relative_to(scripts_out) for path in scripts_out.rglob("*") if path.is_file())
+        changed = [
+            str(path)
+            for path in root_files
+            if path in scripts_files
+            and (root_out / path).read_bytes() != (scripts_out / path).read_bytes()
+        ]
+        assert root_files == scripts_files and not changed, (
+            "Asset build output depends on the current working directory:\n"
+            + "\n".join(f"  changed: {path}" for path in changed)
+            + "\n"
+            + "\n".join(f"  root-only: {path}" for path in sorted(set(root_files) - set(scripts_files)))
+            + "\n"
+            + "\n".join(f"  scripts-only: {path}" for path in sorted(set(scripts_files) - set(root_files)))
+        )
+
+    def test_asset_build_logs_esm_bundle_failure_context(self):
+        script = (_REPO_ROOT / "scripts" / "build_assets.mjs").read_text(encoding="utf-8")
+        assert "[assets] ESM bundle failed" in script
+        for field in ("bundle:", "entry,", "out_dir:", "check_only:", "message:"):
+            assert field in script
 
     def test_no_files_missing_from_structure(self):
         listed = set(_parse_project_structure_tree(_README.read_text()))
@@ -1209,8 +1277,8 @@ class TestReleaseDraftDocs:
             _TESTS_README,
             _ARCHITECTURE,
             _CONFIGURATION,
-            _REPO_ROOT / "FEATURES.md",
-            _REPO_ROOT / "THEME.md",
+            _FEATURES,
+            _THEME,
         ]
         offenders = [
             _markdown_path_for(path)

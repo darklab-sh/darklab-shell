@@ -169,4 +169,16 @@ function restoreHistoryRun(runOrId, options = {}) {
   });
 }
 
-window.restoreHistoryRun = restoreHistoryRun;
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _historyRunIdentity,
+    _tabForHistoryRun,
+    _scrollHistoryHighlightIntoView,
+    _highlightRestoredHistoryLine,
+    _historyHasPendingOutput,
+    _scheduleRestoredHistoryLineHighlight,
+    _suppressHistoryRestoreStatusPeek,
+    restoreHistoryRunIntoTab,
+    restoreHistoryRun,
+  });
+}

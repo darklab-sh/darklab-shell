@@ -308,3 +308,34 @@ function _isWorkspaceTerminalCommand(cmd) {
   if (root === 'file' && ['list', 'ls', 'show', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
   return false;
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _workspaceDeleteCommand,
+    _workspaceDeleteTarget,
+    _workspaceMoveCommand,
+    _workspaceListCommand,
+    _workspaceListTarget,
+    _workspaceEditorCommand,
+    _workspaceDownloadTarget,
+    _workspaceCommandTokens,
+    _workspaceCwd,
+    _setWorkspaceCwd,
+    _workspaceDisplayPath,
+    _normalizeWorkspaceTerminalPath,
+    _resolveWorkspaceCommandPath,
+    _workspacePathExists,
+    _workspacePathHasGlob,
+    _workspaceGlobSegmentToRegExp,
+    _workspaceGlobMatches,
+    _workspaceEntryHints,
+    _workspaceExpandPathPattern,
+    _resolveExistingWorkspaceCommandPath,
+    _ensureWorkspaceCache,
+    _isWorkspaceDeleteCommand,
+    _isWorkspaceEditorCommand,
+    _isWorkspaceDownloadCommand,
+    _isWorkspaceMoveCommand,
+    _isWorkspaceTerminalCommand,
+  });
+}

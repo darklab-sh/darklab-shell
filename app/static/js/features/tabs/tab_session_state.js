@@ -3,6 +3,15 @@
 const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
 let _tabSessionPersistTimer = null;
 let _tabSessionRestoreInProgress = false;
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '_tabSessionRestoreInProgress', {
+    configurable: true,
+    get: () => _tabSessionRestoreInProgress,
+    set: (value) => {
+      _tabSessionRestoreInProgress = !!value;
+    },
+  });
+}
 
 function _snapshotTabRawLines(rawLines) {
   if (!Array.isArray(rawLines)) return [];
@@ -228,15 +237,29 @@ function restoreTabSessionState() {
     const activeIndex = Math.max(0, Math.min(Number(parsed.activeIndex) || 0, restoredIds.length - 1));
     if (typeof activateTab === 'function') activateTab(restoredIds[activeIndex], { focusComposer: false });
     if (typeof mountShellPrompt === 'function') mountShellPrompt(restoredIds[activeIndex], true);
-    if (typeof _restoreOutputTailAfterLayout === 'function'
+    if (typeof window._restoreOutputTailAfterLayout === 'function'
       && typeof getOutput === 'function'
       && typeof getTab === 'function') {
       const activeTab = getTab(restoredIds[activeIndex]);
       const activeOutput = getOutput(restoredIds[activeIndex]);
-      _restoreOutputTailAfterLayout(activeOutput, activeTab);
+      window._restoreOutputTailAfterLayout(activeOutput, activeTab);
     }
     return true;
   } finally {
     _tabSessionRestoreInProgress = false;
   }
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    TAB_SESSION_STATE_KEY,
+    _snapshotTabRawLines,
+    _snapshotTabCommandOutcomeSummary,
+    _flushActiveTabDraftForSessionState,
+    _tabSessionSnapshot,
+    _normalizeRestoredWorkspaceCwd,
+    persistTabSessionStateNow,
+    schedulePersistTabSessionState,
+    restoreTabSessionState,
+  });
 }

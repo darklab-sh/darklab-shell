@@ -93,13 +93,38 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
 }
 
 async function switchScopeFromSelector(page, teamId = '') {
-  await page.locator('#team-scope-trigger').click()
   const menu = page.locator('#team-scope-menu')
-  await expect(menu).toBeVisible()
-  const option = teamId
-    ? menu.locator(`[data-team-scope-menu-option="${teamId}"]`)
-    : menu.locator('[data-team-scope-menu-option="personal"]')
-  await option.click()
+  const selector = teamId
+    ? `[data-team-scope-menu-option="${teamId}"]`
+    : '[data-team-scope-menu-option="personal"]'
+  let lastError = null
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await page.locator('#team-scope-trigger').click()
+    await expect(menu).toBeVisible()
+    const option = menu.locator(selector)
+    await expect(option).toBeVisible({ timeout: 10_000 })
+    try {
+      await option.click({ timeout: 5_000 })
+      lastError = null
+      break
+    } catch (err) {
+      lastError = err
+      const currentScope = await page.evaluate(() => {
+        const sessionId = typeof SESSION_ID === 'string' && SESSION_ID ? SESSION_ID : 'anonymous'
+        return localStorage.getItem(`active_team_id:${sessionId}`) || ''
+      }).catch(() => null)
+      if (currentScope === teamId) {
+        lastError = null
+        break
+      }
+      if (await menu.isVisible().catch(() => false)) {
+        await page.keyboard.press('Escape').catch(() => {})
+      }
+    }
+  }
+
+  if (lastError) throw lastError
   await expect(menu).toBeHidden()
   await expect.poll(() => page.evaluate(() => {
     const sessionId = typeof SESSION_ID === 'string' && SESSION_ID ? SESSION_ID : 'anonymous'
@@ -172,7 +197,6 @@ test.describe('team mode browser flow', () => {
     await expect(page.locator('#mobile-team-scope-label')).toHaveText(teamName)
     await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page, { timeout: 30_000 })
-    await expect(page.locator('#team-scope-label')).toHaveText(teamName)
     await expect(page.locator('#mobile-team-scope-label')).toHaveText(teamName)
     await page.setViewportSize({ width: 1280, height: 720 })
     await expect(page.locator('#team-scope-label')).toHaveText(teamName)

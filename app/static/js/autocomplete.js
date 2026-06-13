@@ -1,4 +1,16 @@
 // Autocomplete dropdown rendering and keyboard interaction.
+const autocompleteDropdownCore = (typeof window !== 'undefined' && window.DarklabAutocompleteCore)
+  ? window.DarklabAutocompleteCore
+  : (typeof DarklabAutocompleteCore !== 'undefined' ? DarklabAutocompleteCore : null);
+
+function _isAutocompleteBlockedByTerminalConfirm() {
+  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
+}
+
+function _isAutocompleteBlockedByActiveRun() {
+  return typeof isActiveTabRunning === 'function' && isActiveTabRunning();
+}
+
 function _positionAutocomplete(itemsCount) {
   // Desktop anchors the dropdown to the prompt row; mobile anchors it above the
   // simplified composer so suggestions never hide behind the keyboard.
@@ -155,7 +167,7 @@ function acShow(items) {
   const tokenCtx = _autocompleteTokenContext(currentValue, currentCursor);
   const matchValue = (items.length && typeof items[0] === 'object') ? tokenCtx.currentToken : currentValue;
   const maxExampleLabelLen = items.reduce((max, s) =>
-    (s && s.isExample ? Math.max(max, autocompleteCore.itemText(s).length) : max), 0);
+    (s && s.isExample ? Math.max(max, autocompleteDropdownCore.itemText(s).length) : max), 0);
   let hasRenderedConcrete = false;
   let hasRenderedHint = false;
   items.forEach((s, i) => {
@@ -168,8 +180,8 @@ function acShow(items) {
       + (hintOnly ? ' ac-hint-only' : '')
       + (hintSeparated ? ' ac-hint-separated' : '');
     if (hintOnly) div.setAttribute('aria-disabled', 'true');
-    const label = autocompleteCore.itemText(s);
-    const description = autocompleteCore.itemDescription(s);
+    const label = autocompleteDropdownCore.itemText(s);
+    const description = autocompleteDropdownCore.itemDescription(s);
     const val = s && typeof s === 'object' && s.matchQuery != null
       ? String(s.matchQuery || '')
       : String(matchValue || '');
@@ -178,7 +190,7 @@ function acShow(items) {
     if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
     main.innerHTML = hintOnly
       ? escapeHtml(label)
-      : autocompleteCore.highlightedLabel(label, val);
+      : autocompleteDropdownCore.highlightedLabel(label, val);
     div.appendChild(main);
     if (description) {
       const desc = document.createElement('span');
@@ -229,7 +241,7 @@ function acExpandSharedPrefix(items) {
     ? getComposerValue()
     : (cmdInput ? cmdInput.value || '' : '');
   const firstItem = items[0];
-  const sharedPrefix = autocompleteCore.sharedPrefix(items);
+  const sharedPrefix = autocompleteDropdownCore.sharedPrefix(items);
   if (!sharedPrefix) return false;
   if (firstItem && typeof firstItem === 'object') {
     const replaceStart = Number(firstItem.replaceStart);
@@ -252,7 +264,7 @@ function acExpandSharedPrefix(items) {
 function _scheduleAutocompleteRefreshAfterAccept(insertValue) {
   if (!String(insertValue || '').endsWith('/')) return;
   setTimeout(() => {
-    if (typeof openAutocompleteForVisibleComposer === 'function' && openAutocompleteForVisibleComposer()) return;
+    if (typeof window.openAutocompleteForVisibleComposer === 'function' && window.openAutocompleteForVisibleComposer()) return;
     const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
     if (input && typeof input.dispatchEvent === 'function') {
       input.dispatchEvent(new Event('input'));
@@ -277,7 +289,7 @@ function acAccept(s) {
     const currentValue = (typeof getComposerValue === 'function')
       ? getComposerValue()
       : (cmdInput ? cmdInput.value || '' : '');
-    const insertValue = autocompleteCore.itemInsertText(s);
+    const insertValue = autocompleteDropdownCore.itemInsertText(s);
     acceptedInsertValue = insertValue;
     const replaceStart = Number(s.replaceStart);
     const replaceEnd = Number(s.replaceEnd);
@@ -299,4 +311,21 @@ function acAccept(s) {
   }
   refocusComposerAfterAction({ preventScroll: true });
   _scheduleAutocompleteRefreshAfterAccept(acceptedInsertValue);
+}
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    _positionAutocomplete,
+    _scrollAutocompleteActiveItem,
+    acIsHintOnly,
+    acSelectableItems,
+    acSelectableIndexes,
+    acFirstSelectableIndex,
+    acLastSelectableIndex,
+    acNextSelectableIndex,
+    acShow,
+    acHide,
+    acExpandSharedPrefix,
+    acAccept,
+  });
 }
