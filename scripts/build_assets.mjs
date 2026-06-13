@@ -15,6 +15,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  copyFileSync,
   writeFileSync,
 } from 'fs';
 import { createHash } from 'crypto';
@@ -71,6 +72,31 @@ function assertSourceExists(source) {
     throw new Error(`Missing asset source ${source} (${relative(ROOT, file)})`);
   }
   return file;
+}
+
+function sourceExtension(source) {
+  const basename = source.split('/').pop() || 'asset';
+  const index = basename.lastIndexOf('.');
+  return index > 0 ? basename.slice(index + 1) : 'asset';
+}
+
+function hashedStaticAssetBasename(source, content) {
+  const basename = source.split('/').pop() || 'asset';
+  const extension = sourceExtension(source);
+  const stem = basename.endsWith(`.${extension}`)
+    ? basename.slice(0, -(extension.length + 1))
+    : basename;
+  const prefix = source.startsWith('/vendor/fonts/')
+    ? 'font'
+    : source.startsWith('/vendor/')
+      ? 'vendor'
+      : 'static';
+  const safeStem = stem
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'asset';
+  return `${prefix}-${safeStem}.${sha256(content).slice(0, 12)}.${extension}`;
 }
 
 function outputExtension(type) {
@@ -192,6 +218,28 @@ function sourceHashMap(sources) {
   return hashes;
 }
 
+function configuredStandaloneSources() {
+  const sources = new Set([
+    ...((Array.isArray(config.lazy) ? config.lazy : [])),
+    ...((Array.isArray(config.excluded) ? config.excluded : [])),
+  ]);
+  sources.add('/static/favicon.ico');
+  const fontRoot = resolve(ROOT, 'app/static/fonts');
+  for (const rel of collectStaticFiles(fontRoot)) {
+    sources.add(`/vendor/fonts/${rel}`);
+  }
+  return Array.from(sources).sort();
+}
+
+function rewriteCssAssetUrls(css, staticAssets) {
+  return css.replace(/url\((['"]?)(\/(?:vendor|static)\/[^'")]+)\1\)/g, (match, quote, source) => {
+    const entry = staticAssets[source];
+    if (!entry || !entry.path) return match;
+    const nextQuote = quote || "'";
+    return `url(${nextQuote}${entry.path}${nextQuote})`;
+  });
+}
+
 async function buildEsmBundle(bundle) {
   const entry = bundle.entries[0];
   const entryFile = assertSourceExists(entry);
@@ -288,10 +336,22 @@ assertCssCoverage(configuredSources);
 assertOrderChecks(bundlesByName);
 
 const buildEntries = {};
+const staticAssetEntries = {};
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
 const builtBundleRecords = [];
+
+for (const source of configuredStandaloneSources()) {
+  const file = assertSourceExists(source);
+  const content = readFileSync(file);
+  const filename = hashedStaticAssetBasename(source, content);
+  copyFileSync(file, resolve(outDir, filename));
+  staticAssetEntries[source] = {
+    path: `/static/build/${filename}`,
+    hash: sha256(content),
+  };
+}
 
 for (const bundle of bundles) {
   let sourceHashes = {};
@@ -312,6 +372,7 @@ for (const bundle of bundles) {
       parts.push(`/* ${source} */\n${content.toString('utf8')}\n`);
     }
     output = `${parts.join('\n')}\n`;
+    output = rewriteCssAssetUrls(output, staticAssetEntries);
   }
   const hash = sha256(output);
   const ext = outputExtension(bundle.type);
@@ -337,6 +398,7 @@ const manifest = {
   version: 1,
   generated_by: 'scripts/build_assets.mjs',
   bundles: buildEntries,
+  static_assets: staticAssetEntries,
 };
 writeFileSync(resolve(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 

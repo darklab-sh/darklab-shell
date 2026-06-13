@@ -125,6 +125,7 @@ _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
 _ASSET_VERSION_CACHE: dict[str, str] = {}
+_STATIC_ASSET_URL_CACHE: dict[str, str] = {}
 _ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "manifest.json"
 _VALID_ASSET_BUNDLE_MODES = frozenset({"source", "bundle"})
 _WARNED_INVALID_ASSET_BUNDLE_MODES: set[str] = set()
@@ -165,6 +166,37 @@ def _versioned_asset_url(path: str) -> str:
     version = _ASSET_VERSION_CACHE[asset_path]
     separator = "&" if "?" in asset_path else "?"
     return f"{asset_path}{separator}v={version}" if version else asset_path
+
+
+def _static_asset_url(path: str) -> str:
+    asset_path = str(path or "")
+    if not asset_path.startswith(("/static/", "/vendor/")):
+        return asset_path
+    if _asset_bundle_mode() != "bundle":
+        return _versioned_asset_url(asset_path)
+    if asset_path not in _STATIC_ASSET_URL_CACHE:
+        _STATIC_ASSET_URL_CACHE[asset_path] = _hashed_static_asset_url(asset_path)
+    return _STATIC_ASSET_URL_CACHE[asset_path]
+
+
+def _hashed_static_asset_url(path: str) -> str:
+    try:
+        static_assets = _load_asset_manifest().get("static_assets")
+    except RuntimeError:
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static", exc_info=True)
+        raise
+    if not isinstance(static_assets, dict):
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static")
+        raise _asset_manifest_error("Asset manifest is incomplete: missing static_assets")
+    entry = static_assets.get(path)
+    if not isinstance(entry, dict):
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static")
+        raise _asset_manifest_error(f"Asset manifest is incomplete: missing static asset {path}")
+    built_path = str(entry.get("path") or "").strip()
+    if not built_path:
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static")
+        raise _asset_manifest_error(f"Asset manifest is incomplete: static asset {path} has no built path")
+    return built_path
 
 
 def _asset_version(path: str) -> str:
@@ -296,7 +328,7 @@ def _asset_bundle_script_type(logical_name: str) -> str:
     return "module" if str(entry.get("type") or "").strip() == "esm" else ""
 
 
-app.jinja_env.globals["static_asset"] = _versioned_asset_url
+app.jinja_env.globals["static_asset"] = _static_asset_url
 app.jinja_env.globals["asset_bundle"] = _asset_bundle
 app.jinja_env.globals["asset_bundle_script_type"] = _asset_bundle_script_type
 

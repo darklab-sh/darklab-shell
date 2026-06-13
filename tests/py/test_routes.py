@@ -326,20 +326,45 @@ class TestIndexRoute:
 
     def test_bundle_mode_renders_built_asset_bundles(self):
         client = get_client()
+        manifest = json.loads(shell_app._ASSET_MANIFEST_PATH.read_text(encoding="utf-8"))
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            shell_app._STATIC_ASSET_URL_CACHE.clear()
             body = client.get("/").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'type="module" src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
+        assert re.search(r'href="/static/build/static-favicon\.[a-f0-9]{12}\.ico"', body)
         assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
         assert (
             "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
             in body
         )
+        lazy_assets = self._lazy_assets_from_body(body)
+        normalized_assets = {
+            name: self._normalize_lazy_asset_entry(entry)
+            for name, entry in lazy_assets.items()
+        }
+        configured_lazy = json.loads(
+            (Path(__file__).resolve().parents[2] / "assets.config.json").read_text(encoding="utf-8")
+        )["lazy"]
+        assert {
+            entry["url"] for entry in normalized_assets.values()
+        } == {
+            manifest["static_assets"][source]["path"]
+            for source in configured_lazy
+        }
+        for name, entry in normalized_assets.items():
+            assert entry["url"].startswith("/static/build/"), name
+            assert "?v=" not in entry["url"], name
+        assert manifest["static_assets"]["/vendor/jspdf.umd.min.js"]["path"] in body
+        assert manifest["static_assets"]["/vendor/xterm.css"]["path"] in body
+        assert manifest["static_assets"]["/vendor/ansi_up.js"]["path"] in body
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/mobile-chrome.css?v=' not in body
         assert '/static/js/core/run_output_model.js?v=' not in body
         assert '/static/js/core/config.js?v=' not in body
         assert '/static/js/mobile_chrome.js?v=' not in body
+        assert '/vendor/jspdf.umd.min.js?v=' not in body
+        assert '/vendor/xterm.css?v=' not in body
 
     def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
@@ -373,19 +398,31 @@ class TestIndexRoute:
                     "source_hashes": {},
                 },
             },
+            "static_assets": {
+                "/vendor/jspdf.umd.min.js": {
+                    "path": "/static/build/vendor-jspdf.123456789abc.js",
+                    "hash": "123456789abc",
+                },
+            },
         }), encoding="utf-8")
         monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", manifest_path)
 
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            shell_app._STATIC_ASSET_URL_CACHE.clear()
             assert shell_app._asset_bundle("module-fixture") == [
                 "/static/build/module-fixture.123456789abc.js"
             ]
             assert shell_app._asset_bundle_script_type("module-fixture") == "module"
+            assert shell_app._static_asset_url("/vendor/jspdf.umd.min.js") == (
+                "/static/build/vendor-jspdf.123456789abc.js"
+            )
 
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
             sources = shell_app._asset_bundle("module-fixture")
+            vendor_url = shell_app._static_asset_url("/vendor/jspdf.umd.min.js")
         assert len(sources) == 1
         assert sources[0].startswith("/static/js/core/utils.js?v=")
+        assert vendor_url.startswith("/vendor/jspdf.umd.min.js?v=")
 
     def test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back(self):
         shell_app._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
@@ -11045,7 +11082,18 @@ class TestVendorAssets:
         resp = client.get(built_path)
         assert resp.status_code == 200
         assert "text/css" in resp.content_type
+        body = resp.get_data(as_text=True)
+        assert "/vendor/fonts/" not in body
+        assert re.search(
+            r"url\('/static/build/font-jetbrainsmono-400\.[a-f0-9]{12}\.ttf'\)",
+            body,
+        )
         self._assert_immutable_asset_cache(resp)
+        vendor_path = shell_app._load_asset_manifest()["static_assets"]["/vendor/jspdf.umd.min.js"]["path"]
+        vendor_resp = client.get(vendor_path)
+        assert vendor_resp.status_code == 200
+        assert "javascript" in vendor_resp.content_type
+        self._assert_immutable_asset_cache(vendor_resp)
 
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()

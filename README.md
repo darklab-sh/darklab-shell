@@ -790,13 +790,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── __init__.py     # Workspace service package marker
 │   │       └── files.py        # App-mediated personal/team workspace path, quota, and cleanup helpers
 │   ├── static/
-│   │   ├── build/             # Committed generated CSS/JS bundles and manifest; regenerate with npm run assets:sync
-│   │   │   ├── app.<hash>.css # Generated shared app CSS bundle
-│   │   │   ├── diag.<hash>.css # Generated diagnostics CSS bundle
-│   │   │   ├── manifest.json  # Generated asset bundle manifest read by Flask
-│   │   │   ├── permalink.<hash>.js # Generated self-contained permalink JS bundle
-│   │   │   ├── shell-bootstrap.<hash>.js # Generated shell bootstrap JS bundle
-│   │   │   └── terminal-export.<hash>.css # Generated permalink/export CSS bundle
+│   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/
 │   │   │   ├── core/
 │   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations

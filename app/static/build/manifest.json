@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.bc8cb143cdf5.css",
-      "hash": "bc8cb143cdf5288ff979dac547ac8ec0714c77f766a4e208f68dae0f70ce1fda",
+      "path": "/static/build/app.18fe16cac168.css",
+      "hash": "18fe16cac16835a6c0fe273e08f2fd3bfdedd4d100126ac7635b3db856b5afa7",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -270,6 +270,272 @@
       "entries": [
         "/static/js/permalink.entry.js"
       ]
+    }
+  },
+  "static_assets": {
+    "/static/css/styles.css": {
+      "path": "/static/build/static-styles.5ebac6464907.css",
+      "hash": "5ebac6464907623a2d0dd8fc4071c16a617a75a451bf2378295ee04d933a4b14"
+    },
+    "/static/favicon.ico": {
+      "path": "/static/build/static-favicon.8185782f11d9.ico",
+      "hash": "8185782f11d9cc03a4d5b5160564e0a8a9ee4787fbac1fbfd02410e14dd5cee8"
+    },
+    "/static/js/export_pdf.js": {
+      "path": "/static/build/static-export-pdf.11ee0584b26e.js",
+      "hash": "11ee0584b26e7b073e5827b682c9b19d7ecc6bd5d4ddf4487237ab8f64c099c8"
+    },
+    "/static/js/features/atlas/atlas_entity_detail.js": {
+      "path": "/static/build/static-atlas-entity-detail.39110f40c500.js",
+      "hash": "39110f40c50056547cf8a3729e9ee264225c63d234e7e363ea2f79756fd4c79f"
+    },
+    "/static/js/features/atlas/atlas_entity_row.js": {
+      "path": "/static/build/static-atlas-entity-row.6a0df54d99bc.js",
+      "hash": "6a0df54d99bc067cf8ac3664356d9ab06c4cf05d1f2840f29fea47d02d997805"
+    },
+    "/static/js/features/atlas/atlas_mobile.js": {
+      "path": "/static/build/static-atlas-mobile.bb22868324ea.js",
+      "hash": "bb22868324ea5183e3e6aed92b05d9041a6d62d19dafe2c00736b8edf92e7b08"
+    },
+    "/static/js/features/atlas/atlas_overlay.js": {
+      "path": "/static/build/static-atlas-overlay.e714b2578076.js",
+      "hash": "e714b257807669a8206eeac9fa907973e0621d727781a5f87090d02869c1f7cf"
+    },
+    "/static/js/features/atlas/atlas_tabs.js": {
+      "path": "/static/build/static-atlas-tabs.b5d310c57c2d.js",
+      "hash": "b5d310c57c2dc74b2a846640e468311af2caf6991bc3479b0f0707cded726234"
+    },
+    "/static/js/features/command-registry/command_registry.js": {
+      "path": "/static/build/static-command-registry.cb745f62473c.js",
+      "hash": "cb745f62473c9b8ba2488cbde71ef19e8537994df3995198631dce895e389480"
+    },
+    "/static/js/features/findings/findings_board_modal.js": {
+      "path": "/static/build/static-findings-board-modal.c12adec76251.js",
+      "hash": "c12adec76251c3a10fff30e95a81662805a84a58ff4cadfde507afc465f28fb4"
+    },
+    "/static/js/features/history/history_run_details.js": {
+      "path": "/static/build/static-history-run-details.0212ebfb40ed.js",
+      "hash": "0212ebfb40ede3d3fd53c08e459b96eab24a0631ac084607f98146022fb95efa"
+    },
+    "/static/js/features/mobile/mobile_running_indicator.js": {
+      "path": "/static/build/static-mobile-running-indicator.36b145b8e8dc.js",
+      "hash": "36b145b8e8dc3fe11954ee6671bc916571d9d6592e1d294646b13b1be90bcaf8"
+    },
+    "/static/js/features/preferences/notification_channels.js": {
+      "path": "/static/build/static-notification-channels.c10cb93a53b1.js",
+      "hash": "c10cb93a53b14b64c1e9e2cf0d2ef2413f8ac178724dd754851081238a21a05a"
+    },
+    "/static/js/features/preferences/secrets_panel.js": {
+      "path": "/static/build/static-secrets-panel.1a785c9c48e1.js",
+      "hash": "1a785c9c48e195e4845dcb12c2ec612a79582b09eae16afd9de5061a1a68f21f"
+    },
+    "/static/js/features/preferences/session_token_controls.js": {
+      "path": "/static/build/static-session-token-controls.041f84fd772b.js",
+      "hash": "041f84fd772b73432b780b14d67615a912511eb2b57388c88b46eb266a632e81"
+    },
+    "/static/js/features/preferences/teams_panel.js": {
+      "path": "/static/build/static-teams-panel.ec967ac18750.js",
+      "hash": "ec967ac18750d03ef13d0e8c0d9c5efee086e064212addfe01f064d96f5b5dcf"
+    },
+    "/static/js/features/projects/project_activity.js": {
+      "path": "/static/build/static-project-activity.214bba97b546.js",
+      "hash": "214bba97b5463ebb7d7cc594159cc10c0a95912dfe23556d8da87eff5d8ac6a1"
+    },
+    "/static/js/features/projects/project_artifacts.js": {
+      "path": "/static/build/static-project-artifacts.e34623e5ad32.js",
+      "hash": "e34623e5ad32b4e6cb98ccd0c1286194520c603c835dc00e6fbbdd2a7b4fd8cf"
+    },
+    "/static/js/features/projects/project_details.js": {
+      "path": "/static/build/static-project-details.4d89544b56d3.js",
+      "hash": "4d89544b56d3ec6d0f4acce6ddf65f6d380ec84b105cc0101fda1b98987da534"
+    },
+    "/static/js/features/projects/project_entities.js": {
+      "path": "/static/build/static-project-entities.89dba4ac5ac2.js",
+      "hash": "89dba4ac5ac2c27f4b7c401bcdc55fb1bf4a121f15ccb06614c7645739ad0e77"
+    },
+    "/static/js/features/projects/project_entity_editor.js": {
+      "path": "/static/build/static-project-entity-editor.58e6bf4080e3.js",
+      "hash": "58e6bf4080e39b5a8fae1e138fc0ee83b599fd08ee4405d5e7895702d69f0b9e"
+    },
+    "/static/js/features/projects/project_filters.js": {
+      "path": "/static/build/static-project-filters.469c86908e25.js",
+      "hash": "469c86908e252261b85c6bc339b3c15b8af2ebf66855ea49f4c521f08adc336b"
+    },
+    "/static/js/features/projects/project_findings.js": {
+      "path": "/static/build/static-project-findings.f806c4c8f02e.js",
+      "hash": "f806c4c8f02eff99cc3bce5a8b896f3c7de3f929ff2cbf2bbfd975acf5ac3461"
+    },
+    "/static/js/features/projects/project_findings_board.js": {
+      "path": "/static/build/static-project-findings-board.7aa20f95ed30.js",
+      "hash": "7aa20f95ed30ccc47a2685178fb990dec9104b3878da4a7c1f497188e5d152c2"
+    },
+    "/static/js/features/projects/project_findings_data.js": {
+      "path": "/static/build/static-project-findings-data.c1cd5b81a78c.js",
+      "hash": "c1cd5b81a78c8b296ef02f4d74aeebfe83ff906d3a5567e293e54325e659ab10"
+    },
+    "/static/js/features/projects/project_list.js": {
+      "path": "/static/build/static-project-list.145f461a8622.js",
+      "hash": "145f461a8622c041551c2303eacff09cb988198e3ece8386998860198af3e80b"
+    },
+    "/static/js/features/projects/project_mobile_compare.js": {
+      "path": "/static/build/static-project-mobile-compare.ff4fe65639ca.js",
+      "hash": "ff4fe65639ca1a09cb0deaa39e061b909cee848fd22d8c435d6aeeb5e83558a6"
+    },
+    "/static/js/features/projects/project_mobile_detail.js": {
+      "path": "/static/build/static-project-mobile-detail.c79e5502a98f.js",
+      "hash": "c79e5502a98fae72df27943b8920fc7e5900c516ff033f565dd0d2fe0c39e345"
+    },
+    "/static/js/features/projects/project_mobile_shell.js": {
+      "path": "/static/build/static-project-mobile-shell.7c6aad095740.js",
+      "hash": "7c6aad095740ec294811dca049219fafefc829dadb941a01d9168003fbabec47"
+    },
+    "/static/js/features/projects/project_navigation.js": {
+      "path": "/static/build/static-project-navigation.80ce4b2d0200.js",
+      "hash": "80ce4b2d020026fd01569e6e6912f8676b1410365bd47e32cc751a38584d52a5"
+    },
+    "/static/js/features/projects/project_nested_sheets.js": {
+      "path": "/static/build/static-project-nested-sheets.5a0d8561141e.js",
+      "hash": "5a0d8561141efcbfe0a1967e38758531d53c6daf7abc23e5c3fde065c8ef43b9"
+    },
+    "/static/js/features/projects/project_packages.js": {
+      "path": "/static/build/static-project-packages.39a63d97fc61.js",
+      "hash": "39a63d97fc616781b7208707a768d2a6b7e1067905f916be83a419df77140a7f"
+    },
+    "/static/js/features/projects/project_report.js": {
+      "path": "/static/build/static-project-report.1d97200bb890.js",
+      "hash": "1d97200bb8901114010e0cde764936e4eeca07c85ec422d0391ef3eb519f337b"
+    },
+    "/static/js/features/projects/project_runs.js": {
+      "path": "/static/build/static-project-runs.e16271ba370e.js",
+      "hash": "e16271ba370e10cbb4c7e4609751a3584d51a9ad67caba9d22d39ee4d0f508c0"
+    },
+    "/static/js/features/projects/project_targets.js": {
+      "path": "/static/build/static-project-targets.504f9992eff5.js",
+      "hash": "504f9992eff5357a9d1f650a68b4abf0123cd4a167c29948c603e1f30ebcca7b"
+    },
+    "/static/js/features/projects/project_workspace_actions.js": {
+      "path": "/static/build/static-project-workspace-actions.98e3b5257e73.js",
+      "hash": "98e3b5257e73e222fc21c9b5ce379b0810edcff380f9867dc01cb2b249ea4710"
+    },
+    "/static/js/features/projects/project_workspace_bootstrap.js": {
+      "path": "/static/build/static-project-workspace-bootstrap.ac2ffc544d19.js",
+      "hash": "ac2ffc544d19d429492bf5f9d45b27b5bc4bddad11a05939b62a3d7d7972c65d"
+    },
+    "/static/js/features/projects/project_workspace_events.js": {
+      "path": "/static/build/static-project-workspace-events.aecca674c34b.js",
+      "hash": "aecca674c34b5e9e7f0e8a571973fd5d0fbecd425563fbb1f5939c2c38f69394"
+    },
+    "/static/js/features/projects/project_workspace_lifecycle.js": {
+      "path": "/static/build/static-project-workspace-lifecycle.f63ad8918bb7.js",
+      "hash": "f63ad8918bb7140f84a6e2c78ea06685898a4e2b61f51aac5f623f2035a149a3"
+    },
+    "/static/js/features/projects/project_workspace_renderer.js": {
+      "path": "/static/build/static-project-workspace-renderer.c93d327beaf9.js",
+      "hash": "c93d327beaf969d257283e7638d95ef679b4f585bdf38ba7a67d6cf0f64f2447"
+    },
+    "/static/js/features/projects/project_workspace_shell.js": {
+      "path": "/static/build/static-project-workspace-shell.01325983d05f.js",
+      "hash": "01325983d05fb07354a0f27b9abf07808ae16b9979f05fb18db5eb2cf6e8d1d3"
+    },
+    "/static/js/features/run-comparison/history_compare_controls.js": {
+      "path": "/static/build/static-history-compare-controls.f64d181a3da5.js",
+      "hash": "f64d181a3da5e0fc22cb07b40b23174e1cace2b18cedcb23ffd6dc1cae34ca12"
+    },
+    "/static/js/features/run-comparison/history_compare_core.js": {
+      "path": "/static/build/static-history-compare-core.ce92c5c8286f.js",
+      "hash": "ce92c5c8286f0f539aeb4d1e3b22b6746f24349d2396a721ec8ea0854c5c791a"
+    },
+    "/static/js/features/run-comparison/history_compare_launcher.js": {
+      "path": "/static/build/static-history-compare-launcher.e76522639c33.js",
+      "hash": "e76522639c33098f126c8da0f65e368c85d19ce430a6b347257591157cb63e79"
+    },
+    "/static/js/features/run-comparison/history_compare_navigation.js": {
+      "path": "/static/build/static-history-compare-navigation.60353512b5ec.js",
+      "hash": "60353512b5ecbfa01eb73739c5c5abfa20b4a22bb27222de984a427c0260aadc"
+    },
+    "/static/js/features/run-comparison/history_compare_overlay.js": {
+      "path": "/static/build/static-history-compare-overlay.efb6d9dea559.js",
+      "hash": "efb6d9dea5596403a9cbf24c7bf1db5dca412e2a45bfa10374cf7fd57d4921b8"
+    },
+    "/static/js/features/run-comparison/history_compare_renderer.js": {
+      "path": "/static/build/static-history-compare-renderer.1305c342c83d.js",
+      "hash": "1305c342c83d0b46d6f65c4686184d1460b95d71f95b95da38c3842cbb61775c"
+    },
+    "/static/js/features/schedules/schedules_modal.js": {
+      "path": "/static/build/static-schedules-modal.3018bedc6d13.js",
+      "hash": "3018bedc6d13d5f9da7a19cde7683615f7e93d3dde99daf51f2159b266f6297d"
+    },
+    "/static/js/features/status-monitor/status_monitor_core.js": {
+      "path": "/static/build/static-status-monitor-core.66b68e515c6e.js",
+      "hash": "66b68e515c6eead08bacfcf4b14641aba2aa9c2b8eea33e7fd039b8803dbc0cd"
+    },
+    "/static/js/features/status-monitor/status_monitor_data.js": {
+      "path": "/static/build/static-status-monitor-data.6e3106024883.js",
+      "hash": "6e31060248838052c406fb2931e14a4416b186ca136000c4323c7b0cf25bdf6b"
+    },
+    "/static/js/features/status-monitor/status_monitor_resources.js": {
+      "path": "/static/build/static-status-monitor-resources.e0a0e80d87b9.js",
+      "hash": "e0a0e80d87b980142080e4ad6727100e458a96bb1ad08b56ac3ac300d730388a"
+    },
+    "/static/js/features/watchers/watchers_modal.js": {
+      "path": "/static/build/static-watchers-modal.b4ade029912d.js",
+      "hash": "b4ade029912da9c65608e945747654adb997248fb1dd7539f059b0441d98c4e3"
+    },
+    "/static/js/features/workflows/workflows.js": {
+      "path": "/static/build/static-workflows.ba6e4e9394d8.js",
+      "hash": "ba6e4e9394d80bdf26754e0907928a06a282b4efe3c50a82511b5e56f77f1466"
+    },
+    "/static/js/pty.js": {
+      "path": "/static/build/static-pty.619c6367f2d0.js",
+      "hash": "619c6367f2d043c9ee5aa46a24d1baeb2d9dae24c3c3734c5447424fe00201b7"
+    },
+    "/static/js/status_monitor.js": {
+      "path": "/static/build/static-status-monitor.cab5a660e713.js",
+      "hash": "cab5a660e713ccbf3c02d798dd946b9f00b11fa9f46a0adb9806d2b8981d40fe"
+    },
+    "/static/js/tour_modal.js": {
+      "path": "/static/build/static-tour-modal.fae5f67a60da.js",
+      "hash": "fae5f67a60dad41519115942c0fd4c9be69bdd5cac640ea3bd75c271b0239bcc"
+    },
+    "/vendor/ansi_up.js": {
+      "path": "/static/build/vendor-ansi-up.61ad065722eb.js",
+      "hash": "61ad065722eb1e36fe3a8c70fe497e9c0165754c1eb3fd119ed7d6cdf429aa1c"
+    },
+    "/vendor/fonts/JetBrainsMono-300.ttf": {
+      "path": "/static/build/font-jetbrainsmono-300.62bbab00e0b0.ttf",
+      "hash": "62bbab00e0b0faffb38a3d111341a814f8731fd50778aa0b495d3293b8290aaf"
+    },
+    "/vendor/fonts/JetBrainsMono-400.ttf": {
+      "path": "/static/build/font-jetbrainsmono-400.44ce4a84f20d.ttf",
+      "hash": "44ce4a84f20d60f24539bd0cef11f79c29e38609e0f8adf18551c9794a5d9dc3"
+    },
+    "/vendor/fonts/JetBrainsMono-700.ttf": {
+      "path": "/static/build/font-jetbrainsmono-700.a1d92abc6b02.ttf",
+      "hash": "a1d92abc6b02a87faed23d98067ab1027e8e95242fd7c9978a072ea383b89d1a"
+    },
+    "/vendor/fonts/Syne-700.ttf": {
+      "path": "/static/build/font-syne-700.668763da807c.ttf",
+      "hash": "668763da807c01fb3ec0f21e053d58cb4ec37a5cc37ab07617317c907df92a99"
+    },
+    "/vendor/fonts/Syne-800.ttf": {
+      "path": "/static/build/font-syne-800.f37df4c4dbb0.ttf",
+      "hash": "f37df4c4dbb0b722d4b462aa2c5e1ad246abdb7fcdc736ae0867bc84cc66da34"
+    },
+    "/vendor/jspdf.umd.min.js": {
+      "path": "/static/build/vendor-jspdf-umd-min.e6551fcdc32f.js",
+      "hash": "e6551fcdc32f09d6853b2c5126d18d01d9447e0da618a41a11ebeee0f6c20d54"
+    },
+    "/vendor/xterm-addon-fit.js": {
+      "path": "/static/build/vendor-xterm-addon-fit.ba3ea256ce06.js",
+      "hash": "ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527"
+    },
+    "/vendor/xterm.css": {
+      "path": "/static/build/vendor-xterm.854a7c0fb70e.css",
+      "hash": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+    },
+    "/vendor/xterm.js": {
+      "path": "/static/build/vendor-xterm.14903579ff54.js",
+      "hash": "14903579ff54664cd72f8e8699e6961a6272c21863ec1c3b118cdc8af5d4a972"
     }
   }
 }

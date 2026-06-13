@@ -28,7 +28,9 @@ app/static/js/vendor/*
 # Regenerate with npm run assets:sync; drift is checked by npm run assets:check.
 app/static/build/*
 !app/static/build/*.css
+!app/static/build/*.ico
 !app/static/build/*.js
+!app/static/build/*.ttf
 !app/static/build/manifest.json
 
 # Persistent workspaces bind mount, if in use

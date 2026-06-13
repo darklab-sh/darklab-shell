@@ -852,6 +852,7 @@ _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
 # the per-file leaf check for everything beneath it.
 _PROJECT_STRUCTURE_OPAQUE_DIRS = frozenset({
     "app/conf/themes",                # theme YAMLs — covered by themes/ entry
+    "app/static/build",               # generated hashed bundles/static assets
     "app/static/fonts",               # vendored binary font files
     "assets",                         # README demo videos
     "tests/js/e2e/fixtures",          # binary screenshot fixtures
@@ -1169,7 +1170,7 @@ class TestProjectStructureCoverage:
         assert not template_static_url_violations, (
             "Templates must resolve /static/ and /vendor/ URLs through "
             "static_asset() or asset_bundle() so immutable cache headers always "
-            "have a cache-buster:\n"
+            "have content-hashed or versioned URLs:\n"
             + "\n".join(f"  {violation}" for violation in template_static_url_violations)
         )
         listed = _parse_project_structure_tree(_README.read_text())

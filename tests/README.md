@@ -2757,7 +2757,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
 | `lazy-loads the project workspace controller cluster in order` | Verifies that the Projects workspace controllers load in manifest order only when the workspace opens. |
 | `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
-| `logs lazy module load failures with safe asset context` | Verifies failed lazy module imports send a client log with asset name, type, sanitized cache-busted path, and expected-global state. |
+| `logs lazy module load failures with safe asset context` | Verifies failed lazy module imports send a client log with asset name, type, sanitized asset path, and expected-global state. |
 | `logs invalid lazy asset config without including the raw JSON body` | Verifies malformed lazy asset JSON logs a warning once while falling back to built-in lazy asset paths. |
 | `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens. |
 | `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens. |
@@ -3147,7 +3147,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `preloads xterm assets at boot when interactive PTY is enabled` | Verifies that enabled interactive PTY mode schedules xterm asset preloading during browser startup. |
 | `does not schedule xterm preloading when interactive PTY is disabled` | Verifies that disabled interactive PTY mode leaves xterm assets unloaded until the feature is enabled. |
 | `replaces failed xterm script tags before retrying vendor asset loads` | Verifies that failed xterm vendor script tags are removed before a retry attaches to a fresh script load. |
-| `loads xterm assets from the shared lazy asset manifest when available` | Verifies that interactive PTY lazy-loads xterm assets through manifest-provided cache-busted URLs. |
+| `loads xterm assets from the shared lazy asset manifest when available` | Verifies that interactive PTY lazy-loads xterm assets through manifest-provided URLs. |
 | `detects mobile terminal mode as unsupported for interactive PTY shells` | Verifies that mobile terminal mode blocks interactive PTY shell startup before opening xterm or starting a backend run. |
 | `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
 | `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |
