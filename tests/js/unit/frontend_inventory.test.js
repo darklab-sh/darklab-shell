@@ -14,18 +14,10 @@ function runInventoryJson() {
   if (inventoryReport) return inventoryReport
   inventoryReport = JSON.parse(execFileSync(
     'node',
-    ['scripts/inventory_frontend_modules.mjs', '--json'],
+    ['scripts/inventory_frontend_modules.mjs', '--json', '--check'],
     EXEC_OPTIONS,
   ))
   return inventoryReport
-}
-
-function runInventoryCheck() {
-  return execFileSync(
-    'node',
-    ['scripts/inventory_frontend_modules.mjs', '--check'],
-    EXEC_OPTIONS,
-  )
 }
 
 function runInventoryCheckWithOutput(env = {}) {
@@ -119,9 +111,8 @@ describe('frontend compatibility global inventory', () => {
   })
 
   it('passes check mode while reporting global purpose totals', () => {
-    expect(() => runInventoryCheck()).not.toThrow()
-
     const report = runInventoryJson()
+    expect(report.generated_by).toBe('scripts/inventory_frontend_modules.mjs')
     expect(report.summary.unresolved_app_bare_read_count).toBe(0)
     expect(report.summary.window_publish_purposes.intentional_bootstrap).toBeGreaterThan(0)
     expect(report.summary.window_publish_purposes.lazy_placeholder).toBeGreaterThan(0)

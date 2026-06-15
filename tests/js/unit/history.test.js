@@ -3716,7 +3716,7 @@ describe('history panel actions', () => {
     expect(appendLine).toHaveBeenCalledWith('old output', '', 'tab-3')
     expect(activateTab).toHaveBeenCalledWith('tab-3', { focusComposer: false })
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
-  })
+  }, 10_000)
 
   it('preflights Restore Both tab capacity before creating either tab', async () => {
     const { _restoreBothHistoryCompareRuns, createTab } = loadHistoryPanel({

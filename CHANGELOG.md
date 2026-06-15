@@ -75,6 +75,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Markdown lint dependency audit** — npm now overrides `markdownlint-cli2`'s pinned Markdown parser dependencies to fixed `js-yaml` and `markdown-it` releases, clearing the moderate npm audit findings without downgrading the markdown lint runner.
+  - **Validation:** `npm audit --audit-level=moderate`, `npm run audit:js`, and `npm run lint:md` pass with the updated lockfile.
+
+- **Shodan scan autocomplete** — `shodan scan` now suggests Shodan's real scan subcommands (`internet`, `list`, `protocols`, `status`, and `submit`) instead of treating the next token as an IP/host.
+  - `shodan scan submit` now owns the public IP/CIDR placeholder, and the built-in examples use `shodan scan submit 8.8.8.8` instead of the invalid `shodan scan 8.8.8.8` form.
+  - **Tests:** expanded autocomplete matcher coverage for nested `shodan scan submit` hints and backend registry coverage for the YAML-derived Shodan scan context.
+
 - **Workflows source-mode lazy smoke** — Sidebar workflow rows now hand off to the controller-owned Workflows opener instead of opening and rendering the Workflows overlay themselves first.
   - This keeps the Workflows overlay on one open/close path after the ESM migration, so the explicit close button cannot leave a scoped workflow sheet open and block the next rail action.
   - **Tests:** verified the source-mode lazy smoke that opens Projects, Options, Command Registry, Workflows, Atlas, Status Monitor, History run details/compare, and PDF export through normal controls.

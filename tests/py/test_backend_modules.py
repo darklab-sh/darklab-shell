@@ -9085,6 +9085,18 @@ class TestDerivedCommandRegistry:
         schedule_every_hints = context["schedule"]["subcommands"]["create"]["arg_hints"]["--every"]
         assert [item["value"] for item in schedule_every_hints] == list(CADENCE_PRESETS)
         assert context["schedule"]["subcommands"]["info"]["arg_hints"]["__positional__"][0]["value"] == "<schedule-id>"
+        shodan_scan_context = context["shodan"]["subcommands"]["scan"]
+        assert [
+            item["value"] for item in shodan_scan_context["arg_hints"]["__positional__"]
+        ] == ["internet", "list", "protocols", "status", "submit"]
+        assert (
+            shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value"]
+            == "<ip-or-cidr>"
+        )
+        assert (
+            shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value_type"]
+            == "target"
+        )
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
         assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
             "list",
@@ -9204,7 +9216,8 @@ class TestDerivedCommandRegistry:
         assert is_command_allowed("shodan domain darklab.sh")[0]
         assert is_command_allowed("shodan honeyscore 8.8.8.8")[0]
         assert is_command_allowed("shodan stats apache")[0]
-        assert is_command_allowed("shodan scan 8.8.8.8")[0]
+        assert is_command_allowed("shodan scan submit 8.8.8.8")[0]
+        assert not is_command_allowed("shodan scan submit 127.0.0.1")[0]
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:

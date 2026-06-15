@@ -578,6 +578,42 @@ describe('autocomplete helpers', () => {
               subs: { flags: [{ value: '-names', description: 'Print names' }] },
             },
           },
+          shodan: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'scan', insertValue: 'scan ', description: 'Manage on-demand scans' },
+              ],
+            },
+            subcommands: {
+              scan: {
+                flags: [],
+                expects_value: [],
+                arg_hints: {
+                  __positional__: [
+                    { value: 'internet', insertValue: 'internet ', description: 'Scan internet by port/protocol' },
+                    { value: 'list', insertValue: 'list ', description: 'Show scans' },
+                    { value: 'protocols', insertValue: 'protocols ', description: 'List protocols' },
+                    { value: 'status', insertValue: 'status ', description: 'Check scan status' },
+                    { value: 'submit', insertValue: 'submit ', description: 'Submit a scan' },
+                  ],
+                },
+                subcommands: {
+                  submit: {
+                    flags: [],
+                    expects_value: [],
+                    arg_hints: {
+                      __positional__: [
+                        { value: '<ip-or-cidr>', hintOnly: true, value_type: 'target', description: 'Public IP or CIDR' },
+                      ],
+                    },
+                    subcommands: {},
+                  },
+                },
+              },
+            },
+          },
         },
         acFiltered: [],
         acIndex: -1,
@@ -590,6 +626,14 @@ describe('autocomplete helpers', () => {
 
     expect(getAutocompleteMatches('amass ', 6).map(item => item.value)).toEqual(['-h', 'enum', 'subs'])
     expect(getAutocompleteMatches('amass nm', 8).map(item => item.value)).toEqual(['enum'])
+    expect(getAutocompleteMatches('shodan scan ', 12).map(item => item.value)).toEqual([
+      'internet',
+      'list',
+      'protocols',
+      'status',
+      'submit',
+    ])
+    expect(getAutocompleteMatches('shodan scan submit ', 19).map(item => item.value)).toEqual(['<ip-or-cidr>'])
   })
 
   it('shows root and subcommand examples while a unique command root is being typed', () => {
