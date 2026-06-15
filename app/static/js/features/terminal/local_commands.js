@@ -1,48 +1,155 @@
 // ── Terminal-native theme/config commands ──
+import { getActiveTabId, getTab as importedGetTab } from '../../core/state.js';
+import { DarklabPreferenceCore as importedPreferenceCore } from '../../core/app_preferences_core.js';
+import { appendLine as importedAppendLine, getLineNumberMode, getTimestampMode, _stickOutputToBottom as importedStickOutputToBottom } from '../../output.js';
+import { getOutput as importedGetOutput, updateOutputFollowButton as importedUpdateOutputFollowButton } from '../../tabs.js';
+import {
+  applyLineNumberPreference as importedApplyLineNumberPreference,
+  applyTimestampPreference as importedApplyTimestampPreference,
+  applyWelcomeIntroPreference as importedApplyWelcomeIntroPreference,
+  getWelcomeIntroPreference as importedGetWelcomeIntroPreference,
+  applyShareRedactionDefaultPreference as importedApplyShareRedactionDefaultPreference,
+  getShareRedactionDefaultPreference as importedGetShareRedactionDefaultPreference,
+  applyProjectAutoLinkExternalRunsPreference as importedApplyProjectAutoLinkExternalRunsPreference,
+  getProjectAutoLinkExternalRunsPreference as importedGetProjectAutoLinkExternalRunsPreference,
+  applyProjectAutoLinkRunEntitiesPreference as importedApplyProjectAutoLinkRunEntitiesPreference,
+  getProjectAutoLinkRunEntitiesPreference as importedGetProjectAutoLinkRunEntitiesPreference,
+  applyRunNotifyPreference as importedApplyRunNotifyPreference,
+  getRunNotifyPreference as importedGetRunNotifyPreference,
+  applyCommandOutcomeSummariesPreference as importedApplyCommandOutcomeSummariesPreference,
+  getCommandOutcomeSummariesPreference as importedGetCommandOutcomeSummariesPreference,
+  applyHudClockPreference as importedApplyHudClockPreference,
+  getHudClockPreference as importedGetHudClockPreference,
+  applyCompareViewModePreference as importedApplyCompareViewModePreference,
+  getCompareViewModePreference as importedGetCompareViewModePreference,
+  applyCompareContextPreference as importedApplyCompareContextPreference,
+  getCompareContextPreference as importedGetCompareContextPreference,
+  applyPromptUsernamePreference as importedApplyPromptUsernamePreference,
+  getPromptUsernamePreference as importedGetPromptUsernamePreference,
+} from '../preferences/preferences.js';
+import {
+  _compareThemeEntries as importedCompareThemeEntries,
+  _findThemeEntry as importedFindThemeEntry,
+  _getThemeThemes as importedGetThemeThemes,
+  _normalizeThemeName as importedNormalizeThemeName,
+  _resolveThemeEntry as importedResolveThemeEntry,
+  _savedThemeName as importedSavedThemeName,
+  applyThemeSelection as importedApplyThemeSelection,
+} from '../theme/theme.js';
+
+const LOCAL_COMMAND_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _cliGlobalFunction(name) {
+  const fn = LOCAL_COMMAND_GLOBAL?.[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _cliAppendLineFn() {
+  return (typeof importedAppendLine !== 'undefined' && importedAppendLine)
+    || _cliGlobalFunction('appendLine');
+}
+
+function _cliGetTab(id) {
+  const getTab = (typeof importedGetTab !== 'undefined' && importedGetTab)
+    || _cliGlobalFunction('getTab');
+  return typeof getTab === 'function' ? getTab(id) : null;
+}
+
+function _cliGetOutput(id) {
+  const getOutput = (typeof importedGetOutput !== 'undefined' && importedGetOutput)
+    || _cliGlobalFunction('getOutput');
+  return typeof getOutput === 'function' ? getOutput(id) : null;
+}
+
+function _cliActiveTabId() {
+  const importedId = typeof getActiveTabId === 'function' ? getActiveTabId() : null;
+  return importedId || LOCAL_COMMAND_GLOBAL?.activeTabId || null;
+}
+
 function _cliAppendLine(text, cls = '', tabId = null, metadata = null) {
-  if (typeof appendLine === 'function') appendLine(text, cls, tabId, metadata);
+  const appendLine = _cliAppendLineFn();
+  if (appendLine) appendLine(text, cls, tabId, metadata);
 }
 
 function _cliShouldPreserveOutputTail(tabId = null) {
-  const id = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : null);
-  const tab = typeof getTab === 'function' ? getTab(id) : null;
+  const id = tabId || _cliActiveTabId();
+  const tab = _cliGetTab(id);
   return !!tab && tab.followOutput !== false;
 }
 
 function _cliPreserveOutputTail(tabId = null, shouldPreserve = true) {
   if (!shouldPreserve) return;
-  const id = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : null);
-  const tab = typeof getTab === 'function' ? getTab(id) : null;
-  const out = typeof getOutput === 'function' ? getOutput(id) : null;
+  const id = tabId || _cliActiveTabId();
+  const tab = _cliGetTab(id);
+  const out = _cliGetOutput(id);
   if (tab) tab.followOutput = true;
-  if (out && typeof window._stickOutputToBottom === 'function') {
-    window._stickOutputToBottom(out, tab);
+  const stickOutputToBottom = (typeof importedStickOutputToBottom !== 'undefined' && importedStickOutputToBottom)
+    || _cliGlobalFunction('_stickOutputToBottom');
+  if (out && stickOutputToBottom) {
+    stickOutputToBottom(out, tab);
   } else if (out) {
     out.scrollTop = out.scrollHeight;
   }
-  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  const updateOutputFollowButton = (typeof importedUpdateOutputFollowButton !== 'undefined' && importedUpdateOutputFollowButton)
+    || _cliGlobalFunction('updateOutputFollowButton');
+  if (updateOutputFollowButton) updateOutputFollowButton(id);
 }
 
 function _cliSetStatus(statusValue) {
-  if (typeof setStatus === 'function') setStatus(statusValue);
+  const setStatus = _cliGlobalFunction('setStatus');
+  if (setStatus) setStatus(statusValue);
 }
 
 function _cliRecordSuccess(command) {
-  if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(command);
+  const recordSuccessfulLocalCommand = _cliGlobalFunction('_recordSuccessfulLocalCommand');
+  if (recordSuccessfulLocalCommand) recordSuccessfulLocalCommand(command);
 }
 
 function _cliPreferenceCore() {
-  return (typeof window !== 'undefined' && window.DarklabPreferenceCore)
-    || (typeof globalThis !== 'undefined' && globalThis.DarklabPreferenceCore)
-    || {};
+  return (typeof importedPreferenceCore !== 'undefined' && importedPreferenceCore) || {};
+}
+
+function _cliTimestampModes() {
+  return Array.isArray(LOCAL_COMMAND_GLOBAL?._tsModes)
+    ? LOCAL_COMMAND_GLOBAL._tsModes.slice()
+    : ['off', 'elapsed', 'clock'];
+}
+
+function _cliTimestampMode() {
+  const mode = typeof getTimestampMode === 'function'
+    ? getTimestampMode()
+    : (typeof LOCAL_COMMAND_GLOBAL?.tsMode === 'string' ? LOCAL_COMMAND_GLOBAL.tsMode : 'off');
+  return _cliTimestampModes().includes(mode) ? mode : 'off';
+}
+
+function _cliLineNumberMode() {
+  const mode = typeof getLineNumberMode === 'function'
+    ? getLineNumberMode()
+    : (typeof LOCAL_COMMAND_GLOBAL?.lnMode === 'string' ? LOCAL_COMMAND_GLOBAL.lnMode : 'off');
+  return mode === 'on' ? 'on' : 'off';
+}
+
+function _cliPreferenceFunction(importedFn, name) {
+  return (typeof importedFn !== 'undefined' && importedFn)
+    || _cliGlobalFunction(name);
 }
 
 function _cliThemeSlug(entry) {
-  return _normalizeThemeName(entry?.name || entry?.filename || '');
+  const normalizeThemeName = (typeof importedNormalizeThemeName !== 'undefined' && importedNormalizeThemeName)
+    || _cliGlobalFunction('_normalizeThemeName');
+  return typeof normalizeThemeName === 'function'
+    ? normalizeThemeName(entry?.name || entry?.filename || '')
+    : String(entry?.name || entry?.filename || '').trim().replace(/\.yaml$/, '');
 }
 
 function _cliThemeEntries() {
-  return [..._getThemeThemes()].sort(_compareThemeEntries).filter(entry => _cliThemeSlug(entry));
+  const getThemeThemes = (typeof importedGetThemeThemes !== 'undefined' && importedGetThemeThemes)
+    || _cliGlobalFunction('_getThemeThemes');
+  const compareThemeEntries = (typeof importedCompareThemeEntries !== 'undefined' && importedCompareThemeEntries)
+    || _cliGlobalFunction('_compareThemeEntries');
+  const entries = typeof getThemeThemes === 'function' ? getThemeThemes() : [];
+  const compare = typeof compareThemeEntries === 'function' ? compareThemeEntries : undefined;
+  return [...entries].sort(compare).filter(entry => _cliThemeSlug(entry));
 }
 
 function _cliThemeColorScheme(entry) {
@@ -67,7 +174,12 @@ function _cliThemeEntriesByColorScheme() {
 }
 
 function _cliCurrentThemeEntry() {
-  return _resolveThemeEntry(document.body?.dataset?.theme || _savedThemeName());
+  const resolveThemeEntry = (typeof importedResolveThemeEntry !== 'undefined' && importedResolveThemeEntry)
+    || _cliGlobalFunction('_resolveThemeEntry');
+  const savedThemeName = (typeof importedSavedThemeName !== 'undefined' && importedSavedThemeName)
+    || _cliGlobalFunction('_savedThemeName');
+  const savedName = typeof savedThemeName === 'function' ? savedThemeName() : '';
+  return typeof resolveThemeEntry === 'function' ? resolveThemeEntry(document.body?.dataset?.theme || savedName) : null;
 }
 
 function _cliCurrentThemeSlug() {
@@ -95,7 +207,8 @@ function _cliThemeDescription(entry) {
 async function handleThemeCommand(cmd, tabId = null) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
-  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+  const appendCommandEcho = _cliGlobalFunction('appendCommandEcho');
+  if (appendCommandEcho) appendCommandEcho(cmd, tabId);
 
   if (parts.length === 1 || sub === 'list') {
     const current = _cliCurrentThemeEntry();
@@ -132,7 +245,9 @@ async function handleThemeCommand(cmd, tabId = null) {
     return true;
   }
 
-  const entry = _findThemeEntry(requested);
+  const findThemeEntry = (typeof importedFindThemeEntry !== 'undefined' && importedFindThemeEntry)
+    || _cliGlobalFunction('_findThemeEntry');
+  const entry = typeof findThemeEntry === 'function' ? findThemeEntry(requested) : null;
   if (!entry) {
     _cliAppendLine(`theme: unknown theme '${requested}'`, 'exit-fail', tabId);
     _cliAppendLine("run 'theme list' to see available themes", '', tabId);
@@ -140,7 +255,9 @@ async function handleThemeCommand(cmd, tabId = null) {
     return true;
   }
 
-  applyThemeSelection(entry.name);
+  const applyThemeSelection = (typeof importedApplyThemeSelection !== 'undefined' && importedApplyThemeSelection)
+    || _cliGlobalFunction('applyThemeSelection');
+  if (typeof applyThemeSelection === 'function') applyThemeSelection(entry.name);
   _cliAppendLine(`theme set: ${_cliThemeDescription(entry)}`, '', tabId);
   _cliRecordSuccess(cmd);
   _cliSetStatus('ok');
@@ -176,15 +293,27 @@ function _cliConfigEntries() {
       key: 'line-numbers',
       description: 'Show line numbers beside output and the live prompt',
       values: ['on', 'off'],
-      get: () => (typeof lnMode === 'string' && lnMode === 'on' ? 'on' : 'off'),
-      set: (value) => applyLineNumberPreference(value),
+      get: () => _cliLineNumberMode(),
+      set: (value) => {
+        const applyLineNumberPreference = _cliPreferenceFunction(
+          typeof importedApplyLineNumberPreference !== 'undefined' ? importedApplyLineNumberPreference : null,
+          'applyLineNumberPreference',
+        );
+        return typeof applyLineNumberPreference === 'function' ? applyLineNumberPreference(value) : undefined;
+      },
     },
     {
       key: 'timestamps',
       description: 'Timestamp display mode',
-      values: (Array.isArray(window._tsModes) ? window._tsModes : ['off', 'elapsed', 'clock']).slice(),
-      get: () => ((Array.isArray(window._tsModes) ? window._tsModes : ['off']).includes(tsMode) ? tsMode : 'off'),
-      set: (value) => applyTimestampPreference(value),
+      values: _cliTimestampModes(),
+      get: () => _cliTimestampMode(),
+      set: (value) => {
+        const applyTimestampPreference = _cliPreferenceFunction(
+          typeof importedApplyTimestampPreference !== 'undefined' ? importedApplyTimestampPreference : null,
+          'applyTimestampPreference',
+        );
+        return typeof applyTimestampPreference === 'function' ? applyTimestampPreference(value) : undefined;
+      },
     },
     {
       key: 'welcome',
@@ -194,10 +323,19 @@ function _cliConfigEntries() {
       toStored: { animated: 'animated', static: 'disable_animation', off: 'remove' },
       fromStored: { animated: 'animated', disable_animation: 'static', remove: 'off' },
       get: function getWelcomeCliValue() {
-        return this.fromStored[getWelcomeIntroPreference()] || 'animated';
+        const getWelcomeIntroPreference = _cliPreferenceFunction(
+          typeof importedGetWelcomeIntroPreference !== 'undefined' ? importedGetWelcomeIntroPreference : null,
+          'getWelcomeIntroPreference',
+        );
+        const value = typeof getWelcomeIntroPreference === 'function' ? getWelcomeIntroPreference() : 'animated';
+        return this.fromStored[value] || 'animated';
       },
       set: function setWelcomeCliValue(value) {
-        applyWelcomeIntroPreference(this.toStored[value] || value);
+        const applyWelcomeIntroPreference = _cliPreferenceFunction(
+          typeof importedApplyWelcomeIntroPreference !== 'undefined' ? importedApplyWelcomeIntroPreference : null,
+          'applyWelcomeIntroPreference',
+        );
+        if (typeof applyWelcomeIntroPreference === 'function') applyWelcomeIntroPreference(this.toStored[value] || value);
       },
     },
     {
@@ -208,46 +346,115 @@ function _cliConfigEntries() {
       toStored: { ask: 'unset', redacted: 'redacted', raw: 'raw' },
       fromStored: { unset: 'ask', redacted: 'redacted', raw: 'raw' },
       get: function getShareRedactionCliValue() {
-        return this.fromStored[getShareRedactionDefaultPreference()] || 'ask';
+        const getShareRedactionDefaultPreference = _cliPreferenceFunction(
+          typeof importedGetShareRedactionDefaultPreference !== 'undefined' ? importedGetShareRedactionDefaultPreference : null,
+          'getShareRedactionDefaultPreference',
+        );
+        const value = typeof getShareRedactionDefaultPreference === 'function' ? getShareRedactionDefaultPreference() : 'unset';
+        return this.fromStored[value] || 'ask';
       },
       set: function setShareRedactionCliValue(value) {
-        applyShareRedactionDefaultPreference(this.toStored[value] || value);
+        const applyShareRedactionDefaultPreference = _cliPreferenceFunction(
+          typeof importedApplyShareRedactionDefaultPreference !== 'undefined' ? importedApplyShareRedactionDefaultPreference : null,
+          'applyShareRedactionDefaultPreference',
+        );
+        if (typeof applyShareRedactionDefaultPreference === 'function') applyShareRedactionDefaultPreference(this.toStored[value] || value);
       },
     },
     {
       key: 'project-auto-link-runs',
       description: 'Add completed external command runs to the active project',
       values: ['on', 'off'],
-      get: () => getProjectAutoLinkExternalRunsPreference(),
-      set: (value) => applyProjectAutoLinkExternalRunsPreference(value),
+      get: () => {
+        const getProjectAutoLinkExternalRunsPreference = _cliPreferenceFunction(
+          typeof importedGetProjectAutoLinkExternalRunsPreference !== 'undefined' ? importedGetProjectAutoLinkExternalRunsPreference : null,
+          'getProjectAutoLinkExternalRunsPreference',
+        );
+        return typeof getProjectAutoLinkExternalRunsPreference === 'function' ? getProjectAutoLinkExternalRunsPreference() : 'on';
+      },
+      set: (value) => {
+        const applyProjectAutoLinkExternalRunsPreference = _cliPreferenceFunction(
+          typeof importedApplyProjectAutoLinkExternalRunsPreference !== 'undefined' ? importedApplyProjectAutoLinkExternalRunsPreference : null,
+          'applyProjectAutoLinkExternalRunsPreference',
+        );
+        return typeof applyProjectAutoLinkExternalRunsPreference === 'function' ? applyProjectAutoLinkExternalRunsPreference(value) : undefined;
+      },
     },
     {
       key: 'project-auto-link-run-entities',
       description: 'Add generated Atlas entities when an auto-linked run is added to the active project',
       values: ['on', 'off'],
-      get: () => getProjectAutoLinkRunEntitiesPreference(),
-      set: (value) => applyProjectAutoLinkRunEntitiesPreference(value),
+      get: () => {
+        const getProjectAutoLinkRunEntitiesPreference = _cliPreferenceFunction(
+          typeof importedGetProjectAutoLinkRunEntitiesPreference !== 'undefined' ? importedGetProjectAutoLinkRunEntitiesPreference : null,
+          'getProjectAutoLinkRunEntitiesPreference',
+        );
+        return typeof getProjectAutoLinkRunEntitiesPreference === 'function' ? getProjectAutoLinkRunEntitiesPreference() : 'on';
+      },
+      set: (value) => {
+        const applyProjectAutoLinkRunEntitiesPreference = _cliPreferenceFunction(
+          typeof importedApplyProjectAutoLinkRunEntitiesPreference !== 'undefined' ? importedApplyProjectAutoLinkRunEntitiesPreference : null,
+          'applyProjectAutoLinkRunEntitiesPreference',
+        );
+        return typeof applyProjectAutoLinkRunEntitiesPreference === 'function' ? applyProjectAutoLinkRunEntitiesPreference(value) : undefined;
+      },
     },
     {
       key: 'run-notifications',
       description: 'Desktop notification when a run completes or is killed',
       values: ['on', 'off'],
-      get: () => getRunNotifyPreference(),
-      set: (value) => applyRunNotifyPreference(value),
+      get: () => {
+        const getRunNotifyPreference = _cliPreferenceFunction(
+          typeof importedGetRunNotifyPreference !== 'undefined' ? importedGetRunNotifyPreference : null,
+          'getRunNotifyPreference',
+        );
+        return typeof getRunNotifyPreference === 'function' ? getRunNotifyPreference() : 'off';
+      },
+      set: (value) => {
+        const applyRunNotifyPreference = _cliPreferenceFunction(
+          typeof importedApplyRunNotifyPreference !== 'undefined' ? importedApplyRunNotifyPreference : null,
+          'applyRunNotifyPreference',
+        );
+        return typeof applyRunNotifyPreference === 'function' ? applyRunNotifyPreference(value) : undefined;
+      },
     },
     {
       key: 'command-outcome-summaries',
       description: 'Show short app-generated summaries below completed command output',
       values: ['on', 'off'],
-      get: () => getCommandOutcomeSummariesPreference(),
-      set: (value) => applyCommandOutcomeSummariesPreference(value),
+      get: () => {
+        const getCommandOutcomeSummariesPreference = _cliPreferenceFunction(
+          typeof importedGetCommandOutcomeSummariesPreference !== 'undefined' ? importedGetCommandOutcomeSummariesPreference : null,
+          'getCommandOutcomeSummariesPreference',
+        );
+        return typeof getCommandOutcomeSummariesPreference === 'function' ? getCommandOutcomeSummariesPreference() : 'on';
+      },
+      set: (value) => {
+        const applyCommandOutcomeSummariesPreference = _cliPreferenceFunction(
+          typeof importedApplyCommandOutcomeSummariesPreference !== 'undefined' ? importedApplyCommandOutcomeSummariesPreference : null,
+          'applyCommandOutcomeSummariesPreference',
+        );
+        return typeof applyCommandOutcomeSummariesPreference === 'function' ? applyCommandOutcomeSummariesPreference(value) : undefined;
+      },
     },
     {
       key: 'hud-clock',
       description: 'HUD clock timezone',
       values: hudClockModes.slice(),
-      get: () => getHudClockPreference(),
-      set: (value) => applyHudClockPreference(value),
+      get: () => {
+        const getHudClockPreference = _cliPreferenceFunction(
+          typeof importedGetHudClockPreference !== 'undefined' ? importedGetHudClockPreference : null,
+          'getHudClockPreference',
+        );
+        return typeof getHudClockPreference === 'function' ? getHudClockPreference() : 'utc';
+      },
+      set: (value) => {
+        const applyHudClockPreference = _cliPreferenceFunction(
+          typeof importedApplyHudClockPreference !== 'undefined' ? importedApplyHudClockPreference : null,
+          'applyHudClockPreference',
+        );
+        return typeof applyHudClockPreference === 'function' ? applyHudClockPreference(value) : undefined;
+      },
     },
     {
       key: 'compare-view',
@@ -277,10 +484,19 @@ function _cliConfigEntries() {
         findings_only: 'findings-only',
       },
       get: function getCompareViewCliValue() {
-        return this.fromStored[getCompareViewModePreference()] || 'auto';
+        const getCompareViewModePreference = _cliPreferenceFunction(
+          typeof importedGetCompareViewModePreference !== 'undefined' ? importedGetCompareViewModePreference : null,
+          'getCompareViewModePreference',
+        );
+        const value = typeof getCompareViewModePreference === 'function' ? getCompareViewModePreference() : 'auto';
+        return this.fromStored[value] || 'auto';
       },
       set: function setCompareViewCliValue(value) {
-        applyCompareViewModePreference(this.toStored[value] || value);
+        const applyCompareViewModePreference = _cliPreferenceFunction(
+          typeof importedApplyCompareViewModePreference !== 'undefined' ? importedApplyCompareViewModePreference : null,
+          'applyCompareViewModePreference',
+        );
+        if (typeof applyCompareViewModePreference === 'function') applyCompareViewModePreference(this.toStored[value] || value);
       },
     },
     {
@@ -288,17 +504,41 @@ function _cliConfigEntries() {
       description: 'Default unchanged-line context in run comparison',
       values: ['3', '10', 'all'],
       aliases: { default: '3', minimal: '3', expanded: '10', full: 'all' },
-      get: () => getCompareContextPreference(),
-      set: (value) => applyCompareContextPreference(value),
+      get: () => {
+        const getCompareContextPreference = _cliPreferenceFunction(
+          typeof importedGetCompareContextPreference !== 'undefined' ? importedGetCompareContextPreference : null,
+          'getCompareContextPreference',
+        );
+        return typeof getCompareContextPreference === 'function' ? getCompareContextPreference() : '3';
+      },
+      set: (value) => {
+        const applyCompareContextPreference = _cliPreferenceFunction(
+          typeof importedApplyCompareContextPreference !== 'undefined' ? importedApplyCompareContextPreference : null,
+          'applyCompareContextPreference',
+        );
+        return typeof applyCompareContextPreference === 'function' ? applyCompareContextPreference(value) : undefined;
+      },
     },
     {
       key: 'prompt-username',
       description: 'Username shown before the prompt domain',
       values: null,
       valueHelp: '<username> | default',
-      get: () => getPromptUsernamePreference() || 'default',
+      get: () => {
+        const getPromptUsernamePreference = _cliPreferenceFunction(
+          typeof importedGetPromptUsernamePreference !== 'undefined' ? importedGetPromptUsernamePreference : null,
+          'getPromptUsernamePreference',
+        );
+        return (typeof getPromptUsernamePreference === 'function' ? getPromptUsernamePreference() : '') || 'default';
+      },
       normalize: _cliNormalizePromptUsernameValue,
-      set: (value) => applyPromptUsernamePreference(value),
+      set: (value) => {
+        const applyPromptUsernamePreference = _cliPreferenceFunction(
+          typeof importedApplyPromptUsernamePreference !== 'undefined' ? importedApplyPromptUsernamePreference : null,
+          'applyPromptUsernamePreference',
+        );
+        return typeof applyPromptUsernamePreference === 'function' ? applyPromptUsernamePreference(value) : undefined;
+      },
     },
   ];
 }
@@ -352,7 +592,8 @@ async function handleConfigCommand(cmd, tabId = null) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
   const preserveTail = _cliShouldPreserveOutputTail(tabId);
-  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+  const appendCommandEcho = _cliGlobalFunction('appendCommandEcho');
+  if (appendCommandEcho) appendCommandEcho(cmd, tabId);
 
   if (parts.length === 1 || sub === 'list') {
     _printCliConfigList(tabId);
@@ -404,17 +645,18 @@ async function handleConfigCommand(cmd, tabId = null) {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _cliAppendLine,
-    _cliShouldPreserveOutputTail,
-    _cliPreserveOutputTail,
-    _cliSetStatus,
-    _cliRecordSuccess,
-    _cliThemeSlug,
-    _cliThemeEntries,
-    _cliThemeDescription,
-    _cliConfigEntries,
-    handleThemeCommand,
-    handleConfigCommand,
-  });
 }
+
+export {
+  _cliAppendLine,
+  _cliConfigEntries,
+  _cliPreserveOutputTail,
+  _cliRecordSuccess,
+  _cliSetStatus,
+  _cliShouldPreserveOutputTail,
+  _cliThemeDescription,
+  _cliThemeEntries,
+  _cliThemeSlug,
+  handleConfigCommand,
+  handleThemeCommand,
+};

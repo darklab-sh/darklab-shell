@@ -1,6 +1,70 @@
 // ── Run comparison launcher ──────────────────────────────────────────────
 // Loaded after history.js so it can reuse History drawer state, route helpers,
 // and the result renderer while owning the "choose another run" flow.
+import { showToast as importedShowToast } from '../../core/utils.js';
+import {
+  compareDateGroupLabel as importedCompareDateGroupLabel,
+  compareFormatDate as importedCompareFormatDate,
+} from './history_compare_core.js';
+import {
+  _ensureHistoryCompareOverlay as importedEnsureHistoryCompareOverlay,
+  _openHistoryCompareOverlay as importedOpenHistoryCompareOverlay,
+} from './history_compare_overlay.js';
+import { fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison } from './history_compare_bridge.js';
+import { setHistoryCompareHandlers as importedSetHistoryCompareHandlers } from './history_compare_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from '../../runtime_bridge.js';
+
+const HISTORY_COMPARE_LAUNCHER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyCompareLauncherFormatDate(value) {
+  return typeof importedCompareFormatDate === 'function' ? importedCompareFormatDate(value) : '';
+}
+
+function _historyCompareLauncherDateGroupLabel(value) {
+  return typeof importedCompareDateGroupLabel === 'function' ? importedCompareDateGroupLabel(value) : 'Other';
+}
+
+function _historyCompareLauncherShowToast(message, tone = 'success') {
+  if (typeof importedShowToast === 'function') importedShowToast(message, tone);
+}
+
+function _historyCompareLauncherOpenOverlay() {
+  const open = (typeof importedOpenHistoryCompareOverlay !== 'undefined' && importedOpenHistoryCompareOverlay)
+    || HISTORY_COMPARE_LAUNCHER_GLOBAL._openHistoryCompareOverlay;
+  if (typeof open === 'function') open();
+}
+
+function _historyCompareLauncherEnsureOverlay() {
+  const ensure = (typeof importedEnsureHistoryCompareOverlay !== 'undefined' && importedEnsureHistoryCompareOverlay)
+    || HISTORY_COMPARE_LAUNCHER_GLOBAL._ensureHistoryCompareOverlay;
+  return typeof ensure === 'function' ? ensure() : null;
+}
+
+function _historyCompareLauncherApiFetch() {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || (typeof HISTORY_COMPARE_LAUNCHER_GLOBAL.apiFetch === 'function' ? HISTORY_COMPARE_LAUNCHER_GLOBAL.apiFetch : null);
+  if (!fetcher) throw new Error('apiFetch is not available');
+  return fetcher;
+}
+
+function _historyCompareLauncherFetchAndRender(leftId, rightId, options) {
+  const bridged = typeof importedFetchAndRenderHistoryComparison === 'function'
+    ? importedFetchAndRenderHistoryComparison(leftId, rightId, options)
+    : undefined;
+  if (bridged !== undefined) return bridged;
+  const globalFetchAndRender = HISTORY_COMPARE_LAUNCHER_GLOBAL.fetchAndRenderHistoryComparison;
+  return typeof globalFetchAndRender === 'function'
+    ? globalFetchAndRender(leftId, rightId, options)
+    : undefined;
+}
 
 function _historyCompareRunCard(run, label, extra = '') {
   const card = document.createElement('div');
@@ -16,7 +80,7 @@ function _historyCompareRunCard(run, label, extra = '') {
   const meta = document.createElement('div');
   meta.className = 'history-compare-run-meta';
   const parts = [];
-  if (run && run.started) parts.push(_compareFormatDate(run.started));
+  if (run && run.started) parts.push(_historyCompareLauncherFormatDate(run.started));
   if (run && run.exit_code !== undefined && run.exit_code !== null) parts.push(`exit ${run.exit_code}`);
   if (run && Number.isFinite(Number(run.output_line_count))) parts.push(`${Number(run.output_line_count).toLocaleString()} lines`);
   if (extra) parts.push(extra);
@@ -26,7 +90,8 @@ function _historyCompareRunCard(run, label, extra = '') {
 }
 
 function _renderHistoryCompareLauncher() {
-  const overlay = _ensureHistoryCompareOverlay();
+  const overlay = _historyCompareLauncherEnsureOverlay();
+  if (!overlay) return;
   const body = overlay.querySelector('#history-compare-body');
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
@@ -62,7 +127,7 @@ function _renderHistoryCompareLauncher() {
     primary.type = 'button';
     primary.className = 'btn btn-primary btn-compact history-compare-primary';
     primary.textContent = 'Compare with suggested run';
-    primary.addEventListener('click', () => window.fetchAndRenderHistoryComparison(source.id, suggested.id));
+    primary.addEventListener('click', () => _historyCompareLauncherFetchAndRender(source.id, suggested.id));
     suggestedWrap.appendChild(primary);
   } else {
     const empty = document.createElement('div');
@@ -130,7 +195,7 @@ function _fetchHistoryCompareManualCandidates(source, query = '', { requestId = 
     params.set('q', trimmed);
   }
   else if (source && source.command_root) params.set('command_root', source.command_root);
-  apiFetch(`/history?${params.toString()}`)
+  _historyCompareLauncherApiFetch()(`/history?${params.toString()}`)
     .then(resp => resp.json())
     .then(data => {
       if (window._historyCompareState.manualRequestId !== activeRequestId) return;
@@ -158,7 +223,7 @@ function _fetchHistoryCompareManualCandidates(source, query = '', { requestId = 
         window._historyCompareState.manualLoading = false;
         _renderHistoryCompareCandidateList();
       }
-      showToast('Failed to load comparison choices', 'error');
+      _historyCompareLauncherShowToast('Failed to load comparison choices', 'error');
     });
 }
 
@@ -187,7 +252,7 @@ function _renderHistoryCompareCandidateList() {
   const groups = [];
   const groupByLabel = new Map();
   candidates.forEach(candidate => {
-    const groupLabel = _compareDateGroupLabel(candidate.started || candidate.created);
+    const groupLabel = _historyCompareLauncherDateGroupLabel(candidate.started || candidate.created);
     let group = groupByLabel.get(groupLabel);
     if (!group) {
       group = { label: groupLabel, items: [] };
@@ -238,11 +303,11 @@ function _renderHistoryCompareCandidateList() {
       meta.className = 'history-entry-meta history-compare-candidate-meta';
       meta.textContent = [
         candidate.confidence_label || '',
-        candidate.started ? _compareFormatDate(candidate.started) : '',
+        candidate.started ? _historyCompareLauncherFormatDate(candidate.started) : '',
         candidate.exit_code !== undefined && candidate.exit_code !== null ? `exit ${candidate.exit_code}` : '',
       ].filter(Boolean).join(' · ');
       row.appendChild(meta);
-      row.addEventListener('click', () => window.fetchAndRenderHistoryComparison(source.id, candidate.id));
+      row.addEventListener('click', () => _historyCompareLauncherFetchAndRender(source.id, candidate.id));
       rows.appendChild(row);
     });
     headerBtn.addEventListener('click', () => {
@@ -277,23 +342,7 @@ function _renderHistoryCompareCandidateList() {
 
 function openHistoryCompareLauncher(run) {
   if (!run || !run.id) return;
-  window._historyCompareState = {
-    source: {
-      ...run,
-      command_root: (run.command || '').trim().split(/\s+/, 1)[0] || '',
-    },
-    candidates: [],
-    manualCandidates: [],
-    manualLoaded: false,
-    manualRequestId: 0,
-    manualPage: 1,
-    manualHasNext: false,
-    manualLoading: false,
-    manualCollapsedGroups: new Set(),
-    selected: null,
-    manualQuery: '',
-  };
-  _openHistoryCompareOverlay();
+  _historyCompareLauncherOpenOverlay();
   const body = document.querySelector('#history-compare-body');
   if (body) {
     body.replaceChildren();
@@ -302,7 +351,7 @@ function openHistoryCompareLauncher(run) {
     loading.textContent = 'Finding comparable runs...';
     body.appendChild(loading);
   }
-  apiFetch(`/history/${encodeURIComponent(run.id)}/compare-candidates`)
+  _historyCompareLauncherApiFetch()(`/history/${encodeURIComponent(run.id)}/compare-candidates`)
     .then(resp => resp.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
@@ -316,13 +365,19 @@ function openHistoryCompareLauncher(run) {
       window._historyCompareState.candidates = [];
       window._historyCompareState.selected = null;
       _renderHistoryCompareLauncher();
-      showToast('Failed to load comparison choices', 'error');
+      _historyCompareLauncherShowToast('Failed to load comparison choices', 'error');
     });
 }
 
-window._historyCompareRunCard = _historyCompareRunCard;
-window._renderHistoryCompareLauncher = _renderHistoryCompareLauncher;
-window._loadHistoryCompareManualCandidates = _loadHistoryCompareManualCandidates;
-window._fetchHistoryCompareManualCandidates = _fetchHistoryCompareManualCandidates;
-window._renderHistoryCompareCandidateList = _renderHistoryCompareCandidateList;
-window.openHistoryCompareLauncher = openHistoryCompareLauncher;
+if (typeof importedSetHistoryCompareHandlers === 'function') {
+  importedSetHistoryCompareHandlers({ openHistoryCompareLauncher });
+}
+
+export {
+  _fetchHistoryCompareManualCandidates,
+  _historyCompareRunCard,
+  _loadHistoryCompareManualCandidates,
+  _renderHistoryCompareCandidateList,
+  _renderHistoryCompareLauncher,
+  openHistoryCompareLauncher,
+};

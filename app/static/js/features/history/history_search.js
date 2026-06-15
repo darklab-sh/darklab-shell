@@ -1,5 +1,20 @@
 // darklab_shell history search module.
 // Ctrl+R reverse-history search for the command composer.
+import { acHide as importedAcHide } from '../../autocomplete.js';
+import {
+  cmdInput as importedCmdInput,
+  histSearchDropdown as importedHistSearchDropdown,
+  shellPromptWrap as importedShellPromptWrap,
+} from '../../core/dom.js';
+import { getAppState as importedGetAppState } from '../../core/state.js';
+import {
+  getComposerValue as importedGetComposerValue,
+  setComposerValue as importedSetComposerValue,
+} from '../../ui/ui_helpers.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from '../../runtime_bridge.js';
 
 let _histSearchMode = false;
 let _histSearchQuery = '';
@@ -7,6 +22,66 @@ let _histSearchIndex = -1;
 let _histSearchPreDraft = '';
 let _histSearchRuns = null;     // null = not yet fetched; string[] = ready
 let _histSearchFetchTimer = null;
+
+const HISTORY_SEARCH_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historySearchApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || (typeof HISTORY_SEARCH_GLOBAL.apiFetch === 'function' ? HISTORY_SEARCH_GLOBAL.apiFetch : null);
+  return typeof fetcher === 'function' ? fetcher(...args) : Promise.reject(new Error('apiFetch unavailable'));
+}
+
+function _historySearchCmdHistory() {
+  const state = typeof importedGetAppState === 'function'
+    ? importedGetAppState()
+    : (typeof HISTORY_SEARCH_GLOBAL.APP_STATE_API?.getState === 'function'
+        ? HISTORY_SEARCH_GLOBAL.APP_STATE_API.getState()
+        : HISTORY_SEARCH_GLOBAL.APP_STATE || null);
+  if (state && Array.isArray(state.cmdHistory)) return state.cmdHistory;
+  return [];
+}
+
+function _historySearchCmdInput() {
+  return (typeof importedCmdInput !== 'undefined' && importedCmdInput)
+    || HISTORY_SEARCH_GLOBAL.cmdInput
+    || null;
+}
+
+function _historySearchDropdown() {
+  return (typeof importedHistSearchDropdown !== 'undefined' && importedHistSearchDropdown)
+    || HISTORY_SEARCH_GLOBAL.histSearchDropdown
+    || null;
+}
+
+function _historySearchPromptWrap() {
+  return (typeof importedShellPromptWrap !== 'undefined' && importedShellPromptWrap)
+    || HISTORY_SEARCH_GLOBAL.shellPromptWrap
+    || null;
+}
+
+function _historySearchGetComposerValue() {
+  const getter = (typeof importedGetComposerValue !== 'undefined' && importedGetComposerValue)
+    || HISTORY_SEARCH_GLOBAL.getComposerValue;
+  const input = _historySearchCmdInput();
+  return typeof getter === 'function' ? getter() : (input ? input.value : '');
+}
+
+function _historySearchSetComposerValue(...args) {
+  const setter = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue)
+    || HISTORY_SEARCH_GLOBAL.setComposerValue;
+  if (typeof setter === 'function') setter(...args);
+}
+
+function _historySearchHideAutocomplete() {
+  const hide = (typeof importedAcHide !== 'undefined' && importedAcHide)
+    || HISTORY_SEARCH_GLOBAL.acHide;
+  if (typeof hide === 'function') hide();
+}
 
 function isHistSearchMode() { return _histSearchMode; }
 
@@ -19,7 +94,7 @@ function _histSearchMatches() {
   // list with older runs beyond the recents cap; both lists are re-filtered
   // against the current query to guard against race conditions.
   const q = String(_histSearchQuery || '').toLowerCase();
-  const fromClient = cmdHistory.filter(c => c.toLowerCase().includes(q));
+  const fromClient = _historySearchCmdHistory().filter(c => c.toLowerCase().includes(q));
   const seen = new Set();
   const merged = [];
   for (const cmd of fromClient) {
@@ -46,7 +121,7 @@ function _histSearchFetch(q) {
   const params = new URLSearchParams({ type: 'runs', scope: 'command' });
   if (query) params.set('q', query);
   const url = `/history?${params.toString()}`;
-  apiFetch(url).then(r => r.json()).then(data => {
+  _historySearchApiFetch(url).then(r => r.json()).then(data => {
     if (!_histSearchMode) return;
     _histSearchRuns = Array.isArray(data.runs)
       ? [...new Set(data.runs.map(r => r.command))]
@@ -59,7 +134,8 @@ function _histSearchFetch(q) {
 }
 
 function _hideHistSearchDropdown() {
-  if (histSearchDropdown) histSearchDropdown.classList.add('u-hidden');
+  const dropdown = _historySearchDropdown();
+  if (dropdown) dropdown.classList.add('u-hidden');
 }
 
 function _moveHistSearchSelection(delta) {
@@ -77,9 +153,11 @@ function _moveHistSearchSelection(delta) {
 function _renderHistSearch() {
   // Reverse-i-search intentionally mirrors shell behavior: current query at the
   // top, most relevant match preselected, and wraparound keyboard navigation.
-  if (!histSearchDropdown) return;
+  const dropdown = _historySearchDropdown();
+  const promptWrap = _historySearchPromptWrap();
+  if (!dropdown) return;
   const matches = _histSearchMatches();
-  histSearchDropdown.replaceChildren();
+  dropdown.replaceChildren();
 
   const header = document.createElement('div');
   header.className = 'hist-search-header';
@@ -91,13 +169,13 @@ function _renderHistSearch() {
   querySpan.textContent = _histSearchQuery || '';
   header.appendChild(label);
   header.appendChild(querySpan);
-  histSearchDropdown.appendChild(header);
+  dropdown.appendChild(header);
 
   if (!matches.length) {
     const empty = document.createElement('div');
     empty.className = 'hist-search-empty';
     empty.textContent = '(no matches)';
-    histSearchDropdown.appendChild(empty);
+    dropdown.appendChild(empty);
   } else {
     matches.forEach((cmd, i) => {
       const item = document.createElement('div');
@@ -124,21 +202,21 @@ function _renderHistSearch() {
         _histSearchIndex = i;
         exitHistSearch(true);
       });
-      histSearchDropdown.appendChild(item);
+      dropdown.appendChild(item);
     });
   }
 
   // Flip above/below based on available space, mirroring the ac-dropdown so
   // the list stays on-screen when the prompt is near the top of the viewport.
-  histSearchDropdown.classList.remove('u-hidden');
-  if (shellPromptWrap) {
-    const rect = shellPromptWrap.getBoundingClientRect();
-    histSearchDropdown.style.position = 'fixed';
-    histSearchDropdown.style.left = rect.left + 'px';
-    histSearchDropdown.style.width = rect.width + 'px';
-    histSearchDropdown.style.bottom = 'auto';
-    histSearchDropdown.style.maxHeight = '';
-    const desired = histSearchDropdown.offsetHeight;
+  dropdown.classList.remove('u-hidden');
+  if (promptWrap) {
+    const rect = promptWrap.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
+    dropdown.style.bottom = 'auto';
+    dropdown.style.maxHeight = '';
+    const desired = dropdown.offsetHeight;
     const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 8);
     const spaceAbove = Math.max(0, rect.top - 8);
     const safetyPad = 20;
@@ -149,8 +227,8 @@ function _renderHistSearch() {
     const edgeBuffer = showAbove ? 20 : 30;
     const maxHeight = Math.max(0, available > edgeBuffer ? available - edgeBuffer : available);
     const visibleHeight = Math.max(0, Math.min(desired, maxHeight || desired));
-    histSearchDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
-    histSearchDropdown.style.top = showAbove
+    dropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    dropdown.style.top = showAbove
       ? `${Math.max(8, Math.round(rect.top - visibleHeight - 4))}px`
       : `${Math.max(8, Math.round(rect.bottom + 4))}px`;
   }
@@ -165,13 +243,11 @@ function enterHistSearch() {
   _histSearchMode = true;
   _histSearchQuery = '';
   _histSearchIndex = -1;
-  _histSearchPreDraft = (typeof getComposerValue === 'function') ? getComposerValue() : (cmdInput ? cmdInput.value : '');
+  _histSearchPreDraft = _historySearchGetComposerValue();
   // Clear the input so the user types a fresh query rather than appending to the draft.
   // The draft is preserved in _histSearchPreDraft and restored on Escape / Ctrl+G.
-  if (typeof setComposerValue === 'function') {
-    setComposerValue('', 0, 0, { dispatch: false });
-  }
-  if (typeof acHide === 'function') acHide();
+  _historySearchSetComposerValue('', 0, 0, { dispatch: false });
+  _historySearchHideAutocomplete();
 
   _histSearchRuns = null;
   _renderHistSearch();
@@ -184,20 +260,16 @@ function exitHistSearch(accept, { keepCurrent = false } = {}) {
   if (accept) {
     const matches = _histSearchMatches();
     const chosen = _histSearchIndex >= 0 ? matches[_histSearchIndex] : (matches[0] || _histSearchPreDraft);
-    if (typeof setComposerValue === 'function') {
-      setComposerValue(chosen, chosen.length, chosen.length);
-    }
+    _historySearchSetComposerValue(chosen, chosen.length, chosen.length);
   } else if (!keepCurrent) {
-    if (typeof setComposerValue === 'function') {
-      setComposerValue(_histSearchPreDraft, _histSearchPreDraft.length, _histSearchPreDraft.length);
-    }
+    _historySearchSetComposerValue(_histSearchPreDraft, _histSearchPreDraft.length, _histSearchPreDraft.length);
   }
   _histSearchQuery = '';
   _histSearchIndex = -1;
   _histSearchPreDraft = '';
   _histSearchRuns = null;
   if (_histSearchFetchTimer) { clearTimeout(_histSearchFetchTimer); _histSearchFetchTimer = null; }
-  if (typeof acHide === 'function') acHide();
+  _historySearchHideAutocomplete();
 }
 
 function handleHistSearchInput(value) {
@@ -274,11 +346,12 @@ function handleHistSearchKey(e) {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    isHistSearchMode,
-    enterHistSearch,
-    exitHistSearch,
-    handleHistSearchInput,
-    handleHistSearchKey,
-  });
 }
+
+export {
+  enterHistSearch,
+  exitHistSearch,
+  handleHistSearchInput,
+  handleHistSearchKey,
+  isHistSearchMode,
+};

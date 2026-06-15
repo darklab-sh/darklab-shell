@@ -1,21 +1,177 @@
 // darklab_shell session preference helpers and Options modal preference syncing.
 
-const PreferenceCore = window.DarklabPreferenceCore;
+import { DarklabPreferenceCore as importedPreferenceCore } from '../../core/app_preferences_core.js';
+import { APP_CONFIG as importedAppConfig } from '../../core/config.js';
+import {
+  optionsCommandOutcomeSummariesToggle,
+  optionsCompareContextSelect,
+  optionsCompareViewModeSelect,
+  optionsHudClockSelect,
+  optionsLnToggle,
+  optionsNotifyToggle,
+  optionsProjectAutoLinkExternalRunsToggle,
+  optionsProjectAutoLinkRunEntitiesToggle,
+  optionsPromptUsernameError,
+  optionsPromptUsernameInput,
+  optionsShareRedactionSelect,
+  optionsTsSelect,
+  optionsWelcomeSelect,
+} from '../../core/dom.js';
+import {
+  _defaultThemeEntry as importedDefaultThemeEntry,
+  _savedThemeName as importedSavedThemeName,
+  applyThemeSelection as importedApplyThemeSelection,
+} from '../theme/theme.js';
+import {
+  _setLnMode as importedSetLineNumberMode,
+  _setTsMode as importedSetTimestampMode,
+  getLineNumberMode,
+  getTimestampMode,
+  refreshCommandOutcomeSummaries as importedRefreshCommandOutcomeSummaries,
+} from '../../output.js';
+import {
+  apiFetch as importedApiFetch,
+  logClientError as importedLogClientError,
+} from '../../runtime_bridge.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
+import { getActiveProjectContext as importedGetActiveProjectContext } from '../projects/project_context_bridge.js';
+import {
+  getComposerPromptMode as importedGetComposerPromptMode,
+  hidePromptUsernameSavedIndicator as importedHidePromptUsernameSavedIndicator,
+  setComposerPromptMode as importedSetComposerPromptMode,
+  showPromptUsernameSavedIndicator as importedShowPromptUsernameSavedIndicator,
+  syncShellPrompt as importedSyncShellPrompt,
+} from '../terminal/composer_prompt_bridge.js';
+import { renderHudClock as importedRenderHudClock } from '../projects/project_hud_bridge.js';
+
+const PreferenceCore = typeof importedPreferenceCore !== 'undefined' && importedPreferenceCore
+  ? importedPreferenceCore
+  : null;
+const PREFERENCE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 const _welcomeIntroModes = PreferenceCore.WELCOME_INTRO_MODES;
 const _shareRedactionDefaultModes = PreferenceCore.SHARE_REDACTION_DEFAULT_MODES;
 const _hudClockModes = PreferenceCore.HUD_CLOCK_MODES;
 function _timestampModes() {
-  return Array.isArray(window._tsModes) ? window._tsModes : ['off', 'elapsed', 'clock'];
+  return Array.isArray(PREFERENCE_GLOBAL?._tsModes) ? PREFERENCE_GLOBAL._tsModes : ['off', 'elapsed', 'clock'];
+}
+
+function _preferenceGlobalFunction(name) {
+  const fn = PREFERENCE_GLOBAL?.[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _preferenceAppConfig() {
+  return (typeof importedAppConfig !== 'undefined' && importedAppConfig)
+    || PREFERENCE_GLOBAL?.APP_CONFIG
+    || {};
+}
+
+function _preferenceDefaultThemeEntry() {
+  const defaultThemeEntry = (typeof importedDefaultThemeEntry !== 'undefined' && importedDefaultThemeEntry)
+    || _preferenceGlobalFunction('_defaultThemeEntry');
+  return typeof defaultThemeEntry === 'function' ? defaultThemeEntry() : null;
+}
+
+function _preferenceSavedThemeName() {
+  const savedThemeName = (typeof importedSavedThemeName !== 'undefined' && importedSavedThemeName)
+    || _preferenceGlobalFunction('_savedThemeName');
+  return typeof savedThemeName === 'function' ? savedThemeName() : '';
+}
+
+function _preferenceSessionId() {
+  return typeof PREFERENCE_GLOBAL?.SESSION_ID === 'string' ? PREFERENCE_GLOBAL.SESSION_ID : '';
+}
+
+function _preferenceApiFetch(...args) {
+  const fetcher = (typeof importedApiFetch === 'function' && importedApiFetch)
+    || _preferenceGlobalFunction('apiFetch');
+  if (!fetcher) throw new Error('apiFetch is not available');
+  return fetcher(...args);
+}
+
+function _preferenceLogClientError(message, err) {
+  const log = (typeof importedLogClientError === 'function' && importedLogClientError)
+    || _preferenceGlobalFunction('logClientError');
+  if (log) log(message, err);
+}
+
+function _preferenceShowToast(message) {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || _preferenceGlobalFunction('showToast');
+  if (toast) toast(message);
+}
+
+function _preferenceSyncAppSelect(select) {
+  const sync = (typeof importedSyncAppSelect !== 'undefined' && importedSyncAppSelect)
+    || _preferenceGlobalFunction('syncAppSelect');
+  if (sync) sync(select);
+}
+
+function _preferenceComposerPromptMode() {
+  const readMode = (typeof importedGetComposerPromptMode === 'function' && importedGetComposerPromptMode)
+    || _preferenceGlobalFunction('getComposerPromptMode');
+  return typeof readMode === 'function' ? readMode() : null;
+}
+
+function _preferenceHidePromptUsernameSavedIndicator() {
+  const hide = (typeof importedHidePromptUsernameSavedIndicator === 'function' && importedHidePromptUsernameSavedIndicator)
+    || _preferenceGlobalFunction('hidePromptUsernameSavedIndicator');
+  if (typeof hide === 'function') hide();
+}
+
+function _preferenceShowPromptUsernameSavedIndicator() {
+  const show = (typeof importedShowPromptUsernameSavedIndicator === 'function' && importedShowPromptUsernameSavedIndicator)
+    || _preferenceGlobalFunction('showPromptUsernameSavedIndicator');
+  if (typeof show === 'function') show();
+}
+
+function _preferenceSetComposerPromptMode(mode) {
+  const setMode = (typeof importedSetComposerPromptMode === 'function' && importedSetComposerPromptMode)
+    || _preferenceGlobalFunction('setComposerPromptMode');
+  if (typeof setMode === 'function') {
+    setMode(mode);
+    return true;
+  }
+  return false;
+}
+
+function _preferenceSyncShellPrompt() {
+  const sync = (typeof importedSyncShellPrompt === 'function' && importedSyncShellPrompt)
+    || _preferenceGlobalFunction('syncShellPrompt');
+  if (typeof sync === 'function') sync();
+}
+
+function _preferenceTimestampMode() {
+  const readTimestampMode = _preferenceGlobalFunction('getTimestampMode')
+    || (typeof getTimestampMode === 'function' ? getTimestampMode : null);
+  let mode = readTimestampMode
+    ? readTimestampMode()
+    : (typeof PREFERENCE_GLOBAL?.tsMode === 'string' ? PREFERENCE_GLOBAL.tsMode : 'off');
+  if (!_timestampModes().includes(mode) && typeof document !== 'undefined') {
+    if (document.body.classList.contains('ts-elapsed')) mode = 'elapsed';
+    else if (document.body.classList.contains('ts-clock')) mode = 'clock';
+  }
+  if (mode === 'off' && typeof document !== 'undefined') {
+    if (document.body.classList.contains('ts-elapsed')) mode = 'elapsed';
+    else if (document.body.classList.contains('ts-clock')) mode = 'clock';
+  }
+  return _timestampModes().includes(mode) ? mode : 'off';
+}
+
+function _preferenceLineNumberMode() {
+  const mode = typeof getLineNumberMode === 'function'
+    ? getLineNumberMode()
+    : (typeof PREFERENCE_GLOBAL?.lnMode === 'string' ? PREFERENCE_GLOBAL.lnMode : 'off');
+  return mode === 'on' ? 'on' : 'off';
 }
 
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const _sessionPreferenceKeys = PreferenceCore.SESSION_PREFERENCE_KEYS;
-let _sessionPreferenceOverrides = null;
-let _sessionPreferencePersistQueue = Promise.resolve();
-if (typeof window !== 'undefined') {
-  window.__sessionPreferencesLoadState = 'idle';
-}
-
+var _sessionPreferenceOverrides = null;
+var _sessionPreferencePersistQueue = Promise.resolve();
+let _sessionPreferenceLocalRevision = 0;
+let _tourOpenedRecordedThisSession = false;
 function getPreferenceCookie(name) {
   const prefix = `${name}=`;
   return document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix))
@@ -27,6 +183,7 @@ function setPreferenceCookie(name, value) {
 }
 
 function _primePreferenceValue(name, value) {
+  _sessionPreferenceLocalRevision += 1;
   setPreferenceCookie(name, value);
   if (_sessionPreferenceOverrides && Object.prototype.hasOwnProperty.call(_sessionPreferenceOverrides, name)) {
     _sessionPreferenceOverrides[name] = value;
@@ -42,7 +199,9 @@ function getPreference(name) {
 }
 
 function _defaultSessionPreferences() {
-  const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
+  const defaultTheme = _preferenceDefaultThemeEntry()?.name
+    || _preferenceAppConfig().default_theme
+    || 'darklab_obsidian.yaml';
   return PreferenceCore.defaultSessionPreferences(defaultTheme);
 }
 
@@ -52,11 +211,11 @@ function _normalizeSessionPreferences(raw) {
   });
 }
 
-function _sessionPreferenceCacheKey(sessionId = SESSION_ID) {
+function _sessionPreferenceCacheKey(sessionId = _preferenceSessionId()) {
   return PreferenceCore.sessionPreferenceCacheKey(sessionId);
 }
 
-function _readCachedSessionPreferences(sessionId = SESSION_ID) {
+function _readCachedSessionPreferences(sessionId = _preferenceSessionId()) {
   try {
     const raw = localStorage.getItem(_sessionPreferenceCacheKey(sessionId));
     if (!raw) return null;
@@ -66,7 +225,7 @@ function _readCachedSessionPreferences(sessionId = SESSION_ID) {
   }
 }
 
-function _cacheSessionPreferences(prefs, sessionId = SESSION_ID) {
+function _cacheSessionPreferences(prefs, sessionId = _preferenceSessionId()) {
   try {
     localStorage.setItem(_sessionPreferenceCacheKey(sessionId), JSON.stringify(prefs));
   } catch (_) {}
@@ -84,14 +243,16 @@ function _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage = t
 }
 
 function _buildCurrentSessionPreferenceSnapshot() {
-  const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
+  const defaultTheme = _preferenceDefaultThemeEntry()?.name
+    || _preferenceAppConfig().default_theme
+    || 'darklab_obsidian.yaml';
   const currentThemeName = (document.body && document.body.dataset && document.body.dataset.theme)
-    || _savedThemeName()
+    || _preferenceSavedThemeName()
     || defaultTheme;
   const rawPrefs = {
     pref_theme_name: currentThemeName,
-    pref_timestamps: typeof tsMode === 'string' ? tsMode : 'off',
-    pref_line_numbers: typeof lnMode === 'string' ? lnMode : 'off',
+    pref_timestamps: _preferenceTimestampMode(),
+    pref_line_numbers: _preferenceLineNumberMode(),
     pref_welcome_intro: getWelcomeIntroPreference(),
     pref_share_redaction_default: getShareRedactionDefaultPreference(),
     pref_project_auto_link_external_runs: getProjectAutoLinkExternalRunsPreference(),
@@ -106,16 +267,25 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_tour_seen_version: getTourSeenVersionPreference(),
     pref_constellation_full_day: getConstellationFullDayPreference(),
   };
-  const activeProject = typeof globalThis.getActiveProjectContext === 'function'
-    ? globalThis.getActiveProjectContext()
+  const activeProject = typeof importedGetActiveProjectContext === 'function'
+    ? importedGetActiveProjectContext()
     : null;
   const activeProjectId = activeProject && activeProject.id ? String(activeProject.id) : getPreference('pref_active_project_id');
   if (/^prj_[0-9a-f]{16}$/.test(activeProjectId)) rawPrefs.pref_active_project_id = activeProjectId;
   return _normalizeSessionPreferences(rawPrefs);
 }
 
+function _buildCookieSessionPreferenceSnapshot() {
+  const rawPrefs = {};
+  _sessionPreferenceKeys.forEach((key) => {
+    const value = getPreferenceCookie(key);
+    if (value) rawPrefs[key] = decodeURIComponent(value);
+  });
+  return _normalizeSessionPreferences(rawPrefs);
+}
+
 async function _sendSessionPreferenceSnapshot(prefs) {
-  const resp = await apiFetch('/session/preferences', {
+  const resp = await _preferenceApiFetch('/session/preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ preferences: prefs }),
@@ -144,18 +314,18 @@ function _persistCurrentSessionPreferences() {
 }
 
 async function loadSessionPreferences() {
+  const loadStartedAtRevision = _sessionPreferenceLocalRevision;
   if (typeof window !== 'undefined') {
-    window.__sessionPreferencesLoadState = 'pending';
   }
   try {
-    const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
+    const sessionId = _preferenceSessionId().trim();
     const defaults = _defaultSessionPreferences();
     const localFallback = sessionId && !sessionId.startsWith('tok_')
-      ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
+      ? _buildCookieSessionPreferenceSnapshot()
       : null;
     let prefs = null;
     try {
-      const resp = await apiFetch('/session/preferences');
+      const resp = await _preferenceApiFetch('/session/preferences');
       if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const remote = _normalizeSessionPreferences(data && data.preferences);
@@ -163,11 +333,17 @@ async function loadSessionPreferences() {
         prefs = remote;
       }
     } catch (err) {
-      logClientError('failed to load /session/preferences', err);
+      _preferenceLogClientError('failed to load /session/preferences', err);
     }
     if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
     if (!prefs) prefs = localFallback;
     if (!prefs) prefs = defaults;
+    if (_sessionPreferenceLocalRevision !== loadStartedAtRevision) {
+      prefs = {
+        ...prefs,
+        ..._buildCurrentSessionPreferenceSnapshot(),
+      };
+    }
     _sessionPreferenceOverrides = prefs;
     _writePreferenceSnapshotToStorage(prefs);
     _cacheSessionPreferences(prefs, sessionId);
@@ -182,14 +358,11 @@ async function loadSessionPreferences() {
     applyCompareContextPreference(prefs.pref_compare_context, false);
     applyCommandOutcomeSummariesPreference(prefs.pref_command_outcome_summaries, false);
     applyConstellationFullDayPreference(prefs.pref_constellation_full_day, false);
-    if (typeof applyRunNotifyPreference === 'function') {
-      await applyRunNotifyPreference(prefs.pref_run_notify, false);
-    }
+    await applyRunNotifyPreference(prefs.pref_run_notify, false);
     syncOptionsControls();
     return prefs;
   } finally {
     if (typeof window !== 'undefined') {
-      window.__sessionPreferencesLoadState = 'settled';
     }
   }
 }
@@ -272,14 +445,13 @@ function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   }
   _primePreferenceValue('pref_options_modal_last_tab', nextTab);
   if (persist) {
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist options tab preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist options tab preference', err); }
   }
-  if (nextTab === 'notifications' && typeof refreshNotificationChannels === 'function') {
-    void refreshNotificationChannels();
+  const refreshNotifications = _preferenceGlobalFunction('refreshNotificationChannels');
+  if (nextTab === 'notifications' && refreshNotifications) {
+    void refreshNotifications();
   }
-  const refreshTeams = typeof refreshOptionsTeams === 'function'
-    ? refreshOptionsTeams
-    : (typeof window !== 'undefined' && typeof window.refreshOptionsTeams === 'function' ? window.refreshOptionsTeams : null);
+  const refreshTeams = _preferenceGlobalFunction('refreshOptionsTeams');
   if (nextTab === 'teams' && refreshTeams) {
     void refreshTeams();
   }
@@ -303,7 +475,7 @@ function syncOptionsTabFromPreference() {
 }
 
 async function recordTourOpened() {
-  const resp = await apiFetch('/session/tour-seen', {
+  const resp = await _preferenceApiFetch('/session/tour-seen', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
@@ -325,13 +497,13 @@ async function recordTourOpened() {
 }
 
 async function _recordTourOpenedOnceThisSession() {
-  if (window._tourOpenedRecordedThisSession) return true;
+  if (_tourOpenedRecordedThisSession) return true;
   try {
     await recordTourOpened();
-    window._tourOpenedRecordedThisSession = true;
+    _tourOpenedRecordedThisSession = true;
     return true;
   } catch (err) {
-    if (typeof logClientError === 'function') logClientError('failed to record tour open', err);
+    _preferenceLogClientError('failed to record tour open', err);
     return false;
   }
 }
@@ -358,7 +530,7 @@ async function applyRunNotifyPreference(mode, persist = true) {
       nextMode = 'off';
     } else if (Notification.permission === 'denied') {
       nextMode = 'off';
-      showToast('Notifications are blocked in your browser settings.');
+      _preferenceShowToast('Notifications are blocked in your browser settings.');
     } else if (Notification.permission !== 'granted') {
       const result = await Notification.requestPermission();
       if (result !== 'granted') nextMode = 'off';
@@ -366,7 +538,7 @@ async function applyRunNotifyPreference(mode, persist = true) {
   }
   if (persist) {
     _primePreferenceValue('pref_run_notify', nextMode);
-    try { await _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist run notify preference', err); }
+    try { await _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist run notify preference', err); }
   } else {
     _primePreferenceValue('pref_run_notify', nextMode);
   }
@@ -377,20 +549,20 @@ function applyHudClockPreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceHudClockMode(mode);
   if (persist) {
     _primePreferenceValue('pref_hud_clock', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist HUD clock preference', err); }
   } else {
     _primePreferenceValue('pref_hud_clock', nextMode);
   }
   syncOptionsControls();
-  if (typeof globalThis.renderHudClock === 'function') globalThis.renderHudClock();
+  if (typeof importedRenderHudClock === 'function') importedRenderHudClock();
 }
 
 function syncOptionsControls() {
   syncOptionsTabFromPreference();
   const tsSelect = optionsTsSelect;
-  if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
+  if (tsSelect) tsSelect.value = _preferenceTimestampMode();
   const lnToggle = optionsLnToggle;
-  if (lnToggle) lnToggle.checked = typeof lnMode === 'string' && lnMode === 'on';
+  if (lnToggle) lnToggle.checked = _preferenceLineNumberMode() === 'on';
   if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
@@ -409,40 +581,47 @@ function syncOptionsControls() {
   if (optionsCompareContextSelect) optionsCompareContextSelect.value = getCompareContextPreference();
   if (optionsPromptUsernameInput) {
     optionsPromptUsernameInput.value = getPromptUsernamePreference();
-    const defaultUsername = String(APP_CONFIG?.prompt_username || 'anon').trim() || 'anon';
+    const defaultUsername = String(_preferenceAppConfig().prompt_username || 'anon').trim() || 'anon';
     optionsPromptUsernameInput.placeholder = `Use server default (${defaultUsername})`;
     syncPromptUsernameValidation();
   }
-  if (typeof syncAppSelect === 'function') {
-    syncAppSelect(optionsTsSelect);
-    syncAppSelect(optionsWelcomeSelect);
-    syncAppSelect(optionsShareRedactionSelect);
-    syncAppSelect(optionsHudClockSelect);
-    syncAppSelect(optionsCompareViewModeSelect);
-    syncAppSelect(optionsCompareContextSelect);
-  }
+  _preferenceSyncAppSelect(optionsTsSelect);
+  _preferenceSyncAppSelect(optionsWelcomeSelect);
+  _preferenceSyncAppSelect(optionsShareRedactionSelect);
+  _preferenceSyncAppSelect(optionsHudClockSelect);
+  _preferenceSyncAppSelect(optionsCompareViewModeSelect);
+  _preferenceSyncAppSelect(optionsCompareContextSelect);
 }
 
 function applyThemePreference(theme, persist = true) {
-  applyThemeSelection(theme, persist);
+  const applyThemeSelection = (typeof importedApplyThemeSelection !== 'undefined' && importedApplyThemeSelection)
+    || _preferenceGlobalFunction('applyThemeSelection');
+  if (applyThemeSelection) applyThemeSelection(theme, persist);
 }
 
 function applyTimestampPreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceTimestampMode(mode, _timestampModes());
-  window._setTsMode(nextMode);
+  const setTimestampMode = (typeof importedSetTimestampMode !== 'undefined' && importedSetTimestampMode)
+    || _preferenceGlobalFunction('_setTsMode');
+  const applied = setTimestampMode ? setTimestampMode(nextMode) : false;
+  if (applied === false) {
+    _preferenceGlobalFunction('_setTsMode')?.(nextMode);
+  }
   if (persist) {
     _primePreferenceValue('pref_timestamps', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist timestamp preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist timestamp preference', err); }
   }
   syncOptionsControls();
 }
 
 function applyLineNumberPreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceLineNumberMode(mode);
-  _setLnMode(nextMode);
+  const setLineNumberMode = (typeof importedSetLineNumberMode !== 'undefined' && importedSetLineNumberMode)
+    || _preferenceGlobalFunction('_setLnMode');
+  if (setLineNumberMode) setLineNumberMode(nextMode);
   if (persist) {
     _primePreferenceValue('pref_line_numbers', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist line-number preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist line-number preference', err); }
   }
   syncOptionsControls();
 }
@@ -451,7 +630,7 @@ function applyWelcomeIntroPreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceWelcomeIntroMode(mode);
   if (persist) {
     _primePreferenceValue('pref_welcome_intro', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist welcome-intro preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist welcome-intro preference', err); }
   }
   syncOptionsControls();
 }
@@ -460,7 +639,7 @@ function applyShareRedactionDefaultPreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceShareRedactionDefaultMode(mode);
   if (persist) {
     _primePreferenceValue('pref_share_redaction_default', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist share-redaction preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist share-redaction preference', err); }
   }
   syncOptionsControls();
 }
@@ -469,7 +648,7 @@ function applyProjectAutoLinkExternalRunsPreference(mode, persist = true) {
   const nextMode = mode === 'off' ? 'off' : 'on';
   if (persist) {
     _primePreferenceValue('pref_project_auto_link_external_runs', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist project auto-link preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist project auto-link preference', err); }
   } else {
     _primePreferenceValue('pref_project_auto_link_external_runs', nextMode);
   }
@@ -480,7 +659,7 @@ function applyProjectAutoLinkRunEntitiesPreference(mode, persist = true) {
   const nextMode = mode === 'off' ? 'off' : 'on';
   if (persist) {
     _primePreferenceValue('pref_project_auto_link_run_entities', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist project entity auto-link preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist project entity auto-link preference', err); }
   } else {
     _primePreferenceValue('pref_project_auto_link_run_entities', nextMode);
   }
@@ -492,12 +671,14 @@ function applyCommandOutcomeSummariesPreference(mode, persist = true) {
   if (persist) {
     _primePreferenceValue('pref_command_outcome_summaries', nextMode);
     try { void _persistCurrentSessionPreferences(); }
-    catch (err) { logClientError('failed to persist command outcome summaries preference', err); }
+    catch (err) { _preferenceLogClientError('failed to persist command outcome summaries preference', err); }
   } else {
     _primePreferenceValue('pref_command_outcome_summaries', nextMode);
   }
   syncOptionsControls();
-  if (typeof refreshCommandOutcomeSummaries === 'function') refreshCommandOutcomeSummaries();
+  const refreshSummaries = (typeof importedRefreshCommandOutcomeSummaries !== 'undefined' && importedRefreshCommandOutcomeSummaries)
+    || _preferenceGlobalFunction('refreshCommandOutcomeSummaries');
+  if (refreshSummaries) refreshSummaries();
   return nextMode;
 }
 
@@ -513,7 +694,7 @@ function applyConstellationFullDayPreference(mode, persist = true) {
   _primePreferenceValue('pref_constellation_full_day', nextMode);
   if (persist) {
     try { void _persistCurrentSessionPreferences(); }
-    catch (err) { logClientError('failed to persist constellation full-day preference', err); }
+    catch (err) { _preferenceLogClientError('failed to persist constellation full-day preference', err); }
   }
   return nextMode;
 }
@@ -522,7 +703,7 @@ function applyCompareViewModePreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceCompareViewMode(mode);
   if (persist) {
     _primePreferenceValue('pref_compare_view_mode', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist compare view preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist compare view preference', err); }
   } else {
     _primePreferenceValue('pref_compare_view_mode', nextMode);
   }
@@ -533,7 +714,7 @@ function applyCompareContextPreference(mode, persist = true) {
   const nextMode = PreferenceCore.coerceCompareContextMode(mode);
   if (persist) {
     _primePreferenceValue('pref_compare_context', nextMode);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist compare context preference', err); }
+    try { void _persistCurrentSessionPreferences(); } catch (err) { _preferenceLogClientError('failed to persist compare context preference', err); }
   } else {
     _primePreferenceValue('pref_compare_context', nextMode);
   }
@@ -544,7 +725,7 @@ function applyPromptUsernamePreference(username, persist = true) {
   const rawUsername = String(username || '').trim();
   const nextUsername = PreferenceCore.normalizePromptUsername(rawUsername);
   if (rawUsername && !nextUsername) {
-    window.hidePromptUsernameSavedIndicator?.();
+    _preferenceHidePromptUsernameSavedIndicator();
     syncPromptUsernameValidation();
     return false;
   }
@@ -552,64 +733,64 @@ function applyPromptUsernamePreference(username, persist = true) {
     _primePreferenceValue('pref_prompt_username', nextUsername);
     try {
       void _persistCurrentSessionPreferences()
-        .then(() => window.showPromptUsernameSavedIndicator?.())
+        .then(() => _preferenceShowPromptUsernameSavedIndicator())
         .catch((err) => {
-          window.hidePromptUsernameSavedIndicator?.();
-          logClientError('failed to persist prompt username preference', err);
+          _preferenceHidePromptUsernameSavedIndicator();
+          _preferenceLogClientError('failed to persist prompt username preference', err);
         });
     } catch (err) {
-      window.hidePromptUsernameSavedIndicator?.();
-      logClientError('failed to persist prompt username preference', err);
+      _preferenceHidePromptUsernameSavedIndicator();
+      _preferenceLogClientError('failed to persist prompt username preference', err);
     }
   } else {
     _primePreferenceValue('pref_prompt_username', nextUsername);
   }
   syncOptionsControls();
-  if (typeof window.setComposerPromptMode === 'function') window.setComposerPromptMode(window._composerPromptMode);
-  else if (typeof window.syncShellPrompt === 'function') window.syncShellPrompt();
+  if (!_preferenceSetComposerPromptMode(_preferenceComposerPromptMode())) _preferenceSyncShellPrompt();
   return true;
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    getPreferenceCookie,
-    setPreferenceCookie,
-    getPreference,
-    _persistCurrentSessionPreferences,
-    loadSessionPreferences,
-    getWelcomeIntroPreference,
-    getShareRedactionDefaultPreference,
-    getProjectAutoLinkExternalRunsPreference,
-    getProjectAutoLinkRunEntitiesPreference,
-    getRunNotifyPreference,
-    getCommandOutcomeSummariesPreference,
-    getConstellationFullDayPreference,
-    getHudClockPreference,
-    getPromptUsernamePreference,
-    getCompareViewModePreference,
-    getCompareContextPreference,
-    getTourSeenVersionPreference,
-    getOptionsModalLastTabPreference,
-    activateOptionsTab,
-    cycleOptionsTab,
-    syncOptionsTabFromPreference,
-    recordTourOpened,
-    _recordTourOpenedOnceThisSession,
-    syncPromptUsernameValidation,
-    applyRunNotifyPreference,
-    applyHudClockPreference,
-    syncOptionsControls,
-    applyThemePreference,
-    applyTimestampPreference,
-    applyLineNumberPreference,
-    applyWelcomeIntroPreference,
-    applyShareRedactionDefaultPreference,
-    applyProjectAutoLinkExternalRunsPreference,
-    applyProjectAutoLinkRunEntitiesPreference,
-    applyCommandOutcomeSummariesPreference,
-    applyConstellationFullDayPreference,
-    applyCompareViewModePreference,
-    applyCompareContextPreference,
-    applyPromptUsernamePreference,
-  });
 }
+
+export {
+  getPreferenceCookie,
+  setPreferenceCookie,
+  getPreference,
+  _persistCurrentSessionPreferences,
+  loadSessionPreferences,
+  getWelcomeIntroPreference,
+  getShareRedactionDefaultPreference,
+  getProjectAutoLinkExternalRunsPreference,
+  getProjectAutoLinkRunEntitiesPreference,
+  getRunNotifyPreference,
+  getCommandOutcomeSummariesPreference,
+  getConstellationFullDayPreference,
+  getHudClockPreference,
+  getPromptUsernamePreference,
+  getCompareViewModePreference,
+  getCompareContextPreference,
+  getTourSeenVersionPreference,
+  getOptionsModalLastTabPreference,
+  activateOptionsTab,
+  cycleOptionsTab,
+  syncOptionsTabFromPreference,
+  recordTourOpened,
+  _recordTourOpenedOnceThisSession,
+  syncPromptUsernameValidation,
+  applyRunNotifyPreference,
+  applyHudClockPreference,
+  syncOptionsControls,
+  applyThemePreference,
+  applyTimestampPreference,
+  applyLineNumberPreference,
+  applyWelcomeIntroPreference,
+  applyShareRedactionDefaultPreference,
+  applyProjectAutoLinkExternalRunsPreference,
+  applyProjectAutoLinkRunEntitiesPreference,
+  applyCommandOutcomeSummariesPreference,
+  applyConstellationFullDayPreference,
+  applyCompareViewModePreference,
+  applyCompareContextPreference,
+  applyPromptUsernamePreference,
+};

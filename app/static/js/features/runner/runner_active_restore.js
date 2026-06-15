@@ -1,9 +1,10 @@
 // Tracks active runs the user intentionally detached before reload restore runs.
 // Loaded before pty.js and runner.js because both clear detached restore markers.
 const DETACHED_ACTIVE_RUNS_STORAGE_PREFIX = 'detached_active_runs';
+const RUNNER_ACTIVE_RESTORE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
 function _detachedActiveRunsStorageKey() {
-  const sessionId = typeof SESSION_ID !== 'undefined' ? String(SESSION_ID || 'session') : 'session';
+  const sessionId = String(RUNNER_ACTIVE_RESTORE_GLOBAL?.SESSION_ID || 'session');
   return `${DETACHED_ACTIVE_RUNS_STORAGE_PREFIX}:${sessionId}`;
 }
 
@@ -67,10 +68,15 @@ function _pruneDetachedActiveRunRestoreIds(activeRunIds) {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    markActiveRunDetachedForRestore,
-    clearActiveRunDetachedForRestore,
-    _isActiveRunDetachedForRestore,
-    _pruneDetachedActiveRunRestoreIds,
-  });
 }
+
+export {
+  DETACHED_ACTIVE_RUNS_STORAGE_PREFIX,
+  _detachedActiveRunsStorageKey,
+  _isActiveRunDetachedForRestore,
+  _pruneDetachedActiveRunRestoreIds,
+  _readDetachedActiveRunIds,
+  _writeDetachedActiveRunIds,
+  clearActiveRunDetachedForRestore,
+  markActiveRunDetachedForRestore,
+};

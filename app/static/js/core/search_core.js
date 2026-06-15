@@ -144,6 +144,40 @@ var DarklabSearchCore = (function (global) {
     summaryMergeSections,
     summarySectionsTotal,
   });
-  global.DarklabSearchCore = api;
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+const {
+  SEARCH_SCOPE_LABELS,
+  SEARCH_SUMMARY_LIMIT,
+  formatFindingSummary,
+  normalizeSignalCounts,
+  searchInputPlaceholder,
+  searchNoMatchesLabel,
+  searchScopeButtonLabel,
+  searchScopeUnitLabel,
+  summaryCommandLabels,
+  summaryCommandRoot,
+  summaryCompactLines,
+  summaryGroupedItems,
+  summaryMergeSections,
+  summarySectionsTotal,
+} = DarklabSearchCore;
+
+export {
+  DarklabSearchCore,
+  SEARCH_SCOPE_LABELS,
+  SEARCH_SUMMARY_LIMIT,
+  formatFindingSummary,
+  normalizeSignalCounts,
+  searchInputPlaceholder,
+  searchNoMatchesLabel,
+  searchScopeButtonLabel,
+  searchScopeUnitLabel,
+  summaryCommandLabels,
+  summaryCommandRoot,
+  summaryCompactLines,
+  summaryGroupedItems,
+  summaryMergeSections,
+  summarySectionsTotal,
+};

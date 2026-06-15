@@ -302,6 +302,8 @@ var DarklabRunnerCore = (function (global) {
     isSyntheticTailCommand,
     isSyntheticWcLineCountCommand,
   });
-  global.DarklabRunnerCore = api;
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { applySyntheticPostFilterLines, formatElapsed, isSyntheticGrepCommand, isSyntheticHeadCommand, isSyntheticPostFilterCommand, isSyntheticSortCommand, isSyntheticTailCommand, isSyntheticUniqCommand, isSyntheticWcLineCountCommand, parseSyntheticPostFilterCommand } = DarklabRunnerCore;
+export { DarklabRunnerCore };

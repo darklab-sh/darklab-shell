@@ -311,7 +311,7 @@ test.describe('tab command recall', () => {
     await runCommand(page, 'status')
     await page.locator('#new-tab-btn').click()
     await page.evaluate(() => {
-      const id = window.activeTabId
+      const id = window.APP_STATE_API.getActiveTabId()
       window.setTabLabel(id, 'inactive large restore')
       window.appendLine('$ nmap -iL targets.txt', 'prompt-echo', id)
       for (let index = 1; index <= 320; index += 1) {
@@ -450,6 +450,7 @@ test.describe('tab command recall', () => {
     await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(
       beforeCount + 1,
     )
+    await expect(page.locator('.tab-panel.active .output > :last-child')).toHaveId('shell-prompt-wrap')
     await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })

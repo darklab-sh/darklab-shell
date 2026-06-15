@@ -1,6 +1,17 @@
 // Shared Project UI/data helpers.
 // Loaded before shell_chrome.js; shell chrome supplies runtime binding callbacks.
 
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import {
+  verificationStatusLabel as importedVerificationStatusLabel,
+  verificationStatusTone as importedVerificationStatusTone,
+} from '../findings/finding_triage_editor.js';
+
+let exportedDarklabProjectSharedUi = null;
+
 (function projectSharedUiModule(global) {
   'use strict';
 
@@ -80,8 +91,12 @@
       if (triage) {
         const status = String(triage.verification_status || entity.verification_status || 'not_started');
         if (status && status !== 'not_started') {
-          const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
-          const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+          const label = typeof importedVerificationStatusLabel === 'function'
+            ? importedVerificationStatusLabel(status)
+            : status.replace(/_/g, ' ');
+          const tone = typeof importedVerificationStatusTone === 'function'
+            ? importedVerificationStatusTone(status)
+            : 'muted';
           const kind = tone === 'green' ? 'success' : (tone === 'amber' ? 'warning' : 'label');
           chips.push({ label, kind });
         }
@@ -382,15 +397,15 @@
     }
 
     function activeTeamScopeCan(capability) {
-      return typeof global.activeTeamScopeCan === 'function'
-        ? global.activeTeamScopeCan(capability)
-        : true;
+      const can = typeof importedActiveTeamScopeCan === 'function' ? importedActiveTeamScopeCan : null;
+      return typeof can === 'function' ? can(capability) : true;
     }
 
     function teamScopeDeniedMessage(capability) {
       const action = capability === 'triage_findings' ? 'triage team findings' : 'change team projects';
-      return typeof global.teamScopeDeniedMessage === 'function'
-        ? global.teamScopeDeniedMessage(action)
+      const denied = typeof importedTeamScopeDeniedMessage === 'function' ? importedTeamScopeDeniedMessage : null;
+      return typeof denied === 'function'
+        ? denied(action)
         : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
@@ -536,7 +551,11 @@
     };
   }
 
-  global.DarklabProjectSharedUi = {
+  const DarklabProjectSharedUi = {
     createProjectSharedUiController,
   };
+  exportedDarklabProjectSharedUi = DarklabProjectSharedUi;
 })(globalThis);
+
+export {
+  exportedDarklabProjectSharedUi as DarklabProjectSharedUi,};

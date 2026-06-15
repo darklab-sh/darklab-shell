@@ -1,8 +1,10 @@
 // ── Shared UI state ──
-// The browser scripts still read/write these names directly, but the actual
-// storage lives here so the app can move away from prompt-specific globals in
-// a controlled way without changing every module at once.
-(function initSharedState(global) {
+// Shared storage lives here; modules should use the explicit API below instead
+// of top-level window state names.
+const APP_STATE_API = (function initSharedState(global) {
+  if (global?.APP_STATE_API && typeof global.APP_STATE_API.getState === 'function') {
+    return global.APP_STATE_API;
+  }
   const defaults = {
     tabs: [],
     activeTabId: null,
@@ -51,79 +53,26 @@
     timerStart: null,
     pendingKillTabId: null,
   };
-  const state = global.APP_STATE || (global.APP_STATE = {});
-  Object.assign(state, defaults);
+  const state = (global.APP_STATE && typeof global.APP_STATE === 'object')
+    ? global.APP_STATE
+    : {};
+  const cloneDefaultValue = (value) => {
+    if (Array.isArray(value)) return value.slice();
+    if (value && typeof value === 'object') return { ...value };
+    return value;
+  };
+  Object.entries(defaults).forEach(([key, value]) => {
+    if (!Object.prototype.hasOwnProperty.call(state, key)) state[key] = cloneDefaultValue(value);
+  });
 
-  const bindings = [
-    'tabs',
-    'activeTabId',
-    'acSuggestions',
-    'acContextRegistry',
-    'acWordlists',
-    'acSpecialCommands',
-    'acBuiltinCommandRoots',
-    'sessionVariables',
-    'acFiltered',
-    'acIndex',
-    'acSuppressInputOnce',
-    'searchMatches',
-    'searchMatchIdx',
-    'searchCaseSensitive',
-    'searchRegexMode',
-    'searchScope',
-    'searchDiscoverabilityPrompted',
-    'searchSignalCounts',
-    'cmdHistory',
-    'recentPreviewHistory',
-    '_cmdHistoryNavIndex',
-    '_cmdHistoryNavDraft',
-    '_suspendCmdHistoryNavReset',
-    'pendingHistAction',
-    '_welcomeActive',
-    '_welcomeDone',
-    '_welcomeTabId',
-    '_welcomeBanner',
-    '_welcomeLiveLine',
-    '_welcomeHintNode',
-    '_welcomeStatusNodes',
-    '_welcomePlan',
-    '_welcomeNextBlockIndex',
-    '_welcomeSettleRequested',
-    '_welcomePromptAfterSettle',
-    '_welcomeBootPending',
-    '_composerValue',
-    '_composerSelectionStart',
-    '_composerSelectionEnd',
-    '_composerActiveInput',
-    '_mobileKeyboardOffsetBaseline',
-    '_mobileViewportClosedHeight',
-    '_mobileKeyboardLastOpenOffset',
-    'timerInterval',
-    'timerStart',
-    'pendingKillTabId',
-  ];
-
-  for (const name of bindings) {
-    Object.defineProperty(global, name, {
-      configurable: true,
-      enumerable: true,
-      get() {
-        return state[name];
-      },
-      set(value) {
-        state[name] = value;
-      },
-    });
-  }
-
-  global.getAppState = () => state;
-  global.getComposerState = () => ({
+  const getAppState = () => state;
+  const getComposerState = () => ({
     value: state._composerValue,
     selectionStart: state._composerSelectionStart,
     selectionEnd: state._composerSelectionEnd,
     activeInput: state._composerActiveInput,
   });
-  global.setComposerState = (next = {}) => {
+  const setComposerState = (next = {}) => {
     if (Object.prototype.hasOwnProperty.call(next, 'value')) {
       state._composerValue = String(next.value ?? '');
     }
@@ -136,51 +85,118 @@
     if (Object.prototype.hasOwnProperty.call(next, 'activeInput')) {
       state._composerActiveInput = next.activeInput === 'mobile' ? 'mobile' : 'desktop';
     }
-    return global.getComposerState();
+    return getComposerState();
   };
-  global.resetComposerState = () => {
+  const resetComposerState = () => {
     state._composerValue = defaults._composerValue;
     state._composerSelectionStart = defaults._composerSelectionStart;
     state._composerSelectionEnd = defaults._composerSelectionEnd;
     state._composerActiveInput = defaults._composerActiveInput;
-    return global.getComposerState();
+    return getComposerState();
   };
-  global.APP_STATE_API = {
-    getState: () => state,
-    reset: () => Object.assign(state, defaults),
-    getTabs: () => state.tabs,
-    setTabs: (v) => { state.tabs = v; },
-    getActiveTabId: () => state.activeTabId,
-    setActiveTabId: (v) => { state.activeTabId = v; },
-    getActiveTab: () => state.tabs.find(t => t.id === state.activeTabId),
-    getTab: (id) => state.tabs.find(t => t.id === id),
-    getComposerState: () => global.getComposerState(),
-    setComposerState: (next) => global.setComposerState(next),
-    resetComposerState: () => global.resetComposerState(),
+  const resetAppState = () => {
+    Object.entries(defaults).forEach(([key, value]) => {
+      state[key] = cloneDefaultValue(value);
+    });
+    return state;
   };
+  const getTabs = () => state.tabs;
+  const setTabs = (v) => { state.tabs = v; };
+  const getActiveTabId = () => state.activeTabId;
+  const setActiveTabId = (v) => { state.activeTabId = v; };
+  const getActiveTab = () => state.tabs.find(t => t.id === state.activeTabId);
+  const getTab = (id) => state.tabs.find(t => t.id === id);
+  const getAutocompleteState = () => ({
+    filtered: state.acFiltered,
+    index: state.acIndex,
+    suppressInputOnce: state.acSuppressInputOnce,
+  });
+  const setAutocompleteState = (next = {}) => {
+    if (Object.prototype.hasOwnProperty.call(next, 'filtered')) {
+      state.acFiltered = Array.isArray(next.filtered) ? next.filtered : [];
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'index')) {
+      state.acIndex = Number.isFinite(Number(next.index)) ? Number(next.index) : -1;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'suppressInputOnce')) {
+      state.acSuppressInputOnce = !!next.suppressInputOnce;
+    }
+    return getAutocompleteState();
+  };
+  const getWelcomeState = () => ({
+    active: state._welcomeActive,
+    done: state._welcomeDone,
+    tabId: state._welcomeTabId,
+    settleRequested: state._welcomeSettleRequested,
+    promptAfterSettle: state._welcomePromptAfterSettle,
+    bootPending: state._welcomeBootPending,
+  });
+  const setWelcomeState = (next = {}) => {
+    if (Object.prototype.hasOwnProperty.call(next, 'active')) {
+      state._welcomeActive = !!next.active;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'done')) {
+      state._welcomeDone = !!next.done;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'tabId')) {
+      state._welcomeTabId = next.tabId == null ? null : String(next.tabId);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'settleRequested')) {
+      state._welcomeSettleRequested = !!next.settleRequested;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'promptAfterSettle')) {
+      state._welcomePromptAfterSettle = !!next.promptAfterSettle;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'bootPending')) {
+      state._welcomeBootPending = !!next.bootPending;
+    }
+    return getWelcomeState();
+  };
+  const api = {
+    getState: getAppState,
+    reset: resetAppState,
+    getTabs,
+    setTabs,
+    getActiveTabId,
+    setActiveTabId,
+    getActiveTab,
+    getTab,
+    getComposerState,
+    setComposerState,
+    resetComposerState,
+    getAutocompleteState,
+    setAutocompleteState,
+    getWelcomeState,
+    setWelcomeState,
+  };
+
 
   // ── Tab accessors ──
   // Use these instead of reading/writing tabs and activeTabId directly.
   // Direct access still works (via the property descriptors above), but these
   // setters make mutation sites explicit and provide a stable boundary for
   // future refactoring.
-  global.getTabs = () => state.tabs;
-  global.setTabs = (v) => { state.tabs = v; };
-  global.getActiveTabId = () => state.activeTabId;
-  global.setActiveTabId = (v) => { state.activeTabId = v; };
-  global.getActiveTab = () => state.tabs.find(t => t.id === state.activeTabId);
-  global.getTab = (id) => state.tabs.find(t => t.id === id);
 
   // ── UI event helpers ──
   // Keep cross-module state sync explicit: publishers emit document-level
   // CustomEvents and subscribers opt in with add/remove listeners instead of
   // monkey-patching each other's globals after load.
-  global.emitUiEvent = (name, detail = {}) => {
+  const emitUiEvent = (name, detail = {}) => {
     if (typeof document === 'undefined' || typeof document.dispatchEvent !== 'function') return false;
-    document.dispatchEvent(new CustomEvent(name, { detail }));
+    if (typeof document.createEvent === 'function') {
+      const event = document.createEvent('CustomEvent');
+      event.initCustomEvent(name, false, false, detail);
+      document.dispatchEvent(event);
+      return true;
+    }
+    const EventCtor = document.defaultView?.CustomEvent
+      || global.CustomEvent
+      || (typeof CustomEvent === 'function' ? CustomEvent : null);
+    if (!EventCtor) return false;
+    document.dispatchEvent(new EventCtor(name, { detail }));
     return true;
   };
-  global.onUiEvent = (name, handler, options) => {
+  const onUiEvent = (name, handler, options) => {
     if (typeof document === 'undefined' || typeof document.addEventListener !== 'function' || typeof handler !== 'function') {
       return () => {};
     }
@@ -188,4 +204,75 @@
     return () => document.removeEventListener(name, handler, options);
   };
 
+  if (global) {
+    const publicApi = {
+      APP_STATE_API: api,
+      APP_STATE: state,
+      getAppState: api.getState,
+      resetAppState: api.reset,
+      getTabs: api.getTabs,
+      setTabs: api.setTabs,
+      getActiveTabId: api.getActiveTabId,
+      setActiveTabId: api.setActiveTabId,
+      getActiveTab: api.getActiveTab,
+      getTab: api.getTab,
+      getComposerState: api.getComposerState,
+      setComposerState: api.setComposerState,
+      resetComposerState: api.resetComposerState,
+      getAutocompleteState: api.getAutocompleteState,
+      setAutocompleteState: api.setAutocompleteState,
+      getWelcomeState: api.getWelcomeState,
+      setWelcomeState: api.setWelcomeState,
+      emitUiEvent,
+      onUiEvent,
+    };
+    Object.assign(global, publicApi);
+    if (typeof window !== 'undefined' && window !== global) {
+      Object.assign(window, publicApi);
+    }
+  }
+  return api;
 })(globalThis);
+
+const getAppState = (...args) => APP_STATE_API.getState(...args);
+const resetAppState = (...args) => APP_STATE_API.reset(...args);
+const getTabs = (...args) => APP_STATE_API.getTabs(...args);
+const setTabs = (...args) => APP_STATE_API.setTabs(...args);
+const getActiveTabId = (...args) => APP_STATE_API.getActiveTabId(...args);
+const setActiveTabId = (...args) => APP_STATE_API.setActiveTabId(...args);
+const getActiveTab = (...args) => APP_STATE_API.getActiveTab(...args);
+const getTab = (...args) => APP_STATE_API.getTab(...args);
+const getComposerState = (...args) => APP_STATE_API.getComposerState(...args);
+const setComposerState = (...args) => APP_STATE_API.setComposerState(...args);
+const resetComposerState = (...args) => APP_STATE_API.resetComposerState(...args);
+const getAutocompleteState = (...args) => APP_STATE_API.getAutocompleteState(...args);
+const setAutocompleteState = (...args) => APP_STATE_API.setAutocompleteState(...args);
+const getWelcomeState = (...args) => APP_STATE_API.getWelcomeState(...args);
+const setWelcomeState = (...args) => APP_STATE_API.setWelcomeState(...args);
+const emitUiEvent = (...args) => (
+  typeof globalThis.emitUiEvent === 'function' ? globalThis.emitUiEvent(...args) : false
+);
+const onUiEvent = (...args) => (
+  typeof globalThis.onUiEvent === 'function' ? globalThis.onUiEvent(...args) : () => {}
+);
+
+export {
+  APP_STATE_API,
+  emitUiEvent,
+  getActiveTab,
+  getActiveTabId,
+  getAutocompleteState,
+  getAppState,
+  getComposerState,
+  getTab,
+  getTabs,
+  onUiEvent,
+  resetAppState,
+  resetComposerState,
+  setActiveTabId,
+  setAutocompleteState,
+  setComposerState,
+  setTabs,
+  getWelcomeState,
+  setWelcomeState,
+};

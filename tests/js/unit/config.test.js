@@ -33,7 +33,7 @@ describe('frontend config bootstrap', () => {
         ? { textContent: JSON.stringify(bootstrap) }
         : null,
     }
-    const window = {}
+    const window = { logClientError: vi.fn() }
     const { APP_CONFIG } = fromDomScript('app/static/js/core/config.js', { document, window }, 'APP_CONFIG')
 
     expect(APP_CONFIG).toMatchObject({
@@ -59,15 +59,56 @@ describe('frontend config bootstrap', () => {
     })
     expect(APP_CONFIG).toEqual(bootstrap)
     expect(window.APP_CONFIG).toBe(APP_CONFIG)
+    expect(window.DarklabConfig.getAppConfig()).toBe(APP_CONFIG)
+    expect(window.logClientError).toHaveBeenCalledWith('app config loaded', null, {
+      event: 'APP_CONFIG_LOADED',
+      level: 'info',
+      source: 'app-config-json',
+      workspace_enabled: false,
+      lazy_asset_count: 0,
+    })
+    expect(window.DarklabConfig.setAppConfig({ app_name: 'updated' })).toEqual({ app_name: 'updated' })
+    expect(window.APP_CONFIG).toEqual({ app_name: 'updated' })
   })
 
   it('falls back to an existing window APP_CONFIG object for non-template harnesses', () => {
-    const bootstrap = { app_name: 'harness', recent_commands_limit: 3 }
-    const document = { getElementById: () => null }
-    const window = { APP_CONFIG: bootstrap }
+    const bootstrap = {
+      app_name: 'harness',
+      recent_commands_limit: 3,
+      workspace_enabled: true,
+      lazy_asset_urls: { project_report: '/static/js/features/projects/project_report.js' },
+    }
+    const document = {
+      getElementById: (id) => id === 'app-config-json'
+        ? { textContent: '{"broken": ' }
+        : null,
+    }
+    const window = { APP_CONFIG: bootstrap, logClientError: vi.fn() }
     const { APP_CONFIG } = fromDomScript('app/static/js/core/config.js', { document, window }, 'APP_CONFIG')
 
     expect(APP_CONFIG).toBe(bootstrap)
+    expect(window.logClientError).toHaveBeenCalledWith(
+      'failed to parse app config bootstrap',
+      expect.any(SyntaxError),
+      {
+        event: 'APP_CONFIG_PARSE_FAILED',
+        level: 'warning',
+        source: 'app-config-json',
+        fallback: 'window.APP_CONFIG',
+        text_length: '{"broken": '.length,
+      },
+    )
+    expect(window.logClientError).toHaveBeenCalledWith(
+      'app config loaded',
+      null,
+      {
+        event: 'APP_CONFIG_LOADED',
+        level: 'info',
+        source: 'window.APP_CONFIG',
+        workspace_enabled: true,
+        lazy_asset_count: 1,
+      },
+    )
   })
 
   it('does not hard-code server config defaults in config.js', () => {
@@ -205,40 +246,119 @@ describe('frontend config bootstrap', () => {
         : null,
     }
     const imported = []
+    const appConfig = {}
     const window = {
+      logClientError: vi.fn(),
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
-        if (url.includes('/atlas_tabs.js')) window.DarklabAtlasTabs = {}
-        if (url.includes('/atlas_entity_row.js')) window.DarklabAtlasEntityRow = {}
-        if (url.includes('/atlas_entity_detail.js')) window.DarklabAtlasDetail = {}
-        if (url.includes('/atlas_overlay.js')) window.openAtlas = vi.fn(async options => ({ atlas: options.source }))
-        if (url.includes('/atlas_mobile.js')) window.DarklabAtlasMobile = {}
-        if (url.includes('/findings_board_modal.js')) window.openFindingsBoard = vi.fn(async options => ({ opened: options.source }))
-        if (url.includes('/status_monitor_core.js')) window.DarklabStatusMonitorCore = {}
-        if (url.includes('/status_monitor_data.js')) window.DarklabStatusMonitorData = {}
-        if (url.includes('/status_monitor_resources.js')) window.DarklabStatusMonitorResources = {}
-        if (url.includes('/status_monitor.js')) window.openStatusMonitor = vi.fn(async options => ({ status: options.source }))
-        if (url.includes('/tour_modal.js')) window.openTourModal = vi.fn(options => ({ tour: options.source }))
-        if (url.includes('/history_run_details.js')) window.openHistoryRunDetails = vi.fn(run => ({ runId: run.id }))
-        if (url.includes('/project_report.js')) window.DarklabProjectReport = { createProjectReportController: vi.fn() }
-        if (url.includes('/project_activity.js')) window.DarklabProjectActivity = { createProjectActivityController: vi.fn() }
-        if (url.includes('/project_artifacts.js')) window.DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
-        if (url.includes('/project_packages.js')) window.DarklabProjectPackages = { createProjectPackagesController: vi.fn() }
+        if (url.includes('/atlas_tabs.js')) {
+          const DarklabAtlasTabs = {}
+          window.DarklabAtlasTabs = DarklabAtlasTabs
+          return { DarklabAtlasTabs }
+        }
+        if (url.includes('/atlas_entity_row.js')) {
+          const DarklabAtlasEntityRow = {}
+          window.DarklabAtlasEntityRow = DarklabAtlasEntityRow
+          return { DarklabAtlasEntityRow }
+        }
+        if (url.includes('/atlas_entity_detail.js')) {
+          const DarklabAtlasDetail = {}
+          window.DarklabAtlasDetail = DarklabAtlasDetail
+          return { DarklabAtlasDetail }
+        }
+        if (url.includes('/atlas_overlay.js')) {
+          const DarklabAtlasOverlay = {}
+          const openAtlas = vi.fn(async options => ({ atlas: options.source }))
+          window.DarklabAtlasOverlay = DarklabAtlasOverlay
+          window.openAtlas = openAtlas
+          return { DarklabAtlasOverlay, openAtlas }
+        }
+        if (url.includes('/atlas_mobile.js')) {
+          const DarklabAtlasMobile = {}
+          window.DarklabAtlasMobile = DarklabAtlasMobile
+          return { DarklabAtlasMobile }
+        }
+        if (url.includes('/findings_board_modal.js')) {
+          const openFindingsBoard = vi.fn(async options => ({ opened: options.source }))
+          window.openFindingsBoard = openFindingsBoard
+          return { openFindingsBoard }
+        }
+        if (url.includes('/status_monitor_core.js')) {
+          const DarklabStatusMonitorCore = {}
+          window.DarklabStatusMonitorCore = DarklabStatusMonitorCore
+          return { DarklabStatusMonitorCore }
+        }
+        if (url.includes('/status_monitor_data.js')) {
+          const DarklabStatusMonitorData = {}
+          window.DarklabStatusMonitorData = DarklabStatusMonitorData
+          return { DarklabStatusMonitorData }
+        }
+        if (url.includes('/status_monitor_resources.js')) {
+          const DarklabStatusMonitorResources = {}
+          window.DarklabStatusMonitorResources = DarklabStatusMonitorResources
+          return { DarklabStatusMonitorResources }
+        }
+        if (url.includes('/status_monitor.js')) {
+          const openStatusMonitor = vi.fn(async options => ({ status: options.source }))
+          window.openStatusMonitor = openStatusMonitor
+          return { openStatusMonitor }
+        }
+        if (url.includes('/tour_modal.js')) {
+          const openTourModal = vi.fn(options => ({ tour: options.source }))
+          window.openTourModal = openTourModal
+          return { openTourModal }
+        }
+        if (url.includes('/history_run_details.js')) {
+          const openHistoryRunDetails = vi.fn(run => ({ runId: run.id }))
+          window.openHistoryRunDetails = openHistoryRunDetails
+          return { openHistoryRunDetails }
+        }
+        if (url.includes('/project_report.js')) {
+          const DarklabProjectReport = { createProjectReportController: vi.fn() }
+          window.DarklabProjectReport = DarklabProjectReport
+          return { DarklabProjectReport }
+        }
+        if (url.includes('/project_activity.js')) {
+          const DarklabProjectActivity = { createProjectActivityController: vi.fn() }
+          window.DarklabProjectActivity = DarklabProjectActivity
+          return { DarklabProjectActivity }
+        }
+        if (url.includes('/project_artifacts.js')) {
+          const DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
+          window.DarklabProjectArtifacts = DarklabProjectArtifacts
+          return { DarklabProjectArtifacts }
+        }
+        if (url.includes('/project_packages.js')) {
+          const DarklabProjectPackages = { createProjectPackagesController: vi.fn() }
+          window.DarklabProjectPackages = DarklabProjectPackages
+          return { DarklabProjectPackages }
+        }
         if (url.includes('/pty.js')) {
           window.startInteractivePtyCommand = vi.fn(async (cmd, tabId) => ({ cmd, tabId }))
           window.attachInteractivePtyCommand = vi.fn(async (run, tabId) => ({ run, tabId }))
           window.isInteractivePtyCommand = vi.fn((cmd) => cmd.includes('--interactive'))
         }
-        if (url.includes('/schedules_modal.js')) window.openSchedulesModal = vi.fn(async options => ({ schedule: options.scheduleId }))
-        if (url.includes('/watchers_modal.js')) window.openWatchersModal = vi.fn(async options => ({ watcher: options.watcherId }))
+        if (url.includes('/schedules_modal.js')) {
+          const openSchedulesModal = vi.fn(async options => ({ schedule: options.scheduleId }))
+          window.openSchedulesModal = openSchedulesModal
+          return { openSchedulesModal }
+        }
+        if (url.includes('/watchers_modal.js')) {
+          const openWatchersModal = vi.fn(async options => ({ watcher: options.watcherId }))
+          window.openWatchersModal = openWatchersModal
+          return { openWatchersModal }
+        }
       }),
     }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
-      { document, window },
+      { document, window, getAppConfig: () => appConfig },
       'window',
     )
+    window.emitUiEvent = (name, detail) => {
+      events.push({ name, detail })
+    }
 
     const openPromise = window.openFindingsBoard({ source: 'unit' })
     await expect(openPromise).resolves.toEqual({ opened: 'unit' })
@@ -287,9 +407,7 @@ describe('frontend config bootstrap', () => {
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/history/history_run_details.js?v=history-details-hash')
     expect(window.openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run-1' })
 
-    window.APP_CONFIG = {
-      interactive_pty_commands: [{ root: 'mtr', trigger_flag: '--interactive' }],
-    }
+    appConfig.interactive_pty_commands = [{ root: 'mtr', trigger_flag: '--interactive' }]
     expect(window.isInteractivePtyCommand('mtr --interactive darklab.sh')).toBe(true)
     expect(window.isInteractivePtyCommand('mtr darklab.sh')).toBe(false)
 
@@ -378,6 +496,18 @@ describe('frontend config bootstrap', () => {
           appended.push(node)
         },
       },
+      createEvent: () => {
+        const event = { type: '', detail: null }
+        event.initCustomEvent = (name, _bubbles, _cancelable, detail) => {
+          event.type = name
+          event.detail = detail
+        }
+        return event
+      },
+      dispatchEvent: (event) => {
+        events.push({ name: event.type, detail: event.detail })
+        return true
+      },
       createElement: (tagName) => ({ tagName, dataset: {} }),
       getElementById: (id) => id === 'lazy-assets-json'
         ? {
@@ -395,12 +525,15 @@ describe('frontend config bootstrap', () => {
     }
     const imported = []
     const window = {
+      logClientError: vi.fn(),
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
         const script = projectWorkspaceScripts.find(([name]) => url.includes(`/${name}.js`))
         if (!script) return
         const [, globalName, factoryName] = script
-        window[globalName] = { [factoryName]: vi.fn() }
+        const api = { [factoryName]: vi.fn() }
+        window[globalName] = api
+        return { [globalName]: api }
       }),
     }
 
@@ -412,11 +545,78 @@ describe('frontend config bootstrap', () => {
 
     const loadPromise = window.loadProjectWorkspace()
     const workspaceApi = await loadPromise
-    expect(workspaceApi).toBe(window.DarklabProjectWorkspaceShell)
+    expect(workspaceApi).toEqual(expect.objectContaining({
+      DarklabProjectDetails: window.DarklabProjectDetails,
+      DarklabProjectList: window.DarklabProjectList,
+      DarklabProjectNavigation: window.DarklabProjectNavigation,
+      DarklabProjectEntityEditor: window.DarklabProjectEntityEditor,
+      DarklabProjectWorkspaceActions: window.DarklabProjectWorkspaceActions,
+      DarklabProjectWorkspaceShell: window.DarklabProjectWorkspaceShell,
+      DarklabProjectWorkspaceLifecycle: window.DarklabProjectWorkspaceLifecycle,
+      DarklabProjectWorkspaceRenderer: window.DarklabProjectWorkspaceRenderer,
+      DarklabProjectWorkspaceBootstrap: window.DarklabProjectWorkspaceBootstrap,
+      DarklabProjectNestedSheets: window.DarklabProjectNestedSheets,
+      DarklabProjectWorkspaceEvents: window.DarklabProjectWorkspaceEvents,
+      DarklabProjectTargets: window.DarklabProjectTargets,
+      DarklabProjectRuns: window.DarklabProjectRuns,
+      DarklabProjectMobileCompare: window.DarklabProjectMobileCompare,
+      DarklabProjectMobileShell: window.DarklabProjectMobileShell,
+      DarklabProjectMobileDetail: window.DarklabProjectMobileDetail,
+      DarklabProjectFindingsData: window.DarklabProjectFindingsData,
+      DarklabProjectFilters: window.DarklabProjectFilters,
+      DarklabProjectEntities: window.DarklabProjectEntities,
+      DarklabProjectFindings: window.DarklabProjectFindings,
+      DarklabProjectFindingsBoard: window.DarklabProjectFindingsBoard,
+    }))
     expect(imported).toEqual(projectWorkspaceScripts.map(([name]) => (
       `/static/js/features/projects/${name}.js?v=${name}-hash`
     )))
     expect(appended).toEqual([])
+
+    const failureDocument = {
+      ...document,
+      head: { appendChild: vi.fn() },
+      dispatchEvent: vi.fn(() => true),
+    }
+    const failureImported = []
+    const failureWindow = {
+      __darklabImportModule: vi.fn(async (url) => {
+        failureImported.push(url)
+        const script = projectWorkspaceScripts.find(([name]) => url.includes(`/${name}.js`))
+        if (!script) return {}
+        const [, globalName, factoryName] = script
+        const api = globalName === 'DarklabProjectWorkspaceShell'
+          ? { createUnexpectedController: vi.fn() }
+          : { [factoryName]: vi.fn() }
+        failureWindow[globalName] = api
+        return { [globalName]: api }
+      }),
+      logClientError: vi.fn(),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      { document: failureDocument, window: failureWindow },
+      'window',
+    )
+
+    await expect(failureWindow.loadProjectWorkspace()).rejects.toThrow(
+      'Lazy module project_workspace_shell did not expose DarklabProjectWorkspaceShell.createProjectWorkspaceShellController',
+    )
+    expect(failureWindow.logClientError).toHaveBeenCalledWith(
+      'lazy module export missing',
+      expect.any(Error),
+      {
+        event: 'LAZY_MODULE_EXPORT_MISSING',
+        level: 'error',
+        asset_name: 'project_workspace_shell',
+        export_name: 'DarklabProjectWorkspaceShell',
+        controller_name: 'createProjectWorkspaceShellController',
+        src: '/static/js/features/projects/project_workspace_shell.js?v=project_workspace_shell-hash',
+        module_keys: ['DarklabProjectWorkspaceShell'],
+      },
+    )
+    expect(failureImported).toContain('/static/js/features/projects/project_workspace_shell.js?v=project_workspace_shell-hash')
   })
 
   it('lazy-loads the history comparison controller cluster in order', async () => {
@@ -448,19 +648,42 @@ describe('frontend config bootstrap', () => {
     }
     const imported = []
     const window = {
+      logClientError: vi.fn(),
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
-        if (url.includes('/history_compare_core.js')) window.DarklabHistoryCompareCore = {}
+        if (url.includes('/history_compare_core.js')) {
+          const DarklabHistoryCompareCore = {}
+          window.DarklabHistoryCompareCore = DarklabHistoryCompareCore
+          return { DarklabHistoryCompareCore }
+        }
         if (url.includes('/history_compare_overlay.js')) {
-          window.closeHistoryCompareOverlay = vi.fn()
-          window.isHistoryCompareOverlayOpen = vi.fn()
+          const closeHistoryCompareOverlay = vi.fn()
+          const isHistoryCompareOverlayOpen = vi.fn()
+          window.closeHistoryCompareOverlay = closeHistoryCompareOverlay
+          window.isHistoryCompareOverlayOpen = isHistoryCompareOverlayOpen
+          return { closeHistoryCompareOverlay, isHistoryCompareOverlayOpen }
         }
-        if (url.includes('/history_compare_controls.js')) window._closeHistoryCompareActionMenus = vi.fn()
-        if (url.includes('/history_compare_navigation.js')) window._historyCompareScrollToLine = vi.fn()
-        if (url.includes('/history_compare_renderer.js')) window.fetchAndRenderHistoryComparison = vi.fn()
+        if (url.includes('/history_compare_controls.js')) {
+          const _closeHistoryCompareActionMenus = vi.fn()
+          window._closeHistoryCompareActionMenus = _closeHistoryCompareActionMenus
+          return { _closeHistoryCompareActionMenus }
+        }
+        if (url.includes('/history_compare_navigation.js')) {
+          const _historyCompareScrollToLine = vi.fn()
+          window._historyCompareScrollToLine = _historyCompareScrollToLine
+          return { _historyCompareScrollToLine }
+        }
+        if (url.includes('/history_compare_renderer.js')) {
+          const fetchAndRenderHistoryComparison = vi.fn()
+          window.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison
+          return { fetchAndRenderHistoryComparison }
+        }
         if (url.includes('/history_compare_launcher.js')) {
-          window.openHistoryCompareLauncher = vi.fn(run => ({ runId: run.id }))
+          const openHistoryCompareLauncher = vi.fn(run => ({ runId: run.id }))
+          window.openHistoryCompareLauncher = openHistoryCompareLauncher
+          return { openHistoryCompareLauncher }
         }
+        return {}
       }),
     }
 
@@ -476,9 +699,15 @@ describe('frontend config bootstrap', () => {
     expect(window.openHistoryCompareLauncher).toHaveBeenCalledWith({ id: 'run-1' })
     expect(imported).toEqual(historyCompareScripts.map(([, url]) => url))
     expect(appended).toEqual([])
+    expect(window.logClientError).not.toHaveBeenCalled()
+
+    window.logClientError.mockClear()
+    await window.loadLazyAsset('history_compare_core')
+    expect(window.__darklabImportModule).toHaveBeenCalledTimes(historyCompareScripts.length)
+    expect(window.logClientError).not.toHaveBeenCalled()
   })
 
-  it('logs lazy module load failures with safe asset context', async () => {
+  it('logs lazy module load and export-contract failures with safe asset context', async () => {
     const document = {
       documentElement: {},
       head: { appendChild: vi.fn() },
@@ -495,10 +724,12 @@ describe('frontend config bootstrap', () => {
         : null,
     }
     const failure = new Error('network failed')
+    let importerMode = 'reject'
     const window = {
       location: { href: 'http://127.0.0.1/' },
       __darklabImportModule: vi.fn(async () => {
-        throw failure
+        if (importerMode === 'reject') throw failure
+        return { OtherExport: vi.fn() }
       }),
       logClientError: vi.fn(),
     }
@@ -516,8 +747,28 @@ describe('frontend config bootstrap', () => {
       asset_name: 'project_report',
       asset_type: 'module',
       src: '/static/js/features/projects/project_report.js?v=report-hash',
-      expected_global: true,
+      expected_global: false,
     })
+
+    importerMode = 'missing-export'
+    window.logClientError.mockClear()
+
+    await expect(window.loadProjectReport()).rejects.toThrow(
+      'Lazy module did not expose export: DarklabProjectReport',
+    )
+    expect(window.logClientError).toHaveBeenCalledWith(
+      'lazy module export missing',
+      expect.any(Error),
+      {
+        event: 'LAZY_MODULE_EXPORT_MISSING',
+        level: 'error',
+        asset_name: 'project_report',
+        export_name: 'DarklabProjectReport',
+        controller_name: '',
+        src: '/static/js/features/projects/project_report.js?v=report-hash',
+        module_keys: ['OtherExport'],
+      },
+    )
   })
 
   it('logs invalid lazy asset config without including the raw JSON body', async () => {
@@ -595,13 +846,37 @@ describe('frontend config bootstrap', () => {
     const window = {
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
-        if (url.includes('/session_token_controls.js')) window._updateOptionsSessionTokenStatus = vi.fn()
-        if (url.includes('/secrets_panel.js')) {
-          window.refreshOptionsSecrets = vi.fn(async () => true)
-          window.invalidateOptionsSecrets = vi.fn()
+        if (url.includes('/session_token_controls.js')) {
+          const _updateOptionsSessionTokenStatus = vi.fn()
+          window._updateOptionsSessionTokenStatus = _updateOptionsSessionTokenStatus
+          return { _updateOptionsSessionTokenStatus }
         }
-        if (url.includes('/teams_panel.js')) window.refreshOptionsTeams = vi.fn(async () => true)
-        if (url.includes('/notification_channels.js')) window.refreshNotificationChannels = vi.fn(async () => true)
+        if (url.includes('/secrets_panel.js')) {
+          const refreshOptionsSecrets = vi.fn(async () => true)
+          const invalidateOptionsSecrets = vi.fn()
+          const openSecretEditor = vi.fn()
+          const openProviderStatusModal = vi.fn()
+          window.refreshOptionsSecrets = refreshOptionsSecrets
+          window.invalidateOptionsSecrets = invalidateOptionsSecrets
+          return {
+            refreshOptionsSecrets,
+            invalidateOptionsSecrets,
+            openSecretEditor,
+            openProviderStatusModal,
+          }
+        }
+        if (url.includes('/teams_panel.js')) {
+          const refreshOptionsTeams = vi.fn(async () => true)
+          window.refreshOptionsTeams = refreshOptionsTeams
+          return { refreshOptionsTeams }
+        }
+        if (url.includes('/notification_channels.js')) {
+          const refreshNotificationChannels = vi.fn(async () => true)
+          const openNotificationChannelEditor = vi.fn()
+          window.refreshNotificationChannels = refreshNotificationChannels
+          return { refreshNotificationChannels, openNotificationChannelEditor }
+        }
+        return {}
       }),
     }
 
@@ -621,7 +896,20 @@ describe('frontend config bootstrap', () => {
     ]))
     expect(appended).toEqual([])
 
-    await expect(loadPromise).resolves.toBe(true)
+    const panels = await loadPromise
+    expect(panels).toEqual(expect.objectContaining({
+      _updateOptionsSessionTokenStatus: expect.any(Function),
+      refreshOptionsSecrets: expect.any(Function),
+      invalidateOptionsSecrets: expect.any(Function),
+      openSecretEditor: expect.any(Function),
+      openProviderStatusModal: expect.any(Function),
+      refreshOptionsTeams: expect.any(Function),
+      refreshNotificationChannels: expect.any(Function),
+      openNotificationChannelEditor: expect.any(Function),
+    }))
+    expect(panels.refreshOptionsSecrets).toBe(window.refreshOptionsSecrets)
+    expect(panels.refreshOptionsTeams).toBe(window.refreshOptionsTeams)
+    expect(panels.refreshNotificationChannels).toBe(window.refreshNotificationChannels)
   })
 
   it('lazy-loads the command registry modal on first open', async () => {
@@ -649,7 +937,9 @@ describe('frontend config bootstrap', () => {
     const window = {
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
-        window.openCommandRegistry = vi.fn(() => ({ opened: true }))
+        const openCommandRegistry = vi.fn(() => ({ opened: true }))
+        window.openCommandRegistry = openCommandRegistry
+        return { openCommandRegistry }
       }),
     }
 
@@ -692,31 +982,29 @@ describe('frontend config bootstrap', () => {
     const imported = []
     const realHandler = vi.fn(async () => true)
     const window = {
-      emitUiEvent: (name, detail) => {
-        events.push({ name, detail })
-      },
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
-        window.renderWorkflowItems = vi.fn()
+        const renderWorkflowItems = vi.fn()
+        const handleWorkflowTerminalCommand = realHandler
+        window.renderWorkflowItems = renderWorkflowItems
         window.handleWorkflowTerminalCommand = realHandler
+        return { renderWorkflowItems, handleWorkflowTerminalCommand }
       }),
     }
 
     fromDomScripts(
       ['app/static/js/core/lazy_assets.js'],
-      { document, window },
+      { document, window, emitUiEvent: (name, detail) => events.push({ name, detail }) },
       'window',
     )
 
     const items = [{ title: 'DNS check' }]
     expect(window.renderWorkflowItems(items)).toEqual(items)
     expect(window.__workflowCatalogItems).toEqual(items)
-    expect(events).toEqual([
-      {
-        name: 'app:workflows-rendered',
-        detail: { count: 1, items },
-      },
-    ])
+    expect(events).toEqual([{
+      name: 'app:workflows-rendered',
+      detail: { count: 1, items },
+    }])
 
     const commandPromise = window.handleWorkflowTerminalCommand('workflow list', 'tab-1')
 

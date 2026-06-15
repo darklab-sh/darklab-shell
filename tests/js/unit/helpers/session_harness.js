@@ -19,7 +19,11 @@ export function loadSession({
     })
 
   const fns = fromDomScripts(
-    ['app/static/js/core/session_core.js', 'app/static/js/session.js'],
+    [
+      'app/static/js/core/session_core.js',
+      'app/static/js/features/preferences/session_token_bridge.js',
+      'app/static/js/session.js',
+    ],
     {
       localStorage: storage,
       crypto: { randomUUID },
@@ -30,6 +34,7 @@ export function loadSession({
     describeFetchError,
     logClientError,
     maskSessionToken,
+    setSessionTokenHandlers,
     updateSessionId,
     _getSessionId: () => SESSION_ID,
     _getClientId: () => CLIENT_ID,

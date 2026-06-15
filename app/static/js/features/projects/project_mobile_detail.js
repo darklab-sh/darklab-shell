@@ -1,6 +1,14 @@
 // Project mobile detail controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+import { enhanceAppSelects as importedEnhanceAppSelects } from '../../ui/ui_helpers.js';
+import {
+  closeActionSheet as importedCloseActionSheet,
+  openActionSheet as importedOpenActionSheet,
+} from '../../ui/ui_action_sheet.js';
+
+let exportedDarklabProjectMobileDetail = null;
+
 (function projectMobileDetailModule(global) {
   'use strict';
 
@@ -130,7 +138,7 @@
     }
 
     function closeActionSheet({ restoreFocus = true } = {}) {
-      if (typeof global.closeActionSheet === 'function') global.closeActionSheet({ restoreFocus });
+      if (typeof importedCloseActionSheet === 'function') importedCloseActionSheet({ restoreFocus });
     }
 
     function actionSheetItem(projectId, item) {
@@ -160,8 +168,8 @@
 
     function openActionSheet(projectId, label, actions = [], returnFocus = null) {
       const filteredActions = actions.filter(Boolean);
-      if (!filteredActions.length || typeof global.openActionSheet !== 'function') return;
-      global.openActionSheet({
+      if (!filteredActions.length || typeof importedOpenActionSheet !== 'function') return;
+      importedOpenActionSheet({
         title: label || 'Actions',
         container: ctx.projectWorkspaceModal || document.body,
         returnFocus,
@@ -649,6 +657,11 @@
       if (!ctx.projectMobileDetailBody) return;
       ctx.projectMobileDetailBody.replaceChildren();
       if (!summary || summary.load_error) {
+        if (ctx.projectWorkspaceTab() === 'packages' && project) {
+          const fallbackSummary = summary && typeof summary === 'object' ? summary : { project };
+          ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobilePackagesTab(String(project.id || ctx.selectedProjectId() || ''), fallbackSummary));
+          return;
+        }
         const retryPanel = ctx.emptyProjectPanel('Could not load this project. It may have been deleted.');
         const retry = document.createElement('button');
         retry.type = 'button';
@@ -701,8 +714,9 @@
       ctx.renderProjectMobileDetailTopbar(project, activeId);
       ctx.renderProjectMobileTabs(selectedId, summary);
       renderTabBody(project, summary);
-      if (typeof global.enhanceAppSelects === 'function') {
-        global.enhanceAppSelects(ctx.projectMobileDetailBody);
+      const enhanceAppSelects = typeof importedEnhanceAppSelects === 'function' ? importedEnhanceAppSelects : null;
+      if (typeof enhanceAppSelects === 'function') {
+        enhanceAppSelects(ctx.projectMobileDetailBody);
       }
       const findingFiltersActive = ctx.projectFindingServerFiltersActive(selectedId, summary);
       if (
@@ -738,7 +752,11 @@
     };
   }
 
-  global.DarklabProjectMobileDetail = {
+  const DarklabProjectMobileDetail = {
     createProjectMobileDetailController,
   };
+  exportedDarklabProjectMobileDetail = DarklabProjectMobileDetail;
 })(globalThis);
+
+export {
+  exportedDarklabProjectMobileDetail as DarklabProjectMobileDetail,};

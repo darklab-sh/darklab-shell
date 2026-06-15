@@ -24,7 +24,7 @@
 // need Escape-to-close should layer a bindDismissible on the same surface
 // (when it has modal/panel/sheet semantics), or rely on the owning
 // modal/sheet's Escape cascade for nested dropdowns.
-(function (global) {
+const bindOutsideClickClose = (function (global) {
   'use strict';
 
   function _toArray(input) {
@@ -79,5 +79,7 @@
     };
   }
 
-  global.bindOutsideClickClose = bindOutsideClickClose;
+  return bindOutsideClickClose;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export { bindOutsideClickClose };

@@ -1,14 +1,134 @@
 // ── Run comparison controls ──────────────────────────────────────────────
 // View/context controls and actions menu for the compare result viewer.
+import { copyTextToClipboard as importedCopyTextToClipboard, showToast as importedShowToast } from '../../core/utils.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from '../history/history_restore.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
+import {
+  enhanceAppSelects as importedEnhanceAppSelects,
+  portalDropdownMenu as importedPortalDropdownMenu,
+  unportalDropdownMenu as importedUnportalDropdownMenu,
+} from '../../ui/ui_helpers.js';
+import { closeHistoryCompareOverlay as importedCloseHistoryCompareOverlay } from './history_compare_overlay.js';
+import {
+  coerceContext as importedCompareCoerceContext,
+  coerceViewMode as importedCompareCoerceViewMode,
+  compareFormatDelta as importedCompareFormatDelta,
+  resolveViewMode as importedCompareResolveViewMode,
+  storedContext as importedCompareStoredContext,
+  storedViewMode as importedCompareStoredViewMode,
+  viewportMode as importedCompareViewportMode,
+  viewModeOptions as importedCompareViewModeOptions,
+} from './history_compare_core.js';
+
+const HISTORY_COMPARE_CONTROLS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyCompareControlsCoerceViewMode(mode) {
+  const coerce = (typeof importedCompareCoerceViewMode !== 'undefined' && importedCompareCoerceViewMode)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareCoerceViewMode;
+  return typeof coerce === 'function' ? coerce(mode) : mode;
+}
+
+function _historyCompareControlsCoerceContext(mode) {
+  const coerce = (typeof importedCompareCoerceContext !== 'undefined' && importedCompareCoerceContext)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareCoerceContext;
+  return typeof coerce === 'function' ? coerce(mode) : mode;
+}
+
+function _historyCompareControlsStoredViewMode() {
+  const stored = (typeof importedCompareStoredViewMode !== 'undefined' && importedCompareStoredViewMode)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareStoredViewMode;
+  return typeof stored === 'function' ? stored() : 'auto';
+}
+
+function _historyCompareControlsStoredContext() {
+  const stored = (typeof importedCompareStoredContext !== 'undefined' && importedCompareStoredContext)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareStoredContext;
+  return typeof stored === 'function' ? stored() : '3';
+}
+
+function _historyCompareControlsResolveViewMode(mode) {
+  const resolve = (typeof importedCompareResolveViewMode !== 'undefined' && importedCompareResolveViewMode)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareResolveViewMode;
+  return typeof resolve === 'function' ? resolve(mode) : mode;
+}
+
+function _historyCompareControlsViewportMode() {
+  const viewport = (typeof importedCompareViewportMode !== 'undefined' && importedCompareViewportMode)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareViewportMode;
+  return typeof viewport === 'function' ? viewport() : 'side_by_side';
+}
+
+function _historyCompareControlsViewModeOptions() {
+  const options = (typeof importedCompareViewModeOptions !== 'undefined' && importedCompareViewModeOptions)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._historyCompareViewModeOptions;
+  return typeof options === 'function' ? options() : [];
+}
+
+function _historyCompareControlsFormatDelta(value) {
+  const format = (typeof importedCompareFormatDelta !== 'undefined' && importedCompareFormatDelta)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL._compareFormatDelta;
+  return typeof format === 'function' ? format(value) : String(value);
+}
+
+function _historyCompareControlsEnhanceAppSelects(root) {
+  const enhance = (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.enhanceAppSelects;
+  if (typeof enhance === 'function') enhance(root);
+}
+
+function _historyCompareControlsUnportalDropdownMenu(menu) {
+  const unportal = (typeof importedUnportalDropdownMenu !== 'undefined' && importedUnportalDropdownMenu)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.unportalDropdownMenu;
+  if (typeof unportal === 'function') unportal(menu);
+}
+
+function _historyCompareControlsPortalDropdownMenu(wrap, trigger, menu) {
+  const portal = (typeof importedPortalDropdownMenu !== 'undefined' && importedPortalDropdownMenu)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.portalDropdownMenu;
+  if (typeof portal === 'function') portal(wrap, trigger, menu);
+}
+
+function _historyCompareControlsBindPressable(el) {
+  const bind = (typeof importedBindPressable !== 'undefined' && importedBindPressable)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.bindPressable;
+  if (typeof bind === 'function') bind(el);
+}
+
+function _historyCompareControlsRestoreRun(run, options) {
+  const restore = (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.restoreHistoryRunIntoTab
+    || null;
+  return typeof restore === 'function'
+    ? restore(run, options)
+    : Promise.reject(new Error('history restore unavailable'));
+}
+
+function _historyCompareControlsCloseOverlay() {
+  const close = (typeof importedCloseHistoryCompareOverlay !== 'undefined' && importedCloseHistoryCompareOverlay)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.closeHistoryCompareOverlay;
+  if (typeof close === 'function') close();
+}
+
+function _historyCompareControlsCopyText(text) {
+  const copy = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.copyTextToClipboard;
+  return typeof copy === 'function' ? copy(text) : Promise.reject(new Error('clipboard unavailable'));
+}
+
+function _historyCompareControlsShowToast(message, tone = 'success') {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || HISTORY_COMPARE_CONTROLS_GLOBAL.showToast;
+  if (typeof toast === 'function') toast(message, tone);
+}
 
 function _historyCompareApplyViewMode(mode, data) {
-  const nextMode = _historyCompareCoerceViewMode(mode);
+  const nextMode = _historyCompareControlsCoerceViewMode(mode);
   data._compareViewModeRaw = nextMode;
   window._renderHistoryComparison(data);
 }
 
 function _historyCompareApplyContext(mode, data) {
-  const nextMode = _historyCompareCoerceContext(mode);
+  const nextMode = _historyCompareControlsCoerceContext(mode);
   data._compareContext = nextMode;
   window._renderHistoryComparison(data);
 }
@@ -19,7 +139,7 @@ function _closeHistoryCompareActionMenus(except = null) {
     wrap.classList.remove('open');
     wrap.querySelector('.history-compare-actions-trigger')?.setAttribute('aria-expanded', 'false');
     const menu = wrap._portaledMenu;
-    if (menu && typeof unportalDropdownMenu === 'function') unportalDropdownMenu(menu);
+    if (menu) _historyCompareControlsUnportalDropdownMenu(menu);
     wrap._portaledMenu = null;
   });
 }
@@ -28,14 +148,14 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   const controls = document.createElement('div');
   controls.className = 'history-compare-controls';
 
-  const defaultMode = _historyCompareCoerceViewMode(data._compareViewModeDefault || _historyCompareStoredViewMode());
-  const rawMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || defaultMode);
-  const resolvedMode = _historyCompareResolveViewMode(rawMode);
+  const defaultMode = _historyCompareControlsCoerceViewMode(data._compareViewModeDefault || _historyCompareControlsStoredViewMode());
+  const rawMode = _historyCompareControlsCoerceViewMode(data._compareViewModeRaw || defaultMode);
+  const resolvedMode = _historyCompareControlsResolveViewMode(rawMode);
   const viewSelect = document.createElement('select');
   viewSelect.className = 'form-select history-compare-view-select';
   viewSelect.setAttribute('aria-label', 'Run comparison view mode');
   viewSelect.dataset.portalMenu = 'true';
-  _historyCompareViewModeOptions().forEach(([value, label]) => {
+  _historyCompareControlsViewModeOptions().forEach(([value, label]) => {
     const option = document.createElement('option');
     option.value = value;
     option.textContent = label;
@@ -45,7 +165,7 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   viewSelect.addEventListener('change', () => _historyCompareApplyViewMode(viewSelect.value, data));
   controls.appendChild(viewSelect);
 
-  const resetHidden = rawMode === defaultMode || (defaultMode === 'auto' && rawMode === _historyCompareViewportMode());
+  const resetHidden = rawMode === defaultMode || (defaultMode === 'auto' && rawMode === _historyCompareControlsViewportMode());
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.className = 'btn btn-ghost btn-icon-only history-compare-reset-view';
@@ -64,15 +184,13 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   const contextControls = _renderHistoryCompareContextControls(data, viewMode);
   if (contextControls) controls.appendChild(contextControls);
 
-  if (typeof enhanceAppSelects === 'function') {
-    enhanceAppSelects(controls);
-  }
+  _historyCompareControlsEnhanceAppSelects(controls);
   return controls;
 }
 
 function _renderHistoryCompareContextControls(data, viewMode) {
   if (viewMode === 'changes_only' || viewMode === 'findings_only') return null;
-  const selected = _historyCompareCoerceContext(data._compareContext || _historyCompareStoredContext());
+  const selected = _historyCompareControlsCoerceContext(data._compareContext || _historyCompareControlsStoredContext());
   const contextSelect = document.createElement('select');
   contextSelect.className = 'form-select history-compare-context-select';
   contextSelect.setAttribute('aria-label', 'Run comparison context');
@@ -97,8 +215,8 @@ function _historyCompareSummaryText(data, deltas = {}) {
   return [
     `Compare: ${data.left.command} -> ${data.right.command}`,
     `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
-    `Lines: ${_compareFormatDelta(deltas.output_lines?.delta || 0)}`,
-    `Findings: ${_compareFormatDelta(deltas.findings?.delta || 0)}`,
+    `Lines: ${_historyCompareControlsFormatDelta(deltas.output_lines?.delta || 0)}`,
+    `Findings: ${_historyCompareControlsFormatDelta(deltas.findings?.delta || 0)}`,
     `Changed: ${Number(totalsForCopy.changed_line_count || 0)}`,
     `Added: ${Number(totalsForCopy.added_line_count || 0)}`,
     `Removed: ${Number(totalsForCopy.removed_line_count || 0)}`,
@@ -134,29 +252,29 @@ function _renderHistoryCompareActionsMenu(data, deltas = {}) {
     return item;
   };
   addItem('Restore A', () => {
-    window.restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false })
-      .then(() => closeHistoryCompareOverlay())
-      .catch(() => showToast('Failed to restore run', 'error'));
+    _historyCompareControlsRestoreRun(data.left, { hidePanelOnSuccess: false })
+      .then(() => _historyCompareControlsCloseOverlay())
+      .catch(() => _historyCompareControlsShowToast('Failed to restore run', 'error'));
   });
   addItem('Restore B', () => {
-    window.restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false })
-      .then(() => closeHistoryCompareOverlay())
-      .catch(() => showToast('Failed to restore run', 'error'));
+    _historyCompareControlsRestoreRun(data.right, { hidePanelOnSuccess: false })
+      .then(() => _historyCompareControlsCloseOverlay())
+      .catch(() => _historyCompareControlsShowToast('Failed to restore run', 'error'));
   });
   addItem('Restore Both', (item) => {
     item.disabled = true;
     window._restoreBothHistoryCompareRuns(data.left, data.right)
-      .then(() => closeHistoryCompareOverlay())
+      .then(() => _historyCompareControlsCloseOverlay())
       .catch(err => {
         item.disabled = false;
         if (err && err.message === 'not enough tab capacity') return;
-        showToast('Failed to restore both runs', 'error');
+        _historyCompareControlsShowToast('Failed to restore both runs', 'error');
       });
   });
   addItem('Copy summary', () => {
-    copyTextToClipboard(_historyCompareSummaryText(data, deltas))
-      .then(() => showToast('Comparison summary copied'))
-      .catch(() => showToast('Failed to copy summary', 'error'));
+    _historyCompareControlsCopyText(_historyCompareSummaryText(data, deltas))
+      .then(() => _historyCompareControlsShowToast('Comparison summary copied'))
+      .catch(() => _historyCompareControlsShowToast('Failed to copy summary', 'error'));
   });
   wrap.dataset.portalMenu = 'true';
   trigger.addEventListener('click', (event) => {
@@ -166,23 +284,26 @@ function _renderHistoryCompareActionsMenu(data, deltas = {}) {
     _closeHistoryCompareActionMenus(open ? wrap : null);
     wrap.classList.toggle('open', open);
     trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open && typeof portalDropdownMenu === 'function') {
-      portalDropdownMenu(wrap, trigger, menu);
+    if (open) {
+      _historyCompareControlsPortalDropdownMenu(wrap, trigger, menu);
       wrap._portaledMenu = menu;
-    } else if (!open && typeof unportalDropdownMenu === 'function') {
-      unportalDropdownMenu(menu);
+    } else {
+      _historyCompareControlsUnportalDropdownMenu(menu);
       wrap._portaledMenu = null;
     }
   });
-  if (typeof bindPressable === 'function') bindPressable(trigger);
+  _historyCompareControlsBindPressable(trigger);
   wrap.append(trigger, menu);
   return wrap;
 }
 
-window._historyCompareApplyViewMode = _historyCompareApplyViewMode;
-window._historyCompareApplyContext = _historyCompareApplyContext;
-window._closeHistoryCompareActionMenus = _closeHistoryCompareActionMenus;
-window._renderHistoryCompareDisplayControls = _renderHistoryCompareDisplayControls;
-window._renderHistoryCompareContextControls = _renderHistoryCompareContextControls;
-window._historyCompareSummaryText = _historyCompareSummaryText;
-window._renderHistoryCompareActionsMenu = _renderHistoryCompareActionsMenu;
+
+export {
+  _closeHistoryCompareActionMenus,
+  _historyCompareApplyContext,
+  _historyCompareApplyViewMode,
+  _historyCompareSummaryText,
+  _renderHistoryCompareActionsMenu,
+  _renderHistoryCompareContextControls,
+  _renderHistoryCompareDisplayControls,
+};

@@ -1,142 +1,58 @@
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const ENTITY_METADATA_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
-const UI_ACTION_SHEET_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_action_sheet.js'), 'utf8')
-const ATLAS_ENTITY_ROW_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/features/atlas/atlas_entity_row.js'), 'utf8')
-const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
-  'utf8',
-)
+const readScriptSource = relativePath => stripEsmExports(readFileSync(resolve(REPO_ROOT, relativePath), 'utf8'))
+const ENTITY_METADATA_SRC = readScriptSource('app/static/js/ui/ui_entity_metadata.js')
+const UI_ACTION_SHEET_SRC = readScriptSource('app/static/js/ui/ui_action_sheet.js')
+const ATLAS_ENTITY_ROW_SRC = readScriptSource('app/static/js/features/atlas/atlas_entity_row.js')
+const PROJECT_TARGET_VALIDATION_SRC = readScriptSource('app/static/js/features/projects/project_target_validation.js')
 const PROJECTS_CSS = readFileSync(resolve(REPO_ROOT, 'app/static/css/features/projects.css'), 'utf8')
-const PROJECT_ACTIVE_CONTEXT_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_active_context.js'),
-  'utf8',
+const PROJECT_ACTIVE_CONTEXT_SRC = readScriptSource('app/static/js/features/projects/project_active_context.js')
+const PROJECT_WORKSPACE_CONSTANTS_SRC = readScriptSource('app/static/js/features/projects/project_workspace_constants.js')
+const PROJECT_WORKSPACE_STATE_SRC = readScriptSource('app/static/js/features/projects/project_workspace_state.js')
+const PROJECT_SHARED_UI_SRC = readScriptSource('app/static/js/features/projects/project_shared_ui.js')
+const PROJECT_DETAILS_SRC = readScriptSource('app/static/js/features/projects/project_details.js')
+const PROJECT_LIST_SRC = readScriptSource('app/static/js/features/projects/project_list.js')
+const PROJECT_NAVIGATION_SRC = readScriptSource('app/static/js/features/projects/project_navigation.js')
+const PROJECT_ENTITY_EDITOR_SRC = readScriptSource('app/static/js/features/projects/project_entity_editor.js')
+const PROJECT_WORKSPACE_ACTIONS_SRC = readScriptSource('app/static/js/features/projects/project_workspace_actions.js')
+const PROJECT_WORKSPACE_SHELL_SRC = readScriptSource('app/static/js/features/projects/project_workspace_shell.js')
+const PROJECT_WORKSPACE_LIFECYCLE_SRC = readScriptSource('app/static/js/features/projects/project_workspace_lifecycle.js')
+const PROJECT_WORKSPACE_RENDERER_SRC = readScriptSource('app/static/js/features/projects/project_workspace_renderer.js')
+const PROJECT_WORKSPACE_BOOTSTRAP_SRC = readScriptSource('app/static/js/features/projects/project_workspace_bootstrap.js')
+const PROJECT_NESTED_SHEETS_SRC = readScriptSource('app/static/js/features/projects/project_nested_sheets.js')
+const PROJECT_WORKSPACE_EVENTS_SRC = readScriptSource('app/static/js/features/projects/project_workspace_events.js')
+const PROJECT_TARGETS_SRC = readScriptSource('app/static/js/features/projects/project_targets.js')
+const PROJECT_RUNS_SRC = readScriptSource('app/static/js/features/projects/project_runs.js')
+const PROJECT_MOBILE_COMPARE_SRC = readScriptSource('app/static/js/features/projects/project_mobile_compare.js')
+const PROJECT_MOBILE_SHELL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_shell.js')
+const PROJECT_MOBILE_DETAIL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_detail.js')
+const PROJECT_FINDINGS_DATA_SRC = readScriptSource('app/static/js/features/projects/project_findings_data.js')
+const PROJECT_FILTERS_SRC = readScriptSource('app/static/js/features/projects/project_filters.js')
+const PROJECT_ENTITIES_SRC = readScriptSource('app/static/js/features/projects/project_entities.js')
+const PROJECT_FINDINGS_SRC = readScriptSource('app/static/js/features/projects/project_findings.js')
+const PROJECT_FINDINGS_BOARD_SRC = readScriptSource('app/static/js/features/projects/project_findings_board.js')
+const FINDING_TRIAGE_EDITOR_SRC = readScriptSource('app/static/js/features/findings/finding_triage_editor.js')
+const FINDINGS_BOARD_MODAL_SRC = readScriptSource('app/static/js/features/findings/findings_board_modal.js')
+const PROJECT_ARTIFACTS_SRC = readScriptSource('app/static/js/features/projects/project_artifacts.js')
+const PROJECT_PACKAGES_SRC = readScriptSource('app/static/js/features/projects/project_packages.js')
+const PROJECT_REPORT_SRC = readScriptSource('app/static/js/features/projects/project_report.js')
+const PROJECT_ACTIVITY_SRC = readScriptSource('app/static/js/features/projects/project_activity.js')
+const PROJECT_CONTEXT_BRIDGE_SRC = readScriptSource('app/static/js/features/projects/project_context_bridge.js')
+const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').replace(
+  '\n})(globalThis);',
+  `
+  global.__darklabShellChromeExports = {
+    openProjectWorkspace,
+    openProjectAutoPromoteRuleFromAtlas,
+    refreshProjectWorkspace,
+  };
+})(globalThis);`,
 )
-const PROJECT_WORKSPACE_CONSTANTS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_constants.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_STATE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_state.js'),
-  'utf8',
-)
-const PROJECT_SHARED_UI_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_shared_ui.js'),
-  'utf8',
-)
-const PROJECT_DETAILS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_details.js'),
-  'utf8',
-)
-const PROJECT_LIST_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_list.js'),
-  'utf8',
-)
-const PROJECT_NAVIGATION_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_navigation.js'),
-  'utf8',
-)
-const PROJECT_ENTITY_EDITOR_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_entity_editor.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_ACTIONS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_actions.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_SHELL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_shell.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_LIFECYCLE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_lifecycle.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_RENDERER_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_renderer.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_BOOTSTRAP_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_bootstrap.js'),
-  'utf8',
-)
-const PROJECT_NESTED_SHEETS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_nested_sheets.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_EVENTS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_events.js'),
-  'utf8',
-)
-const PROJECT_TARGETS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_targets.js'),
-  'utf8',
-)
-const PROJECT_RUNS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_runs.js'),
-  'utf8',
-)
-const PROJECT_MOBILE_COMPARE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_compare.js'),
-  'utf8',
-)
-const PROJECT_MOBILE_SHELL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_shell.js'),
-  'utf8',
-)
-const PROJECT_MOBILE_DETAIL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_detail.js'),
-  'utf8',
-)
-const PROJECT_FINDINGS_DATA_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_data.js'),
-  'utf8',
-)
-const PROJECT_FILTERS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_filters.js'),
-  'utf8',
-)
-const PROJECT_ENTITIES_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_entities.js'),
-  'utf8',
-)
-const PROJECT_FINDINGS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings.js'),
-  'utf8',
-)
-const PROJECT_FINDINGS_BOARD_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_board.js'),
-  'utf8',
-)
-const FINDING_TRIAGE_EDITOR_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/findings/finding_triage_editor.js'),
-  'utf8',
-)
-const FINDINGS_BOARD_MODAL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/findings/findings_board_modal.js'),
-  'utf8',
-)
-const PROJECT_ARTIFACTS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_artifacts.js'),
-  'utf8',
-)
-const PROJECT_PACKAGES_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_packages.js'),
-  'utf8',
-)
-const PROJECT_REPORT_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_report.js'),
-  'utf8',
-)
-const PROJECT_ACTIVITY_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_activity.js'),
-  'utf8',
-)
-const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
@@ -368,8 +284,11 @@ function loadShellChrome({
       setItem: vi.fn(),
       removeItem: vi.fn(),
     },
+    __darklabExtractPreferGlobalThis: true,
     tabs: [],
     recentPreviewHistory: [],
+    apiFetch,
+    logClientError,
     renderHudClock: null,
     toggleRailCollapsed: null,
     openStatusMonitor,
@@ -459,6 +378,11 @@ function loadShellChrome({
       const APP_CONFIG = global.APP_CONFIG || {};
       window.bindPressable = bindPressable;
       window.bindDisclosure = bindDisclosure;
+      window.apiFetch = apiFetch;
+      window.logClientError = logClientError;
+      window.bindOutsideClickClose = bindOutsideClickClose;
+      window.downloadUrlAsAttachment = downloadUrlAsAttachment;
+      window.downloadBlobAsAttachment = downloadBlobAsAttachment;
       global.bindDisclosure = bindDisclosure;
       window.bindDismissible = global.bindDismissible;
       window.bindMobileSheet = global.bindMobileSheet;
@@ -468,43 +392,113 @@ function loadShellChrome({
       ${ENTITY_METADATA_SRC}
       ${UI_ACTION_SHEET_SRC}
       ${ATLAS_ENTITY_ROW_SRC}
-      global.openActionSheet = window.openActionSheet;
-      global.closeActionSheet = window.closeActionSheet;
+      global.openActionSheet = openActionSheet;
+      global.closeActionSheet = closeActionSheet;
+      window.openActionSheet = openActionSheet;
+      window.closeActionSheet = closeActionSheet;
       ${PROJECT_TARGET_VALIDATION_SRC}
       ${PROJECT_WORKSPACE_CONSTANTS_SRC}
+      global.DarklabProjectWorkspaceConstants = exportedDarklabProjectWorkspaceConstants;
+      window.DarklabProjectWorkspaceConstants = exportedDarklabProjectWorkspaceConstants;
       ${PROJECT_WORKSPACE_STATE_SRC}
+      global.DarklabProjectWorkspaceState = exportedDarklabProjectWorkspaceState;
+      window.DarklabProjectWorkspaceState = exportedDarklabProjectWorkspaceState;
       ${PROJECT_ACTIVE_CONTEXT_SRC}
-      ${PROJECT_SHARED_UI_SRC}
-      ${PROJECT_DETAILS_SRC}
-      ${PROJECT_LIST_SRC}
-      ${PROJECT_NAVIGATION_SRC}
-      ${PROJECT_ENTITY_EDITOR_SRC}
-      ${PROJECT_WORKSPACE_ACTIONS_SRC}
-      ${PROJECT_WORKSPACE_SHELL_SRC}
-      ${PROJECT_WORKSPACE_LIFECYCLE_SRC}
-      ${PROJECT_WORKSPACE_RENDERER_SRC}
-      ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
-      ${PROJECT_NESTED_SHEETS_SRC}
+      global.DarklabProjectActiveContext = exportedDarklabProjectActiveContext;
+      window.DarklabProjectActiveContext = exportedDarklabProjectActiveContext;
       ${FINDING_TRIAGE_EDITOR_SRC}
-      global.DarklabFindingTriageEditor = window.DarklabFindingTriageEditor;
+      global.DarklabFindingTriageEditor = DarklabFindingTriageEditor;
+      window.DarklabFindingTriageEditor = DarklabFindingTriageEditor;
+      global.verificationStatusLabel = DarklabFindingTriageEditor.verificationStatusLabel;
+      global.verificationStatusTone = DarklabFindingTriageEditor.verificationStatusTone;
+      window.verificationStatusLabel = DarklabFindingTriageEditor.verificationStatusLabel;
+      window.verificationStatusTone = DarklabFindingTriageEditor.verificationStatusTone;
+      ${PROJECT_SHARED_UI_SRC}
+      global.DarklabProjectSharedUi = exportedDarklabProjectSharedUi;
+      window.DarklabProjectSharedUi = exportedDarklabProjectSharedUi;
+      ${PROJECT_DETAILS_SRC}
+      global.DarklabProjectDetails = exportedDarklabProjectDetails;
+      window.DarklabProjectDetails = exportedDarklabProjectDetails;
+      ${PROJECT_LIST_SRC}
+      global.DarklabProjectList = exportedDarklabProjectList;
+      window.DarklabProjectList = exportedDarklabProjectList;
+      ${PROJECT_NAVIGATION_SRC}
+      global.DarklabProjectNavigation = exportedDarklabProjectNavigation;
+      window.DarklabProjectNavigation = exportedDarklabProjectNavigation;
+      ${PROJECT_ENTITY_EDITOR_SRC}
+      global.DarklabProjectEntityEditor = exportedDarklabProjectEntityEditor;
+      window.DarklabProjectEntityEditor = exportedDarklabProjectEntityEditor;
+      ${PROJECT_WORKSPACE_ACTIONS_SRC}
+      global.DarklabProjectWorkspaceActions = exportedDarklabProjectWorkspaceActions;
+      window.DarklabProjectWorkspaceActions = exportedDarklabProjectWorkspaceActions;
+      ${PROJECT_WORKSPACE_SHELL_SRC}
+      global.DarklabProjectWorkspaceShell = exportedDarklabProjectWorkspaceShell;
+      window.DarklabProjectWorkspaceShell = exportedDarklabProjectWorkspaceShell;
+      ${PROJECT_WORKSPACE_LIFECYCLE_SRC}
+      global.DarklabProjectWorkspaceLifecycle = exportedDarklabProjectWorkspaceLifecycle;
+      window.DarklabProjectWorkspaceLifecycle = exportedDarklabProjectWorkspaceLifecycle;
+      ${PROJECT_WORKSPACE_RENDERER_SRC}
+      global.DarklabProjectWorkspaceRenderer = exportedDarklabProjectWorkspaceRenderer;
+      window.DarklabProjectWorkspaceRenderer = exportedDarklabProjectWorkspaceRenderer;
+      ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
+      global.DarklabProjectWorkspaceBootstrap = exportedDarklabProjectWorkspaceBootstrap;
+      window.DarklabProjectWorkspaceBootstrap = exportedDarklabProjectWorkspaceBootstrap;
+      ${PROJECT_NESTED_SHEETS_SRC}
+      global.DarklabProjectNestedSheets = exportedDarklabProjectNestedSheets;
+      window.DarklabProjectNestedSheets = exportedDarklabProjectNestedSheets;
       ${PROJECT_WORKSPACE_EVENTS_SRC}
+      global.DarklabProjectWorkspaceEvents = exportedDarklabProjectWorkspaceEvents;
+      window.DarklabProjectWorkspaceEvents = exportedDarklabProjectWorkspaceEvents;
       ${PROJECT_TARGETS_SRC}
+      global.DarklabProjectTargets = exportedDarklabProjectTargets;
+      window.DarklabProjectTargets = exportedDarklabProjectTargets;
       ${PROJECT_RUNS_SRC}
+      global.DarklabProjectRuns = exportedDarklabProjectRuns;
+      window.DarklabProjectRuns = exportedDarklabProjectRuns;
       ${PROJECT_MOBILE_COMPARE_SRC}
+      global.DarklabProjectMobileCompare = exportedDarklabProjectMobileCompare;
+      window.DarklabProjectMobileCompare = exportedDarklabProjectMobileCompare;
       ${PROJECT_MOBILE_SHELL_SRC}
+      global.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
+      window.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
       ${PROJECT_MOBILE_DETAIL_SRC}
+      global.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
+      window.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
       ${PROJECT_FINDINGS_DATA_SRC}
+      global.DarklabProjectFindingsData = exportedDarklabProjectFindingsData;
+      window.DarklabProjectFindingsData = exportedDarklabProjectFindingsData;
       ${PROJECT_FILTERS_SRC}
+      global.DarklabProjectFilters = exportedDarklabProjectFilters;
+      window.DarklabProjectFilters = exportedDarklabProjectFilters;
       ${PROJECT_ENTITIES_SRC}
+      global.DarklabProjectEntities = exportedDarklabProjectEntities;
+      window.DarklabProjectEntities = exportedDarklabProjectEntities;
       ${PROJECT_FINDINGS_SRC}
+      global.DarklabProjectFindings = exportedDarklabProjectFindings;
+      window.DarklabProjectFindings = exportedDarklabProjectFindings;
       ${PROJECT_FINDINGS_BOARD_SRC}
+      global.DarklabProjectFindingsBoard = exportedDarklabProjectFindingsBoard;
+      window.DarklabProjectFindingsBoard = exportedDarklabProjectFindingsBoard;
       ${FINDINGS_BOARD_MODAL_SRC}
       ${PROJECT_ARTIFACTS_SRC}
+      global.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
+      window.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
       ${PROJECT_PACKAGES_SRC}
+      global.DarklabProjectPackages = exportedDarklabProjectPackages;
+      window.DarklabProjectPackages = exportedDarklabProjectPackages;
       ${PROJECT_REPORT_SRC}
+      global.DarklabProjectReport = exportedDarklabProjectReport;
+      window.DarklabProjectReport = exportedDarklabProjectReport;
       ${PROJECT_ACTIVITY_SRC}
-      global.DarklabProjectActivity = window.DarklabProjectActivity;
+      global.DarklabProjectActivity = exportedDarklabProjectActivity;
+      window.DarklabProjectActivity = exportedDarklabProjectActivity;
+      ${PROJECT_CONTEXT_BRIDGE_SRC}
+      var openFindingsBoard = exportedOpenFindingsBoard;
       ${SHELL_CHROME_SRC}
+      global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
+      global.openProjectAutoPromoteRuleFromAtlas = global.__darklabShellChromeExports.openProjectAutoPromoteRuleFromAtlas;
+      global.refreshProjectWorkspace = global.__darklabShellChromeExports.refreshProjectWorkspace;
+      global.openFindingsBoard = exportedOpenFindingsBoard;
     `,
   )(
     global,
@@ -1955,10 +1949,12 @@ describe('shell chrome project workspace', () => {
     }
     const projectEvents = new Function(
       'globalThis',
-      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn globalThis.DarklabProjectWorkspaceEvents;`,
-    )(sandbox)
+      'window',
+      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn exportedDarklabProjectWorkspaceEvents;`,
+    )(sandbox, sandbox)
     const setProjectWorkspaceMessage = vi.fn()
     const controller = projectEvents.createProjectWorkspaceEventsController({
+      findingTriageEditor: editor,
       filteredProjectFindings: () => [finding],
       mobileView: () => 'detail',
       projectFindingItems: () => [],
@@ -2752,9 +2748,10 @@ describe('shell chrome project workspace', () => {
 
     await shell.refreshProjectWorkspace()
     await tick()
-    await tick()
 
-    expect(document.getElementById('project-explorer-body').textContent).toContain('new finding after relink')
+    await vi.waitFor(() => {
+      expect(document.getElementById('project-explorer-body').textContent).toContain('new finding after relink')
+    })
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('old finding should not persist')
   })
 
@@ -3862,6 +3859,15 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-explorer-meta-row')?.classList.contains('panel-row')).toBe(true)
     expect(Array.from(document.querySelectorAll('.project-explorer-section-heading'))
       .some(heading => heading.textContent.includes('New'))).toBe(true)
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('project-workspace-overlay'),
+      expect.objectContaining({
+        level: 'modal',
+        isOpen: expect.any(Function),
+        onClose: expect.any(Function),
+        closeButtons: null,
+      }),
+    )
     expect(bindDismissible).toHaveBeenCalledWith(
       document.getElementById('project-target-editor-overlay'),
       expect.objectContaining({ level: 'modal' }),

@@ -52,6 +52,7 @@ const {
 describe('interactive PTY terminal', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
+    globalThis.CustomEvent = window.CustomEvent
     globalThis.tabs = []
     globalThis.activeTabId = null
     delete globalThis.Terminal
@@ -399,7 +400,9 @@ describe('interactive PTY terminal', () => {
 
     document.querySelector('.tab-panel[data-id="tab-1"]').classList.remove('active')
     document.querySelector('.tab-panel[data-id="tab-2"]').classList.add('active')
-    document.dispatchEvent(new CustomEvent('app:tab-activated'))
+    const activated = document.createEvent('CustomEvent')
+    activated.initCustomEvent('app:tab-activated', false, false, {})
+    document.dispatchEvent(activated)
     vi.runOnlyPendingTimers()
     vi.runOnlyPendingTimers()
 

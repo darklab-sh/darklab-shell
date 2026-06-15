@@ -26,7 +26,7 @@
 // to know about feature-named classes; both Projects and Atlas wraps
 // compose the shared `.tab-strip-wrap` primitive plus their feature-named
 // class for layout overrides, so the default selector works for both.
-(function (global) {
+const DarklabTabStripEdges = (function (global) {
   'use strict';
 
   const EDGE_THRESHOLD = 2;
@@ -85,7 +85,12 @@
     };
   }
 
-  global.syncTabStripEdges = syncTabStripEdges;
-  global.syncActiveTabStripScroll = syncActiveTabStripScroll;
-  global.bindTabStripEdgeListener = bindTabStripEdgeListener;
+  return Object.freeze({
+    bindTabStripEdgeListener,
+    syncActiveTabStripScroll,
+    syncTabStripEdges,
+  });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { bindTabStripEdgeListener, syncActiveTabStripScroll, syncTabStripEdges } = DarklabTabStripEdges;
+export { DarklabTabStripEdges };

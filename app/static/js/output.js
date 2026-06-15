@@ -1,7 +1,166 @@
 // ── Shared output logic ──
-const _outputCore = (typeof window !== 'undefined' && window.DarklabOutputCore)
-  ? window.DarklabOutputCore
-  : (typeof DarklabOutputCore !== 'undefined' ? DarklabOutputCore : null);
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
+import { DarklabOutputCore as importedOutputCore } from './core/output_core.js';
+import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_output_model.js';
+import {
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  getTab as importedGetTab,
+  getTabs as importedGetTabs,
+} from './core/state.js';
+import { shellPromptWrap as importedShellPromptWrap } from './core/dom.js';
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  escapeHtml as importedEscapeHtml,
+  showToast as importedShowToast,
+} from './core/utils.js';
+import {
+  getCommandOutcomeSummariesPreference as importedGetCommandOutcomeSummariesPreference,
+  getPreference as importedGetPreference,
+} from './features/preferences/preferences.js';
+import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
+import { activateFaqCommandChip as importedActivateFaqCommandChip } from './features/command-registry/faq_helpers.js';
+import {
+  isSearchBarOpen as importedIsSearchBarOpen,
+  refreshSearchDiscoverabilityUi as importedRefreshSearchDiscoverabilityUi,
+  runSearch as importedRunSearch,
+  scheduleSearchDiscoverabilityRefresh as importedScheduleSearchDiscoverabilityRefresh,
+} from './search.js';
+import {
+  getOutput as importedGetOutput,
+  mountShellPrompt as importedMountShellPrompt,
+  updateOutputFollowButton as importedUpdateOutputFollowButton,
+} from './tabs_bridge.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import {
+  isTabSessionRestoreInProgress as importedIsTabSessionRestoreInProgress,
+  setOutputHandlers as importedSetOutputHandlers,
+} from './output_bridge.js';
+import { setOutputModeHandlers as importedSetOutputModeHandlers } from './output_mode_bridge.js';
+import {
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedLogClientError,
+} from './runtime_bridge.js';
+
+function _outputGlobal() {
+  return typeof window !== 'undefined' ? window : globalThis;
+}
+
+function _outputGlobalFunction(name) {
+  const global = _outputGlobal();
+  const fn = global && global[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _outputGlobalValue(name) {
+  const global = _outputGlobal();
+  return global ? global[name] : undefined;
+}
+
+function _outputCoreApi() {
+  return (typeof importedOutputCore !== 'undefined' && importedOutputCore)
+    || _outputGlobalValue('DarklabOutputCore')
+    || null;
+}
+
+function _outputAppConfig() {
+  if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
+  return _outputGlobalValue('APP_CONFIG') || {};
+}
+
+function _outputAppState() {
+  if (typeof importedGetAppState === 'function') return importedGetAppState();
+  return _outputGlobalValue('APP_STATE') || {};
+}
+
+function _outputActiveTabId() {
+  if (typeof importedGetActiveTabId === 'function') return importedGetActiveTabId();
+  const readActiveTabId = _outputGlobalFunction('getActiveTabId');
+  if (readActiveTabId) return readActiveTabId();
+  return _outputAppState().activeTabId || null;
+}
+
+function _outputTabs() {
+  if (typeof importedGetTabs === 'function') return importedGetTabs();
+  const readTabs = _outputGlobalFunction('getTabs');
+  if (readTabs) return readTabs();
+  const tabs = _outputAppState().tabs;
+  return Array.isArray(tabs) ? tabs : [];
+}
+
+function _outputGetTab(tabId) {
+  if (typeof importedGetTab === 'function') return importedGetTab(tabId);
+  const readTab = _outputGlobalFunction('getTab');
+  return readTab ? readTab(tabId) : null;
+}
+
+function _outputGetOutput(tabId) {
+  if (typeof importedGetOutput === 'function') return importedGetOutput(tabId);
+  const readOutput = _outputGlobalFunction('getOutput');
+  return readOutput ? readOutput(tabId) : null;
+}
+
+function _outputShellPromptWrap() {
+  return (typeof importedShellPromptWrap !== 'undefined' && importedShellPromptWrap)
+    || _outputGlobalValue('shellPromptWrap')
+    || null;
+}
+
+function _outputWorkspaceCwd(tabId = _outputActiveTabId()) {
+  const workspaceCwd = _outputGlobalFunction('_workspaceCwd');
+  return workspaceCwd ? workspaceCwd(tabId) : '';
+}
+
+function _outputWorkspaceDisplayPath(path = '') {
+  const displayPath = _outputGlobalFunction('workspaceDisplayPath');
+  return displayPath ? displayPath(path) : _outputCoreApi().workspaceDisplayPath(path);
+}
+
+function _outputOpenAtlas(options) {
+  const openAtlas = (typeof importedOpenAtlas === 'function' && importedOpenAtlas)
+    || _outputGlobalFunction('openAtlas');
+  return openAtlas ? openAtlas(options) : null;
+}
+
+function _outputLogClientError(context, err, details = null) {
+  const logClientError = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedLogClientError === 'function'
+      ? importedLogClientError
+      : null
+  ) || _outputGlobalFunction('logClientError');
+  if (logClientError) logClientError(context, err, details);
+}
+
+function _outputSearchRefresh(tabId) {
+  if (tabId !== _outputActiveTabId()) return;
+  const refresh = (typeof importedRefreshSearchDiscoverabilityUi === 'function' && importedRefreshSearchDiscoverabilityUi)
+    || _outputGlobalFunction('refreshSearchDiscoverabilityUi');
+  if (!refresh) return;
+  const isOpen = (typeof importedIsSearchBarOpen === 'function' && importedIsSearchBarOpen)
+    || _outputGlobalFunction('isSearchBarOpen');
+  const run = (typeof importedRunSearch === 'function' && importedRunSearch)
+    || _outputGlobalFunction('runSearch');
+  const schedule = (typeof importedScheduleSearchDiscoverabilityRefresh === 'function'
+    && importedScheduleSearchDiscoverabilityRefresh)
+    || _outputGlobalFunction('scheduleSearchDiscoverabilityRefresh');
+  if (typeof isOpen === 'function' && isOpen() && typeof run === 'function') run();
+  else if (typeof schedule === 'function') schedule();
+  else refresh();
+}
+
+function _outputUpdateFollowButton(tabId) {
+  const update = (typeof importedUpdateOutputFollowButton === 'function' && importedUpdateOutputFollowButton)
+    || _outputGlobalFunction('updateOutputFollowButton');
+  if (update) update(tabId);
+}
+
+function _outputMountShellPrompt(tabId, force = false) {
+  const mount = (typeof importedMountShellPrompt === 'function' && importedMountShellPrompt)
+    || _outputGlobalFunction('mountShellPrompt');
+  if (mount) mount(tabId, force);
+}
 
 function createAnsiUpRenderer() {
   // ANSI rendering is optional. If the vendored parser fails to load, fall back
@@ -11,7 +170,7 @@ function createAnsiUpRenderer() {
       const instance = new AnsiUp();
       if (instance && typeof instance.ansi_to_html === 'function') {
         instance.use_classes = false;
-        return instance;
+      return instance;
       }
     } catch (err) {
       // Fall through to the plain-text renderer below.
@@ -20,7 +179,15 @@ function createAnsiUpRenderer() {
   return {
     use_classes: false,
     ansi_to_html(text) {
-      return escapeHtml(String(text ?? ''));
+      const escape = (typeof importedEscapeHtml === 'function' && importedEscapeHtml)
+        || _outputGlobalFunction('escapeHtml');
+      if (typeof escape === 'function') return escape(String(text ?? ''));
+      return String(text ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     },
   };
 }
@@ -60,27 +227,15 @@ let tsMode = 'off';
 // Body class 'ln-on' enables shared prefix rendering for output rows.
 let lnMode = 'off';
 
+function getLineNumberMode() {
+  return lnMode;
+}
+
+function getTimestampMode() {
+  return tsMode;
+}
+
 if (typeof window !== 'undefined') {
-  Object.defineProperty(window, 'tsMode', {
-    configurable: true,
-    enumerable: true,
-    get() {
-      return tsMode;
-    },
-    set(value) {
-      tsMode = String(value || 'off');
-    },
-  });
-  Object.defineProperty(window, 'lnMode', {
-    configurable: true,
-    enumerable: true,
-    get() {
-      return lnMode;
-    },
-    set(value) {
-      lnMode = String(value || 'off');
-    },
-  });
 }
 
 const _OUTPUT_SYNC_BURST_LIMIT = 60;
@@ -89,18 +244,21 @@ const _OUTPUT_APPEND_LINES_CHUNK_SIZE = 300;
 const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
 const _OUTPUT_COALESCED_LINE_ROLES = new Set(['progress', 'status-line']);
 const _pendingOutputBatches = new Map();
-const _OUTPUT_SIGNAL_SCOPES = _outputCore.OUTPUT_SIGNAL_SCOPES;
+const _OUTPUT_SIGNAL_SCOPES = _outputCoreApi().OUTPUT_SIGNAL_SCOPES;
 const _HIGH_VOLUME_OUTPUT_DEFAULT_LINE_THRESHOLD = 50000;
 const _HIGH_VOLUME_OUTPUT_DEFAULT_STATUS_INTERVAL_LINES = 50000;
 
 function _promptUsernameOverride() {
   let value = '';
+  const getPreference = (typeof importedGetPreference === 'function' && importedGetPreference)
+    || _outputGlobalFunction('getPreference');
   if (typeof getPreference === 'function') {
     value = getPreference('pref_prompt_username');
-  } else if (typeof document !== 'undefined') {
+  }
+  if (typeof document !== 'undefined') {
     const cookie = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith('pref_prompt_username='));
     try {
-      value = cookie ? decodeURIComponent(cookie.slice('pref_prompt_username='.length)) : '';
+      if (cookie) value = decodeURIComponent(cookie.slice('pref_prompt_username='.length));
     } catch (_) {
       value = '';
     }
@@ -110,60 +268,60 @@ function _promptUsernameOverride() {
 }
 
 function _configuredPromptUsername() {
-  const configured = typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_username === 'string'
-    ? APP_CONFIG.prompt_username
+  const config = _outputAppConfig();
+  const configured = config && typeof config.prompt_username === 'string'
+    ? config.prompt_username
     : 'anon';
   return _promptUsernameOverride() || String(configured || 'anon').trim() || 'anon';
 }
 
 function _configuredPromptDomain() {
-  const configured = typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_domain === 'string'
-    ? APP_CONFIG.prompt_domain
+  const config = _outputAppConfig();
+  const configured = config && typeof config.prompt_domain === 'string'
+    ? config.prompt_domain
     : 'darklab.sh';
   return String(configured || 'darklab.sh').trim() || 'darklab.sh';
 }
 
 function promptIdentityPrefix(rawPrefix = null) {
-  if (rawPrefix !== null) return _outputCore.promptIdentityPrefix(String(rawPrefix || ''));
-  return _outputCore.promptIdentityFromParts(_configuredPromptUsername(), _configuredPromptDomain());
+  if (rawPrefix !== null) return _outputCoreApi().promptIdentityPrefix(String(rawPrefix || ''));
+  return _outputCoreApi().promptIdentityFromParts(_configuredPromptUsername(), _configuredPromptDomain());
 }
 
 function currentPromptWorkspacePath() {
+  const config = _outputAppConfig();
   if (
-    typeof APP_CONFIG !== 'undefined'
-    && APP_CONFIG
-    && APP_CONFIG.workspace_enabled === true
+    config
+    && config.workspace_enabled === true
   ) {
-    const rawPath = typeof _workspaceCwd === 'function'
-      ? _workspaceCwd(typeof activeTabId !== 'undefined' ? activeTabId : undefined)
-      : '';
-    const normalized = _outputCore.normalizeWorkspaceCwd(rawPath);
-    if (typeof workspaceDisplayPath === 'function') return workspaceDisplayPath(normalized);
-    return _outputCore.workspaceDisplayPath(normalized);
+    const rawPath = _outputWorkspaceCwd();
+    const normalized = _outputCoreApi().normalizeWorkspaceCwd(rawPath);
+    return _outputWorkspaceDisplayPath(normalized);
   }
   return '~';
 }
 
 function buildPromptLabel(rawPrefix = null, path = null) {
   const promptPath = path === null ? currentPromptWorkspacePath() : String(path || '~');
-  if (rawPrefix !== null) return _outputCore.buildPromptLabel(String(rawPrefix || ''), promptPath);
-  return _outputCore.buildPromptLabelFromParts(_configuredPromptUsername(), _configuredPromptDomain(), promptPath);
+  if (rawPrefix !== null) return _outputCoreApi().buildPromptLabel(String(rawPrefix || ''), promptPath);
+  return _outputCoreApi().buildPromptLabelFromParts(_configuredPromptUsername(), _configuredPromptDomain(), promptPath);
 }
 
 function stripPromptLabelFromEchoText(text = '') {
-  return _outputCore.stripPromptLabelFromEchoText(text, buildPromptLabel(), promptIdentityPrefix());
+  return _outputCoreApi().stripPromptLabelFromEchoText(text, buildPromptLabel(), promptIdentityPrefix());
 }
 
 function _outputPromptPrefix() {
+  const config = _outputAppConfig();
+  const shellPromptWrap = _outputShellPromptWrap();
   if (
-    typeof APP_CONFIG !== 'undefined'
-    && APP_CONFIG
-    && APP_CONFIG.workspace_enabled === true
-    && !(typeof shellPromptWrap !== 'undefined' && shellPromptWrap && shellPromptWrap.classList.contains('shell-prompt-confirm'))
+    config
+    && config.workspace_enabled === true
+    && !(shellPromptWrap && shellPromptWrap.classList.contains('shell-prompt-confirm'))
   ) {
     return buildPromptLabel();
   }
-  const promptPrefix = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap)
+  const promptPrefix = shellPromptWrap
     ? shellPromptWrap.querySelector('.prompt-prefix')
     : document.querySelector('#shell-prompt-wrap .prompt-prefix');
   const text = promptPrefix ? String(promptPrefix.textContent || '').trim() : '';
@@ -171,7 +329,7 @@ function _outputPromptPrefix() {
 }
 
 function _formatOutputPrefix(index, tsText, includeTimestamp) {
-  return _outputCore.formatOutputPrefix(index, tsText, includeTimestamp, lnMode, tsMode);
+  return _outputCoreApi().formatOutputPrefix(index, tsText, includeTimestamp, lnMode, tsMode);
 }
 
 function _outputPrefixesActive() {
@@ -204,11 +362,11 @@ function _prefixWidthForOutput(out) {
 
 function _tabForOutput(out) {
   const id = String(out?.id || '').replace(/^output-/, '');
-  return id && typeof getTab === 'function' ? getTab(id) : null;
+  return id ? _outputGetTab(id) : null;
 }
 
 function _trimOutputToMaxLines(out) {
-  const max = APP_CONFIG.max_output_lines;
+  const max = _outputAppConfig().max_output_lines;
   if (!(max > 0) || !out || typeof out.getElementsByClassName !== 'function') return 0;
   const lines = out.getElementsByClassName('line');
   const removed = Math.max(0, lines.length - max);
@@ -268,33 +426,33 @@ function _syncOutputLinePrefixMetadata(out, tab = null) {
 }
 
 function _emptyOutputSignalCounts() {
-  return _outputCore.emptySignalCounts();
+  return _outputCoreApi().emptySignalCounts();
 }
 
 function _isOutputSignalSummaryClassName(cls) {
-  return _outputCore.isSignalSummaryClassName(cls);
+  return _outputCoreApi().isSignalSummaryClassName(cls);
 }
 
 function _outputLineHasClass(rawLine, className) {
-  return _outputCore.lineHasClass(rawLine, className);
+  return _outputCoreApi().lineHasClass(rawLine, className);
 }
 
 function _isOutputSignalCountableLine(rawLine) {
-  return _outputCore.isSignalCountableLine(rawLine);
+  return _outputCoreApi().isSignalCountableLine(rawLine);
 }
 
 function _isOutputBuiltinCommandRoot(root) {
-  const builtinRoots = (
-    typeof acBuiltinCommandRoots !== 'undefined' && Array.isArray(acBuiltinCommandRoots)
-  ) ? acBuiltinCommandRoots : [];
-  return _outputCore.isBuiltinCommandRoot(root, builtinRoots);
+  const builtinRoots = Array.isArray(_outputAppState().acBuiltinCommandRoots)
+    ? _outputAppState().acBuiltinCommandRoots
+    : [];
+  return _outputCoreApi().isBuiltinCommandRoot(root, builtinRoots);
 }
 
 function _countableOutputSignalScopes(rawLine) {
-  const builtinRoots = (
-    typeof acBuiltinCommandRoots !== 'undefined' && Array.isArray(acBuiltinCommandRoots)
-  ) ? acBuiltinCommandRoots : [];
-  return _outputCore.countableSignalScopes(rawLine, builtinRoots);
+  const builtinRoots = Array.isArray(_outputAppState().acBuiltinCommandRoots)
+    ? _outputAppState().acBuiltinCommandRoots
+    : [];
+  return _outputCoreApi().countableSignalScopes(rawLine, builtinRoots);
 }
 
 function _ensureTabOutputSignalCounts(tab) {
@@ -407,9 +565,9 @@ function _isWelcomeLine(line) {
 
 function _isSyntheticSummaryLine(line) {
   if (!line || !line.classList) return false;
-  const isSyntheticClass = typeof _outputCore.isSyntheticSummaryClassName === 'function'
-    ? _outputCore.isSyntheticSummaryClassName
-    : _outputCore.isSignalSummaryClassName;
+  const isSyntheticClass = typeof _outputCoreApi().isSyntheticSummaryClassName === 'function'
+    ? _outputCoreApi().isSyntheticSummaryClassName
+    : _outputCoreApi().isSignalSummaryClassName;
   return [...line.classList].some(cls => isSyntheticClass(cls));
 }
 
@@ -501,11 +659,11 @@ function _schedulePendingOutputFlush(tabId) {
 }
 
 function _normalizeOutputSignals(signals) {
-  return _outputCore.normalizeSignals(signals);
+  return _outputCoreApi().normalizeSignals(signals);
 }
 
 function _normalizeOutputEntities(entities) {
-  return _outputCore.normalizeEntities(entities);
+  return _outputCoreApi().normalizeEntities(entities);
 }
 
 function _applyOutputSignalMetadata(span, rawLine, metadata) {
@@ -642,13 +800,13 @@ function _renderAnsiWithEntityTokens(content, text, entities, tabId) {
 }
 
 function _openAtlasForOutputEntity(token, options = {}) {
-  if (!token || typeof openAtlas !== 'function') return;
+  if (!token || typeof _outputGlobalFunction('openAtlas') !== 'function') return;
   const entityType = String(token.dataset.atlasEntityType || '');
   const entityValue = String(token.dataset.atlasEntityValue || '');
   const tab = String(token.dataset.atlasEntityTab || _atlasTabForOutputEntity(entityType));
   if (!entityType || !entityValue) return;
   _closeOutputEntityMenu();
-  void openAtlas({
+  void _outputOpenAtlas({
     source: 'output-entity',
     tab,
     entityType,
@@ -723,9 +881,14 @@ function _showOutputEntityMenu(token, x, y) {
     if (action === 'promote') _openAtlasForOutputEntity(token, { addActiveProject: true });
     if (action === 'lookup-intel') _openAtlasForOutputEntity(token, { refreshIntel: true });
     if (action === 'copy-value') {
+      const copyTextToClipboard = (typeof importedCopyTextToClipboard === 'function' && importedCopyTextToClipboard)
+        || _outputGlobalFunction('copyTextToClipboard');
+      const showToast = (typeof importedShowToast === 'function' && importedShowToast)
+        || _outputGlobalFunction('showToast');
+      if (typeof copyTextToClipboard !== 'function') return;
       copyTextToClipboard(String(token.dataset.atlasEntityValue || ''))
-        .then(() => showToast('Entity copied'))
-        .catch(() => showToast('Failed to copy entity', 'error'));
+        .then(() => showToast?.('Entity copied'))
+        .catch(() => showToast?.('Failed to copy entity', 'error'));
     }
     if (action === 'see-run') _focusOutputEntityLine(token);
     _closeOutputEntityMenu();
@@ -819,13 +982,13 @@ function _bindOutputEntityTokenEvents() {
 _bindOutputEntityTokenEvents();
 
 function _highVolumeOutputLineThreshold() {
-  const configured = Number(APP_CONFIG?.high_volume_output_line_threshold);
+  const configured = Number(_outputAppConfig()?.high_volume_output_line_threshold);
   if (Number.isFinite(configured)) return Math.max(0, Math.floor(configured));
   return _HIGH_VOLUME_OUTPUT_DEFAULT_LINE_THRESHOLD;
 }
 
 function _highVolumeOutputStatusIntervalLines() {
-  const configured = Number(APP_CONFIG?.high_volume_output_status_interval_lines);
+  const configured = Number(_outputAppConfig()?.high_volume_output_status_interval_lines);
   if (Number.isFinite(configured)) return Math.max(1, Math.floor(configured));
   return _HIGH_VOLUME_OUTPUT_DEFAULT_STATUS_INTERVAL_LINES;
 }
@@ -860,8 +1023,8 @@ function _formatHighVolumeCount(value) {
 }
 
 function _runOutputModel() {
-  if (typeof DarklabRunOutputModel !== 'undefined') return DarklabRunOutputModel;
-  if (typeof globalThis !== 'undefined' && globalThis.DarklabRunOutputModel) return globalThis.DarklabRunOutputModel;
+  if (typeof importedRunOutputModel !== 'undefined' && importedRunOutputModel) return importedRunOutputModel;
+  if (_outputGlobalValue('DarklabRunOutputModel')) return _outputGlobalValue('DarklabRunOutputModel');
   return null;
 }
 
@@ -870,9 +1033,7 @@ let _runOutputModelMissingReported = false;
 function _reportMissingRunOutputModel() {
   if (_runOutputModelMissingReported) return;
   _runOutputModelMissingReported = true;
-  if (typeof logClientError === 'function') {
-    logClientError('run output model missing', new Error('DarklabRunOutputModel is not loaded'));
-  }
+  _outputLogClientError('run output model missing', new Error('DarklabRunOutputModel is not loaded'));
 }
 
 function _fallbackLineEventKind(payload) {
@@ -1110,7 +1271,7 @@ function _shouldSkipLiveOutputRender(tab, metadata) {
 }
 
 function resetHighVolumeOutputState(tabId) {
-  const tab = getTab(tabId);
+  const tab = _outputGetTab(tabId);
   if (!tab) return;
   tab.highVolumeOutput = {
     active: false,
@@ -1125,7 +1286,7 @@ function resetHighVolumeOutputState(tabId) {
 }
 
 function appendHighVolumeOutputFinalSummary(tabId) {
-  const tab = getTab(tabId);
+  const tab = _outputGetTab(tabId);
   const state = _ensureHighVolumeOutputState(tab);
   if (!tab || !state || state.finalSummaryShown || (!state.skippedLines && !state.coalescedLines)) return false;
   state.finalSummaryShown = true;
@@ -1149,20 +1310,20 @@ function appendHighVolumeOutputFinalSummary(tabId) {
 function recordLiveOutputCoalescedLines(tabId, count) {
   const value = Math.max(0, Number(count || 0));
   if (!value) return;
-  const tab = getTab(tabId);
+  const tab = _outputGetTab(tabId);
   const state = _ensureHighVolumeOutputState(tab);
   if (!state) return;
   state.coalescedLines = Math.max(0, Number(state.coalescedLines || 0) + value);
 }
 
 function disableHighVolumeOutputResumeControls(tabId) {
-  const tab = getTab(tabId);
+  const tab = _outputGetTab(tabId);
   const state = _ensureHighVolumeOutputState(tab);
   if (state) {
     state.active = false;
     state.resumeDisabled = true;
   }
-  const out = getOutput(tabId);
+  const out = _outputGetOutput(tabId);
   if (!out || typeof out.querySelectorAll !== 'function') return;
   out.querySelectorAll('[data-high-volume-resume-tab]').forEach(button => {
     if (String(button.dataset.highVolumeResumeTab || '') !== String(tabId || '')) return;
@@ -1173,7 +1334,7 @@ function disableHighVolumeOutputResumeControls(tabId) {
 }
 
 function _resumeHighVolumeLiveOutput(tabId) {
-  const tab = getTab(tabId);
+  const tab = _outputGetTab(tabId);
   const state = _ensureHighVolumeOutputState(tab);
   if (!tab || !state) return;
   if (state.resumeDisabled || tab.st !== 'running') {
@@ -1192,9 +1353,8 @@ function _resumeHighVolumeLiveOutput(tabId) {
 function _bindHighVolumeOutputResumeButton(button) {
   if (!button) return;
   const onActivate = () => _resumeHighVolumeLiveOutput(String(button.dataset.highVolumeResumeTab || ''));
-  const bind = typeof bindPressable === 'function'
-    ? bindPressable
-    : (typeof globalThis.bindPressable === 'function' ? globalThis.bindPressable : null);
+  const bind = (typeof importedBindPressable === 'function' && importedBindPressable)
+    || _outputGlobalFunction('bindPressable');
   if (typeof bind === 'function') {
     bind(button, { onActivate, refocusComposer: false });
     return;
@@ -1207,11 +1367,8 @@ function _bindHighVolumeOutputResumeButton(button) {
 }
 
 function _activateOutputCommandChip(command) {
-  const activate = typeof activateFaqCommandChip === 'function'
-    ? activateFaqCommandChip
-    : typeof globalThis.activateFaqCommandChip === 'function'
-    ? globalThis.activateFaqCommandChip
-    : null;
+  const activate = (typeof importedActivateFaqCommandChip === 'function' && importedActivateFaqCommandChip)
+    || _outputGlobalFunction('activateFaqCommandChip');
   if (typeof activate === 'function') activate(command);
 }
 
@@ -1399,7 +1556,8 @@ function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
 }
 
 function _appendOutputSpan(out, span) {
-  const prompt = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && shellPromptWrap.parentElement === out)
+  const shellPromptWrap = _outputShellPromptWrap();
+  const prompt = (shellPromptWrap && shellPromptWrap.parentElement === out)
     ? shellPromptWrap
     : null;
   if (prompt) out.insertBefore(span, prompt);
@@ -1407,22 +1565,28 @@ function _appendOutputSpan(out, span) {
 }
 
 function _commandOutcomeSummariesEnabled() {
-  if (typeof getCommandOutcomeSummariesPreference === 'function') {
-    return getCommandOutcomeSummariesPreference() !== 'off';
+  const readPreference = _outputGlobalFunction('getCommandOutcomeSummariesPreference')
+    || (typeof importedGetCommandOutcomeSummariesPreference === 'function'
+    && importedGetCommandOutcomeSummariesPreference)
+    || null;
+  if (typeof readPreference === 'function') {
+    return readPreference() !== 'off';
   }
   return true;
 }
 
 function _normalizeCommandOutcomeSummary(outcome) {
-  if (_outputCore && typeof _outputCore.normalizeCommandOutcomeSummary === 'function') {
-    return _outputCore.normalizeCommandOutcomeSummary(outcome);
+  const outputCore = _outputCoreApi();
+  if (outputCore && typeof outputCore.normalizeCommandOutcomeSummary === 'function') {
+    return outputCore.normalizeCommandOutcomeSummary(outcome);
   }
   return null;
 }
 
 function _buildCommandOutcomeSummary(tab) {
-  if (!tab || !_outputCore || typeof _outputCore.buildCommandOutcomeSummary !== 'function') return null;
-  return _outputCore.buildCommandOutcomeSummary(tab.command || '', _commandOutcomeRawLinesForTab(tab));
+  const outputCore = _outputCoreApi();
+  if (!tab || !outputCore || typeof outputCore.buildCommandOutcomeSummary !== 'function') return null;
+  return outputCore.buildCommandOutcomeSummary(tab.command || '', _commandOutcomeRawLinesForTab(tab));
 }
 
 function _commandOutcomeRawLinesForTab(tab) {
@@ -1461,9 +1625,9 @@ function _appendCommandOutcomeLine(out, tab, text, className) {
 }
 
 function renderCommandOutcomeSummary(tabId, outcome = null) {
-  const id = tabId || activeTabId;
-  const out = getOutput(id);
-  const tab = getTab(id);
+  const id = tabId || _outputActiveTabId();
+  const out = _outputGetOutput(id);
+  const tab = _outputGetTab(id);
   if (!out || !tab) return false;
   _flushPendingOutputBeforeHighVolumeSkip(id);
   _removeCommandOutcomeSummary(out);
@@ -1494,12 +1658,12 @@ function renderCommandOutcomeSummary(tabId, outcome = null) {
   });
   _syncOutputPrefixesForAppend(out);
   _followOutputAfterAppend(out, tab);
-  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  _outputUpdateFollowButton(id);
   return true;
 }
 
 function setTabCommandOutcomeSummary(tabId, outcome, { render = true } = {}) {
-  const tab = getTab(tabId || activeTabId);
+  const tab = _outputGetTab(tabId || _outputActiveTabId());
   if (!tab) return null;
   tab.commandOutcomeSummary = _normalizeCommandOutcomeSummary(outcome);
   if (render) renderCommandOutcomeSummary(tab.id, tab.commandOutcomeSummary);
@@ -1507,8 +1671,7 @@ function setTabCommandOutcomeSummary(tabId, outcome, { render = true } = {}) {
 }
 
 function refreshCommandOutcomeSummaries() {
-  if (!Array.isArray(tabs)) return;
-  tabs.forEach(tab => {
+  _outputTabs().forEach(tab => {
     if (tab && tab.id) renderCommandOutcomeSummary(tab.id);
   });
 }
@@ -1528,7 +1691,7 @@ function _stickOutputToBottom(out, tab) {
     // earlier output) we must not yank them back — their scroll intent
     // wins over our layout-settle retry.
     setTimeout(() => {
-      const live = getTab(tab.id);
+      const live = _outputGetTab(tab.id);
       if (!live || live._outputFollowToken !== token) return;
       if (live.followOutput !== false) {
         out.scrollTop = out.scrollHeight;
@@ -1548,12 +1711,12 @@ function _restoreOutputTailAfterLayout(out, tab) {
   }
 
   const stick = (final = false) => {
-    const live = tab ? getTab(tab.id) : null;
+    const live = tab ? _outputGetTab(tab.id) : null;
     if (tab && (!live || live._outputFollowToken !== token)) return;
     if (live && Date.now() <= Number(live.outputUserScrollUntil || 0)) {
       live.followOutput = false;
       live.suppressOutputScrollTracking = false;
-      if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(live.id);
+      _outputUpdateFollowButton(live.id);
       return;
     }
     if (!live || live.followOutput !== false) {
@@ -1561,7 +1724,7 @@ function _restoreOutputTailAfterLayout(out, tab) {
     }
     if (final && live) {
       live.suppressOutputScrollTracking = false;
-      if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(live.id);
+      _outputUpdateFollowButton(live.id);
     }
   };
 
@@ -1594,7 +1757,7 @@ function _syncTabRawLines(tab, rawLine) {
   if (!Array.isArray(tab.rawLines)) tab.rawLines = [];
   tab.rawLines.push(rawLine);
   _adjustTabOutputSignalCounts(tab, rawLine, 1);
-  const max = APP_CONFIG.max_output_lines;
+  const max = _outputAppConfig().max_output_lines;
   if (max > 0 && tab.rawLines.length > max) {
     const removed = tab.rawLines.length - max;
     const removedLines = tab.rawLines.splice(0, removed);
@@ -1647,8 +1810,8 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
 }
 
 function renderRestoredTabOutput(tabId, rawLines) {
-  const out = getOutput(tabId);
-  const tab = getTab(tabId);
+  const out = _outputGetOutput(tabId);
+  const tab = _outputGetTab(tabId);
   if (!out || !tab) return;
   const restoredSummary = tab.commandOutcomeSummary;
   const lines = Array.isArray(rawLines) ? rawLines.map(line => ({
@@ -1677,12 +1840,8 @@ function renderRestoredTabOutput(tabId, rawLines) {
     if (_isMobileTerminalMode()) _stickOutputToBottom(out, tab);
     else _restoreOutputTailAfterLayout(out, tab);
   }
-  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
-  if (tabId === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
-    if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
-    else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
-    else refreshSearchDiscoverabilityUi();
-  }
+  _outputUpdateFollowButton(tabId);
+  _outputSearchRefresh(tabId);
 }
 
 function _flushPendingOutputBatch(tabId) {
@@ -1691,8 +1850,8 @@ function _flushPendingOutputBatch(tabId) {
   state.scheduled = false;
   state.handle = null;
 
-  const out = getOutput(tabId);
-  const tab = getTab(tabId);
+  const out = _outputGetOutput(tabId);
+  const tab = _outputGetTab(tabId);
   if (!out || !tab) {
     _cancelPendingOutputBatch(tabId);
     return;
@@ -1729,12 +1888,8 @@ function _flushPendingOutputBatch(tabId) {
   if (shouldStickToBottom) {
     _followOutputAfterAppend(out, tab, { afterLargeBatch: wasLargeBurst || batch.length > 1 });
   }
-  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
-  if (tabId === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
-    if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
-    else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
-    else refreshSearchDiscoverabilityUi();
-  }
+  _outputUpdateFollowButton(tabId);
+  _outputSearchRefresh(tabId);
 
   if (state.items.length > 0 || state.rawLines.length > 0) {
     _schedulePendingOutputFlush(tabId);
@@ -1746,25 +1901,24 @@ function _flushPendingOutputBatch(tabId) {
 }
 
 function _refreshFollowingOutputsAfterLayout() {
-  if (!Array.isArray(tabs)) return;
-  tabs.forEach(tab => {
+  _outputTabs().forEach(tab => {
     if (!tab || tab.followOutput === false) return;
-    const out = getOutput(tab.id);
+    const out = _outputGetOutput(tab.id);
     if (!out) return;
     setTimeout(() => _restoreOutputTailAfterLayout(out, tab), 16);
   });
 }
 
 function _maybeMountDeferredPrompt(tabId) {
-  const tab = getTab(tabId);
+  const tab = _outputGetTab(tabId);
   if (!tab || !tab.deferPromptMount || tab.st === 'running') return;
-  if (typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) return;
+  const restoreInProgress = (typeof importedIsTabSessionRestoreInProgress === 'function' && importedIsTabSessionRestoreInProgress())
+    || _outputGlobalValue('_tabSessionRestoreInProgress');
+  if (restoreInProgress) return;
   const state = _pendingOutputBatches.get(tabId);
   if (state && (state.scheduled || state.items.length > 0 || state.rawLines.length > 0)) return;
   tab.deferPromptMount = false;
-  if (tabId === activeTabId && typeof mountShellPrompt === 'function') {
-    mountShellPrompt(tabId, true);
-  }
+  if (tabId === _outputActiveTabId()) _outputMountShellPrompt(tabId, true);
 }
 
 function syncOutputPrefixes(scope = document) {
@@ -1804,6 +1958,13 @@ function _setTsMode(mode) {
   document.body.classList.remove('ts-elapsed', 'ts-clock');
   if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
   if (mode === 'clock') document.body.classList.add('ts-clock');
+  const tsBtn = document.getElementById('ts-btn');
+  if (tsBtn) {
+    const labels = { off: 'timestamps', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
+    tsBtn.textContent = labels[mode] || labels.off;
+    tsBtn.classList.toggle('active', mode !== 'off');
+    tsBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
+  }
   syncOutputPrefixes();
   try {
     _refreshFollowingOutputsAfterLayout();
@@ -1820,11 +1981,11 @@ _setLnMode('off');
 function appendLine(text, cls, tabId, metadata = null) {
   const normalized = _normalizeAppendLineArgs(text, cls, tabId, metadata);
   const { event } = normalized;
-  const id = normalized.tabId || activeTabId;
-  const out = getOutput(id);
+  const id = normalized.tabId || _outputActiveTabId();
+  const out = _outputGetOutput(id);
   if (!out) return;
 
-  const tab = getTab(id);
+  const tab = _outputGetTab(id);
   const now = Date.now();
   const runStart = tab?.runStart || 0;
   if (_shouldSkipLiveOutputRender(tab, normalized.metadata)) {
@@ -1867,13 +2028,9 @@ function appendLine(text, cls, tabId, metadata = null) {
 
   _syncOutputPrefixesForAppend(out, span);
   _followOutputAfterAppend(out, tab);
-  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  _outputUpdateFollowButton(id);
   _syncTabRawLines(tab, rawLine);
-  if (id === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
-    if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
-    else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
-    else refreshSearchDiscoverabilityUi();
-  }
+  _outputSearchRefresh(id);
 }
 
 function _normalizeAppendLinesEntry(entry) {
@@ -1882,9 +2039,9 @@ function _normalizeAppendLinesEntry(entry) {
 }
 
 function appendLines(lines, tabId) {
-  const id = tabId || activeTabId;
-  const out = getOutput(id);
-  const tab = getTab(id);
+  const id = tabId || _outputActiveTabId();
+  const out = _outputGetOutput(id);
+  const tab = _outputGetTab(id);
   const sourceLines = Array.isArray(lines) ? lines : [];
   if (!out || !sourceLines.length) return Promise.resolve();
 
@@ -1925,35 +2082,59 @@ function appendLines(lines, tabId) {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    createAnsiUpRenderer,
-    resetAnsiRendererForTab,
-    dropAnsiRendererForTab,
-    promptIdentityPrefix,
-    currentPromptWorkspacePath,
-    buildPromptLabel,
-    stripPromptLabelFromEchoText,
-    hasPendingOutputBatch,
-    discardPendingOutputBatch,
-    resetHighVolumeOutputState,
-    appendHighVolumeOutputFinalSummary,
-    _maybeMountDeferredPrompt,
-    recordLiveOutputCoalescedLines,
-    disableHighVolumeOutputResumeControls,
-    renderCommandOutcomeSummary,
-    setTabCommandOutcomeSummary,
-    refreshCommandOutcomeSummaries,
-    renderRestoredTabOutput,
-    _refreshFollowingOutputsAfterLayout,
-    syncOutputPrefixes,
-    _resetTabOutputSignalCounts,
-    _cancelPendingOutputBatch,
-    _renderAnsiWithEntityTokens,
-    _stickOutputToBottom,
-    _restoreOutputTailAfterLayout,
-    _setLnMode,
-    _setOutputTsMode: _setTsMode,
-    appendLine,
-    appendLines,
-  });
+  if (typeof window._setTsMode !== 'function') window._setTsMode = _setTsMode;
+  if (typeof window._setLnMode !== 'function') window._setLnMode = _setLnMode;
+  if (typeof importedSetOutputModeHandlers === 'function') {
+    importedSetOutputModeHandlers({ setTimestampMode: _setTsMode });
+  }
+  if (typeof importedSetOutputHandlers === 'function') {
+    importedSetOutputHandlers({
+      resetAnsiRendererForTab,
+      dropAnsiRendererForTab,
+      hasPendingOutputBatch,
+      _maybeMountDeferredPrompt,
+      syncOutputPrefixes,
+      _resetTabOutputSignalCounts,
+      _cancelPendingOutputBatch,
+      _stickOutputToBottom,
+      _restoreOutputTailAfterLayout,
+      appendLine,
+      appendLines,
+      isTabSessionRestoreInProgress: () => !!_outputGlobalValue('_tabSessionRestoreInProgress'),
+    });
+  }
 }
+
+export {
+  _cancelPendingOutputBatch,
+  _maybeMountDeferredPrompt,
+  _refreshFollowingOutputsAfterLayout,
+  _renderAnsiWithEntityTokens,
+  _resetTabOutputSignalCounts,
+  _restoreOutputTailAfterLayout,
+  _setLnMode,
+  _setTsMode,
+  _stickOutputToBottom,
+  appendHighVolumeOutputFinalSummary,
+  appendLine,
+  appendLines,
+  buildPromptLabel,
+  createAnsiUpRenderer,
+  currentPromptWorkspacePath,
+  disableHighVolumeOutputResumeControls,
+  discardPendingOutputBatch,
+  dropAnsiRendererForTab,
+  getLineNumberMode,
+  getTimestampMode,
+  hasPendingOutputBatch,
+  promptIdentityPrefix,
+  recordLiveOutputCoalescedLines,
+  refreshCommandOutcomeSummaries,
+  renderCommandOutcomeSummary,
+  renderRestoredTabOutput,
+  resetAnsiRendererForTab,
+  resetHighVolumeOutputState,
+  setTabCommandOutcomeSummary,
+  stripPromptLabelFromEchoText,
+  syncOutputPrefixes,
+};

@@ -1,5 +1,8 @@
 // Project Activity tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies request and render hooks.
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+
+let exportedDarklabProjectActivity = null;
 
 (function projectActivityModule(global) {
   'use strict';
@@ -285,8 +288,10 @@
     }
 
     function bindDetailsDisclosure(toggle, panel) {
-      const disclosure = typeof global.bindDisclosure === 'function'
-        ? global.bindDisclosure(toggle, {
+      const bindDisclosure = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure)
+        || null;
+      const disclosure = typeof bindDisclosure === 'function'
+        ? bindDisclosure(toggle, {
           panel,
           openClass: null,
           hiddenClass: 'u-hidden',
@@ -615,7 +620,11 @@
     };
   }
 
-  global.DarklabProjectActivity = {
+  const DarklabProjectActivity = {
     createProjectActivityController,
   };
+  exportedDarklabProjectActivity = DarklabProjectActivity;
 })(window);
+
+export {
+  exportedDarklabProjectActivity as DarklabProjectActivity,};

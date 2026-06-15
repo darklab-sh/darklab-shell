@@ -30,10 +30,20 @@ function totalEntityCount(summary) {
   return Object.values(summary.counts).reduce((total, value) => total + Number(value || 0), 0);
 }
 
-window.DarklabAtlasTabs = {
+const DarklabAtlasTabs = {
   tabs,
   tabById,
   labelForType,
   countForTab,
+  totalEntityCount,
+};
+
+
+export {
+  DarklabAtlasTabs,
+  countForTab,
+  labelForType,
+  tabById,
+  tabs,
   totalEntityCount,
 };

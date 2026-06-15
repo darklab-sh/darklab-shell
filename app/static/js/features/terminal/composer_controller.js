@@ -1,23 +1,334 @@
 // ── Terminal composer controller ──
 // Owns prompt focus/paste behavior, autocomplete loading, and keyboard handling.
 
+import {
+  findWordBoundaryLeft,
+  findWordBoundaryRight,
+  getCmdSelection,
+  replaceCmdRange,
+} from './composer_editing.js';
+import {
+  _bindMobileComposerInteractions,
+  _mobileUiLayoutRefs,
+  syncMobileViewportState,
+  useMobileTerminalViewportMode,
+} from '../mobile/mobile_shell_layout.js';
+import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from '../workspace/workspace_autocomplete_cache.js';
+import { loadSessionVariables as importedLoadSessionVariables } from '../autocomplete/runtime_context.js';
+import { setAutocompleteCatalog as importedSetAutocompleteCatalog } from '../autocomplete/suggestions.js';
+import {
+  apiFetch as importedApiFetch,
+  logClientError as importedLogClientError,
+} from '../../session.js';
+import { schedulePersistTabSessionState as importedSchedulePersistTabSessionState } from '../tabs/tab_session_state.js';
+import { isHistoryRunOverlayOpen as importedIsHistoryRunOverlayOpen } from '../history/history_run_modal_state_bridge.js';
+import {
+  enterHistSearch as importedEnterHistSearch,
+  handleHistSearchInput as importedHandleHistSearchInput,
+  handleHistSearchKey as importedHandleHistSearchKey,
+  isHistSearchMode as importedIsHistSearchMode,
+} from '../history/history_search.js';
+import { navigateCmdHistory as importedNavigateCmdHistory } from '../history/history_recall.js';
+import {
+  hasComposerPromptHandler as importedHasComposerPromptHandler,
+  syncShellPrompt as importedSyncShellPrompt,
+} from './composer_prompt_bridge.js';
+import {
+  eventMatchesCode as importedEventMatchesCode,
+  eventMatchesLetter as importedEventMatchesLetter,
+  handleActionShortcut as importedHandleActionShortcut,
+  handleChromeShortcut as importedHandleChromeShortcut,
+  handleTabShortcut as importedHandleTabShortcut,
+} from '../shortcuts/global_shortcuts.js';
+import {
+  acAutocompleteIsHintOnly as importedAcAutocompleteIsHintOnly,
+  acAutocompleteNextSelectableIndex as importedAcAutocompleteNextSelectableIndex,
+  acAutocompleteSelectableItems as importedAcAutocompleteSelectableItems,
+  hasActiveTerminalConfirm as importedHasActiveTerminalConfirm,
+  isAnyPanelOverlayOpen as importedIsAnyPanelOverlayOpen,
+  setupMobileComposer as importedSetupMobileComposer,
+} from '../../controller.js';
+import {
+  closeOptions as importedCloseOptions,
+  closeThemeSelector as importedCloseThemeSelector,
+  isEditableTarget as importedIsEditableTarget,
+} from '../../app.js';
+import {
+  closeFaq as importedCloseFaq,
+  closeWorkflows as importedCloseWorkflows,
+} from '../../controller_action_bridge.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from '../../ui/ui_outside_click.js';
+import {
+  hideHistoryPanel as importedHideHistoryPanel,
+  isHistoryPanelOpen as importedIsHistoryPanelOpen,
+} from '../../ui/ui_helpers.js';
+import { closeTopmostDismissible as importedCloseTopmostDismissible } from '../../ui/ui_dismissible.js';
+import {
+  cancelPendingTerminalConfirm as importedCancelPendingTerminalConfirm,
+  confirmKill as importedConfirmKill,
+  interruptPromptLine as importedInterruptPromptLine,
+  runCommand as importedRunCommand,
+  submitComposerCommand as importedSubmitComposerCommand,
+} from '../../runner_bridge.js';
+import {
+  cmdInput as importedCmdInput,
+  historyPanel as importedHistoryPanel,
+  runBtn as importedRunBtn,
+  shellPromptWrap as importedShellPromptWrap,
+} from '../../core/dom.js';
+import {
+  APP_STATE_API as importedAppStateApi,
+  getActiveTab as importedGetActiveTab,
+  getActiveTabId as importedGetActiveTabId,
+  getAutocompleteState as importedGetAutocompleteState,
+  getComposerState as importedGetComposerState,
+  getWelcomeState as importedGetWelcomeState,
+  setAutocompleteState as importedSetAutocompleteState,
+  setComposerState as importedSetComposerState,
+  setWelcomeState as importedSetWelcomeState,
+} from '../../core/state.js';
+
+const COMPOSER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+var cmdInput = importedCmdInput || COMPOSER_GLOBAL.cmdInput || null;
+var historyPanel = importedHistoryPanel || COMPOSER_GLOBAL.historyPanel || null;
+var runBtn = importedRunBtn || COMPOSER_GLOBAL.runBtn || null;
+var shellPromptWrap = importedShellPromptWrap || COMPOSER_GLOBAL.shellPromptWrap || null;
+
+function _composerFn(name) {
+  const fn = COMPOSER_GLOBAL && COMPOSER_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _composerImportedFn(importedFn, name) {
+  return (typeof importedFn === 'function' && importedFn) || _composerFn(name);
+}
+
+function _composerHasActiveTerminalConfirm() {
+  return !!_composerImportedFn(importedHasActiveTerminalConfirm, 'hasActiveTerminalConfirm')?.();
+}
+
+function _composerIsAnyPanelOverlayOpen() {
+  return !!_composerImportedFn(importedIsAnyPanelOverlayOpen, 'isAnyPanelOverlayOpen')?.();
+}
+
+function _composerCloseTopmostDismissible() {
+  return !!_composerImportedFn(importedCloseTopmostDismissible, 'closeTopmostDismissible')?.();
+}
+
+function _composerAutocompleteIsHintOnly(item) {
+  return !!_composerImportedFn(importedAcAutocompleteIsHintOnly, 'acAutocompleteIsHintOnly')?.(item);
+}
+
+function _composerAutocompleteSelectableItems(items) {
+  return _composerImportedFn(importedAcAutocompleteSelectableItems, 'acAutocompleteSelectableItems')?.(items) || [];
+}
+
+function _composerAutocompleteNextSelectableIndex(items, currentIndex, direction = 1) {
+  return _composerImportedFn(
+    importedAcAutocompleteNextSelectableIndex,
+    'acAutocompleteNextSelectableIndex',
+  )?.(items, currentIndex, direction) ?? -1;
+}
+
+function _composerIsHistSearchMode() {
+  return !!_composerImportedFn(importedIsHistSearchMode, 'isHistSearchMode')?.();
+}
+
+function _composerNavigateCmdHistory(delta) {
+  const navigate = (typeof importedNavigateCmdHistory === 'function' && importedNavigateCmdHistory)
+    || _composerFn('navigateCmdHistory');
+  return typeof navigate === 'function' && navigate(delta);
+}
+
+function _composerEnterHistSearch() {
+  _composerImportedFn(importedEnterHistSearch, 'enterHistSearch')?.();
+}
+
+function _composerHandleHistSearchInput(value) {
+  _composerImportedFn(importedHandleHistSearchInput, 'handleHistSearchInput')?.(value);
+}
+
+function _composerHandleHistSearchKey(event) {
+  return !!_composerImportedFn(importedHandleHistSearchKey, 'handleHistSearchKey')?.(event);
+}
+
+function _composerSetupMobileComposer() {
+  _composerImportedFn(importedSetupMobileComposer, 'setupMobileComposer')?.();
+}
+
+function _composerIsEditableTarget(target) {
+  return !!_composerImportedFn(importedIsEditableTarget, 'isEditableTarget')?.(target);
+}
+
+function _composerCloseOptions() {
+  _composerImportedFn(importedCloseOptions, 'closeOptions')?.();
+}
+
+function _composerCloseThemeSelector() {
+  _composerImportedFn(importedCloseThemeSelector, 'closeThemeSelector')?.();
+}
+
+function _composerValue(name) {
+  return COMPOSER_GLOBAL ? COMPOSER_GLOBAL[name] : undefined;
+}
+
+function _composerAppStateApi() {
+  return importedAppStateApi || _composerValue('APP_STATE_API') || null;
+}
+
+function _composerActiveTabId() {
+  const getId = (typeof importedGetActiveTabId === 'function' && importedGetActiveTabId)
+    || _composerFn('getActiveTabId');
+  return typeof getId === 'function' ? getId() : (_composerValue('activeTabId') || null);
+}
+
+function _composerActiveTab() {
+  const getActive = (typeof importedGetActiveTab === 'function' && importedGetActiveTab)
+    || _composerFn('getActiveTab');
+  return typeof getActive === 'function' ? getActive() : null;
+}
+
+function _composerSetState(next = {}) {
+  const setState = (typeof importedSetComposerState === 'function' && importedSetComposerState)
+    || _composerFn('setComposerState');
+  return typeof setState === 'function' ? setState(next) : null;
+}
+
+function _composerInputs() {
+  const readInputs = _composerFn('getComposerInputs');
+  return typeof readInputs === 'function' ? readInputs() : {};
+}
+
+function _composerGetValue(fallback = '') {
+  const readValue = _composerFn('getComposerValue');
+  if (typeof readValue === 'function') {
+    const value = readValue();
+    if (value || !(cmdInput && typeof cmdInput.value === 'string' && cmdInput.value)) return value;
+  }
+  const composer = typeof importedGetComposerState === 'function' ? importedGetComposerState() : null;
+  if (composer && typeof composer.value === 'string') return composer.value;
+  if (cmdInput && typeof cmdInput.value === 'string') return cmdInput.value;
+  return fallback;
+}
+
+function _composerVisibleInput() {
+  const readInput = _composerFn('getVisibleComposerInput');
+  return typeof readInput === 'function' ? readInput() : cmdInput;
+}
+
+function _composerSyncShellPrompt() {
+  const syncPrompt = (
+    typeof importedHasComposerPromptHandler === 'function'
+    && importedHasComposerPromptHandler('syncShellPrompt')
+  ) ? importedSyncShellPrompt : _composerFn('syncShellPrompt');
+  if (typeof syncPrompt === 'function') syncPrompt();
+}
+
+function _composerSyncSelection(start, end, options) {
+  const syncSelection = _composerFn('syncComposerSelection');
+  if (typeof syncSelection === 'function') return syncSelection(start, end, options);
+  return null;
+}
+
+function _composerAcHide() {
+  const hide = _composerFn('acHide');
+  if (typeof hide === 'function') hide();
+}
+
+function _composerRefocus(options) {
+  const refocus = _composerFn('refocusComposerAfterAction');
+  if (typeof refocus === 'function') refocus(options);
+}
+
+function _composerSubmitCommand(rawCmd, options) {
+  const submitCommand = (typeof importedSubmitComposerCommand === 'function' && importedSubmitComposerCommand)
+    || _composerFn('submitComposerCommand');
+  if (typeof submitCommand === 'function') return submitCommand(rawCmd, options);
+  const run = (typeof importedRunCommand === 'function' && importedRunCommand)
+    || _composerFn('runCommand');
+  return typeof run === 'function' ? run() : undefined;
+}
+
+function _refreshWorkspaceFileCache() {
+  const refresh = (typeof importedRefreshWorkspaceFileCache !== 'undefined' && importedRefreshWorkspaceFileCache)
+    || _composerFn('refreshWorkspaceFileCache');
+  if (typeof refresh === 'function') return refresh();
+  return null;
+}
+
 function _isMajorSurfaceOpenForPromptPaste() {
   return (
-    isFaqOverlayOpen()
-    || isOptionsOverlayOpen()
-    || isThemeOverlayOpen()
-    || isWorkflowsOverlayOpen()
-    || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
-    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
-    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
-    || isHistoryPanelOpen()
-    || (typeof isConfirmOpen === 'function' && isConfirmOpen())
+    (_composerFn('isFaqOverlayOpen')?.() || false)
+    || (_composerFn('isOptionsOverlayOpen')?.() || false)
+    || (_composerFn('isThemeOverlayOpen')?.() || false)
+    || (_composerFn('isWorkflowsOverlayOpen')?.() || false)
+    || (_composerFn('isWorkspaceOverlayOpen')?.() || false)
+    || (_composerFn('isHistoryCompareOverlayOpen')?.() || false)
+    || (_composerImportedFn(importedIsHistoryRunOverlayOpen, 'isHistoryRunOverlayOpen')?.() || false)
+    || (_composerFn('isHistoryPanelOpen')?.() || false)
+    || (_composerFn('isConfirmOpen')?.() || false)
   );
+}
+
+function _readComposerAutocompleteState() {
+  const getState = (typeof importedGetAutocompleteState === 'function' && importedGetAutocompleteState)
+    || _composerFn('getAutocompleteState');
+  const apiState = typeof getState === 'function' ? getState() : {};
+  return {
+    filtered: Array.isArray(apiState.filtered) ? apiState.filtered : [],
+    index: apiState.index ?? -1,
+  };
+}
+
+function _writeComposerAutocompleteState(next = {}) {
+  const setState = (typeof importedSetAutocompleteState === 'function' && importedSetAutocompleteState)
+    || _composerFn('setAutocompleteState');
+  if (typeof setState === 'function') setState(next);
+  return _readComposerAutocompleteState();
+}
+
+function _writeComposerAutocompleteCatalog(data = {}) {
+  const writeCatalog = (typeof importedSetAutocompleteCatalog === 'function' && importedSetAutocompleteCatalog)
+    || _composerFn('setAutocompleteCatalog');
+  if (typeof writeCatalog === 'function') return writeCatalog(data);
+  return {};
+}
+
+function _composerWelcomeActive() {
+  const getWelcome = (typeof importedGetWelcomeState === 'function' && importedGetWelcomeState)
+    || _composerFn('getWelcomeState');
+  return !!(_composerValue('_welcomeActive')
+    || (typeof getWelcome === 'function' && getWelcome().active));
+}
+
+function _composerWelcomeDone() {
+  const getWelcome = (typeof importedGetWelcomeState === 'function' && importedGetWelcomeState)
+    || _composerFn('getWelcomeState');
+  return !!(_composerValue('_welcomeDone')
+    || (typeof getWelcome === 'function' && getWelcome().done));
+}
+
+function _setComposerWelcomePromptAfterSettle(value) {
+  const setWelcome = (typeof importedSetWelcomeState === 'function' && importedSetWelcomeState)
+    || _composerFn('setWelcomeState');
+  if (typeof setWelcome === 'function') setWelcome({ promptAfterSettle: !!value });
+  if (COMPOSER_GLOBAL) COMPOSER_GLOBAL._welcomePromptAfterSettle = !!value;
+}
+
+function _composerWelcomeOwns(tabId) {
+  const welcomeOwns = _composerFn('welcomeOwnsTab');
+  return typeof welcomeOwns === 'function' && welcomeOwns(tabId);
+}
+
+function _composerRequestWelcomeSettle(tabId) {
+  const requestSettle = _composerFn('requestWelcomeSettle');
+  return typeof requestSettle === 'function' ? requestSettle(tabId) : false;
 }
 
 document.addEventListener('paste', e => {
   if (e.defaultPrevented) return;
-  if (!cmdInput || isEditableTarget(e.target) || _isMajorSurfaceOpenForPromptPaste()) return;
+  if (!cmdInput || _composerIsEditableTarget(e.target) || _isMajorSurfaceOpenForPromptPaste()) return;
   const clipboard = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
   const text = clipboard && typeof clipboard.getData === 'function'
     ? (clipboard.getData('text/plain') || clipboard.getData('text') || '')
@@ -29,8 +340,8 @@ document.addEventListener('paste', e => {
     const selection = window.getSelection();
     if (selection && typeof selection.removeAllRanges === 'function') selection.removeAllRanges();
   }
-  refocusComposerAfterAction({ preventScroll: true });
-  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
+  _composerRefocus({ preventScroll: true });
+  const value = _composerGetValue(cmdInput.value || '');
   const { start, end } = getCmdSelection(value);
   replaceCmdRange(value, start, end, text);
 });
@@ -40,22 +351,23 @@ document.addEventListener('paste', e => {
 // autocomplete dropdown). The mobile menu sheet's dismissal is owned by
 // its bindDismissible registration in mobile_chrome.js — the scrim covers
 // the viewport so every outside click hits it.
-if (historyPanel && typeof bindOutsideClickClose === 'function') {
-  bindOutsideClickClose(historyPanel, {
+const bindOutsideClick = _composerImportedFn(importedBindOutsideClickClose, 'bindOutsideClickClose');
+if (historyPanel && bindOutsideClick) {
+  bindOutsideClick(historyPanel, {
     triggers: null,
-    isOpen: isHistoryPanelOpen,
-    onClose: hideHistoryPanel,
+    isOpen: () => _composerImportedFn(importedIsHistoryPanelOpen, 'isHistoryPanelOpen')?.() || false,
+    onClose: () => _composerImportedFn(importedHideHistoryPanel, 'hideHistoryPanel')?.(),
     exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '.modal-overlay', '#history-compare-overlay'],
   });
 }
-if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
+if (bindOutsideClick && shellPromptWrap) {
   // Autocomplete dismissal: the dropdown itself is a transient element, so we
   // anchor the helper on the prompt wrap (always present) and exempt the
   // dropdown + mobile composer via selectors. Any click outside all three
   // zones hides the dropdown, matching the prior global-click behavior.
-  bindOutsideClickClose(shellPromptWrap, {
-    isOpen: () => typeof isAcDropdownOpen === 'function' && isAcDropdownOpen(),
-    onClose: () => { if (typeof acHide === 'function') acHide(); },
+  bindOutsideClick(shellPromptWrap, {
+    isOpen: () => _composerFn('isAcDropdownOpen')?.() || false,
+    onClose: () => { _composerAcHide(); },
     exemptSelectors: ['.ac-dropdown', '#mobile-composer'],
   });
 }
@@ -64,14 +376,14 @@ function _handleRunningComposerShortcut(e) {
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     e.preventDefault();
     e.stopPropagation();
-    confirmKill(activeTabId);
+    _composerImportedFn(importedConfirmKill, 'confirmKill')?.(_composerActiveTabId());
     return true;
   }
 
   const isCtrlD = e.ctrlKey && !e.metaKey && !e.altKey && (
     e.key === 'd'
     || e.key === 'D'
-    || (typeof eventMatchesLetter === 'function' && eventMatchesLetter(e, 'd'))
+    || (_composerImportedFn(importedEventMatchesLetter, 'eventMatchesLetter')?.(e, 'd') || false)
   );
   if (isCtrlD) {
     e.preventDefault();
@@ -79,17 +391,17 @@ function _handleRunningComposerShortcut(e) {
     return true;
   }
 
-  if (typeof handleTabShortcut === 'function' && handleTabShortcut(e)) {
+  if (_composerImportedFn(importedHandleTabShortcut, 'handleTabShortcut')?.(e)) {
     e.stopPropagation();
     return true;
   }
 
-  if (typeof handleActionShortcut === 'function' && handleActionShortcut(e)) {
+  if (_composerImportedFn(importedHandleActionShortcut, 'handleActionShortcut')?.(e)) {
     e.stopPropagation();
     return true;
   }
 
-  if (typeof handleChromeShortcut === 'function' && handleChromeShortcut(e)) {
+  if (_composerImportedFn(importedHandleChromeShortcut, 'handleChromeShortcut')?.(e)) {
     e.stopPropagation();
     return true;
   }
@@ -111,12 +423,12 @@ let _promptPointerSelectionState = null;
 let _suppressPromptFocusUntil = 0;
 let _pendingPromptFocusTimer = null;
 
-if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
+if (shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('pointerdown', e => {
     if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     if (useMobileTerminalViewportMode()) {
       e.preventDefault();
-      focusCommandInputFromGesture();
+      _composerFn('focusCommandInputFromGesture')?.();
       return;
     }
     if (_pendingPromptFocusTimer) {
@@ -152,13 +464,13 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('touchstart', e => {
     if (useMobileTerminalViewportMode()) {
       e.preventDefault();
-      focusCommandInputFromGesture();
+      _composerFn('focusCommandInputFromGesture')?.();
     }
   }, { passive: false });
   shellPromptWrap.addEventListener('click', e => {
     if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     if (useMobileTerminalViewportMode()) {
-      focusCommandInputFromGesture();
+      _composerFn('focusCommandInputFromGesture')?.();
       return;
     }
     if (e.detail > 1 || Date.now() < _suppressPromptFocusUntil) return;
@@ -168,7 +480,7 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
       _pendingPromptFocusTimer = null;
       if (_selectionTouchesElement(shellPromptWrap)) return;
       if (Date.now() < _suppressPromptFocusUntil) return;
-      focusCommandInputFromGesture();
+      _composerFn('focusCommandInputFromGesture')?.();
     }, 220);
   });
   shellPromptWrap.addEventListener('dblclick', () => {
@@ -180,192 +492,187 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   });
 }
 
-if (typeof window._bindMobileComposerInteractions === 'function') {
-  window._bindMobileComposerInteractions(window._mobileUiLayoutRefs);
+if (typeof _bindMobileComposerInteractions === 'function') {
+  _bindMobileComposerInteractions(_mobileUiLayoutRefs);
 }
 
 if (cmdInput) {
   cmdInput.addEventListener('focus', () => {
-    if (typeof setComposerState === 'function') {
-      setComposerState({
+    _composerSetState({
         value: cmdInput.value || '',
         selectionStart: typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : (cmdInput.value || '').length,
         selectionEnd: typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : (cmdInput.value || '').length,
         activeInput: 'desktop',
       });
-    }
-    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
-    syncShellPrompt();
+    if (shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+    _composerSyncShellPrompt();
     syncMobileViewportState();
   });
   cmdInput.addEventListener('blur', () => {
-    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.remove('shell-prompt-focused');
-    syncShellPrompt();
+    if (shellPromptWrap) shellPromptWrap.classList.remove('shell-prompt-focused');
+    _composerSyncShellPrompt();
     syncMobileViewportState();
   });
-  cmdInput.addEventListener('select', syncShellPrompt);
-  cmdInput.addEventListener('keyup', syncShellPrompt);
+  cmdInput.addEventListener('select', _composerSyncShellPrompt);
+  cmdInput.addEventListener('keyup', _composerSyncShellPrompt);
 }
 
 if (typeof document !== 'undefined') {
   document.addEventListener('selectionchange', () => {
     if (!cmdInput) return;
-    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && _selectionTouchesElement(shellPromptWrap)) {
+    if (shellPromptWrap && _selectionTouchesElement(shellPromptWrap)) {
       if (_pendingPromptFocusTimer) {
         clearTimeout(_pendingPromptFocusTimer);
         _pendingPromptFocusTimer = null;
       }
       return;
     }
-    const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
+    const composerInputs = _composerInputs();
     const mobileInput = composerInputs.mobile || null;
     if (document.activeElement === cmdInput) {
-      if (typeof setComposerState === 'function') {
-        setComposerState({
+      _composerSetState({
           value: cmdInput.value || '',
           selectionStart: typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : (cmdInput.value || '').length,
           selectionEnd: typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : (cmdInput.value || '').length,
           activeInput: 'desktop',
         });
-      }
-      syncShellPrompt();
+      _composerSyncShellPrompt();
       return;
     }
     if (mobileInput && document.activeElement === mobileInput) {
-      if (typeof setComposerState === 'function') {
-        setComposerState({
+      _composerSetState({
           value: mobileInput.value || '',
           selectionStart: typeof mobileInput.selectionStart === 'number' ? mobileInput.selectionStart : (mobileInput.value || '').length,
           selectionEnd: typeof mobileInput.selectionEnd === 'number' ? mobileInput.selectionEnd : (mobileInput.value || '').length,
           activeInput: 'mobile',
         });
-      }
-      syncShellPrompt();
+      _composerSyncShellPrompt();
     }
   });
 }
 
-apiFetch('/autocomplete').then(r => r.json()).then(data => {
-  acSuggestions = data.suggestions || [];
-  acContextRegistry = data.context || {};
-  acWordlists = Array.isArray(data.wordlists) ? data.wordlists : [];
-  acSpecialCommands = data.special_commands || [];
-  acBuiltinCommandRoots = data.builtin_command_roots || [];
-  if (typeof window.loadSessionVariables === 'function') window.loadSessionVariables().catch(() => {});
-  if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {});
-  if (typeof loadProjectAutocompleteTargets === 'function') loadProjectAutocompleteTargets().catch(() => {});
-  if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
-  if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
-  if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
-  if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
-  else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
+const _composerApiFetch = (typeof importedApiFetch === 'function' && importedApiFetch)
+  || _composerFn('apiFetch');
+if (typeof _composerApiFetch === 'function') _composerApiFetch('/autocomplete').then(r => r.json()).then(data => {
+  _writeComposerAutocompleteCatalog(data);
+  _composerImportedFn(importedLoadSessionVariables, 'loadSessionVariables')?.()?.catch?.(() => {});
+  _composerFn('loadRecentValues')?.()?.catch?.(() => {});
+  _composerFn('loadProjectAutocompleteTargets')?.()?.catch?.(() => {});
+  _composerFn('loadScheduleAutocompleteHints')?.()?.catch?.(() => {});
+  _composerFn('loadWatcherAutocompleteHints')?.()?.catch?.(() => {});
+  _refreshWorkspaceFileCache()?.catch?.(() => {});
+  const refreshSearchDiscoverability = _composerFn('scheduleSearchDiscoverabilityRefresh')
+    || _composerFn('refreshSearchDiscoverabilityUi');
+  refreshSearchDiscoverability?.();
 }).catch(err => {
-  logClientError('failed to load /autocomplete', err);
+  const log = (typeof importedLogClientError === 'function' && importedLogClientError)
+    || _composerFn('logClientError');
+  log?.('failed to load /autocomplete', err);
 });
 
 cmdInput.addEventListener('input', () => {
-  if (typeof normalizeComposerSmartPeriod === 'function') normalizeComposerSmartPeriod(cmdInput);
-  if (isHistoryPanelOpen()) hideHistoryPanel();
-  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
-    if (typeof handleHistSearchInput === 'function') {
-      // Read the DOM value directly — the hist-search path intentionally
-      // short-circuits handleComposerInputChange, so the shared composer
-      // state is one keystroke stale (reads showed the pre-backspace query).
-      handleHistSearchInput(cmdInput.value);
-    }
-    const _hsTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  _composerFn('normalizeComposerSmartPeriod')?.(cmdInput);
+  if (_composerFn('isHistoryPanelOpen')?.()) _composerFn('hideHistoryPanel')?.();
+  if (_composerIsHistSearchMode()) {
+    // Read the DOM value directly — the hist-search path intentionally
+    // short-circuits handleComposerInputChange, so the shared composer
+    // state is one keystroke stale (reads showed the pre-backspace query).
+    _composerHandleHistSearchInput(cmdInput.value);
+    const _hsTab = _composerActiveTab();
     if (_hsTab) _hsTab.followOutput = true;
     const _hsOut = document.querySelector('.tab-panel.active .output');
     if (_hsOut) _hsOut.scrollTop = _hsOut.scrollHeight;
     return;
   }
-  handleComposerInputChange(cmdInput);
+  _composerFn('handleComposerInputChange')?.(cmdInput);
   // Keep the active tab's draft current so activateTab can read it directly.
-  const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  const _activeTab = _composerActiveTab();
   if (_activeTab && _activeTab.st !== 'running') {
-    _activeTab.draftInput = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
-    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    _activeTab.draftInput = _composerGetValue(cmdInput.value);
+    _composerImportedFn(importedSchedulePersistTabSessionState, 'schedulePersistTabSessionState')?.();
   }
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isAnyPanelOverlayOpen()) {
+  if (_composerIsAnyPanelOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeWorkflows(); if (typeof closeWorkspace === 'function') closeWorkspace(); closeOptions(); closeThemeSelector();
-      refocusComposerAfterAction({ defer: true });
+      if (!_composerCloseTopmostDismissible()) {
+        _composerImportedFn(importedCloseFaq, 'closeFaq')?.();
+        _composerImportedFn(importedCloseWorkflows, 'closeWorkflows')?.();
+        _composerFn('closeWorkspace')?.();
+        _composerCloseOptions();
+        _composerCloseThemeSelector();
+      }
+      _composerRefocus({ defer: true });
       e.preventDefault();
     }
     return;
   }
-  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
-    if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
+  if (_composerIsHistSearchMode()) {
+    if (_composerHandleHistSearchKey(e)) return;
   }
 
-  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+  if (_composerFn('isActiveTabRunning')?.()) {
     if (_handleRunningComposerShortcut(e)) return;
-    if (typeof acHide === 'function') acHide();
+    _composerAcHide();
     e.preventDefault();
     return;
   }
 
-  const isWordArrowLeft = e.key === 'ArrowLeft' || eventMatchesCode(e, 'ArrowLeft');
-  const isWordArrowRight = e.key === 'ArrowRight' || eventMatchesCode(e, 'ArrowRight');
+  const eventMatchesCodeFn = _composerImportedFn(importedEventMatchesCode, 'eventMatchesCode');
+  const isWordArrowLeft = e.key === 'ArrowLeft' || eventMatchesCodeFn?.(e, 'ArrowLeft');
+  const isWordArrowRight = e.key === 'ArrowRight' || eventMatchesCodeFn?.(e, 'ArrowRight');
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (isWordArrowLeft || isWordArrowRight)) {
     e.preventDefault();
     e.stopPropagation();
-    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    _composerFn('syncFocusedComposerState')?.(cmdInput);
+    const value = _composerGetValue('');
     const { start, end } = getCmdSelection(value);
     const next = isWordArrowLeft
       ? findWordBoundaryLeft(value, start)
       : findWordBoundaryRight(value, end);
-    const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
-    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input });
+    const input = _composerVisibleInput();
+    _composerSyncSelection(next, next, { input });
     if (input && typeof input.setSelectionRange === 'function' && input.selectionStart !== next) {
       input.setSelectionRange(next, next);
     } else if (!input && cmdInput && typeof cmdInput.setSelectionRange === 'function') {
       cmdInput.setSelectionRange(next, next);
     }
-    syncShellPrompt();
+    _composerSyncShellPrompt();
     return;
   }
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
     e.preventDefault();
-    if (typeof enterHistSearch === 'function') enterHistSearch();
+    _composerEnterHistSearch();
     return;
   }
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     e.preventDefault();
-    const welcomeActive = (typeof window !== 'undefined' && window._welcomeActive)
-      || (typeof _welcomeActive !== 'undefined' && _welcomeActive);
-    const welcomeOwns = (typeof window !== 'undefined' && window.welcomeOwnsTab)
-      || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null);
-    const requestSettle = (typeof window !== 'undefined' && window.requestWelcomeSettle)
-      || (typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
-    if (welcomeActive && typeof welcomeOwns === 'function' && welcomeOwns(activeTabId)) {
-      _welcomePromptAfterSettle = true;
-      if (typeof requestSettle === 'function') requestSettle(activeTabId);
-      refocusComposerAfterAction({ defer: true });
+    const currentTabId = _composerActiveTabId();
+    if (_composerWelcomeActive() && !_composerWelcomeDone() && _composerWelcomeOwns(currentTabId)) {
+      _setComposerWelcomePromptAfterSettle(true);
+      _composerRequestWelcomeSettle(currentTabId);
+      _composerRefocus({ defer: true });
       return;
     }
-    const activeTab = getActiveTab();
+    const activeTab = _composerActiveTab();
     if (activeTab && activeTab.st === 'running') {
-      confirmKill(activeTabId);
+      _composerImportedFn(importedConfirmKill, 'confirmKill')?.(currentTabId);
       return;
     }
-    if (hasActiveTerminalConfirm()) {
-      cancelPendingTerminalConfirm(activeTabId);
+    if (_composerHasActiveTerminalConfirm()) {
+      _composerImportedFn(importedCancelPendingTerminalConfirm, 'cancelPendingTerminalConfirm')?.(currentTabId);
       return;
     }
-    interruptPromptLine(activeTabId);
+    _composerImportedFn(importedInterruptPromptLine, 'interruptPromptLine')?.(currentTabId);
     return;
   }
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
     e.preventDefault();
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const value = _composerGetValue('');
     const { start, end } = getCmdSelection(value);
 
     if (start !== end) {
@@ -382,7 +689,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'u' || e.key === 'U')) {
     e.preventDefault();
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const value = _composerGetValue('');
     const { start, end } = getCmdSelection(value);
     if (start !== end) {
       replaceCmdRange(value, start, end);
@@ -395,15 +702,15 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'a' || e.key === 'A')) {
     e.preventDefault();
-    if (typeof syncComposerSelection === 'function') syncComposerSelection(0, 0);
+    if (_composerFn('syncComposerSelection')) _composerSyncSelection(0, 0);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(0, 0);
-    syncShellPrompt();
+    _composerSyncShellPrompt();
     return;
   }
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
     e.preventDefault();
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const value = _composerGetValue('');
     const { start, end } = getCmdSelection(value);
     if (start !== end) {
       replaceCmdRange(value, start, end);
@@ -416,122 +723,124 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'e' || e.key === 'E')) {
     e.preventDefault();
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const value = _composerGetValue('');
     const end = value.length;
-    if (typeof syncComposerSelection === 'function') syncComposerSelection(end, end);
+    if (_composerFn('syncComposerSelection')) _composerSyncSelection(end, end);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(end, end);
-    syncShellPrompt();
+    _composerSyncShellPrompt();
     return;
   }
 
-  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetter(e, 'b')) {
+  const eventMatchesLetterFn = _composerImportedFn(importedEventMatchesLetter, 'eventMatchesLetter');
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetterFn?.(e, 'b')) {
     e.preventDefault();
-    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    _composerFn('syncFocusedComposerState')?.(cmdInput);
+    const value = _composerGetValue('');
     const { start } = getCmdSelection(value);
     const next = findWordBoundaryLeft(value, start);
-    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next);
+    if (_composerFn('syncComposerSelection')) _composerSyncSelection(next, next);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
-    syncShellPrompt();
+    _composerSyncShellPrompt();
     return;
   }
 
-  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetter(e, 'f')) {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetterFn?.(e, 'f')) {
     e.preventDefault();
-    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    _composerFn('syncFocusedComposerState')?.(cmdInput);
+    const value = _composerGetValue('');
     const { end } = getCmdSelection(value);
     const next = findWordBoundaryRight(value, end);
-    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next);
+    if (_composerFn('syncComposerSelection')) _composerSyncSelection(next, next);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
-    syncShellPrompt();
+    _composerSyncShellPrompt();
     return;
   }
 
   if (e.key === 'Enter') {
-    const welcomeActive = (typeof window !== 'undefined' && window._welcomeActive)
-      || (typeof _welcomeActive !== 'undefined' && _welcomeActive);
-    const welcomeOwns = (typeof window !== 'undefined' && window.welcomeOwnsTab)
-      || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null);
-    const requestSettle = (typeof window !== 'undefined' && window.requestWelcomeSettle)
-      || (typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
-    if (welcomeActive && typeof welcomeOwns === 'function' && welcomeOwns(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
+    const currentTabId = _composerActiveTabId();
+    if (_composerWelcomeActive() && !_composerWelcomeDone() && _composerWelcomeOwns(currentTabId) && !_composerGetValue('').trim()) {
       e.preventDefault();
-      if (typeof requestSettle === 'function') requestSettle(activeTabId);
-      refocusComposerAfterAction({ defer: true });
+      _composerRequestWelcomeSettle(currentTabId);
+      _composerRefocus({ defer: true });
       return;
     }
+    const acState = _readComposerAutocompleteState();
     if (
-      !hasActiveTerminalConfirm()
-      && acIndex >= 0
-      && acFiltered[acIndex]
-      && !acAutocompleteIsHintOnly(acFiltered[acIndex])
+      !_composerHasActiveTerminalConfirm()
+      && acState.index >= 0
+      && acState.filtered[acState.index]
+      && !_composerAutocompleteIsHintOnly(acState.filtered[acState.index])
     ) {
       e.preventDefault();
-      acAccept(acFiltered[acIndex]);
+      _composerFn('acAccept')?.(acState.filtered[acState.index]);
     } else {
       e.preventDefault();
-      acHide();
-      if (typeof submitComposerCommand === 'function') {
-        submitComposerCommand(typeof getComposerValue === 'function' ? getComposerValue() : '', { dismissKeyboard: true });
-      } else {
-        runCommand();
-      }
+      _composerAcHide();
+      _composerSubmitCommand(_composerGetValue(''), { dismissKeyboard: true });
     }
     return;
   }
   if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
-    if (hasActiveTerminalConfirm()) {
-      acHide();
+    if (_composerHasActiveTerminalConfirm()) {
+      _composerAcHide();
       return;
     }
-    const selectableItems = acAutocompleteSelectableItems(acFiltered);
-    if (selectableItems.length === 1) { acAccept(selectableItems[0]); }
+    const acState = _readComposerAutocompleteState();
+    const selectableItems = _composerAutocompleteSelectableItems(acState.filtered);
+    if (selectableItems.length === 1) { _composerFn('acAccept')?.(selectableItems[0]); }
     else if (selectableItems.length > 0) {
-      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(selectableItems)) return;
-      if (acIndex < 0 || !isAcDropdownOpen()) {
-        acIndex = acAutocompleteNextSelectableIndex(acFiltered, -1, 1);
+      if (_composerFn('acExpandSharedPrefix')?.(selectableItems)) return;
+      let nextIndex;
+      if (acState.index < 0 || !_composerFn('isAcDropdownOpen')?.()) {
+        nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, -1, 1);
       } else if (e.shiftKey) {
-        acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
+        nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, acState.index, -1);
       } else {
-        acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
+        nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, acState.index, 1);
       }
-      acShow(acFiltered);
+      _writeComposerAutocompleteState({ index: nextIndex });
+      _composerFn('acShow')?.(acState.filtered);
     }
     return;
   }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    if (hasActiveTerminalConfirm()) {
-      acHide();
+    if (_composerHasActiveTerminalConfirm()) {
+      _composerAcHide();
       return;
     }
-    const acOpen = isAcDropdownOpen();
-    if (acOpen && acAutocompleteSelectableItems(acFiltered).length) {
-      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
-      acShow(acFiltered);
+    const acOpen = _composerFn('isAcDropdownOpen')?.();
+    const acState = _readComposerAutocompleteState();
+    const selectableItems = _composerAutocompleteSelectableItems(acState.filtered);
+    if (acOpen && selectableItems.length) {
+      const nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, acState.index, 1);
+      _writeComposerAutocompleteState({ index: nextIndex });
+      _composerFn('acShow')?.(acState.filtered);
       return;
     }
-    if (navigateCmdHistory(-1)) acHide();
+    if (_composerNavigateCmdHistory(-1)) _composerAcHide();
     return;
   }
   if (e.key === 'ArrowUp') {
     e.preventDefault();
-    if (hasActiveTerminalConfirm()) {
-      acHide();
+    if (_composerHasActiveTerminalConfirm()) {
+      _composerAcHide();
       return;
     }
-    const acOpen = isAcDropdownOpen();
-    if (acOpen && acAutocompleteSelectableItems(acFiltered).length) {
-      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
-      acShow(acFiltered);
+    const acOpen = _composerFn('isAcDropdownOpen')?.();
+    const acState = _readComposerAutocompleteState();
+    const selectableItems = _composerAutocompleteSelectableItems(acState.filtered);
+    if (acOpen && selectableItems.length) {
+      const nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, acState.index, -1);
+      _writeComposerAutocompleteState({ index: nextIndex });
+      _composerFn('acShow')?.(acState.filtered);
       return;
     }
-    if (navigateCmdHistory(1)) acHide();
+    if (_composerNavigateCmdHistory(1)) _composerAcHide();
     return;
   }
-  if (e.key === 'Escape')    { acHide(); return; }
+  if (e.key === 'Escape')    { _composerAcHide(); return; }
 
   // Suppress the macOS 'Press and Hold' accent picker. On macOS, holding a key
   // on a native <input> shows an accent chooser instead of repeating the character.
@@ -542,14 +851,9 @@ cmdInput.addEventListener('keydown', e => {
   // settle phase (the document keydown handler owns key routing while welcome is
   // active, including Space/Enter/Escape settle triggers and printable insertion).
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing
-      && !(((typeof window !== 'undefined' && window._welcomeActive)
-        || (typeof _welcomeActive !== 'undefined' && _welcomeActive))
-        && typeof ((typeof window !== 'undefined' && window.welcomeOwnsTab)
-          || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null)) === 'function'
-        && ((typeof window !== 'undefined' && window.welcomeOwnsTab)
-          || (typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null))(activeTabId))) {
+      && !(_composerWelcomeActive() && !_composerWelcomeDone() && _composerWelcomeOwns(_composerActiveTabId()))) {
     e.preventDefault();
-    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const value = _composerGetValue('');
     const { start, end } = getCmdSelection(value);
     replaceCmdRange(value, start, end, e.key);
     return;
@@ -564,10 +868,10 @@ if (typeof window !== 'undefined') {
   }
 }
 
-runBtn.addEventListener('click', runCommand);
+if (runBtn) runBtn.addEventListener('click', () => { _composerSubmitCommand(_composerGetValue(''), { dismissKeyboard: true }); });
 
-if (typeof window._applyComposerPromptMode === 'function') window._applyComposerPromptMode();
-syncShellPrompt();
-if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+_composerSyncShellPrompt();
+_composerSyncShellPrompt();
+_composerFn('syncRunButtonDisabled')?.();
 
-if (typeof window.setupMobileComposer === 'function') window.setupMobileComposer();
+_composerSetupMobileComposer();

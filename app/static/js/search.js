@@ -1,6 +1,41 @@
 // ── Shared search logic ──
 
-const _searchCore = window.DarklabSearchCore || null;
+import {
+  searchCaseBtn as importedSearchCaseBtn,
+  searchCount as importedSearchCount,
+  searchInput as importedSearchInput,
+  searchRegexBtn as importedSearchRegexBtn,
+  searchScopeButtons as importedSearchScopeButtons,
+  searchSignalSummary as importedSearchSignalSummary,
+  searchSummaryBtn as importedSearchSummaryBtn,
+  searchToggleBtn as importedSearchToggleBtn,
+} from './core/dom.js';
+import { DarklabSearchCore as importedSearchCore } from './core/search_core.js';
+import {
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  getTab as importedGetTab,
+} from './core/state.js';
+import { escapeRegex as importedEscapeRegex } from './core/utils.js';
+import { appendLine as importedAppendLine } from './output.js';
+import { getOutput as importedGetOutput, updateTabbarChromeFit as importedUpdateTabbarChromeFit } from './tabs.js';
+import { isSearchBarOpen as importedIsSearchBarOpen } from './ui/ui_helpers.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+
+const SEARCH_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _searchGlobalFunction(name) {
+  const fn = SEARCH_GLOBAL && SEARCH_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _searchGlobalValue(name) {
+  return SEARCH_GLOBAL ? SEARCH_GLOBAL[name] : undefined;
+}
+
+const _searchCore = typeof importedSearchCore !== 'undefined' && importedSearchCore
+  ? importedSearchCore
+  : (_searchGlobalValue('DarklabSearchCore') || null);
 const _SEARCH_SCOPE_LABELS = _searchCore.SEARCH_SCOPE_LABELS;
 const _SEARCH_SUMMARY_LIMIT = _searchCore.SEARCH_SUMMARY_LIMIT;
 const _TERMINAL_SEARCH_DELAY_MS = 200;
@@ -16,12 +51,174 @@ let _terminalSearchTimer = null;
 let _terminalLazyHighlightedMatch = null;
 let _terminalSearchLazyMode = false;
 
+function _stateValue(name, fallback = undefined) {
+  const state = typeof importedGetAppState === 'function'
+    ? importedGetAppState()
+    : (_searchGlobalValue('APP_STATE') || null);
+  if (state && Object.prototype.hasOwnProperty.call(state, name)) return state[name];
+  if (SEARCH_GLOBAL && Object.prototype.hasOwnProperty.call(SEARCH_GLOBAL, name)) return SEARCH_GLOBAL[name];
+  return fallback;
+}
+
+function _setStateValue(name, value) {
+  const state = typeof importedGetAppState === 'function'
+    ? importedGetAppState()
+    : (_searchGlobalValue('APP_STATE') || null);
+  if (state && Object.prototype.hasOwnProperty.call(state, name)) {
+    state[name] = value;
+    return value;
+  }
+  if (SEARCH_GLOBAL) SEARCH_GLOBAL[name] = value;
+  return value;
+}
+
+function _activeTabId() {
+  if (typeof importedGetActiveTabId === 'function') return importedGetActiveTabId();
+  const readActiveTabId = _searchGlobalFunction('getActiveTabId');
+  if (readActiveTabId) return readActiveTabId();
+  return _stateValue('activeTabId', null);
+}
+
+function _searchInputEl() {
+  return typeof importedSearchInput !== 'undefined' && importedSearchInput
+    ? importedSearchInput
+    : _searchDomRef(null, 'searchInput');
+}
+
+function _searchCountEl() {
+  return typeof importedSearchCount !== 'undefined' && importedSearchCount
+    ? importedSearchCount
+    : _searchDomRef(null, 'searchCount');
+}
+
+function _searchCaseButton() {
+  return typeof importedSearchCaseBtn !== 'undefined' && importedSearchCaseBtn
+    ? importedSearchCaseBtn
+    : _searchDomRef(null, 'searchCaseBtn');
+}
+
+function _searchRegexButton() {
+  return typeof importedSearchRegexBtn !== 'undefined' && importedSearchRegexBtn
+    ? importedSearchRegexBtn
+    : _searchDomRef(null, 'searchRegexBtn');
+}
+
+function _searchToggleButton() {
+  return typeof importedSearchToggleBtn !== 'undefined' && importedSearchToggleBtn
+    ? importedSearchToggleBtn
+    : _searchDomRef(null, 'searchToggleBtn');
+}
+
+function _searchSignalSummaryEl() {
+  return typeof importedSearchSignalSummary !== 'undefined' && importedSearchSignalSummary
+    ? importedSearchSignalSummary
+    : _searchDomRef(null, 'searchSignalSummary');
+}
+
+function _searchSummaryButton() {
+  return typeof importedSearchSummaryBtn !== 'undefined' && importedSearchSummaryBtn
+    ? importedSearchSummaryBtn
+    : _searchDomRef(null, 'searchSummaryBtn');
+}
+
+function _searchScopeButtonList() {
+  const buttons = typeof importedSearchScopeButtons !== 'undefined' ? importedSearchScopeButtons : null;
+  if (Array.isArray(buttons) && buttons.length) return buttons;
+  const globalButtons = _searchGlobalValue('searchScopeButtons');
+  if (Array.isArray(globalButtons)) return globalButtons;
+  return Array.isArray(buttons) ? buttons : [];
+}
+
+function _getTabById(tabId) {
+  if (typeof importedGetTab === 'function') return importedGetTab(tabId);
+  const readTab = _searchGlobalFunction('getTab');
+  if (readTab) return readTab(tabId);
+  return null;
+}
+
+function _getOutputForTab(tabId) {
+  if (typeof importedGetOutput === 'function') return importedGetOutput(tabId);
+  const readOutput = _searchGlobalFunction('getOutput');
+  if (readOutput) return readOutput(tabId);
+  return null;
+}
+
+function _appendSearchLine(text, cls, tabId) {
+  const append = typeof importedAppendLine === 'function'
+    ? importedAppendLine
+    : _searchGlobalFunction('appendLine');
+  if (append) append(text, cls, tabId);
+}
+
+function _escapeSearchRegex(value) {
+  if (typeof importedEscapeRegex === 'function') return importedEscapeRegex(value);
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function _searchDomRef(importedRef, name, fallback = null) {
+  if (typeof importedRef !== 'undefined' && importedRef) return importedRef;
+  if (SEARCH_GLOBAL && Object.prototype.hasOwnProperty.call(SEARCH_GLOBAL, name)) return SEARCH_GLOBAL[name];
+  return fallback;
+}
+
+function _bindSearchPressable(el, opts) {
+  const bind = typeof importedBindPressable === 'function'
+    ? importedBindPressable
+    : _searchGlobalFunction('bindPressable');
+  return bind ? bind(el, opts) : null;
+}
+
+function _isSearchOpen() {
+  const check = typeof importedIsSearchBarOpen === 'function'
+    ? importedIsSearchBarOpen
+    : _searchGlobalFunction('isSearchBarOpen');
+  return !!(check && check());
+}
+
+function _updateSearchTabbarChromeFit() {
+  const update = typeof importedUpdateTabbarChromeFit === 'function'
+    ? importedUpdateTabbarChromeFit
+    : _searchGlobalFunction('updateTabbarChromeFit');
+  if (update) update();
+}
+
+function _getSearchMatches() {
+  const matches = _stateValue('searchMatches', []);
+  return Array.isArray(matches) ? matches : [];
+}
+
+function _setSearchMatches(matches) {
+  return _setStateValue('searchMatches', Array.isArray(matches) ? matches : []);
+}
+
+function _getSearchMatchIdx() {
+  return Number(_stateValue('searchMatchIdx', -1)) || 0;
+}
+
+function _setSearchMatchIdx(index) {
+  return _setStateValue('searchMatchIdx', Number(index));
+}
+
+function _getSearchCaseSensitive() {
+  return !!_stateValue('searchCaseSensitive', false);
+}
+
+function _getSearchRegexMode() {
+  return !!_stateValue('searchRegexMode', false);
+}
+
+function _setSearchScope(scope) {
+  return _setStateValue('searchScope', _SEARCH_SCOPE_LABELS[scope] ? scope : 'text');
+}
+
 function _getSearchScope() {
-  return typeof searchScope === 'string' ? searchScope : 'text';
+  const scope = _stateValue('searchScope', 'text');
+  return typeof scope === 'string' ? scope : 'text';
 }
 
 function _setSearchCount(text) {
-  if (searchCount) searchCount.textContent = text;
+  const count = _searchCountEl();
+  if (count) count.textContent = text;
 }
 
 function _searchScopeButtonLabel(scope, count) {
@@ -68,7 +265,8 @@ function _clearSearchDiscoverabilityPulse() {
     clearTimeout(_searchTogglePulseTimer);
     _searchTogglePulseTimer = null;
   }
-  if (typeof searchToggleBtn !== 'undefined' && searchToggleBtn) {
+  const searchToggleBtn = _searchToggleButton();
+  if (searchToggleBtn) {
     searchToggleBtn.classList.remove('search-discover-pulse');
   }
 }
@@ -83,19 +281,20 @@ function _searchInputPlaceholder(scope) {
 
 function syncSearchScopeUi() {
   const scope = _getSearchScope();
-  if (typeof searchInput !== 'undefined' && searchInput) {
+  const searchInput = _searchInputEl();
+  if (searchInput) {
     searchInput.disabled = scope !== 'text';
     searchInput.placeholder = _searchInputPlaceholder(scope);
   }
-  if (typeof searchCaseBtn !== 'undefined' && searchCaseBtn) searchCaseBtn.disabled = scope !== 'text';
-  if (typeof searchRegexBtn !== 'undefined' && searchRegexBtn) searchRegexBtn.disabled = scope !== 'text';
-  if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButtons)) {
-    searchScopeButtons.forEach((btn) => {
-      const active = btn?.dataset?.searchScope === scope;
-      btn?.setAttribute('aria-pressed', active ? 'true' : 'false');
-      btn?.classList.toggle('active', active);
-    });
-  }
+  const searchCaseBtn = _searchCaseButton();
+  const searchRegexBtn = _searchRegexButton();
+  if (searchCaseBtn) searchCaseBtn.disabled = scope !== 'text';
+  if (searchRegexBtn) searchRegexBtn.disabled = scope !== 'text';
+  _searchScopeButtonList().forEach((btn) => {
+    const active = btn?.dataset?.searchScope === scope;
+    btn?.setAttribute('aria-pressed', active ? 'true' : 'false');
+    btn?.classList.toggle('active', active);
+  });
 }
 
 function _lineServerSignals(line) {
@@ -129,13 +328,13 @@ function _normalizeSearchSignalCounts(counts) {
 }
 
 function _getCachedSearchSignalCounts() {
-  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  const tab = _getTabById(_activeTabId());
   if (!tab || tab._outputSignalCountsValid !== true || !tab._outputSignalCounts) return null;
   return _normalizeSearchSignalCounts(tab._outputSignalCounts);
 }
 
 function _isActiveSearchTabRunning() {
-  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  const tab = _getTabById(_activeTabId());
   return !!(tab && tab.st === 'running');
 }
 
@@ -169,10 +368,11 @@ function refreshSearchDiscoverabilityUi() {
     _searchDiscoverabilityRefreshTimer = null;
     _searchDiscoverabilityRefreshTimerType = '';
   }
-  const out = getOutput(activeTabId);
+  const out = _getOutputForTab(_activeTabId());
   const counts = _getSearchSignalCounts(out);
-  searchSignalCounts = counts;
-  if (typeof searchToggleBtn !== 'undefined' && searchToggleBtn) {
+  _setStateValue('searchSignalCounts', counts);
+  const searchToggleBtn = _searchToggleButton();
+  if (searchToggleBtn) {
     const summary = _formatFindingSummary(counts);
     // The findings count lives in the signal-summary badge beside the button, so
     // the button label stays a plain "search" to avoid duplicating it.
@@ -187,19 +387,20 @@ function refreshSearchDiscoverabilityUi() {
       summary ? `Search output, ${summary} available` : 'Search output',
     );
     const shouldPulse = counts.findings > 0
-      && !searchDiscoverabilityPrompted
-      && !(typeof isSearchBarOpen === 'function' && isSearchBarOpen());
+      && !_stateValue('searchDiscoverabilityPrompted', false)
+      && !_isSearchOpen();
     if (shouldPulse) {
-      searchDiscoverabilityPrompted = true;
+      _setStateValue('searchDiscoverabilityPrompted', true);
       searchToggleBtn.classList.add('search-discover-pulse');
       _searchTogglePulseTimer = setTimeout(() => {
         _clearSearchDiscoverabilityPulse();
       }, 8000);
-    } else if (counts.findings <= 0 || (typeof isSearchBarOpen === 'function' && isSearchBarOpen())) {
+    } else if (counts.findings <= 0 || _isSearchOpen()) {
       _clearSearchDiscoverabilityPulse();
     }
   }
-  if (typeof searchSignalSummary !== 'undefined' && searchSignalSummary) {
+  const searchSignalSummary = _searchSignalSummaryEl();
+  if (searchSignalSummary) {
     const hasSignals = counts.findings > 0 || counts.warnings > 0 || counts.errors > 0 || counts.summaries > 0;
     searchSignalSummary.classList.toggle('u-hidden', !hasSignals);
     _renderCompactSignalSummary(searchSignalSummary, counts);
@@ -208,26 +409,32 @@ function refreshSearchDiscoverabilityUi() {
     if (hasSignals) {
       searchSignalSummary.querySelectorAll('[data-search-signal-scope]').forEach((btn) => {
         const activate = () => {
-          const openFromSignal = typeof window.openSearchFromSignal === 'function'
-            ? window.openSearchFromSignal
-            : (typeof openSearchFromSignal === 'function' ? openSearchFromSignal : null);
-          if (openFromSignal) openFromSignal(btn.dataset.searchSignalScope || 'text');
+          const externalOpen = SEARCH_GLOBAL && (
+            SEARCH_GLOBAL.__darklabOpenSearchFromSignalOverride
+            || SEARCH_GLOBAL.openSearchFromSignal
+          );
+          const open = typeof externalOpen === 'function' && externalOpen !== openSearchFromSignal
+            ? externalOpen
+            : openSearchFromSignal;
+          open(btn.dataset.searchSignalScope || 'text');
         };
-        if (typeof bindPressable === 'function') {
-          bindPressable(btn, {
+        if (_bindSearchPressable(btn, {
             refocusComposer: true,
             onActivate: (event) => {
               event.preventDefault();
               activate();
             },
-          });
-        } else {
+          })) {
+          return;
+        }
+        {
           btn.addEventListener('click', activate);
         }
       });
     }
   }
-  if (typeof searchSummaryBtn !== 'undefined' && searchSummaryBtn) {
+  const searchSummaryBtn = _searchSummaryButton();
+  if (searchSummaryBtn) {
     const hasSignals = counts.findings > 0 || counts.warnings > 0 || counts.errors > 0 || counts.summaries > 0;
     const tabRunning = _isActiveSearchTabRunning();
     searchSummaryBtn.disabled = !hasSignals || tabRunning;
@@ -245,19 +452,17 @@ function refreshSearchDiscoverabilityUi() {
         : 'No findings, warnings, errors, or summary lines yet',
     );
   }
-  if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButtons)) {
-    searchScopeButtons.forEach((btn) => {
-      const scope = btn?.dataset?.searchScope || 'text';
-      const count = scope === 'text' ? 0 : Number(counts[scope] || 0);
-      btn.textContent = _searchScopeButtonLabel(scope, count);
-      btn.title = scope === 'text'
-        ? 'Text search'
-        : `Jump between ${count} ${_searchScopeUnitLabel(scope, count)}`;
-    });
-  }
+  _searchScopeButtonList().forEach((btn) => {
+    const scope = btn?.dataset?.searchScope || 'text';
+    const count = scope === 'text' ? 0 : Number(counts[scope] || 0);
+    btn.textContent = _searchScopeButtonLabel(scope, count);
+    btn.title = scope === 'text'
+      ? 'Text search'
+      : `Jump between ${count} ${_searchScopeUnitLabel(scope, count)}`;
+  });
   // The findings badge appearing/disappearing changes the chrome's width, so
   // re-evaluate whether the tab-bar chrome should auto-collapse.
-  if (typeof updateTabbarChromeFit === 'function') updateTabbarChromeFit();
+  _updateSearchTabbarChromeFit();
   return counts;
 }
 
@@ -280,20 +485,32 @@ function scheduleSearchDiscoverabilityRefresh() {
 function prepareSearchBarForOpen() {
   _clearSearchDiscoverabilityPulse();
   refreshSearchDiscoverabilityUi();
-  searchScope = 'text';
+  _setSearchScope('text');
   syncSearchScopeUi();
 }
 
 function prepareSearchBarForScope(scope) {
   _clearSearchDiscoverabilityPulse();
   refreshSearchDiscoverabilityUi();
-  searchScope = _SEARCH_SCOPE_LABELS[scope] ? scope : 'text';
+  _setSearchScope(scope);
   syncSearchScopeUi();
 }
 
 function setSearchScope(scope) {
-  searchScope = _SEARCH_SCOPE_LABELS[scope] ? scope : 'text';
+  _setSearchScope(scope);
   syncSearchScopeUi();
+  runSearch();
+}
+
+function openSearchFromSignal(scope) {
+  const normalizedScope = _SEARCH_SCOPE_LABELS[scope] ? scope : 'text';
+  const alreadyActive = _getSearchScope() === normalizedScope
+    && _getSearchMatches().length > 0;
+  if (alreadyActive) {
+    navigateSearch(1);
+    return;
+  }
+  prepareSearchBarForScope(normalizedScope);
   runSearch();
 }
 
@@ -405,7 +622,7 @@ function _collectTextSearchMatches(root, query, {
 } = {}) {
   if (!(root instanceof Element) || !query) return { matches: [], error: '' };
   const flags = caseSensitive ? 'g' : 'gi';
-  const pattern = regexMode ? query : escapeRegex(query);
+  const pattern = regexMode ? query : _escapeSearchRegex(query);
   let re;
   try {
     re = new RegExp(pattern, flags);
@@ -434,7 +651,7 @@ function _collectLazyTextSearchMatches(root, query, {
 } = {}) {
   if (!(root instanceof Element) || !query) return { matches: [], error: '' };
   const flags = caseSensitive ? 'g' : 'gi';
-  const pattern = regexMode ? query : escapeRegex(query);
+  const pattern = regexMode ? query : _escapeSearchRegex(query);
   let re;
   try {
     re = new RegExp(pattern, flags);
@@ -680,14 +897,12 @@ function _lineCommandRoot(line) {
     }
     cursor = cursor.previousElementSibling;
   }
-  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  const tab = _getTabById(_activeTabId());
   return _summaryCommandRoot(String(tab?.command || ''));
 }
 
 function _isBuiltinCommandRoot(root) {
-  const builtinRoots = (
-    typeof acBuiltinCommandRoots !== 'undefined' && Array.isArray(acBuiltinCommandRoots)
-  ) ? acBuiltinCommandRoots : [];
+  const builtinRoots = _stateValue('acBuiltinCommandRoots', []);
   return !!root && builtinRoots.includes(root);
 }
 
@@ -800,22 +1015,23 @@ function _summaryBuildItems(blocks, tab) {
 }
 
 function _summaryAppendSections(sections) {
+  const tabId = _activeTabId();
   sections.forEach(([scope, lines]) => {
     if (!lines.length) return;
     const compactLines = _summaryCompactLines(lines);
-    appendLine(
+    _appendSearchLine(
       `${_SEARCH_SCOPE_LABELS[scope]} (${compactLines.length})`,
       'builtin-signal-summary-section',
-      activeTabId,
+      tabId,
     );
     compactLines.slice(0, _SEARCH_SUMMARY_LIMIT).forEach((line) => {
-      appendLine(`- ${line}`, 'builtin-signal-summary-row', activeTabId);
+      _appendSearchLine(`- ${line}`, 'builtin-signal-summary-row', tabId);
     });
     if (compactLines.length > _SEARCH_SUMMARY_LIMIT) {
-      appendLine(
+      _appendSearchLine(
         `… ${compactLines.length - _SEARCH_SUMMARY_LIMIT} more ${_searchScopeUnitLabel(scope, compactLines.length - _SEARCH_SUMMARY_LIMIT)} not shown`,
         'builtin-signal-summary-note',
-        activeTabId,
+        tabId,
       );
     }
   });
@@ -842,25 +1058,26 @@ function _summaryRenderGroupedItems(items) {
   if (!groupedItems.length) return 0;
   let rendered = 0;
   let renderedSections = 0;
+  const tabId = _activeTabId();
   const groups = _summaryGroupedItems(groupedItems);
   groups.forEach((rootGroup) => {
-    if (renderedSections > 0) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
-    appendLine(`command             ${rootGroup.root}`, 'builtin-kv', activeTabId);
+    if (renderedSections > 0) _appendSearchLine('------------', 'builtin-signal-summary-sep', tabId);
+    _appendSearchLine(`command             ${rootGroup.root}`, 'builtin-kv', tabId);
     rootGroup.targets.forEach((targetGroup, targetIndex) => {
-      if (targetIndex > 0) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
-      appendLine(`target              ${targetGroup.target}`, 'builtin-kv', activeTabId);
+      if (targetIndex > 0) _appendSearchLine('------------', 'builtin-signal-summary-sep', tabId);
+      _appendSearchLine(`target              ${targetGroup.target}`, 'builtin-kv', tabId);
       if (targetGroup.items.length > 1) {
         const commandLabels = _summaryCommandLabels(targetGroup.items);
-        appendLine(
+        _appendSearchLine(
           `full commands (${commandLabels.length})`,
           'builtin-signal-summary-section',
-          activeTabId,
+          tabId,
         );
         commandLabels.forEach((command) => {
-          appendLine(`- ${command}`, 'builtin-signal-summary-row', activeTabId);
+          _appendSearchLine(`- ${command}`, 'builtin-signal-summary-row', tabId);
         });
       } else {
-        appendLine(`full command        ${targetGroup.items[0].command}`, 'builtin-kv', activeTabId);
+        _appendSearchLine(`full command        ${targetGroup.items[0].command}`, 'builtin-kv', tabId);
       }
       _summaryAppendSections(_summaryMergeSections(targetGroup.items));
       rendered += targetGroup.items.length;
@@ -871,17 +1088,19 @@ function _summaryRenderGroupedItems(items) {
 }
 
 function _summaryRenderCommandItems(items) {
+  const tabId = _activeTabId();
   items.forEach((item, index) => {
-    if (index > 0) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
-    appendLine(`full command        ${item.command}`, 'builtin-kv', activeTabId);
+    if (index > 0) _appendSearchLine('------------', 'builtin-signal-summary-sep', tabId);
+    _appendSearchLine(`full command        ${item.command}`, 'builtin-kv', tabId);
     _summaryAppendSections(item.sections);
   });
 }
 
 function summarizeCurrentOutputSignals() {
-  const out = getOutput(activeTabId);
-  if (!out || typeof appendLine !== 'function') return false;
-  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  const tabId = _activeTabId();
+  const out = _getOutputForTab(tabId);
+  if (!out) return false;
+  const tab = _getTabById(tabId);
   if (tab && tab.st === 'running') return false;
   const blocks = _collectSearchCommandBlocks(out);
   if (!blocks.length) {
@@ -892,19 +1111,19 @@ function summarizeCurrentOutputSignals() {
     });
   }
 
-  appendLine('Command Findings:', 'builtin-signal-summary-header', activeTabId);
+  _appendSearchLine('Command Findings:', 'builtin-signal-summary-header', tabId);
 
   const items = _summaryBuildItems(blocks, tab);
   const groupedCount = _summaryRenderGroupedItems(items);
   const ungroupedItems = items.filter((item) => !(item.root && item.target));
-  if (groupedCount && ungroupedItems.length) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
+  if (groupedCount && ungroupedItems.length) _appendSearchLine('------------', 'builtin-signal-summary-sep', tabId);
   _summaryRenderCommandItems(ungroupedItems);
 
   if (!items.length) {
-    appendLine(
+    _appendSearchLine(
       'No findings, warnings, errors, or summary lines detected in this tab.',
       'builtin-signal-summary-note',
-      activeTabId,
+      tabId,
     );
   }
 
@@ -956,7 +1175,7 @@ function _terminalUsesLargeSearchMode(out) {
 }
 
 function _scrollTerminalLazySearchMatchIntoView(match, mark) {
-  const out = getOutput(activeTabId);
+  const out = _getOutputForTab(_activeTabId());
   const line = match?.line;
   if (out instanceof Element && line instanceof Element && out.contains(line)) {
     const outRect = out.getBoundingClientRect();
@@ -977,25 +1196,25 @@ function _scrollTerminalLazySearchMatchIntoView(match, mark) {
 function runSearch() {
   _clearTerminalSearchTimer();
   clearHighlights();
-  searchMatches = [];
-  searchMatchIdx = -1;
+  _setSearchMatches([]);
+  _setSearchMatchIdx(-1);
   _terminalSearchLazyMode = false;
-  const out = getOutput(activeTabId);
+  const out = _getOutputForTab(_activeTabId());
   if (!out) return;
   refreshSearchDiscoverabilityUi();
 
   const scope = _getSearchScope();
   if (scope !== 'text') {
-    searchMatches = _collectScopedSearchMatches(out, scope);
-    _setSearchCount(searchMatches.length ? `1 / ${searchMatches.length}` : _searchNoMatchesLabel(scope));
-    if (searchMatches.length) {
-      searchMatchIdx = 0;
+    const matches = _setSearchMatches(_collectScopedSearchMatches(out, scope));
+    _setSearchCount(matches.length ? `1 / ${matches.length}` : _searchNoMatchesLabel(scope));
+    if (matches.length) {
+      _setSearchMatchIdx(0);
       highlightCurrent();
     }
     return;
   }
 
-  const q = searchInput.value;
+  const q = _searchInputEl()?.value || '';
   if (!q) {
     _setSearchCount('');
     return;
@@ -1008,14 +1227,14 @@ function runSearch() {
   _terminalSearchLazyMode = useLargeSearch;
   const result = useLargeSearch
     ? _collectLazyTextSearchMatches(out, q, {
-      caseSensitive: searchCaseSensitive,
-      regexMode: searchRegexMode,
+      caseSensitive: _getSearchCaseSensitive(),
+      regexMode: _getSearchRegexMode(),
       lineSelector: '.line',
       preserveDom: true,
     })
     : _collectTextSearchMatches(out, q, {
-      caseSensitive: searchCaseSensitive,
-      regexMode: searchRegexMode,
+      caseSensitive: _getSearchCaseSensitive(),
+      regexMode: _getSearchRegexMode(),
       lineSelector: '.line',
     });
   if (result.error) {
@@ -1023,18 +1242,18 @@ function runSearch() {
     _terminalSearchLazyMode = false;
     return;
   }
-  searchMatches = result.matches;
-  _setSearchCount(searchMatches.length ? `1 / ${searchMatches.length}` : 'no matches');
-  if (searchMatches.length) {
-    searchMatchIdx = 0;
+  const matches = _setSearchMatches(result.matches);
+  _setSearchCount(matches.length ? `1 / ${matches.length}` : 'no matches');
+  if (matches.length) {
+    _setSearchMatchIdx(0);
     highlightCurrent();
   }
 }
 
 function scheduleRunSearch() {
   _clearTerminalSearchTimer();
-  const out = getOutput(activeTabId);
-  const query = String(searchInput?.value || '');
+  const out = _getOutputForTab(_activeTabId());
+  const query = String(_searchInputEl()?.value || '');
   const useLargeSearch = _terminalUsesLargeSearchMode(out);
   if (!query || (useLargeSearch && query.length < _TERMINAL_LARGE_SEARCH_MIN_CHARS)) {
     runSearch();
@@ -1049,32 +1268,36 @@ function scheduleRunSearch() {
 
 function navigateSearch(dir) {
   if (_terminalSearchTimer !== null) runSearch();
-  if (!searchMatches.length) return;
-  searchMatchIdx = (searchMatchIdx + dir + searchMatches.length) % searchMatches.length;
-  _setSearchCount(`${searchMatchIdx + 1} / ${searchMatches.length}`);
+  const matches = _getSearchMatches();
+  if (!matches.length) return;
+  const nextIndex = (_getSearchMatchIdx() + dir + matches.length) % matches.length;
+  _setSearchMatchIdx(nextIndex);
+  _setSearchCount(`${nextIndex + 1} / ${matches.length}`);
   highlightCurrent();
 }
 
 function highlightCurrent() {
+  const matches = _getSearchMatches();
+  const matchIdx = _getSearchMatchIdx();
   if (_terminalSearchLazyMode) {
     _clearTerminalLazyHighlight();
-    const currentMatch = searchMatches[searchMatchIdx];
-    const current = _highlightLazySearchMatch(currentMatch, searchMatchIdx);
+    const currentMatch = matches[matchIdx];
+    const current = _highlightLazySearchMatch(currentMatch, matchIdx);
     _terminalLazyHighlightedMatch = currentMatch || null;
     _scrollTerminalLazySearchMatchIntoView(currentMatch, current);
     return;
   }
-  searchMatches.forEach((group, i) => {
-    group.forEach((node) => node.classList.toggle('current', i === searchMatchIdx));
+  matches.forEach((group, i) => {
+    group.forEach((node) => node.classList.toggle('current', i === matchIdx));
   });
-  const current = searchMatches[searchMatchIdx]?.[0];
+  const current = matches[matchIdx]?.[0];
   if (current && typeof current.scrollIntoView === 'function') {
     current.scrollIntoView({ block: 'center' });
   }
 }
 
 function clearHighlights() {
-  const out = getOutput(activeTabId);
+  const out = _getOutputForTab(_activeTabId());
   if (!out) return;
   _clearTerminalLazyHighlight();
   _clearTextSearchHighlights(out);
@@ -1086,12 +1309,13 @@ function clearHighlights() {
 function clearSearch() {
   _clearTerminalSearchTimer();
   clearHighlights();
-  searchMatches = [];
-  searchMatchIdx = -1;
+  _setSearchMatches([]);
+  _setSearchMatchIdx(-1);
   _terminalSearchLazyMode = false;
   _setSearchCount('');
-  if (typeof searchInput !== 'undefined' && searchInput) searchInput.value = '';
-  searchScope = 'text';
+  const searchInput = _searchInputEl();
+  if (searchInput) searchInput.value = '';
+  _setSearchScope('text');
   syncSearchScopeUi();
   scheduleSearchDiscoverabilityRefresh();
 }
@@ -1100,20 +1324,28 @@ syncSearchScopeUi();
 refreshSearchDiscoverabilityUi();
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    syncSearchScopeUi,
-    refreshSearchDiscoverabilityUi,
-    scheduleSearchDiscoverabilityRefresh,
-    prepareSearchBarForOpen,
-    prepareSearchBarForScope,
-    setSearchScope,
-    createTextSearchController,
-    summarizeCurrentOutputSignals,
-    runSearch,
-    scheduleRunSearch,
-    navigateSearch,
-    highlightCurrent,
-    clearHighlights,
-    clearSearch,
-  });
 }
+
+const isSearchBarOpen = (...args) => (
+  typeof globalThis.isSearchBarOpen === 'function'
+    ? globalThis.isSearchBarOpen(...args)
+    : false
+);
+
+export {
+  clearHighlights,
+  clearSearch,
+  createTextSearchController,
+  highlightCurrent,
+  isSearchBarOpen,
+  navigateSearch,
+  prepareSearchBarForOpen,
+  prepareSearchBarForScope,
+  refreshSearchDiscoverabilityUi,
+  runSearch,
+  scheduleRunSearch,
+  scheduleSearchDiscoverabilityRefresh,
+  setSearchScope,
+  summarizeCurrentOutputSignals,
+  syncSearchScopeUi,
+};

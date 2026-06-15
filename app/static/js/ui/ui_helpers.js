@@ -1,55 +1,163 @@
 // ── Shared UI helpers ──
+import {
+  emitUiEvent as importedEmitUiEvent,
+  getActiveTab as importedGetActiveTab,
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  getAutocompleteState as importedGetAutocompleteState,
+  getComposerState as importedGetComposerState,
+  setAutocompleteState as importedSetAutocompleteState,
+  setComposerState as importedSetComposerState,
+} from '../core/state.js';
+import {
+  acDropdown as importedAcDropdown,
+  cmdInput as importedCmdInput,
+  faqOverlay as importedFaqOverlay,
+  histRow as importedHistRow,
+  historyLoadOverlay as importedHistoryLoadOverlay,
+  historyPanel as importedHistoryPanel,
+  mobileCmdInput as importedMobileCmdInput,
+  mobileMenu as importedMobileMenu,
+  mobileRunBtn as importedMobileRunBtn,
+  optionsOverlay as importedOptionsOverlay,
+  runBtn as importedRunBtn,
+  runTimer as importedRunTimer,
+  searchBar as importedSearchBar,
+  shortcutsOverlay as importedShortcutsOverlay,
+  tabPanels as importedTabPanels,
+  themeOverlay as importedThemeOverlay,
+  workflowsOverlay as importedWorkflowsOverlay,
+  workspaceOverlay as importedWorkspaceOverlay,
+} from '../core/dom.js';
+import {
+  hasComposerPromptHandler as importedHasComposerPromptHandler,
+  syncShellPrompt as importedSyncShellPrompt,
+} from '../features/terminal/composer_prompt_bridge.js';
+import {
+  getMobileKeyboardOffset as importedGetMobileKeyboardOffset,
+  hasMobileShellLayoutHandler as importedHasMobileShellLayoutHandler,
+  isMobileKeyboardOpen as importedIsMobileKeyboardOpen,
+  syncMobileViewportState as importedSyncMobileViewportState,
+  useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode,
+} from '../features/mobile/mobile_shell_layout_bridge.js';
+import {
+  hasHistoryPanelHandler as importedHasHistoryPanelHandler,
+  resetHistorySelectionOnClose as importedResetHistorySelectionOnClose,
+} from '../features/history/history_panel_bridge.js';
+
 (function initSharedUiHelpers(global) {
+  const uiFn = (name) => {
+    const fn = global && global[name];
+    return typeof fn === 'function' ? fn : null;
+  };
+  const syncShellPromptFromBridge = () => {
+    const syncPrompt = (
+      typeof importedHasComposerPromptHandler === 'function'
+      && importedHasComposerPromptHandler('syncShellPrompt')
+    ) ? importedSyncShellPrompt : uiFn('syncShellPrompt');
+    if (typeof syncPrompt === 'function') syncPrompt();
+  };
+  const useMobileTerminalViewportModeFromBridge = () => {
+    if (
+      typeof importedHasMobileShellLayoutHandler === 'function'
+      && importedHasMobileShellLayoutHandler('useMobileTerminalViewportMode')
+    ) {
+      return importedUseMobileTerminalViewportMode();
+    }
+    const useMobile = uiFn('useMobileTerminalViewportMode');
+    return !!(useMobile && useMobile());
+  };
+  const getMobileKeyboardOffsetFromBridge = () => {
+    if (
+      typeof importedHasMobileShellLayoutHandler === 'function'
+      && importedHasMobileShellLayoutHandler('getMobileKeyboardOffset')
+    ) {
+      return importedGetMobileKeyboardOffset();
+    }
+    const getOffset = uiFn('getMobileKeyboardOffset');
+    return typeof getOffset === 'function' ? getOffset() : 0;
+  };
+  const isMobileKeyboardOpenFromBridge = (offset = null) => {
+    if (
+      typeof importedHasMobileShellLayoutHandler === 'function'
+      && importedHasMobileShellLayoutHandler('isMobileKeyboardOpen')
+    ) {
+      return importedIsMobileKeyboardOpen(offset);
+    }
+    const isKeyboardOpen = uiFn('isMobileKeyboardOpen');
+    return typeof isKeyboardOpen === 'function' ? !!isKeyboardOpen(offset) : false;
+  };
+  const syncMobileViewportStateFromBridge = () => {
+    if (
+      typeof importedHasMobileShellLayoutHandler === 'function'
+      && importedHasMobileShellLayoutHandler('syncMobileViewportState')
+    ) {
+      importedSyncMobileViewportState();
+      return;
+    }
+    uiFn('syncMobileViewportState')?.();
+  };
+  const uiValue = (name) => (global ? global[name] : undefined);
+  const uiEl = (imported, name) => imported || uiValue(name) || null;
+  const emitUi = (name, detail) => {
+    const emit = (typeof importedEmitUiEvent === 'function' && importedEmitUiEvent)
+      || uiFn('emitUiEvent');
+    if (emit) emit(name, detail);
+  };
+  const activeTab = () => {
+    if (typeof importedGetActiveTab === 'function') return importedGetActiveTab();
+    const getActive = uiFn('getActiveTab');
+    return getActive ? getActive() : null;
+  };
+  const activeTabId = () => {
+    if (typeof importedGetActiveTabId === 'function') return importedGetActiveTabId();
+    const getActiveId = uiFn('getActiveTabId');
+    return getActiveId ? getActiveId() : (uiValue('activeTabId') || null);
+  };
+  const setComposerStateValue = (next) => {
+    const setComposer = (typeof importedSetComposerState === 'function' && importedSetComposerState)
+      || uiFn('setComposerState');
+    return setComposer ? setComposer(next) : null;
+  };
   // These helpers wrap the split desktop/mobile composer model so the rest of
   // the code can ask for "the visible input" instead of branching everywhere.
-  const state = getAppState();
+  const readAppState = (typeof importedGetAppState !== 'undefined' && importedGetAppState)
+    || uiFn('getAppState');
+  const readComposerState = (typeof importedGetComposerState !== 'undefined' && importedGetComposerState)
+    || uiFn('getComposerState');
+  const state = typeof readAppState === 'function' ? readAppState() : {};
   let _mobileKeyboardVisibilityTimer = null;
-  const getMobileMenuEl = () => mobileMenu || null;
+  const readAutocompleteState = () => {
+    const getAutocomplete = (typeof importedGetAutocompleteState !== 'undefined' && importedGetAutocompleteState)
+      || uiFn('getAutocompleteState');
+    const apiState = typeof getAutocomplete === 'function' ? getAutocomplete() : {};
+    return {
+      filtered: Array.isArray(apiState.filtered) ? apiState.filtered : [],
+      index: apiState.index ?? -1,
+      suppressInputOnce: !!apiState.suppressInputOnce,
+    };
+  };
+  const writeAutocompleteState = (next = {}) => {
+    const setAutocomplete = (typeof importedSetAutocompleteState !== 'undefined' && importedSetAutocompleteState)
+      || uiFn('setAutocompleteState');
+    if (typeof setAutocomplete === 'function') setAutocomplete(next);
+    return readAutocompleteState();
+  };
+  const getMobileMenuEl = () => uiEl(importedMobileMenu, 'mobileMenu');
   const isMobileTerminalViewportActive = () => !!(
-    typeof useMobileTerminalViewportMode === "function"
-    && useMobileTerminalViewportMode()
+    useMobileTerminalViewportModeFromBridge()
     && document.body
     && document.body.classList
     && document.body.classList.contains("mobile-terminal-mode")
   );
 
-  global.getComposerInputs = () => ({
-    desktop: (typeof cmdInput !== 'undefined' && cmdInput) || null,
-    mobile: (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) || null,
-  });
-  global.getVisibleComposerInput = () => {
-    const { desktop, mobile } = global.getComposerInputs();
-    const mobileShellActive = !!(typeof document !== 'undefined'
-      && document.body
-      && document.body.classList
-      && document.body.classList.contains('mobile-terminal-mode'));
-    if (mobileShellActive && mobile) return mobile;
-    return desktop;
-  };
-  global.getActiveComposerInput = () => {
-    const { desktop, mobile } = global.getComposerInputs();
-    const visible = global.getVisibleComposerInput();
-    if (visible) return visible;
-    const composer = typeof getComposerState === 'function' ? getComposerState() : null;
-    if (composer?.activeInput === 'mobile' && mobile) return mobile;
-    if (composer?.activeInput === 'desktop' && desktop) return desktop;
-    return desktop || mobile || null;
-  };
-  global.getComposerValue = () => {
-    if (typeof getComposerState === 'function') {
-      const composer = getComposerState();
-      if (composer && typeof composer.value === 'string') return composer.value;
-    }
-    const input = global.getVisibleComposerInput();
-    return input ? input.value : '';
-  };
   let _setComposerValueInProgress = false;
   const _baseSetComposerState = typeof global.setComposerState === 'function'
     ? global.setComposerState
     : null;
   function _syncComposerInputsFromState() {
-    if (_setComposerValueInProgress || typeof getComposerState !== 'function') return;
-    const composer = getComposerState();
+    if (_setComposerValueInProgress || typeof readComposerState !== 'function') return;
+    const composer = readComposerState();
     if (!composer) return;
     const value = typeof composer.value === 'string' ? composer.value : '';
     const start = typeof composer.selectionStart === 'number' ? Math.max(0, Math.min(composer.selectionStart, value.length)) : value.length;
@@ -69,43 +177,11 @@
     if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
   }
   if (_baseSetComposerState) {
-    global.setComposerState = (next = {}) => {
-      const stateSnapshot = _baseSetComposerState(next);
-      _syncComposerInputsFromState();
-      return stateSnapshot;
-    };
-    if (global.APP_STATE_API) {
-      global.APP_STATE_API.setComposerState = (next) => global.setComposerState(next);
+    const appStateApi = uiValue('APP_STATE_API');
+    if (appStateApi) {
+      appStateApi.setComposerState = (next) => global.setComposerState(next);
     }
   }
-  global.applyMobileTextInputDefaults = (input) => {
-    if (!input || typeof input.setAttribute !== 'function') return;
-    input.setAttribute('autocomplete', 'off');
-    input.setAttribute('autocapitalize', 'none');
-    input.setAttribute('autocorrect', 'off');
-    input.setAttribute('spellcheck', 'false');
-    input.setAttribute('inputmode', 'text');
-  };
-  global.normalizeComposerSmartPeriod = (sourceInput) => {
-    if (!sourceInput || typeof sourceInput.value !== 'string') return false;
-    const composer = typeof getComposerState === 'function' ? getComposerState() : null;
-    if (!composer || typeof composer.value !== 'string') return false;
-    const prevValue = composer.value;
-    const prevStart = typeof composer.selectionStart === 'number' ? composer.selectionStart : prevValue.length;
-    const prevEnd = typeof composer.selectionEnd === 'number' ? composer.selectionEnd : prevStart;
-    if (prevStart !== prevEnd || prevStart < 1 || prevValue[prevStart - 1] !== ' ') return false;
-
-    const smartPeriodValue = `${prevValue.slice(0, prevStart - 1)}. ${prevValue.slice(prevStart)}`;
-    if (sourceInput.value !== smartPeriodValue) return false;
-
-    const normalizedValue = `${prevValue.slice(0, prevStart)} ${prevValue.slice(prevStart)}`;
-    const nextCaret = prevStart + 1;
-    sourceInput.value = normalizedValue;
-    if (typeof sourceInput.setSelectionRange === 'function') {
-      sourceInput.setSelectionRange(nextCaret, nextCaret);
-    }
-    return true;
-  };
   function _estimateComposerTextWidth(input, text) {
     if (!input || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
     const style = window.getComputedStyle(input);
@@ -144,7 +220,66 @@
       input.scrollLeft = Math.max(0, Math.round(caretX - viewport + gutter));
     }
   }
-  global.focusElement = (el, { preventScroll = false } = {}) => {
+
+  const getComposerInputs = () => ({
+    desktop: uiEl(importedCmdInput, 'cmdInput'),
+    mobile: uiEl(importedMobileCmdInput, 'mobileCmdInput'),
+  });
+  const getVisibleComposerInput = () => {
+    const { desktop, mobile } = getComposerInputs();
+    const mobileShellActive = !!(typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-terminal-mode'));
+    if (mobileShellActive && mobile) return mobile;
+    return desktop;
+  };
+  const getActiveComposerInput = () => {
+    const { desktop, mobile } = getComposerInputs();
+    const visible = getVisibleComposerInput();
+    if (visible) return visible;
+    const composer = typeof readComposerState === 'function' ? readComposerState() : null;
+    if (composer?.activeInput === 'mobile' && mobile) return mobile;
+    if (composer?.activeInput === 'desktop' && desktop) return desktop;
+    return desktop || mobile || null;
+  };
+  const getComposerValue = () => {
+    if (typeof readComposerState === 'function') {
+      const composer = readComposerState();
+      if (composer && typeof composer.value === 'string') return composer.value;
+    }
+    const input = getVisibleComposerInput();
+    return input ? input.value : '';
+  };
+  const applyMobileTextInputDefaults = (input) => {
+    if (!input || typeof input.setAttribute !== 'function') return;
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocapitalize', 'none');
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('spellcheck', 'false');
+    input.setAttribute('inputmode', 'text');
+  };
+  const normalizeComposerSmartPeriod = (sourceInput) => {
+    if (!sourceInput || typeof sourceInput.value !== 'string') return false;
+    const composer = typeof readComposerState === 'function' ? readComposerState() : null;
+    if (!composer || typeof composer.value !== 'string') return false;
+    const prevValue = composer.value;
+    const prevStart = typeof composer.selectionStart === 'number' ? composer.selectionStart : prevValue.length;
+    const prevEnd = typeof composer.selectionEnd === 'number' ? composer.selectionEnd : prevStart;
+    if (prevStart !== prevEnd || prevStart < 1 || prevValue[prevStart - 1] !== ' ') return false;
+
+    const smartPeriodValue = `${prevValue.slice(0, prevStart - 1)}. ${prevValue.slice(prevStart)}`;
+    if (sourceInput.value !== smartPeriodValue) return false;
+
+    const normalizedValue = `${prevValue.slice(0, prevStart)} ${prevValue.slice(prevStart)}`;
+    const nextCaret = prevStart + 1;
+    sourceInput.value = normalizedValue;
+    if (typeof sourceInput.setSelectionRange === 'function') {
+      sourceInput.setSelectionRange(nextCaret, nextCaret);
+    }
+    return true;
+  };
+  const focusElement = (el, { preventScroll = false } = {}) => {
     if (!el || typeof el.focus !== 'function') return false;
     try {
       if (preventScroll) el.focus({ preventScroll: true });
@@ -154,46 +289,39 @@
     }
     return true;
   };
-  global.blurActiveElement = () => {
+  const blurActiveElement = () => {
     if (typeof document === 'undefined') return false;
     const active = document.activeElement;
     if (!active || typeof active.blur !== 'function') return false;
     active.blur();
     return true;
   };
-  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
-    const target = input || global.getVisibleComposerInput();
-    return global.focusElement(target, { preventScroll });
+  const focusComposerInput = (input = null, { preventScroll = false } = {}) => {
+    const target = input || getVisibleComposerInput();
+    return focusElement(target, { preventScroll });
   };
-  global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
+  const focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
     if (isMobileTerminalViewportActive()) return false;
-    const target = (typeof getVisibleComposerInput === 'function')
-      ? getVisibleComposerInput()
-      : global.getVisibleComposerInput();
-    return global.focusComposerInput(target, { preventScroll });
+    return focusComposerInput(getVisibleComposerInput(), { preventScroll });
   };
-  global.getMobileKeyboardOffsetBaseline = () => state._mobileKeyboardOffsetBaseline;
-  global.getMobileViewportClosedHeight = () => state._mobileViewportClosedHeight;
-  global.setMobileViewportClosedHeight = (value) => {
+  const getMobileKeyboardOffsetBaseline = () => state._mobileKeyboardOffsetBaseline;
+  const getMobileViewportClosedHeight = () => state._mobileViewportClosedHeight;
+  const setMobileViewportClosedHeight = (value) => {
     state._mobileViewportClosedHeight = typeof value === 'number' ? value : null;
     return state._mobileViewportClosedHeight;
   };
-  global.blurVisibleComposerInput = () => {
-    const target = (typeof getVisibleComposerInput === 'function')
-      ? getVisibleComposerInput()
-      : global.getVisibleComposerInput();
+  const blurVisibleComposerInput = () => {
+    const target = getVisibleComposerInput();
     if (!target || typeof target.blur !== 'function') return false;
     target.blur();
     return true;
   };
-  global.blurVisibleComposerInputIfMobile = () => {
-    if (typeof useMobileTerminalViewportMode !== 'function' || !useMobileTerminalViewportMode()) return false;
-    return global.blurVisibleComposerInput();
+  const blurVisibleComposerInputIfMobile = () => {
+    if (!useMobileTerminalViewportModeFromBridge()) return false;
+    return blurVisibleComposerInput();
   };
-  global.focusAnyComposerInput = ({ preventScroll = false } = {}) => {
-    return global.focusVisibleComposerInput({ preventScroll });
-  };
-  global.syncMobileComposerKeyboardState = (offset = null, { active = true, open = null } = {}) => {
+  const focusAnyComposerInput = ({ preventScroll = false } = {}) => focusVisibleComposerInput({ preventScroll });
+  const syncMobileComposerKeyboardState = (offset = null, { active = true, open = null } = {}) => {
     if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
     const requestedOffset = typeof offset === 'number' ? offset : 0;
     const requestedOpen = typeof open === 'boolean'
@@ -211,7 +339,7 @@
         _mobileKeyboardVisibilityTimer = null;
       }
       document.body.classList.remove('mobile-keyboard-open');
-      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: false });
+      emitUi('app:mobile-keyboard-state', { open: false });
       return false;
     }
     if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
@@ -221,10 +349,10 @@
     if (nextOpen && nextOffset > 0) state._mobileKeyboardLastOpenOffset = nextOffset;
     if (!nextOpen) state._mobileKeyboardOffsetBaseline = nextOffset;
     document.body.classList.toggle('mobile-keyboard-open', nextOpen);
-    if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: !!nextOpen });
+    emitUi('app:mobile-keyboard-state', { open: !!nextOpen });
     return nextOpen;
   };
-  global.setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
+  const setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
     if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
     if (_mobileKeyboardVisibilityTimer) {
       clearTimeout(_mobileKeyboardVisibilityTimer);
@@ -235,71 +363,61 @@
       const wasKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
       document.body.classList.toggle('mobile-keyboard-open', !!open);
       if (open && !wasKeyboardOpen) {
-        if (typeof hideMobileMenu === 'function') hideMobileMenu();
-        if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof hideHistoryPanel === 'function') {
-          hideHistoryPanel();
-        }
-        if (typeof acHide === 'function') acHide();
+        const hideMobile = uiFn('hideMobileMenu') || hideMobileMenu;
+        const isHistoryOpen = uiFn('isHistoryPanelOpen') || isHistoryPanelOpen;
+        const hideHistory = uiFn('hideHistoryPanel') || hideHistoryPanel;
+        const hideAutocomplete = uiFn('acHide');
+        if (hideMobile) hideMobile();
+        if (isHistoryOpen && isHistoryOpen() && hideHistory) hideHistory();
+        if (hideAutocomplete) hideAutocomplete();
       }
-      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: !!open });
+      emitUi('app:mobile-keyboard-state', { open: !!open });
       return !!open;
     };
 
-    if (open) {
-      return applyOpen();
-    }
+    if (open) return applyOpen();
 
     const closeDelay = Math.max(0, Number(delay) || 0);
-    if (closeDelay === 0) {
-      return applyOpen();
-    }
+    if (closeDelay === 0) return applyOpen();
 
     _mobileKeyboardVisibilityTimer = setTimeout(() => {
       _mobileKeyboardVisibilityTimer = null;
-      const mobileInput = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+      const mobileInput = getVisibleComposerInput();
       const keyboardStillOpen = !!(
         mobileInput
         && document.activeElement === mobileInput
-        && typeof getMobileKeyboardOffset === 'function'
-        && typeof isMobileKeyboardOpen === 'function'
-        && isMobileKeyboardOpen(getMobileKeyboardOffset())
+        && isMobileKeyboardOpenFromBridge(getMobileKeyboardOffsetFromBridge())
       );
       if (keyboardStillOpen) return;
       document.body.classList.remove('mobile-keyboard-open');
-      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: false });
-      // Reset keyboard CSS vars to their closed-keyboard values. Use window.innerHeight
-      // rather than visualViewport.height — the keyboard animation may still be in
-      // progress at this point, leaving visualViewport.height at a mid-animation
-      // (shrunk) value that would break the layout.  window.innerHeight is stable
-      // on iOS and unaffected by the software keyboard.
+      emitUi('app:mobile-keyboard-state', { open: false });
       if (typeof window !== 'undefined' && document.documentElement) {
         const h = window.innerHeight || 0;
         if (h > 0) document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
-        global.syncMobileComposerKeyboardState(0, { open: false });
+        syncMobileComposerKeyboardState(0, { open: false });
       }
     }, closeDelay);
     return false;
   };
-  global.isActiveTabRunning = () => {
-    const active = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  const isActiveTabRunning = () => {
+    const active = activeTab();
     return !!(active && active.st === 'running');
   };
-  global.setComposerValue = (value, start = null, end = null, { dispatch = true, exclude = null, allowDuringRun = false } = {}) => {
+  const setComposerValue = (value, start = null, end = null, { dispatch = true, exclude = null, allowDuringRun = false } = {}) => {
     const nextValue = String(value ?? '');
-    if (!allowDuringRun && nextValue.trim() && global.isActiveTabRunning()) {
-      if (typeof acHide === 'function') acHide();
+    if (!allowDuringRun && nextValue.trim() && isActiveTabRunning()) {
+      const hideAutocomplete = uiFn('acHide');
+      if (hideAutocomplete) hideAutocomplete();
       if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
-      return typeof global.getComposerValue === 'function' ? global.getComposerValue() : '';
+      return getComposerValue();
     }
     const nextStart = typeof start === 'number' ? start : nextValue.length;
     const nextEnd = typeof end === 'number' ? end : nextStart;
-    const target = typeof getActiveComposerInput === 'function'
-      ? getActiveComposerInput()
-      : global.getVisibleComposerInput();
-    if (typeof setComposerState === 'function') {
+    const target = getActiveComposerInput();
+    if (typeof setComposerStateValue === 'function') {
       _setComposerValueInProgress = true;
       try {
-        setComposerState({
+        setComposerStateValue({
           value: nextValue,
           selectionStart: nextStart,
           selectionEnd: nextEnd,
@@ -315,9 +433,6 @@
       }
     }
     if (target && target !== exclude) {
-      // Skip programmatic value assignment on the excluded input (typically the
-      // source that just triggered an input event). Assigning .value on a focused
-      // input resets the browser's OS key-repeat state, breaking hold-to-repeat.
       target.value = nextValue;
       if (typeof target.setSelectionRange === 'function') {
         target.setSelectionRange(nextStart, nextEnd);
@@ -330,9 +445,9 @@
     if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
     return nextValue;
   };
-  global.syncComposerSelection = (start = null, end = null, { input = null } = {}) => {
-    const target = input || global.getActiveComposerInput();
-    const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+  const syncComposerSelection = (start = null, end = null, { input = null } = {}) => {
+    const target = input || getActiveComposerInput();
+    const composer = typeof readComposerState === 'function' ? readComposerState() : null;
     const value = composer && typeof composer.value === 'string'
       ? composer.value
       : (target && typeof target.value === 'string' ? target.value : '');
@@ -341,108 +456,102 @@
     const nextEnd = typeof end === 'number' ? Math.max(0, Math.min(end, len)) : nextStart;
     const orderedStart = Math.min(nextStart, nextEnd);
     const orderedEnd = Math.max(nextStart, nextEnd);
-    if (typeof setComposerState === 'function') {
-      setComposerState({
-        selectionStart: orderedStart,
-        selectionEnd: orderedEnd,
-        activeInput: (typeof document !== 'undefined'
-          && document.body
-          && document.body.classList
-          && document.body.classList.contains('mobile-terminal-mode'))
-          ? 'mobile'
-          : 'desktop',
-      });
-    }
+    setComposerStateValue({
+      selectionStart: orderedStart,
+      selectionEnd: orderedEnd,
+      activeInput: (typeof document !== 'undefined'
+        && document.body
+        && document.body.classList
+        && document.body.classList.contains('mobile-terminal-mode'))
+        ? 'mobile'
+        : 'desktop',
+    });
     if (target && typeof target.setSelectionRange === 'function') {
       target.setSelectionRange(orderedStart, orderedEnd);
     }
     _syncComposerCaretVisibility(target, orderedStart, orderedEnd);
     return { start: orderedStart, end: orderedEnd };
   };
-  global.syncFocusedComposerState = (input = null) => {
-    const target = input || global.getActiveComposerInput();
+  const syncFocusedComposerState = (input = null) => {
+    const target = input || getActiveComposerInput();
     if (!target || typeof target.value !== 'string') return null;
     const value = target.value;
     const start = typeof target.selectionStart === 'number' ? target.selectionStart : value.length;
     const end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
-    if (typeof setComposerState === 'function') {
-      setComposerState({
-        value,
-        selectionStart: start,
-        selectionEnd: end,
-        activeInput: target === global.getComposerInputs().mobile ? 'mobile' : 'desktop',
-      });
-    }
+    setComposerStateValue({
+      value,
+      selectionStart: start,
+      selectionEnd: end,
+      activeInput: target === getComposerInputs().mobile ? 'mobile' : 'desktop',
+    });
     return { value, start, end, input: target };
   };
-  global.handleComposerInputChange = (sourceInput) => {
+  const handleComposerInputChange = (sourceInput) => {
     if (!sourceInput) return;
-    // Typing always snaps the output back to bottom so the prompt stays visible.
-    const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    const _activeTab = activeTab();
     if (_activeTab && _activeTab.st === 'running') {
       sourceInput.value = '';
-      global.setComposerValue('', 0, 0, { dispatch: false, exclude: sourceInput, allowDuringRun: true });
-      if (typeof acHide === 'function') acHide();
-      if (typeof syncShellPrompt === 'function') syncShellPrompt();
+      setComposerValue('', 0, 0, { dispatch: false, exclude: sourceInput, allowDuringRun: true });
+      uiFn('acHide')?.();
+      syncShellPromptFromBridge();
       return;
     }
-    if (typeof global.normalizeComposerSmartPeriod === 'function') {
-      global.normalizeComposerSmartPeriod(sourceInput);
-    }
+    normalizeComposerSmartPeriod(sourceInput);
     if (_activeTab) _activeTab.followOutput = true;
     const _out = typeof document !== 'undefined'
       ? document.querySelector('.tab-panel.active .output') : null;
     if (_out) _out.scrollTop = _out.scrollHeight;
-    if (typeof syncShellPrompt === 'function') syncShellPrompt();
-    if (typeof syncMobileViewportState === 'function') syncMobileViewportState();
+    syncShellPromptFromBridge();
+    syncMobileViewportStateFromBridge();
     const value = sourceInput.value;
     const start = typeof sourceInput.selectionStart === 'number' ? sourceInput.selectionStart : value.length;
     const end = typeof sourceInput.selectionEnd === 'number' ? sourceInput.selectionEnd : value.length;
-    global.setComposerValue(value, start, end, { dispatch: false, exclude: sourceInput });
-    const keepHistoryNav = typeof _suspendCmdHistoryNavReset !== 'undefined' && _suspendCmdHistoryNavReset;
-    if (keepHistoryNav) _suspendCmdHistoryNavReset = false;
-    else if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
-    if (value.length > 0 && typeof requestWelcomeSettle === 'function') {
-      requestWelcomeSettle(activeTabId);
-    }
-    if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
-      acSuppressInputOnce = false;
-      if (typeof acHide === 'function') acHide();
+    setComposerValue(value, start, end, { dispatch: false, exclude: sourceInput });
+    if (state && state._suspendCmdHistoryNavReset) state._suspendCmdHistoryNavReset = false;
+    else uiFn('resetCmdHistoryNav')?.();
+    if (value.length > 0) uiFn('requestWelcomeSettle')?.(activeTabId());
+
+    const autocomplete = readAutocompleteState();
+    if (autocomplete.suppressInputOnce) {
+      writeAutocompleteState({ suppressInputOnce: false });
+      uiFn('acHide')?.();
       return;
     }
-    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
-      acIndex = -1;
-      acFiltered = [];
-      if (typeof acHide === 'function') acHide();
+    if (uiFn('hasPendingTerminalConfirm')?.()) {
+      writeAutocompleteState({ index: -1, filtered: [] });
+      uiFn('acHide')?.();
       return;
     }
-    acIndex = -1;
+    writeAutocompleteState({ index: -1 });
     if (!value.trim()) {
-      if (typeof acHide === 'function') acHide();
+      uiFn('acHide')?.();
       return;
     }
-    const usedContextMatcher = typeof getAutocompleteMatches === 'function';
-    const contextMatches = usedContextMatcher ? getAutocompleteMatches(value, start) : [];
-    acFiltered = usedContextMatcher
-      ? (typeof limitAutocompleteMatchesForDisplay === 'function'
-        ? limitAutocompleteMatchesForDisplay(contextMatches, 12)
-        : contextMatches.slice(0, 12))
-      : ((typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
+    const getMatches = uiFn('getAutocompleteMatches');
+    const usedContextMatcher = !!getMatches;
+    const contextMatches = usedContextMatcher ? getMatches(value, start) : [];
+    const limitMatches = uiFn('limitAutocompleteMatchesForDisplay');
+    const suggestions = Array.isArray(uiValue('acSuggestions')) ? uiValue('acSuggestions') : [];
+    const filtered = usedContextMatcher
+      ? (limitMatches ? limitMatches(contextMatches, 12) : contextMatches.slice(0, 12))
+      : suggestions
         .filter(s => s.toLowerCase().startsWith(value.toLowerCase()))
-        .slice(0, 12));
-    if (!acFiltered.length) {
-      if (typeof acHide === 'function') acHide();
+        .slice(0, 12);
+    writeAutocompleteState({ filtered });
+    if (!filtered.length) {
+      uiFn('acHide')?.();
       return;
     }
     if (!usedContextMatcher) {
       const q = value.trim().toLowerCase();
-      if (acFiltered.some(s => String(s || '').toLowerCase() === q)) {
-        if (typeof acHide === 'function') acHide();
+      if (filtered.some(s => String(s || '').toLowerCase() === q)) {
+        uiFn('acHide')?.();
         return;
       }
     }
-    if (typeof acShow === 'function') acShow(acFiltered);
+    uiFn('acShow')?.(filtered);
   };
+
   function _isVisibleModalOverlay(el) {
     if (!el || !el.classList) return false;
     if (el.id === 'history-panel' || el.id === 'history-load-overlay') return false;
@@ -467,30 +576,6 @@
     return active;
   }
 
-  global.syncModalOverlayState = _syncModalOverlayState;
-  global.showPanelOverlay = (el) => {
-    if (el && el.classList) el.classList.add('open');
-    if (el && el.dataset) el.dataset.interactionReady = '0';
-    _syncModalOverlayState();
-  };
-  global.hidePanelOverlay = (el) => {
-    if (el && el.classList) el.classList.remove('open');
-    if (el && el.dataset) delete el.dataset.interactionReady;
-    _syncModalOverlayState();
-  };
-  global.markInteractionSurfaceReady = (surface, overlay, card = null) => {
-    if (overlay && overlay.dataset) overlay.dataset.interactionReady = '1';
-    if (card && card.dataset) card.dataset.interactionReady = '1';
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:interaction-surface-ready', {
-        surface: surface || '',
-        overlayId: overlay && overlay.id ? overlay.id : '',
-        cardId: card && card.id ? card.id : '',
-        activeElementId: document.activeElement && document.activeElement.id ? document.activeElement.id : '',
-        focusTrapBound: !!(card && card.dataset && card.dataset.focusTrapBound === '1'),
-      });
-    }
-  };
   // Canonical post-action refocus path for chrome interactions. Every
   // "return focus to the terminal after a button/overlay/sheet action" call
   // site routes through here so mobile-skip, preventScroll, and timing
@@ -504,135 +589,199 @@
   //     handlers that close overlays, dispatch into other modules, or run
   //     inside a pointerdown/click where the current event is still propagating.
   function _doRefocusComposer(preventScroll) {
-    const isMobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+    const isMobileMode = useMobileTerminalViewportModeFromBridge();
     // Intentional no-op on the mobile terminal viewport: programmatically
     // refocusing would re-pop the software keyboard, which users don't want
     // after every chrome action.
     if (isMobileMode) return false;
-    if (typeof global.isConfirmOpen === 'function' && global.isConfirmOpen()) return false;
+    const isConfirmOpen = uiFn('isConfirmOpen');
+    if (isConfirmOpen && isConfirmOpen()) return false;
+    const focusPty = uiFn('focusActiveInteractivePty');
     if (
-      typeof global.focusActiveInteractivePty === 'function'
-      && global.focusActiveInteractivePty({ preventScroll })
+      focusPty
+      && focusPty({ preventScroll })
     ) {
       return true;
     }
-    const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-    if (target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
+    const getVisible = uiFn('getVisibleComposerInput') || global.getVisibleComposerInput;
+    const focusComposer = uiFn('focusComposerInput') || global.focusComposerInput;
+    const target = getVisible ? getVisible() : null;
+    if (target && focusComposer && focusComposer(target, { preventScroll })) {
       return true;
     }
-    if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll })) return true;
+    const focusAny = uiFn('focusAnyComposerInput') || global.focusAnyComposerInput;
+    if (focusAny && focusAny({ preventScroll })) return true;
     return false;
   }
-  global.refocusComposerAfterAction = ({ preventScroll = true, defer = false } = {}) => {
+  const historyPanelEl = () => uiEl(importedHistoryPanel, 'historyPanel');
+  const workflowsOverlayEl = () => uiEl(importedWorkflowsOverlay, 'workflowsOverlay');
+  const faqOverlayEl = () => uiEl(importedFaqOverlay, 'faqOverlay');
+  const shortcutsOverlayEl = () => uiEl(importedShortcutsOverlay, 'shortcutsOverlay');
+  const themeOverlayEl = () => uiEl(importedThemeOverlay, 'themeOverlay');
+  const optionsOverlayEl = () => uiEl(importedOptionsOverlay, 'optionsOverlay');
+  const historyLoadOverlayEl = () => uiEl(importedHistoryLoadOverlay, 'historyLoadOverlay');
+  const searchBarEl = () => uiEl(importedSearchBar, 'searchBar');
+  const histRowEl = () => uiEl(importedHistRow, 'histRow');
+  const runTimerEl = () => uiEl(importedRunTimer, 'runTimer');
+  const runBtnEl = () => uiEl(importedRunBtn, 'runBtn');
+  const mobileRunBtnEl = () => uiEl(importedMobileRunBtn, 'mobileRunBtn');
+  const tabPanelsEl = () => uiEl(importedTabPanels, 'tabPanels');
+  const getWorkspaceOverlay = () => (
+    uiEl(importedWorkspaceOverlay, 'workspaceOverlay')
+  );
+  const refocusComposerAfterAction = ({ preventScroll = true, defer = false } = {}) => {
     if (defer) {
       setTimeout(() => { _doRefocusComposer(preventScroll); }, 0);
       return undefined;
     }
     return _doRefocusComposer(preventScroll);
   };
-  global.togglePanelOverlay = (el, force = null) => {
+  const togglePanelOverlay = (el, force = null) => {
     if (!el || !el.classList) return false;
     const next = force === null ? !el.classList.contains('open') : !!force;
     el.classList.toggle('open', next);
     return next;
   };
-  global.isPanelOverlayOpen = (el) => !!(el && el.classList && el.classList.contains('open'));
-  global.showModalOverlay = (el, display = 'flex') => {
+  const isPanelOverlayOpen = (el) => !!(el && el.classList && el.classList.contains('open'));
+  const showPanelOverlay = (el) => {
+    if (el && el.classList) el.classList.add('open');
+    if (el && el.dataset) el.dataset.interactionReady = '0';
+    _syncModalOverlayState();
+  };
+  const hidePanelOverlay = (el) => {
+    if (el && el.classList) el.classList.remove('open');
+    if (el && el.dataset) delete el.dataset.interactionReady;
+    _syncModalOverlayState();
+  };
+  const showModalOverlay = (el, display = 'flex') => {
     if (el && el.style) el.style.display = display;
     _syncModalOverlayState();
   };
-  global.hideModalOverlay = (el) => {
+  const hideModalOverlay = (el) => {
     if (el && el.style) el.style.display = 'none';
     _syncModalOverlayState();
   };
-  global.showHistoryPanel = () => showPanelOverlay(historyPanel);
-  global.hideHistoryPanel = () => {
-    if (typeof global.resetHistorySelectionOnClose === 'function') global.resetHistorySelectionOnClose();
-    hidePanelOverlay(historyPanel);
-    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+  const markInteractionSurfaceReady = (surface, overlay, card = null) => {
+    if (overlay && overlay.dataset) overlay.dataset.interactionReady = '1';
+    if (card && card.dataset) card.dataset.interactionReady = '1';
+    emitUi('app:interaction-surface-ready', {
+      surface: surface || '',
+      overlayId: overlay && overlay.id ? overlay.id : '',
+      cardId: card && card.id ? card.id : '',
+      activeElementId: document.activeElement && document.activeElement.id ? document.activeElement.id : '',
+      focusTrapBound: !!(card && card.dataset && card.dataset.focusTrapBound === '1'),
+    });
   };
-  global.isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanel);
-  global.showWorkflowsOverlay = () => showPanelOverlay(workflowsOverlay || null);
-  global.hideWorkflowsOverlay = () => hidePanelOverlay(workflowsOverlay || null);
-  global.isWorkflowsOverlayOpen = () => isPanelOverlayOpen(workflowsOverlay || null);
-  global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
-  global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
-  global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
-  global.showShortcutsOverlay = () => {
-    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+  const showHistoryPanel = () => showPanelOverlay(historyPanelEl());
+  const hideHistoryPanel = () => {
+    if (
+      typeof importedHasHistoryPanelHandler === 'function'
+      && importedHasHistoryPanelHandler('resetHistorySelectionOnClose')
+      && typeof importedResetHistorySelectionOnClose === 'function'
+    ) {
+      importedResetHistorySelectionOnClose();
+    } else {
+      uiFn('resetHistorySelectionOnClose')?.();
+    }
+    hidePanelOverlay(historyPanelEl());
+    refocusComposerAfterAction({ preventScroll: true });
+  };
+  const isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanelEl());
+  const showWorkflowsOverlay = () => showPanelOverlay(workflowsOverlayEl());
+  const hideWorkflowsOverlay = () => hidePanelOverlay(workflowsOverlayEl());
+  const isWorkflowsOverlayOpen = () => isPanelOverlayOpen(workflowsOverlayEl());
+  const showFaqOverlay = () => showPanelOverlay(faqOverlayEl());
+  const hideFaqOverlay = () => hidePanelOverlay(faqOverlayEl());
+  const isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlayEl());
+  const showShortcutsOverlay = () => {
+    const el = shortcutsOverlayEl();
     if (el) el.setAttribute('aria-hidden', 'false');
     showPanelOverlay(el);
   };
-  global.hideShortcutsOverlay = () => {
-    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+  const hideShortcutsOverlay = () => {
+    const el = shortcutsOverlayEl();
     if (el) el.setAttribute('aria-hidden', 'true');
     hidePanelOverlay(el);
   };
-  global.isShortcutsOverlayOpen = () => {
-    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
-    return isPanelOverlayOpen(el);
+  const isShortcutsOverlayOpen = () => isPanelOverlayOpen(shortcutsOverlayEl());
+  const showThemeOverlay = () => showPanelOverlay(themeOverlayEl());
+  const hideThemeOverlay = () => hidePanelOverlay(themeOverlayEl());
+  const isThemeOverlayOpen = () => isPanelOverlayOpen(themeOverlayEl());
+  const showOptionsOverlay = () => showPanelOverlay(optionsOverlayEl());
+  const hideOptionsOverlay = () => hidePanelOverlay(optionsOverlayEl());
+  const isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlayEl());
+  const showWorkspaceOverlay = () => showPanelOverlay(getWorkspaceOverlay());
+  const hideWorkspaceOverlay = () => hidePanelOverlay(getWorkspaceOverlay());
+  const isWorkspaceOverlayOpen = () => isPanelOverlayOpen(getWorkspaceOverlay());
+  const showHistoryLoadOverlay = () => {
+    const el = historyLoadOverlayEl();
+    if (el && el.classList) el.classList.add('open');
+    if (el) el.setAttribute('aria-hidden', 'false');
   };
-  global.showThemeOverlay = () => showPanelOverlay(themeOverlay || null);
-  global.hideThemeOverlay = () => hidePanelOverlay(themeOverlay || null);
-  global.isThemeOverlayOpen = () => isPanelOverlayOpen(themeOverlay || null);
-  global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
-  global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
-  global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
-  const getWorkspaceOverlay = () => (
-    typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay : null
-  );
-  global.showWorkspaceOverlay = () => showPanelOverlay(getWorkspaceOverlay());
-  global.hideWorkspaceOverlay = () => hidePanelOverlay(getWorkspaceOverlay());
-  global.isWorkspaceOverlayOpen = () => isPanelOverlayOpen(getWorkspaceOverlay());
-  global.showHistoryLoadOverlay = () => {
-    if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.add('open');
-    if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'false');
-  };
-  global.hideHistoryLoadOverlay = () => {
-    if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.remove('open');
-    if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'true');
+  const hideHistoryLoadOverlay = () => {
+    const el = historyLoadOverlayEl();
+    if (el && el.classList) el.classList.remove('open');
+    if (el) el.setAttribute('aria-hidden', 'true');
   };
   // Initialise inline display so the inline style takes precedence over the
   // conflicting .search-bar { display: flex } class rule (same specificity,
   // later in the sheet) when .u-hidden is also present on the element.
-  if (typeof searchBar !== 'undefined' && searchBar && searchBar.style) searchBar.style.display = 'none';
-  global.showSearchBar = () => {
-    if (searchBar && searchBar.style) searchBar.style.display = 'flex';
+  if (searchBarEl() && searchBarEl().style) searchBarEl().style.display = 'none';
+  const showSearchBar = () => {
+    const el = searchBarEl();
+    if (el && el.style) el.style.display = 'flex';
   };
-  global.hideSearchBar = () => {
-    if (searchBar && searchBar.style) searchBar.style.display = 'none';
+  const hideSearchBar = () => {
+    const el = searchBarEl();
+    if (el && el.style) el.style.display = 'none';
     refocusComposerAfterAction({ preventScroll: true });
   };
-  global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display === 'flex');
-  global.showHistoryRow = () => {
-    if (histRow && histRow.style) histRow.style.display = 'flex';
+  const isSearchBarOpen = () => {
+    const el = searchBarEl();
+    return !!(el && el.style && el.style.display === 'flex');
   };
-  global.hideHistoryRow = () => {
-    if (histRow && histRow.style) histRow.style.display = 'none';
+  const showHistoryRow = () => {
+    const el = histRowEl();
+    if (el && el.style) el.style.display = 'flex';
   };
-  global.showRunTimer = () => {
-    if (runTimer && runTimer.style) runTimer.style.display = 'inline';
+  const hideHistoryRow = () => {
+    const el = histRowEl();
+    if (el && el.style) el.style.display = 'none';
   };
-  global.hideRunTimer = () => {
-    if (runTimer && runTimer.style) runTimer.style.display = 'none';
-    if (runTimer) runTimer.textContent = '';
+  const showRunTimer = () => {
+    const el = runTimerEl();
+    if (el && el.style) el.style.display = 'inline';
   };
-  global.setRunButtonDisabled = (disabled) => {
+  const hideRunTimer = () => {
+    const el = runTimerEl();
+    if (el && el.style) el.style.display = 'none';
+    if (el) el.textContent = '';
+  };
+  const setRunButtonDisabled = (disabled) => {
     const next = !!disabled;
-    if (typeof runBtn !== 'undefined' && runBtn) runBtn.disabled = next;
-    if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = next;
+    const desktop = runBtnEl();
+    const mobile = mobileRunBtnEl();
+    if (desktop) desktop.disabled = next;
+    if (mobile) mobile.disabled = next;
   };
-  global.syncRunButtonDisabled = () => {
-    const active = typeof getActiveTab === 'function' ? getActiveTab() : null;
-    const composerValue = typeof global.getComposerValue === 'function' ? String(global.getComposerValue() || '') : '';
+  const syncRunButtonDisabled = () => {
+    const active = activeTab();
+    const composerValue = String(getComposerValue() || '');
     const disabled = !!(active && active.st === 'running') || !composerValue.trim();
-    if (typeof runBtn !== 'undefined' && runBtn) runBtn.disabled = disabled;
-    if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = disabled;
+    const desktop = runBtnEl();
+    const mobile = mobileRunBtnEl();
+    if (desktop) desktop.disabled = disabled;
+    if (mobile) mobile.disabled = disabled;
     return disabled;
   };
-  global.isRunButtonDisabled = () => !!((runBtn && runBtn.disabled) || (typeof mobileRunBtn !== 'undefined' && mobileRunBtn && mobileRunBtn.disabled));
+  const isRunButtonDisabled = () => {
+    const desktop = runBtnEl();
+    const mobile = mobileRunBtnEl();
+    return !!((desktop && desktop.disabled) || (mobile && mobile.disabled));
+  };
   const syncTerminalActionLayout = (tabId) => {
-    const btn = (typeof tabPanels !== 'undefined' && tabPanels)
+    const tabPanels = tabPanelsEl();
+    const btn = tabPanels
       ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`)
       : null;
     const actions = btn && btn.parentElement && btn.parentElement.classList && btn.parentElement.classList.contains('terminal-actions')
@@ -642,50 +791,59 @@
     const hasVisibleKill = !!(btn.style ? btn.style.display !== 'none' : !btn.hidden);
     actions.classList.toggle('terminal-actions-has-visible-kill', hasVisibleKill);
   };
-  global.showTabKillBtn = (tabId) => {
-    const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
+  const showTabKillBtn = (tabId) => {
+    const tabPanels = tabPanelsEl();
+    const btn = tabPanels ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
     if (btn) {
       btn.hidden = false;
       if (btn.style) btn.style.display = 'inline-block';
     }
     syncTerminalActionLayout(tabId);
-    if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-kill-visibility-changed', { tabId, visible: true });
+    emitUi('app:tab-kill-visibility-changed', { tabId, visible: true });
   };
-  global.hideTabKillBtn = (tabId) => {
-    const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
+  const hideTabKillBtn = (tabId) => {
+    const tabPanels = tabPanelsEl();
+    const btn = tabPanels ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
     if (btn) {
       btn.hidden = true;
       if (btn.style) btn.style.display = 'none';
     }
     syncTerminalActionLayout(tabId);
-    if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-kill-visibility-changed', { tabId, visible: false });
+    emitUi('app:tab-kill-visibility-changed', { tabId, visible: false });
   };
   // Fallbacks. mobile_chrome.js overrides these with sheet-aware versions when
   // the mobile shell initializes; these stubs only run if that init didn't.
-  global.showMobileMenu = () => {
+  const showMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();
     if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('u-hidden');
+    emitUi('app:mobile-menu-show');
   };
-  global.hideMobileMenu = () => {
+  const hideMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();
     if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('u-hidden');
+    emitUi('app:mobile-menu-hide');
   };
-  global.isMobileMenuOpen = () => {
+  const isMobileMenuOpen = () => {
     const mobileMenu = getMobileMenuEl();
     return !!(mobileMenu && mobileMenu.classList && !mobileMenu.classList.contains('u-hidden'));
   };
-  global.showAcDropdown = () => {
-    if (!acDropdown) return;
-    if (acDropdown.classList) acDropdown.classList.remove('u-hidden');
-    if (acDropdown.style) acDropdown.style.display = 'block';
+  const showAcDropdown = () => {
+    const el = uiEl(importedAcDropdown, 'acDropdown');
+    if (!el) return;
+    if (el.classList) el.classList.remove('u-hidden');
+    if (el.style) el.style.display = 'block';
   };
-  global.hideAcDropdown = () => {
-    if (!acDropdown) return;
-    if (acDropdown.classList) acDropdown.classList.add('u-hidden');
-    if (acDropdown.style) acDropdown.style.display = 'none';
+  const hideAcDropdown = () => {
+    const el = uiEl(importedAcDropdown, 'acDropdown');
+    if (!el) return;
+    if (el.classList) el.classList.add('u-hidden');
+    if (el.style) el.style.display = 'none';
   };
-  global.isAcDropdownOpen = () => !!(acDropdown && acDropdown.style && acDropdown.style.display !== 'none');
-  global.setVisibilityState = (el, hidden, ariaHidden = null) => {
+  const isAcDropdownOpen = () => {
+    const el = uiEl(importedAcDropdown, 'acDropdown');
+    return !!(el && el.style && el.style.display !== 'none');
+  };
+  const setVisibilityState = (el, hidden, ariaHidden = null) => {
     if (!el) return;
     el.hidden = !!hidden;
     if (typeof el.setAttribute === 'function') {
@@ -864,7 +1022,24 @@
     if (!select || _appSelects.has(select)) return;
     if (select.dataset.appSelectEnhanced === 'true') {
       const staleWrap = select.nextElementSibling;
-      if (staleWrap && staleWrap.classList?.contains('app-select')) staleWrap.remove();
+      if (staleWrap && staleWrap.classList?.contains('app-select')) {
+        const trigger = staleWrap.querySelector('.app-select-trigger');
+        const valueEl = staleWrap.querySelector('.app-select-value');
+        const menu = staleWrap.querySelector('.app-select-menu');
+        if (trigger && valueEl && menu) {
+          if (_shouldPortalAppSelect(select)) staleWrap.dataset.portalMenu = 'true';
+          _appSelects.set(select, {
+            wrap: staleWrap,
+            trigger,
+            valueEl,
+            menu,
+            options: Array.from(menu.querySelectorAll('[role="option"]')),
+          });
+          _syncAppSelect(select);
+          return;
+        }
+        staleWrap.remove();
+      }
       select.classList.remove('app-select-native');
       delete select.dataset.appSelectEnhanced;
     }
@@ -941,6 +1116,10 @@
     if (!root || typeof root.querySelectorAll !== 'function') return;
     _enhanceAppSelectTree(root);
   }
+  const syncAppSelect = (select) => _syncAppSelect(select);
+  const closeAppSelects = (exceptWrap = null) => _closeAppSelects(exceptWrap);
+  const portalDropdownMenu = (wrap, trigger, menu) => _portalAppSelectMenu(wrap, trigger, menu);
+  const unportalDropdownMenu = (menu) => _unportalAppSelectMenu(menu);
   function observeAppSelects() {
     if (
       typeof MutationObserver === 'undefined'
@@ -965,15 +1144,9 @@
       attributes: true,
       attributeFilter: ['class'],
     });
-    global.__darklabAppSelectObserver = observer;
   }
-  global.syncAppSelect = (select) => _syncAppSelect(select);
-  global.enhanceAppSelects = enhanceAppSelects;
-  global.closeAppSelects = (exceptWrap = null) => _closeAppSelects(exceptWrap);
   // Exposed for non-app-select dropdowns (e.g. history compare actions menu)
   // that need the same body-portal escape from ancestor stacking contexts.
-  global.portalDropdownMenu = (wrap, trigger, menu) => _portalAppSelectMenu(wrap, trigger, menu);
-  global.unportalDropdownMenu = (menu) => _unportalAppSelectMenu(menu);
   observeAppSelects();
   enhanceAppSelects();
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
@@ -986,4 +1159,227 @@
       if (event.key === 'Escape') _closeAppSelects();
     });
   }
+  const publicApi = {
+    applyMobileTextInputDefaults,
+    blurActiveElement,
+    blurVisibleComposerInput,
+    blurVisibleComposerInputIfMobile,
+    closeAppSelects,
+    enhanceAppSelects,
+    focusAnyComposerInput,
+    focusComposerInput,
+    focusElement,
+    focusVisibleComposerInput,
+    getActiveComposerInput,
+    getComposerInputs,
+    getComposerValue,
+    getMobileKeyboardOffsetBaseline,
+    getMobileViewportClosedHeight,
+    getVisibleComposerInput,
+    handleComposerInputChange,
+    hideAcDropdown,
+    hideFaqOverlay,
+    hideHistoryPanel,
+    hideModalOverlay,
+    hideMobileMenu,
+    hideOptionsOverlay,
+    hidePanelOverlay,
+    hideSearchBar,
+    hideShortcutsOverlay,
+    hideTabKillBtn,
+    hideThemeOverlay,
+    hideWorkflowsOverlay,
+    hideWorkspaceOverlay,
+    isAcDropdownOpen,
+    isActiveTabRunning,
+    isFaqOverlayOpen,
+    isHistoryPanelOpen,
+    isMobileMenuOpen,
+    isOptionsOverlayOpen,
+    isPanelOverlayOpen,
+    isSearchBarOpen,
+    isShortcutsOverlayOpen,
+    isThemeOverlayOpen,
+    isWorkflowsOverlayOpen,
+    isWorkspaceOverlayOpen,
+    markInteractionSurfaceReady,
+    normalizeComposerSmartPeriod,
+    portalDropdownMenu,
+    refocusComposerAfterAction,
+    setComposerValue,
+    setRunButtonDisabled,
+    setMobileKeyboardOpenState,
+    setMobileViewportClosedHeight,
+    setVisibilityState,
+    showAcDropdown,
+    showFaqOverlay,
+    showHistoryLoadOverlay,
+    hideHistoryLoadOverlay,
+    showHistoryPanel,
+    showHistoryRow,
+    showModalOverlay,
+    showMobileMenu,
+    showPanelOverlay,
+    showRunTimer,
+    showSearchBar,
+    showShortcutsOverlay,
+    showTabKillBtn,
+    showThemeOverlay,
+    showOptionsOverlay,
+    showWorkflowsOverlay,
+    showWorkspaceOverlay,
+    syncAppSelect,
+    syncComposerSelection,
+    syncFocusedComposerState,
+    syncMobileComposerKeyboardState,
+    syncModalOverlayState: _syncModalOverlayState,
+    syncRunButtonDisabled,
+    hideHistoryRow,
+    hideRunTimer,
+    isRunButtonDisabled,
+    togglePanelOverlay,
+    unportalDropdownMenu,
+  };
+  Object.assign(global, publicApi);
+  if (typeof window !== 'undefined' && window !== global) {
+    Object.assign(window, publicApi);
+  }
 })(globalThis);
+
+const applyMobileTextInputDefaults = globalThis.applyMobileTextInputDefaults;
+const blurActiveElement = globalThis.blurActiveElement;
+const blurVisibleComposerInput = globalThis.blurVisibleComposerInput;
+const blurVisibleComposerInputIfMobile = globalThis.blurVisibleComposerInputIfMobile;
+const closeAppSelects = globalThis.closeAppSelects;
+const enhanceAppSelects = globalThis.enhanceAppSelects;
+const focusAnyComposerInput = globalThis.focusAnyComposerInput;
+const focusComposerInput = globalThis.focusComposerInput;
+const focusElement = globalThis.focusElement;
+const focusVisibleComposerInput = globalThis.focusVisibleComposerInput;
+const getActiveComposerInput = globalThis.getActiveComposerInput;
+const getComposerInputs = globalThis.getComposerInputs;
+const getComposerValue = globalThis.getComposerValue;
+const getMobileKeyboardOffsetBaseline = globalThis.getMobileKeyboardOffsetBaseline;
+const getMobileViewportClosedHeight = globalThis.getMobileViewportClosedHeight;
+const getVisibleComposerInput = globalThis.getVisibleComposerInput;
+const handleComposerInputChange = globalThis.handleComposerInputChange;
+const hideAcDropdown = globalThis.hideAcDropdown;
+const hideFaqOverlay = globalThis.hideFaqOverlay;
+const hideModalOverlay = globalThis.hideModalOverlay;
+const hideHistoryPanel = globalThis.hideHistoryPanel;
+const hideOptionsOverlay = globalThis.hideOptionsOverlay;
+const hidePanelOverlay = globalThis.hidePanelOverlay;
+const hideSearchBar = globalThis.hideSearchBar;
+const hideShortcutsOverlay = globalThis.hideShortcutsOverlay;
+const hideTabKillBtn = globalThis.hideTabKillBtn;
+const hideThemeOverlay = globalThis.hideThemeOverlay;
+const hideWorkflowsOverlay = globalThis.hideWorkflowsOverlay;
+const hideWorkspaceOverlay = globalThis.hideWorkspaceOverlay;
+const isAcDropdownOpen = globalThis.isAcDropdownOpen;
+const isActiveTabRunning = globalThis.isActiveTabRunning;
+const isFaqOverlayOpen = globalThis.isFaqOverlayOpen;
+const isHistoryPanelOpen = globalThis.isHistoryPanelOpen;
+const isOptionsOverlayOpen = globalThis.isOptionsOverlayOpen;
+const isPanelOverlayOpen = globalThis.isPanelOverlayOpen;
+const isSearchBarOpen = globalThis.isSearchBarOpen;
+const isShortcutsOverlayOpen = globalThis.isShortcutsOverlayOpen;
+const isThemeOverlayOpen = globalThis.isThemeOverlayOpen;
+const isWorkflowsOverlayOpen = globalThis.isWorkflowsOverlayOpen;
+const isWorkspaceOverlayOpen = globalThis.isWorkspaceOverlayOpen;
+const showMobileMenu = globalThis.showMobileMenu;
+const hideMobileMenu = globalThis.hideMobileMenu;
+const isMobileMenuOpen = globalThis.isMobileMenuOpen;
+const markInteractionSurfaceReady = globalThis.markInteractionSurfaceReady;
+const portalDropdownMenu = globalThis.portalDropdownMenu;
+const refocusComposerAfterAction = globalThis.refocusComposerAfterAction;
+const setComposerValue = globalThis.setComposerValue;
+var exportedSetMobileKeyboardOpenState = globalThis.setMobileKeyboardOpenState;
+var exportedSetMobileViewportClosedHeight = globalThis.setMobileViewportClosedHeight;
+const setVisibilityState = globalThis.setVisibilityState;
+const showAcDropdown = globalThis.showAcDropdown;
+const showFaqOverlay = globalThis.showFaqOverlay;
+const showModalOverlay = globalThis.showModalOverlay;
+const showPanelOverlay = globalThis.showPanelOverlay;
+const showSearchBar = globalThis.showSearchBar;
+const showShortcutsOverlay = globalThis.showShortcutsOverlay;
+const showTabKillBtn = globalThis.showTabKillBtn;
+const showWorkflowsOverlay = globalThis.showWorkflowsOverlay;
+const showWorkspaceOverlay = globalThis.showWorkspaceOverlay;
+const syncAppSelect = globalThis.syncAppSelect;
+const syncComposerSelection = globalThis.syncComposerSelection;
+const syncFocusedComposerState = globalThis.syncFocusedComposerState;
+const syncMobileComposerKeyboardState = globalThis.syncMobileComposerKeyboardState;
+const syncModalOverlayState = globalThis.syncModalOverlayState;
+const syncRunButtonDisabled = globalThis.syncRunButtonDisabled;
+const togglePanelOverlay = globalThis.togglePanelOverlay;
+const unportalDropdownMenu = globalThis.unportalDropdownMenu;
+
+export {
+  applyMobileTextInputDefaults,
+  blurActiveElement,
+  blurVisibleComposerInput,
+  blurVisibleComposerInputIfMobile,
+  closeAppSelects,
+  enhanceAppSelects,
+  focusAnyComposerInput,
+  focusComposerInput,
+  focusElement,
+  focusVisibleComposerInput,
+  getActiveComposerInput,
+  getComposerInputs,
+  getComposerValue,
+  getMobileKeyboardOffsetBaseline,
+  getMobileViewportClosedHeight,
+  getVisibleComposerInput,
+  handleComposerInputChange,
+  hideAcDropdown,
+  hideFaqOverlay,
+  hideHistoryPanel,
+  hideModalOverlay,
+  hideMobileMenu,
+  hideOptionsOverlay,
+  hidePanelOverlay,
+  hideSearchBar,
+  hideShortcutsOverlay,
+  hideTabKillBtn,
+  hideThemeOverlay,
+  hideWorkflowsOverlay,
+  hideWorkspaceOverlay,
+  isAcDropdownOpen,
+  isActiveTabRunning,
+  isFaqOverlayOpen,
+  isHistoryPanelOpen,
+  isMobileMenuOpen,
+  isOptionsOverlayOpen,
+  isPanelOverlayOpen,
+  isSearchBarOpen,
+  isShortcutsOverlayOpen,
+  isThemeOverlayOpen,
+  isWorkflowsOverlayOpen,
+  isWorkspaceOverlayOpen,
+  markInteractionSurfaceReady,
+  portalDropdownMenu,
+  refocusComposerAfterAction,
+  setComposerValue,
+  exportedSetMobileKeyboardOpenState as setMobileKeyboardOpenState,
+  exportedSetMobileViewportClosedHeight as setMobileViewportClosedHeight,
+  setVisibilityState,
+  showAcDropdown,
+  showFaqOverlay,
+  showModalOverlay,
+  showMobileMenu,
+  showPanelOverlay,
+  showSearchBar,
+  showShortcutsOverlay,
+  showTabKillBtn,
+  showWorkflowsOverlay,
+  showWorkspaceOverlay,
+  syncAppSelect,
+  syncComposerSelection,
+  syncFocusedComposerState,
+  syncMobileComposerKeyboardState,
+  syncModalOverlayState,
+  syncRunButtonDisabled,
+  togglePanelOverlay,
+  unportalDropdownMenu,
+};

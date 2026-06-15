@@ -1,6 +1,8 @@
 // Project metadata editor controller.
 // Loaded before shell_chrome.js; shell chrome supplies save and refresh callbacks.
 
+let exportedDarklabProjectEntityEditor = null;
+
 (function projectEntityEditorModule(global) {
   'use strict';
 
@@ -261,7 +263,11 @@
     };
   }
 
-  global.DarklabProjectEntityEditor = {
+  const DarklabProjectEntityEditor = {
     createProjectEntityEditorController,
   };
+  exportedDarklabProjectEntityEditor = DarklabProjectEntityEditor;
 })(globalThis);
+
+export {
+  exportedDarklabProjectEntityEditor as DarklabProjectEntityEditor,};

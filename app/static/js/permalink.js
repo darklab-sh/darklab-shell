@@ -6,17 +6,28 @@
 // <script> block in the template before this module loads.
 // Shared helpers come from ExportHtmlUtils (export_html.js), copyTextToClipboard,
 // showToast (utils.js), and the lazy PDF loader loaded before this file.
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  showToast as importedShowToast,
+} from './core/utils.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
+
 (function () {
-  var exportHtmlUtils = window.ExportHtmlUtils
-    || (typeof ExportHtmlUtils !== 'undefined' ? ExportHtmlUtils : {});
+  var exportHtmlUtils = (typeof window !== 'undefined' && window.ExportHtmlUtils)
+    || {};
   var AnsiUpCtor = window.AnsiUp || (typeof AnsiUp !== 'undefined' ? AnsiUp : null);
-  var bindOutsideClickCloseFn = window.bindOutsideClickClose
-    || (typeof bindOutsideClickClose !== 'undefined' ? bindOutsideClickClose : null);
-  var copyTextToClipboardFn = window.copyTextToClipboard
-    || (typeof copyTextToClipboard !== 'undefined' ? copyTextToClipboard : null);
-  var downloadBlobAsAttachmentFn = window.downloadBlobAsAttachment
-    || (typeof downloadBlobAsAttachment !== 'undefined' ? downloadBlobAsAttachment : null);
-  var showToastFn = window.showToast || (typeof showToast !== 'undefined' ? showToast : null);
+  var bindOutsideClickCloseFn = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose)
+    || null;
+  var copyTextToClipboardFn = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard)
+    || null;
+  var downloadBlobAsAttachmentFn = (
+      typeof importedDownloadBlobAsAttachment !== 'undefined'
+      && importedDownloadBlobAsAttachment
+    )
+    || null;
+  var showToastFn = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || null;
   var pd = window.PermData || {};
   var transcriptModel = pd.transcript || {};
   var exportModel = pd.export || {};
@@ -269,8 +280,7 @@
   }
 
   async function savePdf() {
-    var existingPdfUtils = window.ExportPdfUtils
-      || (typeof ExportPdfUtils !== 'undefined' ? ExportPdfUtils : null);
+    var existingPdfUtils = (typeof importedExportPdfUtils !== 'undefined' && importedExportPdfUtils) || null;
     if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
       alert('PDF library not loaded');
       return;

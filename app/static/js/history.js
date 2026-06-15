@@ -1,7 +1,273 @@
 // ── Shared history drawer logic ──
+import {
+  histClearAllBtn as importedHistClearAllBtn,
+  histRow as importedHistRow,
+  historyActiveFilters as importedHistoryActiveFilters,
+  historyBulkToolbar as importedHistoryBulkToolbar,
+  historyClearFiltersBtn as importedHistoryClearFiltersBtn,
+  historyDateFilter as importedHistoryDateFilter,
+  historyEntityInput as importedHistoryEntityInput,
+  historyEntityTypeFilter as importedHistoryEntityTypeFilter,
+  historyExitFilter as importedHistoryExitFilter,
+  historyKindFilter as importedHistoryKindFilter,
+  historyList as importedHistoryList,
+  historyLoadOverlay as importedHistoryLoadOverlay,
+  historyMobileFiltersToggle as importedHistoryMobileFiltersToggle,
+  historyPagination as importedHistoryPagination,
+  historyPaginationControls as importedHistoryPaginationControls,
+  historyPaginationSummary as importedHistoryPaginationSummary,
+  historyPanel as importedHistoryPanel,
+  historyProjectFilter as importedHistoryProjectFilter,
+  historyRootDropdown as importedHistoryRootDropdown,
+  historyRootInput as importedHistoryRootInput,
+  historySearchInput as importedHistorySearchInput,
+  historySignalFilter as importedHistorySignalFilter,
+  historyStarredToggle as importedHistoryStarredToggle,
+  historyTypeFilter as importedHistoryTypeFilter,
+} from './core/dom.js';
+import { DarklabHistoryCore as importedHistoryCore } from './core/history_core.js';
+import {
+  emitUiEvent as importedEmitUiEvent,
+  getAppState as importedGetAppState,
+} from './core/state.js';
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  escapeHtml as importedEscapeHtml,
+  showToast as importedShowToast,
+} from './core/utils.js';
+import { apiFetch as importedApiFetch } from './session.js';
+import {
+  blurActiveElement as importedBlurActiveElement,
+  enhanceAppSelects as importedEnhanceAppSelects,
+  focusElement as importedFocusElement,
+  hideHistoryPanel as importedHideHistoryPanel,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  syncAppSelect as importedSyncAppSelect,
+} from './ui/ui_helpers.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import { showConfirm as importedShowConfirm } from './ui/ui_confirm.js';
+import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
+import {
+  appendLine as importedAppendLine,
+} from './output.js';
+import {
+  activateTab as importedActivateTab,
+} from './tabs.js';
+import { setHistoryPanelHandlers as importedSetHistoryPanelHandlers } from './features/history/history_panel_bridge.js';
+import {
+  _closeHistoryActionMenus as importedCloseHistoryActionMenus,
+  _closeHistoryRunActionMenus as importedCloseHistoryRunActionMenus,
+  _getStarred as importedGetStarred,
+  _positionHistoryActionMenu as importedPositionHistoryActionMenu,
+  _resetHistoryActionMenuPosition as importedResetHistoryActionMenuPosition,
+  _toggleStar as importedToggleStar,
+} from './features/history/history_actions.js';
+import {
+  copyHistoryRunPermalink as importedCopyHistoryRunPermalink,
+  copySnapshotLink as importedCopySnapshotLink,
+  openSnapshotLink as importedOpenSnapshotLink,
+} from './features/history/history_links.js';
+import {
+  _historyCanManageHistory as importedHistoryCanManageHistory,
+  _historyMutationError as importedHistoryMutationError,
+  _historyScopeDeniedMessage as importedHistoryScopeDeniedMessage,
+  _historyShowPermissionDenied as importedHistoryShowPermissionDenied,
+  _setHistoryLoadState as importedSetHistoryLoadState,
+  confirmHistAction as importedConfirmHistAction,
+} from './features/history/history_mutations.js';
+import {
+  _ensureHistoryProjectFilterOptions as importedEnsureHistoryProjectFilterOptions,
+  _historyAddRunToActiveProject as importedHistoryAddRunToActiveProject,
+  _historyAddRunToProject as importedHistoryAddRunToProject,
+  _historyLoadActiveProject as importedHistoryLoadActiveProject,
+  _historyLoadProjects as importedHistoryLoadProjects,
+  _historyOrderProjectsForPicker as importedHistoryOrderProjectsForPicker,
+  _historyProjectDisplayName as importedHistoryProjectDisplayName,
+  _historyProjectFromLink as importedHistoryProjectFromLink,
+  _historyProjectLabelForId as importedHistoryProjectLabelForId,
+  _historyProjectPickerContent as importedHistoryProjectPickerContent,
+  _historyProjectRunEntityOptionContent as importedHistoryProjectRunEntityOptionContent,
+  _historyRefreshProjectRunEntityOption as importedHistoryRefreshProjectRunEntityOption,
+  _historyRemoveRunFromProject as importedHistoryRemoveRunFromProject,
+  _syncHistoryProjectFilterOptions as importedSyncHistoryProjectFilterOptions,
+} from './features/history/history_project_actions.js';
+import {
+  _createHistoryEntry as importedCreateHistoryEntry,
+  _createSnapshotHistoryEntry as importedCreateSnapshotHistoryEntry,
+  _historyActionKeepsPanelOpen as importedHistoryActionKeepsPanelOpen,
+  _historyEditEntityMetadata as importedHistoryEditEntityMetadata,
+} from './features/history/history_rows.js';
+import {
+  _tabForHistoryRun as importedTabForHistoryRun,
+  restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab,
+} from './features/history/history_restore.js';
+import {
+  openHistoryCompareLauncher as importedOpenHistoryCompareLauncher,
+} from './features/run-comparison/history_compare_bridge.js';
+
 function _historyCore() {
-  return (typeof window !== 'undefined' && window.DarklabHistoryCore)
-    || (typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null);
+  return (typeof importedHistoryCore !== 'undefined' && importedHistoryCore)
+    || null;
+}
+
+const HISTORY_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyFn(name, imported = null) {
+  if (typeof imported === 'function') return imported;
+  const fn = HISTORY_GLOBAL && HISTORY_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _historyValue(name, imported = undefined) {
+  if (imported !== undefined) return imported;
+  if (HISTORY_GLOBAL && HISTORY_GLOBAL[name] !== undefined) return HISTORY_GLOBAL[name];
+  if (
+    typeof __darklabExtractGlobals !== 'undefined'
+    && __darklabExtractGlobals
+    && __darklabExtractGlobals[name] !== undefined
+  ) {
+    return __darklabExtractGlobals[name];
+  }
+  return undefined;
+}
+
+function _historyEl(name, imported = undefined) {
+  return _historyValue(name, imported) || null;
+}
+
+function _historyAppConfig() {
+  return _historyValue('APP_CONFIG') || {};
+}
+
+function _historyState() {
+  const state = _historyFn('getAppState', importedGetAppState)?.();
+  return state || _historyValue('APP_STATE') || {};
+}
+
+const _historyApiFetch = (...args) => _historyFn('apiFetch', importedApiFetch)?.(...args);
+const _historyShowToast = (...args) => _historyFn('showToast', importedShowToast)?.(...args);
+const _historyBindPressable = (...args) => _historyFn('bindPressable', importedBindPressable)?.(...args);
+const _historyShowConfirm = (...args) => _historyFn('showConfirm', importedShowConfirm)?.(...args);
+const _historyEmitUiEvent = (...args) => _historyFn('emitUiEvent', importedEmitUiEvent)?.(...args);
+const _historyEscapeHtml = (text) => _historyFn('escapeHtml', importedEscapeHtml)?.(text) ?? String(text ?? '');
+const _historyCopyTextToClipboard = (...args) => _historyFn('copyTextToClipboard', importedCopyTextToClipboard)?.(...args);
+const _historyDownloadBlobAsAttachment = (...args) => {
+  const globalDownloader = _historyFn('downloadBlobAsAttachment');
+  const downloader = globalDownloader || _historyFn('downloadBlobAsAttachment', importedDownloadBlobAsAttachment);
+  return downloader?.(...args);
+};
+const _historyEnhanceAppSelects = (...args) => _historyFn('enhanceAppSelects', importedEnhanceAppSelects)?.(...args);
+const _historySyncAppSelect = (...args) => _historyFn('syncAppSelect', importedSyncAppSelect)?.(...args);
+const _historyUseMobileTerminalViewportMode = () => !!_historyFn('useMobileTerminalViewportMode', importedUseMobileTerminalViewportMode)?.();
+
+var histClearAllBtn = _historyEl('histClearAllBtn', importedHistClearAllBtn);
+var histRow = _historyEl('histRow', importedHistRow);
+var historyActiveFilters = _historyEl('historyActiveFilters', importedHistoryActiveFilters);
+var historyBulkToolbar = _historyEl('historyBulkToolbar', importedHistoryBulkToolbar);
+var historyClearFiltersBtn = _historyEl('historyClearFiltersBtn', importedHistoryClearFiltersBtn);
+var historyDateFilter = _historyEl('historyDateFilter', importedHistoryDateFilter);
+var historyEntityInput = _historyEl('historyEntityInput', importedHistoryEntityInput);
+var historyEntityTypeFilter = _historyEl('historyEntityTypeFilter', importedHistoryEntityTypeFilter);
+var historyExitFilter = _historyEl('historyExitFilter', importedHistoryExitFilter);
+var historyKindFilter = _historyEl('historyKindFilter', importedHistoryKindFilter);
+var historyList = _historyEl('historyList', importedHistoryList);
+var historyLoadOverlay = _historyEl('historyLoadOverlay', importedHistoryLoadOverlay);
+var historyMobileFiltersToggle = _historyEl('historyMobileFiltersToggle', importedHistoryMobileFiltersToggle);
+var historyPagination = _historyEl('historyPagination', importedHistoryPagination);
+var historyPaginationControls = _historyEl('historyPaginationControls', importedHistoryPaginationControls);
+var historyPaginationSummary = _historyEl('historyPaginationSummary', importedHistoryPaginationSummary);
+var historyPanel = _historyEl('historyPanel', importedHistoryPanel);
+var historyProjectFilter = _historyEl('historyProjectFilter', importedHistoryProjectFilter);
+var historyRootDropdown = _historyEl('historyRootDropdown', importedHistoryRootDropdown);
+var historyRootInput = _historyEl('historyRootInput', importedHistoryRootInput);
+var historySearchInput = _historyEl('historySearchInput', importedHistorySearchInput);
+var historySignalFilter = _historyEl('historySignalFilter', importedHistorySignalFilter);
+var historyStarredToggle = _historyEl('historyStarredToggle', importedHistoryStarredToggle);
+var historyTypeFilter = _historyEl('historyTypeFilter', importedHistoryTypeFilter);
+var _historyApiFetchAdapter = (...args) => _historyApiFetch(...args);
+var _historyBindPressableAdapter = (...args) => _historyBindPressable(...args);
+var _historyCopyTextToClipboardAdapter = (...args) => _historyCopyTextToClipboard(...args);
+var _historyDownloadBlobAsAttachmentAdapter = (...args) => _historyDownloadBlobAsAttachment(...args);
+var _historyEmitUiEventAdapter = (...args) => _historyEmitUiEvent(...args);
+var _historyEnhanceAppSelectsAdapter = (...args) => _historyEnhanceAppSelects(...args);
+var _historyEscapeHtmlAdapter = (text) => _historyEscapeHtml(text);
+var _historyShowConfirmAdapter = (...args) => _historyShowConfirm(...args);
+var _historyShowToastAdapter = (...args) => _historyShowToast(...args);
+var _historySyncAppSelectAdapter = (...args) => _historySyncAppSelect(...args);
+var _historyUseMobileTerminalViewportModeAdapter = () => _historyUseMobileTerminalViewportMode();
+var _historyBlurActiveElementAdapter = (...args) => _historyFn('blurActiveElement', importedBlurActiveElement)?.(...args);
+var _historyFocusElementAdapter = (...args) => _historyFn('focusElement', importedFocusElement)?.(...args);
+var _historyHidePanelAdapter = (...args) => _historyFn('hideHistoryPanel', importedHideHistoryPanel)?.(...args);
+var _historyHideRowAdapter = (...args) => _historyFn('hideHistoryRow')?.(...args);
+var _historyRefocusComposerAdapter = (...args) => _historyFn('refocusComposerAfterAction', importedRefocusComposerAfterAction)?.(...args);
+var _historySetComposerValueAdapter = (...args) => _historyFn('setComposerValue', importedSetComposerValue)?.(...args);
+var _historyShowPanelAdapter = (...args) => _historyFn('showHistoryPanel')?.(...args);
+var _historyShowRowAdapter = (...args) => _historyFn('showHistoryRow')?.(...args);
+var _historyResetCmdNavAdapter = (...args) => _historyFn('resetCmdHistoryNav')?.(...args);
+var _historyTogglePanelSurfaceAdapter = (...args) => _historyFn('toggleHistoryPanelSurface')?.(...args);
+var _historyAppendLineAdapter = (...args) => _historyFn('appendLine', importedAppendLine)?.(...args);
+var _historyAppendCommandEchoAdapter = (...args) => _historyFn('appendCommandEcho')?.(...args);
+var _historyActivateTabAdapter = (...args) => _historyFn('activateTab', importedActivateTab)?.(...args);
+var _historyCloseActionMenusAdapter = (...args) => _historyFn('_closeHistoryActionMenus', importedCloseHistoryActionMenus)?.(...args);
+var _historyCloseCompareActionMenusAdapter = (...args) => _historyFn('_closeHistoryCompareActionMenus')?.(...args);
+var _historyCloseRunActionMenusAdapter = (...args) => _historyFn('_closeHistoryRunActionMenus', importedCloseHistoryRunActionMenus)?.(...args);
+var _historyCreateEntryAdapter = (...args) => _historyFn('_createHistoryEntry', importedCreateHistoryEntry)?.(...args);
+var _historyCreateSnapshotEntryAdapter = (...args) => _historyFn('_createSnapshotHistoryEntry', importedCreateSnapshotHistoryEntry)?.(...args);
+var _historyEnsureProjectFilterOptionsAdapter = (...args) => importedEnsureHistoryProjectFilterOptions?.(...args);
+var _historyGetStarredAdapter = (...args) => _historyFn('_getStarred', importedGetStarred)?.(...args);
+var _historyActionKeepsPanelOpenAdapter = (...args) => _historyFn('_historyActionKeepsPanelOpen', importedHistoryActionKeepsPanelOpen)?.(...args);
+var _historyEditEntityMetadataAdapter = (...args) => _historyFn('_historyEditEntityMetadata', importedHistoryEditEntityMetadata)?.(...args);
+var _historyProjectFromLinkAdapter = (...args) => importedHistoryProjectFromLink?.(...args);
+var _historyProjectDisplayNameAdapter = (...args) => importedHistoryProjectDisplayName?.(...args);
+var _historyProjectLabelForIdAdapter = (...args) => importedHistoryProjectLabelForId?.(...args);
+var _historyLoadActiveProjectAdapter = (...args) => importedHistoryLoadActiveProject?.(...args);
+var _historyLoadProjectsAdapter = (...args) => importedHistoryLoadProjects?.(...args);
+var _historyOrderProjectsForPickerAdapter = (...args) => importedHistoryOrderProjectsForPicker?.(...args);
+var _historyProjectPickerContentAdapter = (...args) => importedHistoryProjectPickerContent?.(...args);
+var _historyProjectRunEntityOptionContentAdapter = (...args) => importedHistoryProjectRunEntityOptionContent?.(...args);
+var _historyRefreshProjectRunEntityOptionAdapter = (...args) => importedHistoryRefreshProjectRunEntityOption?.(...args);
+var _historyAddRunToActiveProjectAdapter = (...args) => importedHistoryAddRunToActiveProject?.(...args);
+var _historyAddRunToProjectAdapter = (...args) => importedHistoryAddRunToProject?.(...args);
+var _historyRemoveRunFromProjectAdapter = (...args) => importedHistoryRemoveRunFromProject?.(...args);
+var _historyRestoreRunIntoTabAdapter = (...args) => importedRestoreHistoryRunIntoTab?.(...args);
+var _historyPositionActionMenuAdapter = (...args) => _historyFn('_positionHistoryActionMenu', importedPositionHistoryActionMenu)?.(...args);
+var _historyResetActionMenuPositionAdapter = (...args) => _historyFn('_resetHistoryActionMenuPosition', importedResetHistoryActionMenuPosition)?.(...args);
+var _historyTabForRunAdapter = (...args) => _historyFn('_tabForHistoryRun', importedTabForHistoryRun)?.(...args);
+var _historyToggleStarAdapter = (...args) => _historyFn('_toggleStar', importedToggleStar)?.(...args);
+var _historyCopyRunPermalinkAdapter = (...args) => _historyFn('copyHistoryRunPermalink', importedCopyHistoryRunPermalink)?.(...args);
+var _historyCopySnapshotLinkAdapter = (...args) => _historyFn('copySnapshotLink', importedCopySnapshotLink)?.(...args);
+var _historyOpenSnapshotLinkAdapter = (...args) => _historyFn('openSnapshotLink', importedOpenSnapshotLink)?.(...args);
+var _historyGetActiveProjectContextAdapter = (...args) => _historyFn('getActiveProjectContext')?.(...args);
+var _historyOpenAtlasAdapter = (...args) => _historyFn('openAtlas', importedOpenAtlas)?.(...args);
+var _historyOpenCompareLauncherAdapter = (...args) => _historyFn('openHistoryCompareLauncher', importedOpenHistoryCompareLauncher)?.(...args);
+var _historyOpenRunDetailsAdapter = (...args) => _historyFn('openHistoryRunDetails')?.(...args);
+var _historyOpenSchedulesModalAdapter = (...args) => _historyFn('openSchedulesModal')?.(...args);
+var _historyOpenWatchersModalAdapter = (...args) => _historyFn('openWatchersModal')?.(...args);
+var _historyRefreshProjectWorkspaceAdapter = (...args) => _historyFn('refreshProjectWorkspace')?.(...args);
+var _historyCanManageHistoryAdapter = (...args) => _historyFn('_historyCanManageHistory', importedHistoryCanManageHistory)?.(...args);
+var _historyMutationErrorAdapter = (...args) => _historyFn('_historyMutationError', importedHistoryMutationError)?.(...args);
+var _historyScopeDeniedMessageAdapter = (...args) => _historyFn('_historyScopeDeniedMessage', importedHistoryScopeDeniedMessage)?.(...args);
+var _historyShowPermissionDeniedAdapter = (...args) => _historyFn('_historyShowPermissionDenied', importedHistoryShowPermissionDenied)?.(...args);
+var _historySetLoadStateAdapter = (...args) => _historyFn('_setHistoryLoadState', importedSetHistoryLoadState)?.(...args);
+var _historyConfirmActionAdapter = (...args) => _historyFn('confirmHistAction', importedConfirmHistAction)?.(...args);
+
+function _historyCmdHistory() {
+  const state = _historyState();
+  if (!Array.isArray(state.cmdHistory)) state.cmdHistory = [];
+  return state.cmdHistory;
+}
+
+function _historyRecentPreviewHistory() {
+  const state = _historyState();
+  if (!Array.isArray(state.recentPreviewHistory)) state.recentPreviewHistory = [];
+  return state.recentPreviewHistory;
+}
+
+function _setHistoryCmdHistory(commands) {
+  _historyState().cmdHistory = Array.isArray(commands) ? commands : [];
 }
 
 // History drawer filters are deliberately simple in the first pass:
@@ -25,6 +291,28 @@ let _historyMobileAdvancedOpen = false;
 let _historyProjectOptions = [];
 let _historyProjectOptionsLoaded = false;
 let _historyProjectOptionsLoading = null;
+
+function getHistoryProjectOptionsState() {
+  return {
+    options: _historyProjectOptions,
+    loaded: _historyProjectOptionsLoaded,
+    loading: _historyProjectOptionsLoading,
+  };
+}
+
+function setHistoryProjectOptionsState(updates = {}) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'options')) {
+    _historyProjectOptions = Array.isArray(updates.options) ? updates.options : [];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'loaded')) {
+    _historyProjectOptionsLoaded = updates.loaded === true;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'loading')) {
+    _historyProjectOptionsLoading = updates.loading || null;
+  }
+  return getHistoryProjectOptionsState();
+}
+
 let _historySelection = {
   selectMode: false,
   selected: new Map(),
@@ -39,8 +327,8 @@ let _historyRootSuppressInputOnce = false;
 let _historyRootInputFocused = false;
 let _historyPaging = {
   page: 1,
-  pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
-    ? Math.max(1, Number(APP_CONFIG.history_panel_limit) || 50)
+  pageSize: (_historyAppConfig() && _historyAppConfig().history_panel_limit)
+    ? Math.max(1, Number(_historyAppConfig().history_panel_limit) || 50)
     : 50,
   totalCount: 0,
   pageCount: 0,
@@ -144,14 +432,14 @@ function _publishHistoryState() {
 _publishHistoryState();
 
 function _historyCompareCoreCall(name, ...args) {
-  const _historyCompareCore = typeof DarklabHistoryCompareCore !== 'undefined' ? DarklabHistoryCompareCore : null;
+  const _historyCompareCore = _historyValue('DarklabHistoryCompareCore') || null;
   const helper = _historyCompareCore && _historyCompareCore[name];
   if (typeof helper !== 'function') throw new Error(`DarklabHistoryCompareCore.${name} is unavailable`);
   return helper(...args);
 }
 
 function _closeHistoryCompareActionMenusIfLoaded() {
-  if (typeof _closeHistoryCompareActionMenus === 'function') _closeHistoryCompareActionMenus();
+  if (typeof _historyCloseCompareActionMenusAdapter === 'function') _historyCloseCompareActionMenusAdapter();
 }
 
 function _compareFormatDate(value) {
@@ -282,7 +570,7 @@ function _syncHistoryFilterControls() {
   }
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
   if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
-  if (typeof window._syncHistoryProjectFilterOptions === 'function') window._syncHistoryProjectFilterOptions();
+  if (typeof importedSyncHistoryProjectFilterOptions === 'function') importedSyncHistoryProjectFilterOptions();
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
   const runOnlyEnabled = _historyFilters.type !== 'snapshots';
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
@@ -294,14 +582,14 @@ function _syncHistoryFilterControls() {
   }
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.disabled = !runOnlyEnabled;
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.disabled = !runOnlyEnabled;
-  if (typeof syncAppSelect === 'function') {
-    if (typeof historyTypeFilter !== 'undefined') syncAppSelect(historyTypeFilter);
-    if (typeof historySignalFilter !== 'undefined') syncAppSelect(historySignalFilter);
-    if (typeof historyKindFilter !== 'undefined') syncAppSelect(historyKindFilter);
-    if (typeof historyEntityTypeFilter !== 'undefined') syncAppSelect(historyEntityTypeFilter);
-    if (typeof historyExitFilter !== 'undefined') syncAppSelect(historyExitFilter);
-    if (typeof historyDateFilter !== 'undefined') syncAppSelect(historyDateFilter);
-    if (typeof historyProjectFilter !== 'undefined') syncAppSelect(historyProjectFilter);
+  if (typeof _historySyncAppSelectAdapter === 'function') {
+    if (typeof historyTypeFilter !== 'undefined') _historySyncAppSelectAdapter(historyTypeFilter);
+    if (typeof historySignalFilter !== 'undefined') _historySyncAppSelectAdapter(historySignalFilter);
+    if (typeof historyKindFilter !== 'undefined') _historySyncAppSelectAdapter(historyKindFilter);
+    if (typeof historyEntityTypeFilter !== 'undefined') _historySyncAppSelectAdapter(historyEntityTypeFilter);
+    if (typeof historyExitFilter !== 'undefined') _historySyncAppSelectAdapter(historyExitFilter);
+    if (typeof historyDateFilter !== 'undefined') _historySyncAppSelectAdapter(historyDateFilter);
+    if (typeof historyProjectFilter !== 'undefined') _historySyncAppSelectAdapter(historyProjectFilter);
   }
   if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
     histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
@@ -337,7 +625,7 @@ function _renderHistoryRootSuggestions(runs) {
   const currentQuery = typeof historyRootInput !== 'undefined' && historyRootInput
     ? _normalizeHistoryFilterValue(historyRootInput.value)
     : _historyFilters.commandRoot;
-  if (_historyRootInputFocused && currentQuery) {
+  if (currentQuery) {
     // The server-side command_root filter is exact-root oriented. While the
     // user is typing a partial root, a refresh can legitimately return no
     // matching rows; do not let that transient response erase the suggestion
@@ -350,12 +638,20 @@ function _renderHistoryRootSuggestions(runs) {
   _historyRefreshRootDropdown();
 }
 
+function _historyProjectLabel(projectId) {
+  const normalized = _normalizeHistoryFilterValue(projectId);
+  if (!normalized || normalized === 'all') return '';
+  const project = _historyProjectOptions.find(item => String(item && item.id || '') === normalized);
+  const localLabel = project && String(project.name || project.slug || project.id || '').trim();
+  return localLabel || _historyProjectLabelForIdAdapter(normalized) || normalized;
+}
+
 function _appendHistoryCommandEcho(tabId, command) {
-  if (typeof appendCommandEcho === 'function') {
-    appendCommandEcho(command, tabId);
+  if (typeof _historyAppendCommandEchoAdapter === 'function') {
+    _historyAppendCommandEchoAdapter(command, tabId);
     return;
   }
-  appendLine(command, 'prompt-echo', tabId);
+  _historyAppendLineAdapter(command, 'prompt-echo', tabId);
 }
 
 function _historyOutputLineMetadata(entry) {
@@ -376,11 +672,11 @@ function _appendHistoryOutputLine(entry, tabId) {
     const text = String(entry.text || '');
     const cls = String(entry.cls || '');
     const metadata = _historyOutputLineMetadata(entry);
-    if (metadata) appendLine(text, cls, tabId, metadata);
-    else appendLine(text, cls, tabId);
+    if (metadata) _historyAppendLineAdapter(text, cls, tabId, metadata);
+    else _historyAppendLineAdapter(text, cls, tabId);
     return;
   }
-  appendLine(String(entry || ''), '', tabId);
+  _historyAppendLineAdapter(String(entry || ''), '', tabId);
 }
 
 function _hideHistoryRootDropdown() {
@@ -401,7 +697,7 @@ function _acceptHistoryRootSuggestion(root) {
   _hideHistoryRootDropdown();
   _setHistoryFilter('commandRoot', root);
   if (typeof historyRootInput !== 'undefined' && historyRootInput) {
-    setTimeout(() => focusElement(historyRootInput, { preventScroll: true }), 0);
+    setTimeout(() => _historyFocusElementAdapter(historyRootInput, { preventScroll: true }), 0);
   }
 }
 
@@ -417,7 +713,7 @@ function _renderHistoryRootDropdown(items, query) {
     _hideHistoryRootDropdown();
     return;
   }
-  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const mobileMode = typeof _historyUseMobileTerminalViewportModeAdapter === 'function' && _historyUseMobileTerminalViewportModeAdapter();
   historyRootDropdown.classList.toggle('ac-mobile', mobileMode);
   items.forEach((root, index) => {
     const item = document.createElement('div');
@@ -425,9 +721,9 @@ function _renderHistoryRootDropdown(items, query) {
       + (index === _historyRootIndex ? ' ac-active dropdown-item-active' : '');
     const matchIndex = normalizedQuery ? root.toLowerCase().indexOf(normalizedQuery) : -1;
     if (matchIndex >= 0 && normalizedQuery) {
-      item.innerHTML = escapeHtml(root.slice(0, matchIndex))
-        + '<span class="ac-match">' + escapeHtml(root.slice(matchIndex, matchIndex + normalizedQuery.length)) + '</span>'
-        + escapeHtml(root.slice(matchIndex + normalizedQuery.length));
+      item.innerHTML = _historyEscapeHtmlAdapter(root.slice(0, matchIndex))
+        + '<span class="ac-match">' + _historyEscapeHtmlAdapter(root.slice(matchIndex, matchIndex + normalizedQuery.length)) + '</span>'
+        + _historyEscapeHtmlAdapter(root.slice(matchIndex + normalizedQuery.length));
     } else {
       item.textContent = root;
     }
@@ -454,9 +750,7 @@ function _historyRefreshRootDropdown() {
 }
 
 function _historyActiveFilterItems() {
-  const projectLabel = typeof window._historyProjectLabelForId === 'function'
-    ? window._historyProjectLabelForId(_historyFilters.projectId)
-    : '';
+  const projectLabel = _historyProjectLabel(_historyFilters.projectId);
   return _historyCore().activeFilterItems({
     ..._historyFilters,
     projectLabel,
@@ -592,7 +886,7 @@ function _historyResetSelectionOnClose() {
   _historySelection.selected.clear();
   _historySelection.bulkInFlight = false;
   _historySelection.visibleItems = [];
-  _closeHistoryActionMenus();
+  _historyCloseActionMenusAdapter();
   _closeHistoryBulkActionMenu();
   _renderHistoryBulkToolbar();
 }
@@ -654,8 +948,8 @@ function _historyBulkToast(message, counts = {}) {
   const hasPartial = Number(counts.rejected || 0) > 0
     || Number(counts.not_found || 0) > 0
     || Number(counts.not_linked || 0) > 0;
-  if (hasPartial) showToast(message, 'success', { label: 'dismiss', onClick: () => {} });
-  else showToast(message);
+  if (hasPartial) _historyShowToastAdapter(message, 'success', { label: 'dismiss', onClick: () => {} });
+  else _historyShowToastAdapter(message);
 }
 
 function _historyBulkReasonSummary(results = []) {
@@ -717,7 +1011,7 @@ async function _historyRefreshAfterBulk() {
   try {
     await refreshHistoryPanel();
   } catch (_) {
-    showToast('Bulk action finished, but history could not refresh. Refresh to see the latest state.', 'error');
+    _historyShowToastAdapter('Bulk action finished, but history could not refresh. Refresh to see the latest state.', 'error');
   }
 }
 
@@ -736,7 +1030,7 @@ function _historyProjectsForSelectedLinks() {
     if (!runId) return;
     const links = Array.isArray(run.project_links) ? run.project_links : [];
     links.forEach((link) => {
-      const project = typeof _historyProjectFromLink === 'function' ? _historyProjectFromLink(link) : null;
+      const project = typeof _historyProjectFromLinkAdapter === 'function' ? _historyProjectFromLinkAdapter(link) : null;
       if (!project || !project.id) return;
       const projectId = String(project.id);
       if (!projectsById.has(projectId)) projectsById.set(projectId, { project, runIds: new Set() });
@@ -767,7 +1061,7 @@ async function _historyBulkPostProject(project, action, options = {}) {
   if (!project || !project.id || !runIds.length) return;
   _historySetBulkBusy(true);
   try {
-    const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+    const resp = await _historyApiFetchAdapter(`/projects/${encodeURIComponent(project.id)}/links`, {
       method: action === 'remove' ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -780,7 +1074,7 @@ async function _historyBulkPostProject(project, action, options = {}) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const counts = _historyBulkCountsFromResponse(data);
-    const projectName = window._historyProjectDisplayName(project) || 'project';
+    const projectName = _historyProjectDisplayNameAdapter(project) || 'project';
     _historySelection.selected.clear();
     const reasonSummary = _historyBulkReasonSummary(data.results);
     const entityAdded = Number(data && data.linked_entities && data.linked_entities.added || 0);
@@ -789,12 +1083,12 @@ async function _historyBulkPostProject(project, action, options = {}) {
       : '';
     const message = [_historyBulkResultText(action, projectName, counts), entitySummary, reasonSummary].filter(Boolean).join(' - ');
     _historyBulkToast(message, counts);
-    if (typeof refreshProjectWorkspace === 'function') {
-      try { await refreshProjectWorkspace(); } catch (_) {}
+    if (typeof _historyRefreshProjectWorkspaceAdapter === 'function') {
+      try { await _historyRefreshProjectWorkspaceAdapter(); } catch (_) {}
     }
     await _historyRefreshAfterBulk();
   } catch (_) {
-    showToast(action === 'remove' ? 'Failed to remove selected runs from project' : 'Failed to add selected runs to project', 'error');
+    _historyShowToastAdapter(action === 'remove' ? 'Failed to remove selected runs from project' : 'Failed to add selected runs to project', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
@@ -803,12 +1097,12 @@ async function _historyBulkPostProject(project, action, options = {}) {
 async function _historyBulkRemoveFromAllProjects() {
   const projectGroups = _historyProjectsForSelectedLinks();
   if (!projectGroups.length) {
-    showToast('Selected runs are not linked to any project', 'error');
+    _historyShowToastAdapter('Selected runs are not linked to any project', 'error');
     return;
   }
   const selectedCount = _historySelectedRunIds().length;
   const linkCount = projectGroups.reduce((total, item) => total + item.runIds.length, 0);
-  const choice = await showConfirm({
+  const choice = await _historyShowConfirmAdapter({
     body: {
       text: `Remove ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} from all linked projects?`,
       note: `This removes ${linkCount} project ${linkCount === 1 ? 'link' : 'links'} and leaves the run history intact.`,
@@ -824,7 +1118,7 @@ async function _historyBulkRemoveFromAllProjects() {
   _historySetBulkBusy(true);
   try {
     const responses = await Promise.all(projectGroups.map(async ({ project, runIds }) => {
-      const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+      const resp = await _historyApiFetchAdapter(`/projects/${encodeURIComponent(project.id)}/links`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entity_type: 'run', entity_ids: runIds, source: 'manual' }),
@@ -844,28 +1138,28 @@ async function _historyBulkRemoveFromAllProjects() {
     if (rejected) pieces.push(`${rejected} skipped`);
     const message = [pieces.join(' - '), reasonSummary].filter(Boolean).join(' - ');
     _historyBulkToast(message, counts);
-    if (typeof refreshProjectWorkspace === 'function') {
-      try { await refreshProjectWorkspace(); } catch (_) {}
+    if (typeof _historyRefreshProjectWorkspaceAdapter === 'function') {
+      try { await _historyRefreshProjectWorkspaceAdapter(); } catch (_) {}
     }
     await _historyRefreshAfterBulk();
   } catch (_) {
-    showToast('Failed to remove selected runs from projects', 'error');
+    _historyShowToastAdapter('Failed to remove selected runs from projects', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
 }
 
 async function _historyBulkAddToActiveProject() {
-  const project = await window._historyLoadActiveProject();
+  const project = await _historyLoadActiveProjectAdapter();
   if (!project || !project.id) {
-    showToast('No active project selected', 'error');
+    _historyShowToastAdapter('No active project selected', 'error');
     return;
   }
   const runIds = _historySelectedRunIds();
-  const entityOption = window._historyProjectRunEntityOptionContent();
-  await window._historyRefreshProjectRunEntityOption(entityOption, project, runIds);
-  const choice = await showConfirm({
-    body: `Add ${runIds.length} selected ${runIds.length === 1 ? 'run' : 'runs'} to ${window._historyProjectDisplayName(project) || 'the active project'}?`,
+  const entityOption = _historyProjectRunEntityOptionContentAdapter();
+  await _historyRefreshProjectRunEntityOptionAdapter(entityOption, project, runIds);
+  const choice = await _historyShowConfirmAdapter({
+    body: `Add ${runIds.length} selected ${runIds.length === 1 ? 'run' : 'runs'} to ${_historyProjectDisplayNameAdapter(project) || 'the active project'}?`,
     content: entityOption.wrap.classList.contains('u-hidden') ? null : entityOption.wrap,
     tone: null,
     actions: [
@@ -885,25 +1179,25 @@ async function _historyBulkChooseProject(action) {
   let projects;
   try {
     const [loadedProjects, activeProject] = await Promise.all([
-      window._historyLoadProjects(),
-      window._historyLoadActiveProject().catch(() => null),
+      _historyLoadProjectsAdapter(),
+      _historyLoadActiveProjectAdapter().catch(() => null),
     ]);
-    projects = window._historyOrderProjectsForPicker(loadedProjects, activeProject);
+    projects = _historyOrderProjectsForPickerAdapter(loadedProjects, activeProject);
   } catch (_) {
-    showToast('Failed to load projects', 'error');
+    _historyShowToastAdapter('Failed to load projects', 'error');
     return;
   }
   if (!projects.length) {
-    showToast('No projects available', 'error');
+    _historyShowToastAdapter('No projects available', 'error');
     return;
   }
-  const { wrap, select } = window._historyProjectPickerContent(projects);
-  const entityOption = window._historyProjectRunEntityOptionContent();
+  const { wrap, select } = _historyProjectPickerContentAdapter(projects);
+  const entityOption = _historyProjectRunEntityOptionContentAdapter();
   wrap.appendChild(entityOption.wrap);
   const runIds = _historySelectedRunIds();
   const updateEntityOption = () => {
     const selectedProject = projects.find(item => String(item.id || '') === select.value);
-    window._historyRefreshProjectRunEntityOption(entityOption, selectedProject, runIds);
+    _historyRefreshProjectRunEntityOptionAdapter(entityOption, selectedProject, runIds);
   };
   select.addEventListener('change', updateEntityOption);
   updateEntityOption();
@@ -911,7 +1205,7 @@ async function _historyBulkChooseProject(action) {
   if (help) {
     help.textContent = 'Choose a project to link selected runs.';
   }
-  const choicePromise = showConfirm({
+  const choicePromise = _historyShowConfirmAdapter({
     body: `Add ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} to project`,
     content: wrap,
     tone: null,
@@ -922,9 +1216,9 @@ async function _historyBulkChooseProject(action) {
     ],
     refocusOnResolve: false,
   });
-  if (typeof enhanceAppSelects === 'function') {
-    enhanceAppSelects(wrap);
-    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+  if (typeof _historyEnhanceAppSelectsAdapter === 'function') {
+    _historyEnhanceAppSelectsAdapter(wrap);
+    if (typeof _historyUseMobileTerminalViewportModeAdapter === 'function' && _historyUseMobileTerminalViewportModeAdapter()) {
       wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
     }
   }
@@ -960,14 +1254,14 @@ function _historyMergeBulkDeleteResponses(responses) {
 }
 
 async function _historyPostBulkDelete(url, payload) {
-  const resp = await apiFetch(url, {
+  const resp = await _historyApiFetchAdapter(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   if (!resp.ok) {
-    if (typeof _historyMutationError === 'function') {
-      throw await _historyMutationError(resp, 'Failed to delete selected history items');
+    if (typeof _historyMutationErrorAdapter === 'function') {
+      throw await _historyMutationErrorAdapter(resp, 'Failed to delete selected history items');
     }
     throw new Error(`HTTP ${resp.status}`);
   }
@@ -993,17 +1287,15 @@ async function _historyBulkExportSelectedItems(format) {
   const runIds = _historySelectedRunIds();
   const snapshotIds = _historySelectedSnapshotIds();
   if (!runIds.length && !snapshotIds.length) return;
-  const downloader = typeof window !== 'undefined' && typeof window.downloadBlobAsAttachment === 'function'
-    ? window.downloadBlobAsAttachment
-    : downloadBlobAsAttachment;
+  const downloader = _historyDownloadBlobAsAttachmentAdapter;
   if (typeof downloader !== 'function') {
-    showToast('Downloads are not available', 'error');
+    _historyShowToastAdapter('Downloads are not available', 'error');
     return;
   }
   const exportFormat = format === 'jsonl' ? 'jsonl' : 'txt';
   _historySetBulkBusy(true);
   try {
-    const resp = await apiFetch('/history/bulk-export', {
+    const resp = await _historyApiFetchAdapter('/history/bulk-export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1017,9 +1309,9 @@ async function _historyBulkExportSelectedItems(format) {
     const filename = _historyFilenameFromDisposition(resp.headers?.get?.('content-disposition'))
       || _historyBulkExportFilename(exportFormat);
     downloader(blob, filename, { container: historyPanel });
-    showToast(`History ${exportFormat.toUpperCase()} export started`);
+    _historyShowToastAdapter(`History ${exportFormat.toUpperCase()} export started`);
   } catch (_) {
-    showToast('Failed to export selected history items', 'error');
+    _historyShowToastAdapter('Failed to export selected history items', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
@@ -1029,12 +1321,12 @@ async function _historyBulkDeleteSelectedItems() {
   const runIds = _historySelectedRunIds();
   const snapshotIds = _historySelectedSnapshotIds();
   if (!runIds.length && !snapshotIds.length) return;
-  if (typeof _historyCanManageHistory === 'function' && !_historyCanManageHistory()) {
-    if (typeof _historyShowPermissionDenied === 'function') _historyShowPermissionDenied('delete team history');
+  if (typeof _historyCanManageHistoryAdapter === 'function' && !_historyCanManageHistoryAdapter()) {
+    if (typeof _historyShowPermissionDeniedAdapter === 'function') _historyShowPermissionDeniedAdapter('delete team history');
     return;
   }
   const label = _historyBulkDeleteLabel(runIds.length, snapshotIds.length);
-  const choice = await showConfirm({
+  const choice = await _historyShowConfirmAdapter({
     body: {
       text: `Delete ${label}?`,
       note: runIds.length && snapshotIds.length
@@ -1068,7 +1360,7 @@ async function _historyBulkDeleteSelectedItems() {
     _historyBulkToast(message, counts);
     await _historyRefreshAfterBulk();
   } catch (err) {
-    showToast(err.userFacing ? err.message : 'Failed to delete selected history items', 'error');
+    _historyShowToastAdapter(err.userFacing ? err.message : 'Failed to delete selected history items', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
@@ -1086,7 +1378,7 @@ function _historyBuildBulkActionMenu(disabled) {
   trigger.disabled = disabled;
   const menu = document.createElement('div');
   menu.className = 'history-bulk-actions-menu save-menu dropdown-surface';
-  const activeProject = typeof getActiveProjectContext === 'function' ? getActiveProjectContext() : null;
+  const activeProject = typeof _historyGetActiveProjectContextAdapter === 'function' ? _historyGetActiveProjectContextAdapter() : null;
   const selectedTypes = new Set(Array.from(_historySelection.selected.values()).map(_historyItemType));
   const hasOnlyRuns = selectedTypes.size === 1 && selectedTypes.has('run');
   const selectedRuns = _historySelectedRuns();
@@ -1108,8 +1400,8 @@ function _historyBuildBulkActionMenu(disabled) {
     const projectActionDisabled = !['bulk-delete', 'bulk-export-txt', 'bulk-export-jsonl'].includes(action)
       && !hasOnlyProjectLinkableRuns;
     const historyDeleteDisabled = action === 'bulk-delete'
-      && typeof _historyCanManageHistory === 'function'
-      && !_historyCanManageHistory();
+      && typeof _historyCanManageHistoryAdapter === 'function'
+      && !_historyCanManageHistoryAdapter();
     item.disabled = disabled
       || projectActionDisabled
       || historyDeleteDisabled
@@ -1117,8 +1409,8 @@ function _historyBuildBulkActionMenu(disabled) {
     if (action === 'bulk-add-active-project' && !(activeProject && activeProject.id)) {
       item.title = 'Select an active project first.';
     } else if (historyDeleteDisabled) {
-      item.title = typeof _historyScopeDeniedMessage === 'function'
-        ? _historyScopeDeniedMessage('delete team history')
+      item.title = typeof _historyScopeDeniedMessageAdapter === 'function'
+        ? _historyScopeDeniedMessageAdapter('delete team history')
         : 'View-only team members cannot delete team history.';
     } else if (projectActionDisabled) {
       item.title = 'Project actions apply to selected external runs.';
@@ -1193,7 +1485,7 @@ function _renderHistoryBulkToolbar() {
   const actions = _historyBuildBulkActionMenu(selectedCount === 0 || _historySelection.bulkInFlight);
   actionRow.appendChild(actions);
   historyBulkToolbar.appendChild(actionRow);
-  bindPressable(actions.querySelector('[data-action="history-bulk-menu"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="history-bulk-menu"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1203,7 +1495,7 @@ function _renderHistoryBulkToolbar() {
       actions.querySelector('[data-action="history-bulk-menu"]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
     },
   });
-  bindPressable(actions.querySelector('[data-action="bulk-add-active-project"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="bulk-add-active-project"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1212,7 +1504,7 @@ function _renderHistoryBulkToolbar() {
       _historyBulkAddToActiveProject();
     },
   });
-  bindPressable(actions.querySelector('[data-action="bulk-add-project"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="bulk-add-project"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1221,7 +1513,7 @@ function _renderHistoryBulkToolbar() {
       _historyBulkChooseProject('add');
     },
   });
-  bindPressable(actions.querySelector('[data-action="bulk-remove-project"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="bulk-remove-project"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1230,7 +1522,7 @@ function _renderHistoryBulkToolbar() {
       _historyBulkRemoveFromAllProjects();
     },
   });
-  bindPressable(actions.querySelector('[data-action="bulk-export-txt"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="bulk-export-txt"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1239,7 +1531,7 @@ function _renderHistoryBulkToolbar() {
       _historyBulkExportSelectedItems('txt');
     },
   });
-  bindPressable(actions.querySelector('[data-action="bulk-export-jsonl"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="bulk-export-jsonl"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1248,7 +1540,7 @@ function _renderHistoryBulkToolbar() {
       _historyBulkExportSelectedItems('jsonl');
     },
   });
-  bindPressable(actions.querySelector('[data-action="bulk-delete"]'), {
+  _historyBindPressableAdapter(actions.querySelector('[data-action="bulk-delete"]'), {
     refocusComposer: false,
     onActivate: (event) => {
       event.preventDefault();
@@ -1352,10 +1644,10 @@ function openHistoryWithFilters(filters = {}) {
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
   _hideHistoryRootDropdown();
-  if (typeof toggleHistoryPanelSurface === 'function') {
-    toggleHistoryPanelSurface(true);
+  if (typeof _historyTogglePanelSurfaceAdapter === 'function') {
+    _historyTogglePanelSurfaceAdapter(true);
   } else {
-    if (typeof showHistoryPanel === 'function') showHistoryPanel();
+    if (typeof _historyShowPanelAdapter === 'function') _historyShowPanelAdapter();
     refreshHistoryPanel();
   }
   return true;
@@ -1404,7 +1696,7 @@ function _makeOverflowChip(_count) {
   chip.addEventListener('click', () => {
     if (!historyPanel) return;
     if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
-    showHistoryPanel();
+    _historyShowPanelAdapter();
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   });
   return chip;
@@ -1446,31 +1738,32 @@ function _applyDesktopChipOverflow() {
 }
 
 function _emitHistoryRendered() {
-  if (typeof emitUiEvent === 'function') {
-    emitUiEvent('app:history-rendered', {
-      cmdHistory: Array.isArray(cmdHistory) ? cmdHistory.slice() : [],
-      recentPreviewHistory: Array.isArray(recentPreviewHistory) ? recentPreviewHistory.slice() : [],
+  if (typeof _historyEmitUiEventAdapter === 'function') {
+    _historyEmitUiEventAdapter('app:history-rendered', {
+      cmdHistory: _historyCmdHistory().slice(),
+      recentPreviewHistory: _historyRecentPreviewHistory().slice(),
     });
   }
 }
 
 function renderHistory() {
   while (histRow.children.length > 1) histRow.removeChild(histRow.lastChild);
-  if (!cmdHistory.length) {
-    hideHistoryRow();
+  const commands = _historyCmdHistory();
+  if (!commands.length) {
+    _historyHideRowAdapter();
     _emitHistoryRendered();
     return;
   }
-  showHistoryRow();
+  _historyShowRowAdapter();
 
-  const starred = _getStarred();
+  const starred = _historyGetStarredAdapter();
   // Starred commands first, then remaining in recency order
   const sorted = [
-    ...cmdHistory.filter(c => starred.has(c)),
-    ...cmdHistory.filter(c => !starred.has(c)),
+    ...commands.filter(c => starred.has(c)),
+    ...commands.filter(c => !starred.has(c)),
   ];
 
-  const isMobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const isMobile = typeof _historyUseMobileTerminalViewportModeAdapter === 'function' && _historyUseMobileTerminalViewportModeAdapter();
   const visible = isMobile ? sorted.slice(0, 3) : sorted;
 
   visible.forEach(cmd => {
@@ -1489,7 +1782,7 @@ function renderHistory() {
       starEl.title = isStarred ? 'Unstar' : 'Star';
       starEl.addEventListener('click', e => {
         e.stopPropagation();
-        _toggleStar(cmd);
+        _historyToggleStarAdapter(cmd);
         renderHistory();
       });
       chip.appendChild(starEl);
@@ -1497,10 +1790,10 @@ function renderHistory() {
 
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
-      blurActiveElement();
-      setComposerValue(cmd, cmd.length, cmd.length);
-      if (refocusComposerAfterAction({ preventScroll: true })) return;
-      resetCmdHistoryNav();
+      _historyBlurActiveElementAdapter();
+      _historySetComposerValueAdapter(cmd, cmd.length, cmd.length);
+      if (_historyRefocusComposerAdapter({ preventScroll: true })) return;
+      _historyResetCmdNavAdapter();
     });
     histRow.appendChild(chip);
   });
@@ -1517,15 +1810,13 @@ function renderHistory() {
 // Re-measure chip overflow when the window is resized on desktop.
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('resize', () => {
-    if (typeof useMobileTerminalViewportMode === 'function' && !useMobileTerminalViewportMode()) {
+    if (typeof _historyUseMobileTerminalViewportModeAdapter === 'function' && !_historyUseMobileTerminalViewportModeAdapter()) {
       renderHistory();
     }
   });
 }
 
 
-window.openHistoryWithFilters = openHistoryWithFilters;
-window.resetHistorySelectionOnClose = _historyResetSelectionOnClose;
 
 function _historyRenderPanelData(data) {
   historyList.replaceChildren();
@@ -1542,8 +1833,8 @@ function _historyRenderPanelData(data) {
   if (!visibleItems.length) {
     _historyRenderPagination(0);
     _renderHistoryEmptyState();
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:history-panel-refreshed', {
+    if (typeof _historyEmitUiEventAdapter === 'function') {
+      _historyEmitUiEventAdapter('app:history-panel-refreshed', {
         items: [],
         runs: [],
         roots: Array.isArray(data.roots) ? data.roots.slice() : [],
@@ -1554,12 +1845,12 @@ function _historyRenderPanelData(data) {
     return;
   }
 
-  const starred = _getStarred();
+  const starred = _historyGetStarredAdapter();
   visibleItems.forEach(item => {
       if (item.type === 'snapshot') {
         const selectable = _historyIsSelectableItem(item);
         const selected = _historySelection.selected.has(_historySelectionKey(item));
-        const entry = _createSnapshotHistoryEntry(item, {
+        const entry = _historyCreateSnapshotEntryAdapter(item, {
           selectMode: _historySelection.selectMode,
           selectable,
           selected,
@@ -1575,8 +1866,8 @@ function _historyRenderPanelData(data) {
             _historyToggleItemSelection(item);
             return;
           }
-          openSnapshotLink(item);
-          hideHistoryPanel();
+          _historyOpenSnapshotLinkAdapter(item);
+          _historyHidePanelAdapter();
         });
         const selectionBox = entry.querySelector('[data-action="select-run"]');
         if (selectionBox) {
@@ -1586,27 +1877,27 @@ function _historyRenderPanelData(data) {
           });
         }
 
-        bindPressable(entry.querySelector('[data-action="open"]'), {
+        _historyBindPressableAdapter(entry.querySelector('[data-action="open"]'), {
           onActivate: () => {
-            openSnapshotLink(item);
-            hideHistoryPanel();
+            _historyOpenSnapshotLinkAdapter(item);
+            _historyHidePanelAdapter();
           },
         });
-        bindPressable(entry.querySelector('[data-action="link"]'), {
+        _historyBindPressableAdapter(entry.querySelector('[data-action="link"]'), {
           onActivate: () => {
-            copySnapshotLink(item).catch(() => showToast('Failed to copy link', 'error'));
-            if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+            _historyCopySnapshotLinkAdapter(item).catch(() => _historyShowToastAdapter('Failed to copy link', 'error'));
+            if (!_historyActionKeepsPanelOpenAdapter('permalink')) _historyHidePanelAdapter();
           },
         });
-        bindPressable(entry.querySelector('[data-action="edit-metadata"]'), {
+        _historyBindPressableAdapter(entry.querySelector('[data-action="edit-metadata"]'), {
           refocusComposer: false,
           onActivate: () => {
-            _historyEditEntityMetadata('snapshot', item);
+            _historyEditEntityMetadataAdapter('snapshot', item);
           },
         });
-        bindPressable(entry.querySelector('[data-action="delete"]'), {
+        _historyBindPressableAdapter(entry.querySelector('[data-action="delete"]'), {
           onActivate: () => {
-            confirmHistAction('delete', item.id, item.label || 'snapshot', 'snapshot');
+            _historyConfirmActionAdapter('delete', item.id, item.label || 'snapshot', 'snapshot');
           },
         });
         historyList.appendChild(entry);
@@ -1617,7 +1908,7 @@ function _historyRenderPanelData(data) {
       const isStarred = starred.has(run.command);
       const selectable = _historyIsSelectableRun(run);
       const selected = _historySelection.selected.has(_historySelectionKey(run));
-      const entry = _createHistoryEntry(run, isStarred, {
+      const entry = _historyCreateEntryAdapter(run, isStarred, {
         selectMode: _historySelection.selectMode,
         selectable,
         selected,
@@ -1637,7 +1928,7 @@ function _historyRenderPanelData(data) {
           _historyToggleRunSelection(run);
           return;
         }
-        openHistoryRunDetails(run);
+        _historyOpenRunDetailsAdapter(run);
       });
 
       const selectionBox = entry.querySelector('[data-action="select-run"]');
@@ -1648,20 +1939,21 @@ function _historyRenderPanelData(data) {
         });
       }
 
-      bindPressable(entry.querySelector('[data-action="star"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="star"]'), {
         onActivate: () => {
-          const wasStarred = _getStarred().has(run.command);
-          _toggleStar(run.command);
-          if (!wasStarred && !cmdHistory.includes(run.command)) {
-            cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
+          const wasStarred = _historyGetStarredAdapter().has(run.command);
+          _historyToggleStarAdapter(run.command);
+          const commands = _historyCmdHistory();
+          if (!wasStarred && !commands.includes(run.command)) {
+            _setHistoryCmdHistory([run.command, ...commands].slice(0, _historyAppConfig().recent_commands_limit));
           }
-          if (!_historyActionKeepsPanelOpen('star')) hideHistoryPanel();
+          if (!_historyActionKeepsPanelOpenAdapter('star')) _historyHidePanelAdapter();
           refreshHistoryPanel();
           renderHistory();
         },
       });
 
-      bindPressable(entry.querySelector('[data-action="open-schedule"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="open-schedule"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
@@ -1670,48 +1962,58 @@ function _historyRenderPanelData(data) {
           const ownerKind = target?.dataset?.scheduleOwnerKind || run.schedule_owner_kind || '';
           const watcherId = target?.dataset?.scheduleOwnerId || run.schedule_owner_id || run.watcher_id || '';
           const scheduleId = target?.dataset?.scheduleId || run.schedule_id || '';
-          if (ownerKind === 'watcher' && watcherId && typeof openWatchersModal === 'function') {
-            void openWatchersModal({ watcherId });
-          } else if (scheduleId && typeof openSchedulesModal === 'function') {
-            void openSchedulesModal({ scheduleId });
+          if (ownerKind === 'watcher' && watcherId && typeof _historyOpenWatchersModalAdapter === 'function') {
+            void _historyOpenWatchersModalAdapter({ watcherId });
+          } else if (scheduleId && typeof _historyOpenSchedulesModalAdapter === 'function') {
+            void _historyOpenSchedulesModalAdapter({ scheduleId });
           }
         },
       });
 
-      bindPressable(entry.querySelector('[data-action="copy-command"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="copy-command"]'), {
         onActivate: () => {
-          _closeHistoryActionMenus();
-          copyTextToClipboard(run.command)
-            .then(() => showToast('Command copied'))
-            .catch(() => showToast('Failed to copy command', 'error'));
+          _historyCloseActionMenusAdapter();
+          _historyCopyTextToClipboardAdapter(run.command)
+            .then(() => _historyShowToastAdapter('Command copied'))
+            .catch(() => _historyShowToastAdapter('Failed to copy command', 'error'));
         },
       });
 
-      bindPressable(entry.querySelector('[data-action="restore"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="restore"]'), {
         onActivate: () => {
-          const existing = _tabForHistoryRun(run);
+          const existing = _historyTabForRunAdapter(run);
           const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
           if (existing && !canUpgradeExisting) {
-            activateTab(existing.id);
-            hideHistoryPanel();
+            _historyActivateTabAdapter(existing.id);
+            _historyHidePanelAdapter();
             return;
           }
           const cmdEl = entry.querySelector('.history-entry-cmd');
           cmdEl.textContent = 'loading…';
-          _setHistoryLoadState(true);
-          window.restoreHistoryRunIntoTab(run, {
+          if (historyLoadOverlay) {
+            historyLoadOverlay.classList.add('open');
+            historyLoadOverlay.setAttribute('aria-hidden', 'false');
+          }
+          _historySetLoadStateAdapter(true);
+          _historyRestoreRunIntoTabAdapter(run, {
             targetTabId: canUpgradeExisting ? existing.id : null,
             hidePanelOnSuccess: true,
           })
             .catch(() => {
               entry.querySelector('.history-entry-cmd').textContent = run.command;
-              showToast('Failed to load run');
+              _historyShowToastAdapter('Failed to load run');
             })
-            .finally(() => _setHistoryLoadState(false));
+            .finally(() => {
+              if (historyLoadOverlay) {
+                historyLoadOverlay.classList.remove('open');
+                historyLoadOverlay.setAttribute('aria-hidden', 'true');
+              }
+              _historySetLoadStateAdapter(false);
+            });
         },
       });
 
-      bindPressable(entry.querySelector('[data-action="history-menu"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="history-menu"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
@@ -1719,100 +2021,100 @@ function _historyRenderPanelData(data) {
           const wrap = entry.querySelector('.history-action-menu-wrap');
           if (!wrap) return;
           const open = !wrap.classList.contains('open');
-          _closeHistoryActionMenus(open ? wrap : null);
+          _historyCloseActionMenusAdapter(open ? wrap : null);
           wrap.classList.toggle('open', open);
           entry.querySelector('[data-action="history-menu"]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
-          if (open) _positionHistoryActionMenu(wrap);
-          else _resetHistoryActionMenuPosition(wrap);
+          if (open) _historyPositionActionMenuAdapter(wrap);
+          else _historyResetActionMenuPositionAdapter(wrap);
         },
       });
-      bindPressable(entry.querySelector('[data-action="permalink"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="permalink"]'), {
         onActivate: () => {
-          _closeHistoryActionMenus();
-          copyHistoryRunPermalink(run).catch(() => showToast('Failed to copy link', 'error'));
-          if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+          _historyCloseActionMenusAdapter();
+          _historyCopyRunPermalinkAdapter(run).catch(() => _historyShowToastAdapter('Failed to copy link', 'error'));
+          if (!_historyActionKeepsPanelOpenAdapter('permalink')) _historyHidePanelAdapter();
         },
       });
-      bindPressable(entry.querySelector('[data-action="edit-metadata"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="edit-metadata"]'), {
         refocusComposer: false,
         onActivate: () => {
-          _closeHistoryActionMenus();
-          _historyEditEntityMetadata('run', run);
+          _historyCloseActionMenusAdapter();
+          _historyEditEntityMetadataAdapter('run', run);
         },
       });
-      bindPressable(entry.querySelector('[data-action="open-atlas"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="open-atlas"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          _closeHistoryActionMenus();
-          if (typeof openAtlas === 'function') void openAtlas({ source: 'history-run' });
+          _historyCloseActionMenusAdapter();
+          if (typeof _historyOpenAtlasAdapter === 'function') void _historyOpenAtlasAdapter({ source: 'history-run' });
         },
       });
-      bindPressable(entry.querySelector('[data-action="watch-command"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="watch-command"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          _closeHistoryActionMenus();
-          if (typeof openWatchersModal === 'function') void openWatchersModal({ baselineRun: run });
+          _historyCloseActionMenusAdapter();
+          if (typeof _historyOpenWatchersModalAdapter === 'function') void _historyOpenWatchersModalAdapter({ baselineRun: run });
         },
       });
-      bindPressable(entry.querySelector('[data-action="compare"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="compare"]'), {
         refocusComposer: false,
         onActivate: () => {
-          _closeHistoryActionMenus();
-          openHistoryCompareLauncher(run);
-          if (!_historyActionKeepsPanelOpen('compare')) hideHistoryPanel();
+          _historyCloseActionMenusAdapter();
+          _historyOpenCompareLauncherAdapter(run);
+          if (!_historyActionKeepsPanelOpenAdapter('compare')) _historyHidePanelAdapter();
         },
       });
-      bindPressable(entry.querySelector('[data-action="add-active-project"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="add-active-project"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          _closeHistoryActionMenus();
-          window._historyAddRunToActiveProject(run).catch(() => showToast('Failed to add run to active project', 'error'));
+          _historyCloseActionMenusAdapter();
+          _historyAddRunToActiveProjectAdapter(run).catch(() => _historyShowToastAdapter('Failed to add run to active project', 'error'));
         },
       });
-      bindPressable(entry.querySelector('[data-action="add-project"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="add-project"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          _closeHistoryActionMenus();
-          window._historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
+          _historyCloseActionMenusAdapter();
+          _historyAddRunToProjectAdapter(run).catch(() => _historyShowToastAdapter('Failed to add run to project', 'error'));
         },
       });
-      bindPressable(entry.querySelector('[data-action="remove-project"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="remove-project"]'), {
         refocusComposer: false,
         onActivate: (event) => {
           event.preventDefault();
           event.stopPropagation();
-          _closeHistoryActionMenus();
-          window._historyRemoveRunFromProject(run).catch(() => showToast('Failed to remove run from project', 'error'));
+          _historyCloseActionMenusAdapter();
+          _historyRemoveRunFromProjectAdapter(run).catch(() => _historyShowToastAdapter('Failed to remove run from project', 'error'));
         },
       });
-      bindPressable(entry.querySelector('[data-action="copy-run-id"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="copy-run-id"]'), {
         onActivate: () => {
-          _closeHistoryActionMenus();
-          copyTextToClipboard(run.id)
-            .then(() => showToast('Run ID copied'))
-            .catch(() => showToast('Failed to copy run ID', 'error'));
+          _historyCloseActionMenusAdapter();
+          _historyCopyTextToClipboardAdapter(run.id)
+            .then(() => _historyShowToastAdapter('Run ID copied'))
+            .catch(() => _historyShowToastAdapter('Failed to copy run ID', 'error'));
         },
       });
-      bindPressable(entry.querySelector('[data-action="delete"]'), {
+      _historyBindPressableAdapter(entry.querySelector('[data-action="delete"]'), {
         onActivate: () => {
-          _closeHistoryActionMenus();
-          confirmHistAction('delete', run.id, run.command);
+          _historyCloseActionMenusAdapter();
+          _historyConfirmActionAdapter('delete', run.id, run.command);
         },
       });
 
       historyList.appendChild(entry);
     });
     _historyRenderPagination(visibleItems.length);
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:history-panel-refreshed', {
+    if (typeof _historyEmitUiEventAdapter === 'function') {
+      _historyEmitUiEventAdapter('app:history-panel-refreshed', {
         items: visibleItems.slice(),
         runs: visibleItems.filter(item => item.type === 'run').slice(),
         roots: Array.isArray(data.roots) ? data.roots.slice() : [],
@@ -1834,13 +2136,18 @@ function _historyRenderCurrentPanel() {
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
   // history instead of assuming the in-memory tab state is authoritative.
-  _ensureHistoryProjectFilterOptions().catch(() => {});
-  _syncHistoryFilterControls();
-  _renderHistoryActiveFilters();
-  return apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
-    _historyLatestPanelData = data;
-    _historyRenderPanelData(data);
-  });
+  return Promise.resolve(_historyEnsureProjectFilterOptionsAdapter())
+    .catch(() => [])
+    .then(() => {
+      _syncHistoryFilterControls();
+      _renderHistoryActiveFilters();
+      return _historyApiFetchAdapter(_buildHistoryRequestUrl());
+    })
+    .then(r => r.json())
+    .then(data => {
+      _historyLatestPanelData = data;
+      _historyRenderPanelData(data);
+    });
 }
 
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
@@ -1849,32 +2156,32 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
     if (event.target && event.target.closest && event.target.closest('.history-bulk-actions-wrap')) return;
     if (event.target && event.target.closest && event.target.closest('.history-compare-actions-menu-wrap')) return;
     if (event.target && event.target.closest && event.target.closest('.history-run-action-menu-wrap')) return;
-    _closeHistoryActionMenus();
+    _historyCloseActionMenusAdapter();
     _closeHistoryBulkActionMenu();
     _closeHistoryCompareActionMenusIfLoaded();
-    _closeHistoryRunActionMenus();
+    _historyCloseRunActionMenusAdapter();
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      _closeHistoryActionMenus();
+      _historyCloseActionMenusAdapter();
       _closeHistoryBulkActionMenu();
       _closeHistoryCompareActionMenusIfLoaded();
-      _closeHistoryRunActionMenus();
+      _historyCloseRunActionMenusAdapter();
     }
   });
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('resize', () => {
-    _closeHistoryActionMenus();
+    _historyCloseActionMenusAdapter();
     _closeHistoryBulkActionMenu();
     _closeHistoryCompareActionMenusIfLoaded();
-    _closeHistoryRunActionMenus();
+    _historyCloseRunActionMenusAdapter();
   });
   window.addEventListener('scroll', () => {
-    _closeHistoryActionMenus();
+    _historyCloseActionMenusAdapter();
     _closeHistoryBulkActionMenu();
     _closeHistoryCompareActionMenusIfLoaded();
-    _closeHistoryRunActionMenus();
+    _historyCloseRunActionMenusAdapter();
   }, true);
 }
 
@@ -1984,7 +2291,7 @@ if (typeof historyDateFilter !== 'undefined' && historyDateFilter) {
 
 if (typeof historyProjectFilter !== 'undefined' && historyProjectFilter) {
   historyProjectFilter.addEventListener('focus', () => {
-    _ensureHistoryProjectFilterOptions().catch(() => {});
+    _historyEnsureProjectFilterOptionsAdapter().catch(() => {});
   });
   historyProjectFilter.addEventListener('change', e => {
     _setHistoryFilter('projectId', e.target.value);
@@ -2003,106 +2310,57 @@ if (typeof historyClearFiltersBtn !== 'undefined' && historyClearFiltersBtn) {
 
 _syncHistoryFilterControls();
 
-if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _historyCore,
-    _closeHistoryCompareActionMenusIfLoaded,
-    _compareFormatDate,
-    _compareDateGroupLabel,
-    _compareFormatDuration,
-    _compareFormatDelta,
-    _historyCompareTotalChangedLines,
-    _historyCompareOmittedTotal,
-    _historyCompareLineLimit,
-    _historyCompareCoerceViewMode,
-    _historyCompareCoerceContext,
-    _historyCompareStoredViewMode,
-    _historyCompareStoredContext,
-    _historyCompareViewportMode,
-    _historyCompareResolveViewMode,
-    _historyCompareViewModeOptions,
-    _historyCompareContextLimit,
-    _historyCompareNumber,
-    _historyCompareCssEscape,
-    _historyCompareBucketTone,
-    _historyCompareBuildAnchorMap,
-    _historyCompareAnchorTone,
-    _normalizeHistoryFilterValue,
-    _historyDefaultFilterValue,
-    _historyRunOnlyFilterIsActive,
-    _historyHasActiveRunOnlyFilters,
-    _syncHistoryFilterControls,
-    _historyHasActiveServerFilters,
-    _historyHasAnyFilters,
-    _historyResetRunOnlyFilters,
-    _historyLabelForType,
-    _historySummaryLabel,
-    _historyCommandRootsFromRuns,
-    _renderHistoryRootSuggestions,
-    _appendHistoryCommandEcho,
-    _historyOutputLineMetadata,
-    _appendHistoryOutputLine,
-    _hideHistoryRootDropdown,
-    _historyRootMatches,
-    _acceptHistoryRootSuggestion,
-    _renderHistoryRootDropdown,
-    _historyRefreshRootDropdown,
-    _historyActiveFilterItems,
-    _historySetPage,
-    _historyRenderPagination,
-    _renderHistoryActiveFilters,
-    _historyItemType,
-    _historyIsSelectableItem,
-    _historyIsSelectableRun,
-    _historySelectionKey,
-    _historySelectedRuns,
-    _historySelectedSnapshots,
-    _historyClearSelection,
-    _historyResetSelectionOnClose,
-    _historySetSelectMode,
-    _historyToggleItemSelection,
-    _historyToggleRunSelection,
-    _historySelectAllVisibleItems,
-    _historySetBulkBusy,
-    _historyBulkCountsFromResponse,
-    _historyBulkToast,
-    _historyBulkReasonSummary,
-    _historyBulkResultText,
-    _historySelectedRunIds,
-    _historySelectedSnapshotIds,
-    _historyRefreshAfterBulk,
-    _closeHistoryBulkActionMenu,
-    _historyProjectsForSelectedLinks,
-    _historyMergeBulkProjectResponses,
-    _historyBulkPostProject,
-    _historyBulkRemoveFromAllProjects,
-    _historyBulkAddToActiveProject,
-    _historyBulkChooseProject,
-    _historyBulkDeleteLabel,
-    _historyBulkDeletedNoun,
-    _historyMergeBulkDeleteResponses,
-    _historyPostBulkDelete,
-    _historyBulkExportFilename,
-    _historyFilenameFromDisposition,
-    _historyBulkExportSelectedItems,
-    _historyBulkDeleteSelectedItems,
-    _historyBuildBulkActionMenu,
-    _renderHistoryBulkToolbar,
-    _buildHistoryRequestUrl,
-    _applyHistoryClientFilters,
-    _renderHistoryEmptyState,
-    _scheduleHistoryPanelRefresh,
-    _setHistoryFilter,
+if (typeof importedSetHistoryPanelHandlers === 'function') {
+  importedSetHistoryPanelHandlers({
     openHistoryWithFilters,
-    clearHistoryFilters,
-    resetHistoryMobileFilters,
-    toggleHistoryMobileFilters,
-    _makeOverflowChip,
-    _applyDesktopChipOverflow,
-    _emitHistoryRendered,
-    renderHistory,
-    _historyRenderPanelData,
-    _historyRenderCurrentPanel,
     refreshHistoryPanel,
+    renderHistory,
+    resetHistoryMobileFilters,
+    resetHistorySelectionOnClose: _historyResetSelectionOnClose,
   });
 }
+
+export {
+  _applyHistoryClientFilters,
+  _buildHistoryRequestUrl,
+  _closeHistoryCompareActionMenusIfLoaded,
+  _compareDateGroupLabel,
+  _compareFormatDate,
+  _compareFormatDelta,
+  _compareFormatDuration,
+  _historyCompareAnchorTone,
+  _historyCompareBucketTone,
+  _historyCompareBuildAnchorMap,
+  _historyCompareCoerceContext,
+  _historyCompareCoerceViewMode,
+  _historyCompareContextLimit,
+  _historyCompareCssEscape,
+  _historyCompareLineLimit,
+  _historyCompareNumber,
+  _historyCompareOmittedTotal,
+  _historyCompareResolveViewMode,
+  _historyCompareStoredContext,
+  _historyCompareStoredViewMode,
+  _historyCompareTotalChangedLines,
+  _historyCompareViewportMode,
+  _historyCompareViewModeOptions,
+  _historyCore,
+  _historyDefaultFilterValue,
+  _historyHasActiveRunOnlyFilters,
+  _historyHasActiveServerFilters,
+  _historyHasAnyFilters,
+  _historyLabelForType,
+  _historyResetRunOnlyFilters,
+  _historyRunOnlyFilterIsActive,
+  _historySummaryLabel,
+  _normalizeHistoryFilterValue,
+  clearHistoryFilters,
+  getHistoryProjectOptionsState,
+  openHistoryWithFilters,
+  refreshHistoryPanel,
+  renderHistory,
+  resetHistoryMobileFilters,
+  setHistoryProjectOptionsState,
+  _historyResetSelectionOnClose as resetHistorySelectionOnClose,
+  toggleHistoryMobileFilters,
+};

@@ -48,6 +48,17 @@
 //   invoked when the action is clicked; returning (or resolving to)
 //   a falsy value keeps the modal open so validation errors can stay
 //   on screen. Any other return closes and resolves with the action id.
+import { closeActionSheet as importedCloseActionSheet } from './ui_action_sheet.js';
+import { bindMobileSheet as importedBindMobileSheet } from './mobile_sheet.js';
+import { bindDismissible as importedBindDismissible } from './ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from './ui_focus_trap.js';
+import {
+  enhanceAppSelects as importedEnhanceAppSelects,
+  hideModalOverlay as importedHideModalOverlay,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  showModalOverlay as importedShowModalOverlay,
+} from './ui_helpers.js';
+
 (function (global) {
   'use strict';
 
@@ -145,14 +156,17 @@
   function _cleanup(state) {
     if (!_host) return;
     if (state && state.mqList && typeof state.mqList.remove === 'function') state.mqList.remove();
+    if (state && state.keydownHandle && typeof state.keydownHandle.remove === 'function') {
+      state.keydownHandle.remove();
+    }
     if (state && state.focusTrapHandle && typeof state.focusTrapHandle.dispose === 'function') {
       state.focusTrapHandle.dispose();
     }
     if (state && state.dismissibleHandle && typeof state.dismissibleHandle.dispose === 'function') {
       state.dismissibleHandle.dispose();
     }
-    if (typeof global.hideModalOverlay === 'function') {
-      global.hideModalOverlay(_host);
+    if (typeof importedHideModalOverlay === 'function') {
+      importedHideModalOverlay(_host);
     } else if (_host.style) {
       _host.style.display = 'none';
     }
@@ -173,8 +187,8 @@
     try {
       _cleanup(state);
     } finally {
-      if (state.refocusOnResolve !== false && typeof global.refocusComposerAfterAction === 'function') {
-        global.refocusComposerAfterAction({ defer: true });
+      if (state.refocusOnResolve !== false && typeof importedRefocusComposerAfterAction === 'function') {
+        importedRefocusComposerAfterAction({ defer: true });
       }
       state.resolve(value);
     }
@@ -184,8 +198,8 @@
     const host = _getHost();
     if (!host) return Promise.reject(new Error('showConfirm: #confirm-host not present'));
     if (_isOpen()) return Promise.reject(new Error('showConfirm: another confirm is already open'));
-    if (typeof global.closeActionSheet === 'function') {
-      global.closeActionSheet({ restoreFocus: false });
+    if (typeof importedCloseActionSheet === 'function') {
+      importedCloseActionSheet({ restoreFocus: false });
     }
 
     const body = opts && opts.body !== undefined ? opts.body : '';
@@ -196,11 +210,11 @@
 
     _renderBody(_bodyEl, body);
     if (_contentEl) _renderContent(_contentEl, content);
-    if (_contentEl && typeof global.enhanceAppSelects === 'function') {
+    if (_contentEl && typeof importedEnhanceAppSelects === 'function') {
       _contentEl.querySelectorAll('select.form-select').forEach((select) => {
         select.dataset.portalMenu = 'true';
       });
-      global.enhanceAppSelects(_contentEl);
+      importedEnhanceAppSelects(_contentEl);
     }
     _card.classList.remove('modal-card-danger', 'modal-card-warning');
     if (tone === 'danger') _card.classList.add('modal-card-danger');
@@ -238,10 +252,31 @@
     });
     _applyStacking(actions.length);
 
+    const activateDefaultAction = (event) => {
+      if (!event || event.key !== 'Enter') return;
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const active = document.activeElement;
+      const activeInsideHost = active && host.contains(active);
+      const editableInsideHost = activeInsideHost && (
+        active.matches?.('input, textarea, select, [contenteditable="true"]')
+      );
+      if (editableInsideHost) return;
+      const activeButton = activeInsideHost && active?.matches?.('[data-confirm-action-id]')
+        ? active
+        : null;
+      const cancel = buttons.find(({ action }) => action.role === 'cancel');
+      const target = activeButton || (cancel && cancel.btn) || (buttons[0] && buttons[0].btn);
+      if (!target || typeof target.click !== 'function') return;
+      event.preventDefault();
+      event.stopPropagation();
+      target.click();
+    };
+    document.addEventListener('keydown', activateDefaultAction, true);
+
     // Show the host.
     host.classList.remove('u-hidden');
-    if (typeof global.showModalOverlay === 'function') {
-      global.showModalOverlay(host, 'flex');
+    if (typeof importedShowModalOverlay === 'function') {
+      importedShowModalOverlay(host, 'flex');
     } else if (host.style) {
       host.style.display = 'flex';
     }
@@ -256,6 +291,7 @@
       dismissibleHandle: null,
       focusTrapHandle: null,
       mqList: null,
+      keydownHandle: { remove: () => document.removeEventListener('keydown', activateDefaultAction, true) },
       refocusOnResolve: opts.refocusOnResolve !== false,
     };
     _activeState = state;
@@ -263,13 +299,13 @@
     // Focus trap: keep Tab cycling inside the card while the modal is open;
     // otherwise Tab falls through to the document and starts cycling into
     // rail / tab / HUD buttons behind the backdrop.
-    if (typeof global.bindFocusTrap === 'function' && _card) {
-      state.focusTrapHandle = global.bindFocusTrap(_card, { arrowKeys: true });
+    if (typeof importedBindFocusTrap === 'function' && _card) {
+      state.focusTrapHandle = importedBindFocusTrap(_card, { arrowKeys: true });
     }
 
     // Escape + backdrop via bindDismissible.
-    if (typeof global.bindDismissible === 'function') {
-      state.dismissibleHandle = global.bindDismissible(host, {
+    if (typeof importedBindDismissible === 'function') {
+      state.dismissibleHandle = importedBindDismissible(host, {
         level: 'modal',
         isOpen: _isOpen,
         onClose: () => _resolveWith(null),
@@ -278,8 +314,8 @@
     }
     // Mobile sheet drag handle. bindMobileSheet is idempotent; safe to
     // call on every open — the injected grab element persists.
-    if (typeof global.bindMobileSheet === 'function' && _card) {
-      global.bindMobileSheet(_card, { onClose: () => _resolveWith(null) });
+    if (typeof importedBindMobileSheet === 'function' && _card) {
+      importedBindMobileSheet(_card, { onClose: () => _resolveWith(null) });
     }
 
     // Keep stacking reactive while the modal is open.
@@ -344,7 +380,17 @@
     return _isOpen();
   }
 
-  global.showConfirm = showConfirm;
-  global.cancelConfirm = cancelConfirm;
-  global.isConfirmOpen = isConfirmOpen;
+  Object.assign(global, {
+    cancelConfirm,
+    isConfirmOpen,
+    showConfirm,
+  });
+
 })(typeof window !== 'undefined' ? window : globalThis);
+
+const confirmGlobal = typeof window !== 'undefined' ? window : globalThis;
+const showConfirm = confirmGlobal.showConfirm;
+const cancelConfirm = confirmGlobal.cancelConfirm;
+const isConfirmOpen = confirmGlobal.isConfirmOpen;
+
+export { showConfirm, cancelConfirm, isConfirmOpen };

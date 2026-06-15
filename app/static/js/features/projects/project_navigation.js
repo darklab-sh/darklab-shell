@@ -1,6 +1,15 @@
 // Project workspace navigation controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import {
+  bindTabStripEdgeListener as importedBindTabStripEdgeListener,
+  syncActiveTabStripScroll as importedSyncActiveTabStripScroll,
+  syncTabStripEdges as importedSyncTabStripEdges,
+} from '../../ui/ui_tab_strip_edges.js';
+
+let exportedDarklabProjectNavigation = null;
+
 (function projectNavigationModule(global) {
   'use strict';
 
@@ -137,7 +146,8 @@
       } else {
         actions.appendChild(ctx.makeProjectButton('Unarchive', 'unarchive', String(project.id || '')));
       }
-      if (typeof global.openAtlas === 'function') {
+      const openAtlas = typeof importedOpenAtlas === 'function' ? importedOpenAtlas : null;
+      if (typeof openAtlas === 'function') {
         actions.appendChild(ctx.makeProjectButton('Open in Atlas', 'open-atlas', String(project.id || '')));
       }
       actions.appendChild(ctx.makeProjectButton('Delete', 'delete', String(project.id || ''), 'destructive'));
@@ -261,21 +271,21 @@
     }
 
     function syncMobileActiveTabScroll() {
-      if (typeof global.syncActiveTabStripScroll === 'function') {
-        global.syncActiveTabStripScroll(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      if (typeof importedSyncActiveTabStripScroll === 'function') {
+        importedSyncActiveTabStripScroll(ctx.projectMobileTabs, mobileTabEdgeOptions);
       }
     }
 
     function syncDesktopActiveTabScroll(strip) {
-      if (typeof global.syncActiveTabStripScroll === 'function') {
-        global.syncActiveTabStripScroll(strip, desktopTabEdgeOptions);
+      if (typeof importedSyncActiveTabStripScroll === 'function') {
+        importedSyncActiveTabStripScroll(strip, desktopTabEdgeOptions);
       }
       scheduleDesktopTabScrollSync(strip);
     }
 
     function bindDesktopTabControls(strip) {
-      if (typeof global.bindTabStripEdgeListener === 'function') {
-        global.bindTabStripEdgeListener(strip, desktopTabEdgeOptions);
+      if (typeof importedBindTabStripEdgeListener === 'function') {
+        importedBindTabStripEdgeListener(strip, desktopTabEdgeOptions);
       }
       if (!strip || typeof strip.closest !== 'function') return;
       const wrap = strip.closest('.project-explorer-tabs-wrap');
@@ -324,14 +334,14 @@
       });
       leftBtn.disabled = !hasOverflow || scrollLeft <= 1;
       rightBtn.disabled = !hasOverflow || scrollLeft >= maxScroll - 1;
-      if (typeof global.syncTabStripEdges === 'function') {
-        global.syncTabStripEdges(strip, desktopTabEdgeOptions);
+      if (typeof importedSyncTabStripEdges === 'function') {
+        importedSyncTabStripEdges(strip, desktopTabEdgeOptions);
       }
     }
 
     function syncMobileTabEdges() {
-      if (typeof global.syncTabStripEdges === 'function') {
-        global.syncTabStripEdges(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      if (typeof importedSyncTabStripEdges === 'function') {
+        importedSyncTabStripEdges(ctx.projectMobileTabs, mobileTabEdgeOptions);
       }
     }
 
@@ -361,7 +371,11 @@
     };
   }
 
-  global.DarklabProjectNavigation = {
+  const DarklabProjectNavigation = {
     createProjectNavigationController,
   };
+  exportedDarklabProjectNavigation = DarklabProjectNavigation;
 })(globalThis);
+
+export {
+  exportedDarklabProjectNavigation as DarklabProjectNavigation,};

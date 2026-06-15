@@ -1,16 +1,31 @@
 // Shared lazy asset loader for rarely-used scripts and modules.
+import { getAppConfig as importedGetAppConfig } from './config.js';
+import { emitUiEvent as importedEmitUiEvent } from './state.js';
+import { setAtlasHandlers as importedSetAtlasHandlers } from '../features/atlas/atlas_bridge.js';
+import { setWorkflowHandlers as importedSetWorkflowHandlers } from '../features/workflows/workflows_bridge.js';
+import { setHistoryCompareHandlers as importedSetHistoryCompareHandlers } from '../features/run-comparison/history_compare_bridge.js';
+import { setCommandRegistryHandlers as importedSetCommandRegistryHandlers } from '../features/command-registry/command_registry_bridge.js';
+import {
+  apiFetch as importedApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedLogClientError,
+  setRuntimeHandlers as importedSetRuntimeHandlers,
+} from '../runtime_bridge.js';
+import { setHistoryRunModalStateHandlers as importedSetHistoryRunModalStateHandlers } from '../features/history/history_run_modal_state_bridge.js';
+import { setSecretsHandlers as importedSetSecretsHandlers } from '../features/preferences/secrets_bridge.js';
+
+let exportedLoadMobileRunningIndicator = null;
+
 (function () {
   const _lazyAssetPromises = {};
+  const _lazyAssetLoadedLogged = new Set();
+  const _lazyModuleAssetMeta = typeof WeakMap === 'function' ? new WeakMap() : null;
   let _lazyAssetConfigInvalidLogged = false;
 
   function _logLazyAssetConfigInvalid(err) {
-    if (
-      _lazyAssetConfigInvalidLogged
-      || typeof window === 'undefined'
-      || typeof window.logClientError !== 'function'
-    ) return;
+    if (_lazyAssetConfigInvalidLogged || typeof importedLogClientError !== 'function') return;
     _lazyAssetConfigInvalidLogged = true;
-    window.logClientError('lazy asset config invalid', err, {
+    importedLogClientError('lazy asset config invalid', err, {
       event: 'LAZY_ASSET_CONFIG_INVALID',
       level: 'warning',
       source: 'lazy-assets-json',
@@ -31,9 +46,8 @@
         }
       }
     }
-    const appConfigUrls = typeof window !== 'undefined'
-      && window.APP_CONFIG
-      && window.APP_CONFIG.lazy_asset_urls;
+    const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    const appConfigUrls = appConfig && appConfig.lazy_asset_urls;
     if (appConfigUrls && typeof appConfigUrls === 'object' && !Array.isArray(appConfigUrls)) {
       urls = { ...urls, ...appConfigUrls };
     }
@@ -134,11 +148,8 @@
   }
 
   function _logLazyAssetLoadFailed(name, entry, err, globalCheck) {
-    if (
-      typeof window === 'undefined'
-      || typeof window.logClientError !== 'function'
-    ) return;
-    window.logClientError('lazy asset load failed', err, {
+    if (typeof importedLogClientError !== 'function') return;
+    importedLogClientError('lazy asset load failed', err, {
       event: 'LAZY_ASSET_LOAD_FAILED',
       level: 'error',
       asset_name: String(name || '').slice(0, 120),
@@ -148,20 +159,133 @@
     });
   }
 
+  function _lazyAssetTimestamp() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  }
+
+  function _lazyAssetDurationMs(startedAt) {
+    const duration = Math.max(0, _lazyAssetTimestamp() - Number(startedAt || 0));
+    return Math.round(duration);
+  }
+
+  function _lazyAssetDiagnosticsEnabled() {
+    const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    return appConfig.frontend_bridge_warnings === true
+      || appConfig.debug === true
+      || appConfig.dev_mode === true
+      || appConfig.environment === 'development'
+      || appConfig.env === 'development'
+      || appConfig.lazy_asset_debug === true;
+  }
+
+  function _logLazyAssetLifecycle(context, name, entry, details = {}) {
+    if (!_lazyAssetDiagnosticsEnabled()) return;
+    const consoleApi = (
+      typeof window !== 'undefined' && window.console
+    ) || (typeof globalThis !== 'undefined' && globalThis.console);
+    const log = consoleApi && (consoleApi.debug || consoleApi.log);
+    if (typeof log !== 'function') return;
+    log.call(consoleApi, `[darklab] ${details.event || context}`, {
+      asset_name: String(name || '').slice(0, 120),
+      asset_type: entry && entry.type === 'module' ? 'module' : 'classic',
+      src: _safeLazyAssetLogSrc(entry && entry.url),
+      ...details,
+    });
+  }
+
+  function _logLazyAssetLoadStarted(name, entry, cacheHit = false) {
+    _logLazyAssetLifecycle('lazy asset load started', name, entry, {
+      event: 'LAZY_ASSET_LOAD_STARTED',
+      level: 'debug',
+      cache_hit: cacheHit === true,
+    });
+  }
+
+  function _logLazyAssetLoaded(name, entry, startedAt, cacheHit = false) {
+    const firstLoad = !_lazyAssetLoadedLogged.has(name);
+    if (!cacheHit) _lazyAssetLoadedLogged.add(name);
+    if (!firstLoad && !cacheHit) return;
+    _logLazyAssetLifecycle('lazy asset loaded', name, entry, {
+      event: 'LAZY_ASSET_LOADED',
+      level: firstLoad && !cacheHit ? 'info' : 'debug',
+      duration_ms: cacheHit ? 0 : _lazyAssetDurationMs(startedAt),
+      cache_hit: cacheHit === true,
+    });
+  }
+
+  function _rememberLazyModuleMeta(moduleApi, name, entry) {
+    if (
+      !_lazyModuleAssetMeta
+      || !moduleApi
+      || (typeof moduleApi !== 'object' && typeof moduleApi !== 'function')
+    ) return;
+    try {
+      _lazyModuleAssetMeta.set(moduleApi, {
+        name: String(name || '').slice(0, 120),
+        entry,
+      });
+    } catch (_) {}
+  }
+
+  function _lazyModuleMeta(moduleApi) {
+    if (
+      !_lazyModuleAssetMeta
+      || !moduleApi
+      || (typeof moduleApi !== 'object' && typeof moduleApi !== 'function')
+    ) return null;
+    try {
+      return _lazyModuleAssetMeta.get(moduleApi) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _lazyModuleExportKeys(moduleApi) {
+    if (!moduleApi || (typeof moduleApi !== 'object' && typeof moduleApi !== 'function')) return [];
+    try {
+      return Object.keys(moduleApi).sort().slice(0, 80);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function _logLazyModuleExportMissing(moduleApi, err, details = {}) {
+    if (typeof importedLogClientError !== 'function') return;
+    const meta = _lazyModuleMeta(moduleApi);
+    importedLogClientError('lazy module export missing', err, {
+      event: 'LAZY_MODULE_EXPORT_MISSING',
+      level: 'error',
+      asset_name: String(details.assetName || meta?.name || '').slice(0, 120),
+      export_name: String(details.exportName || '').slice(0, 160),
+      controller_name: String(details.controllerName || '').slice(0, 160),
+      src: _safeLazyAssetLogSrc(details.src || meta?.entry?.url || ''),
+      module_keys: _lazyModuleExportKeys(moduleApi),
+    });
+  }
+
   function lazyAssetUrl(name) {
     return _lazyAssetUrl(name);
   }
 
   function loadLazyClassicScript(name, globalCheck) {
     if (typeof globalCheck === 'function' && globalCheck()) return Promise.resolve();
-    if (_lazyAssetPromises[name]) return _lazyAssetPromises[name];
     const entry = _lazyAssetEntry(name);
+    if (_lazyAssetPromises[name]) {
+      _logLazyAssetLoadStarted(name, entry, true);
+      _lazyAssetPromises[name].then(() => _logLazyAssetLoaded(name, entry, null, true)).catch(() => {});
+      return _lazyAssetPromises[name];
+    }
     const src = entry.url;
     if (!src) {
       const err = new Error(`Unknown lazy asset: ${name}`);
       _logLazyAssetLoadFailed(name, entry, err, globalCheck);
       return Promise.reject(err);
     }
+    const startedAt = _lazyAssetTimestamp();
+    _logLazyAssetLoadStarted(name, entry, false);
     _lazyAssetPromises[name] = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = src;
@@ -172,6 +296,9 @@
       };
       script.onerror = () => reject(new Error(`Failed to load lazy asset: ${src}`));
       (document.head || document.documentElement).appendChild(script);
+    }).then((result) => {
+      _logLazyAssetLoaded(name, entry, startedAt, false);
+      return result;
     }).catch((err) => {
       delete _lazyAssetPromises[name];
       _logLazyAssetLoadFailed(name, entry, err, globalCheck);
@@ -182,8 +309,12 @@
 
   function loadLazyModule(name, globalCheck) {
     if (typeof globalCheck === 'function' && globalCheck()) return Promise.resolve();
-    if (_lazyAssetPromises[name]) return _lazyAssetPromises[name];
     const entry = _lazyAssetEntry(name);
+    if (_lazyAssetPromises[name]) {
+      _logLazyAssetLoadStarted(name, entry, true);
+      _lazyAssetPromises[name].then(() => _logLazyAssetLoaded(name, entry, null, true)).catch(() => {});
+      return _lazyAssetPromises[name];
+    }
     const src = entry.url;
     if (!src) {
       const err = new Error(`Unknown lazy asset: ${name}`);
@@ -193,10 +324,16 @@
     const importer = typeof window !== 'undefined' && typeof window.__darklabImportModule === 'function'
       ? window.__darklabImportModule
       : (url) => import(url);
+    const startedAt = _lazyAssetTimestamp();
+    _logLazyAssetLoadStarted(name, entry, false);
     _lazyAssetPromises[name] = Promise.resolve()
       .then(() => importer(src))
-      .then(() => {
-        if (typeof globalCheck !== 'function' || globalCheck()) return undefined;
+      .then((moduleApi) => {
+        if (typeof globalCheck !== 'function' || globalCheck()) {
+          _rememberLazyModuleMeta(moduleApi, name, entry);
+          _logLazyAssetLoaded(name, entry, startedAt, false);
+          return moduleApi;
+        }
         throw new Error(`Lazy module did not expose its expected global: ${src}`);
       })
       .catch((err) => {
@@ -226,355 +363,369 @@
   }
 
   async function loadExportPdfUtils() {
-    await loadLazyAsset('export_pdf', () => !!(
-      window.ExportPdfUtils
-      && typeof window.ExportPdfUtils.buildTerminalExportPdf === 'function'
+    const pdfModule = await loadLazyAsset('export_pdf');
+    return _requireLazyModuleExport(pdfModule, 'ExportPdfUtils', value => (
+      value && typeof value.buildTerminalExportPdf === 'function'
     ));
-    return window.ExportPdfUtils;
   }
 
   async function loadFindingsBoard() {
-    await loadLazyAsset('findings_board', () => !!(
-      window.openFindingsBoard
-      && window.openFindingsBoard !== lazyOpenFindingsBoard
-    ));
-    return window.openFindingsBoard;
+    const boardModule = await loadLazyAsset('findings_board');
+    return {
+      openFindingsBoard: _requireLazyModuleExport(boardModule, 'openFindingsBoard', value => (
+        typeof value === 'function' && value !== lazyOpenFindingsBoard
+      )),
+      closeFindingsBoard: boardModule?.closeFindingsBoard || null,
+      isFindingsBoardOpen: boardModule?.isFindingsBoardOpen || null,
+    };
+  }
+
+  function _requireLazyModuleExport(moduleApi, exportName, predicate = value => !!value) {
+    const exported = moduleApi && moduleApi[exportName];
+    if (predicate(exported)) return exported;
+    const err = new Error(`Lazy module did not expose export: ${exportName}`);
+    _logLazyModuleExportMissing(moduleApi, err, { exportName });
+    throw err;
   }
 
   async function loadAtlasOverlay() {
-    await loadLazyClassicScripts([
-      {
-        name: 'atlas_tabs',
-        globalCheck: () => !!window.DarklabAtlasTabs,
-      },
-      {
-        name: 'atlas_entity_row',
-        globalCheck: () => !!window.DarklabAtlasEntityRow,
-      },
-      {
-        name: 'atlas_entity_detail',
-        globalCheck: () => !!window.DarklabAtlasDetail,
-      },
-      {
-        name: 'atlas_overlay',
-        globalCheck: () => !!(
-          window.openAtlas
-          && window.openAtlas !== lazyOpenAtlas
-        ),
-      },
-      {
-        name: 'atlas_mobile',
-        globalCheck: () => (
-          !!window.DarklabAtlasMobile
-          || !document.getElementById('atlas-mobile-root')
-        ),
-      },
-    ]);
-    return window.openAtlas;
+    const tabsModule = await loadLazyAsset('atlas_tabs');
+    const entityRowModule = await loadLazyAsset('atlas_entity_row');
+    const detailModule = await loadLazyAsset('atlas_entity_detail');
+    const overlayModule = await loadLazyAsset('atlas_overlay');
+    const mobileModule = document.getElementById('atlas-mobile-root')
+      ? await loadLazyAsset('atlas_mobile')
+      : null;
+    const DarklabAtlasOverlay = _requireLazyModuleExport(overlayModule, 'DarklabAtlasOverlay');
+    return {
+      DarklabAtlasTabs: _requireLazyModuleExport(tabsModule, 'DarklabAtlasTabs'),
+      DarklabAtlasEntityRow: _requireLazyModuleExport(entityRowModule, 'DarklabAtlasEntityRow'),
+      DarklabAtlasDetail: _requireLazyModuleExport(detailModule, 'DarklabAtlasDetail'),
+      DarklabAtlasOverlay,
+      DarklabAtlasMobile: mobileModule?.DarklabAtlasMobile || null,
+      openAtlas: _requireLazyModuleExport(overlayModule, 'openAtlas', value => (
+        typeof value === 'function' && value !== lazyOpenAtlas
+      )),
+      closeAtlas: overlayModule?.closeAtlas || null,
+      isAtlasOverlayOpen: overlayModule?.isAtlasOverlayOpen || null,
+      refreshAtlasOverlay: overlayModule?.refreshAtlasOverlay || null,
+      cycleAtlasTab: overlayModule?.cycleAtlasTab || null,
+    };
   }
 
   async function loadWatchersModal() {
-    await loadLazyAsset('watchers_modal', () => !!(
-      window.openWatchersModal
-      && window.openWatchersModal !== lazyOpenWatchersModal
-    ));
-    return window.openWatchersModal;
+    const watchersModule = await loadLazyAsset('watchers_modal');
+    return {
+      openWatchersModal: _requireLazyModuleExport(watchersModule, 'openWatchersModal', value => (
+        typeof value === 'function' && value !== lazyOpenWatchersModal
+      )),
+      closeWatchersModal: watchersModule?.closeWatchersModal || null,
+      isWatchersOverlayOpen: watchersModule?.isWatchersOverlayOpen || null,
+    };
   }
 
   async function loadProjectReport() {
-    await loadLazyAsset('project_report', () => !!(
-      window.DarklabProjectReport
-      && typeof window.DarklabProjectReport.createProjectReportController === 'function'
+    const reportModule = await loadLazyAsset('project_report');
+    return _requireLazyModuleExport(reportModule, 'DarklabProjectReport', value => (
+      value && typeof value.createProjectReportController === 'function'
     ));
-    return window.DarklabProjectReport;
   }
 
   async function loadProjectActivity() {
-    await loadLazyAsset('project_activity', () => !!(
-      window.DarklabProjectActivity
-      && typeof window.DarklabProjectActivity.createProjectActivityController === 'function'
+    const activityModule = await loadLazyAsset('project_activity');
+    return _requireLazyModuleExport(activityModule, 'DarklabProjectActivity', value => (
+      value && typeof value.createProjectActivityController === 'function'
     ));
-    return window.DarklabProjectActivity;
   }
 
   async function loadProjectArtifacts() {
-    await loadLazyAsset('project_artifacts', () => !!(
-      window.DarklabProjectArtifacts
-      && typeof window.DarklabProjectArtifacts.createProjectArtifactsController === 'function'
+    const artifactsModule = await loadLazyAsset('project_artifacts');
+    return _requireLazyModuleExport(artifactsModule, 'DarklabProjectArtifacts', value => (
+      value && typeof value.createProjectArtifactsController === 'function'
     ));
-    return window.DarklabProjectArtifacts;
   }
 
   async function loadProjectPackages() {
-    await loadLazyAsset('project_packages', () => !!(
-      window.DarklabProjectPackages
-      && typeof window.DarklabProjectPackages.createProjectPackagesController === 'function'
+    const packagesModule = await loadLazyAsset('project_packages');
+    const DarklabProjectPackages = _requireLazyModuleExport(packagesModule, 'DarklabProjectPackages', value => (
+      value && typeof value.createProjectPackagesController === 'function'
     ));
-    return window.DarklabProjectPackages;
+    window.DarklabProjectPackages = DarklabProjectPackages;
+    return DarklabProjectPackages;
   }
 
   async function loadProjectWorkspace() {
-    await loadLazyClassicScripts([
-      {
-        name: 'project_details',
-        globalCheck: () => !!(
-          window.DarklabProjectDetails
-          && typeof window.DarklabProjectDetails.createProjectDetailsController === 'function'
-        ),
-      },
-      {
-        name: 'project_list',
-        globalCheck: () => !!(
-          window.DarklabProjectList
-          && typeof window.DarklabProjectList.createProjectListController === 'function'
-        ),
-      },
-      {
-        name: 'project_navigation',
-        globalCheck: () => !!(
-          window.DarklabProjectNavigation
-          && typeof window.DarklabProjectNavigation.createProjectNavigationController === 'function'
-        ),
-      },
-      {
-        name: 'project_entity_editor',
-        globalCheck: () => !!(
-          window.DarklabProjectEntityEditor
-          && typeof window.DarklabProjectEntityEditor.createProjectEntityEditorController === 'function'
-        ),
-      },
-      {
-        name: 'project_workspace_actions',
-        globalCheck: () => !!(
-          window.DarklabProjectWorkspaceActions
-          && typeof window.DarklabProjectWorkspaceActions.createProjectWorkspaceActionsController === 'function'
-        ),
-      },
-      {
-        name: 'project_workspace_shell',
-        globalCheck: () => !!(
-          window.DarklabProjectWorkspaceShell
-          && typeof window.DarklabProjectWorkspaceShell.createProjectWorkspaceShellController === 'function'
-        ),
-      },
-      {
-        name: 'project_workspace_lifecycle',
-        globalCheck: () => !!(
-          window.DarklabProjectWorkspaceLifecycle
-          && typeof window.DarklabProjectWorkspaceLifecycle.createProjectWorkspaceLifecycleController === 'function'
-        ),
-      },
-      {
-        name: 'project_workspace_renderer',
-        globalCheck: () => !!(
-          window.DarklabProjectWorkspaceRenderer
-          && typeof window.DarklabProjectWorkspaceRenderer.createProjectWorkspaceRendererController === 'function'
-        ),
-      },
-      {
-        name: 'project_workspace_bootstrap',
-        globalCheck: () => !!(
-          window.DarklabProjectWorkspaceBootstrap
-          && typeof window.DarklabProjectWorkspaceBootstrap.createProjectWorkspaceBootstrapController === 'function'
-        ),
-      },
-      {
-        name: 'project_nested_sheets',
-        globalCheck: () => !!(
-          window.DarklabProjectNestedSheets
-          && typeof window.DarklabProjectNestedSheets.createProjectNestedSheetsController === 'function'
-        ),
-      },
-      {
-        name: 'project_workspace_events',
-        globalCheck: () => !!(
-          window.DarklabProjectWorkspaceEvents
-          && typeof window.DarklabProjectWorkspaceEvents.createProjectWorkspaceEventsController === 'function'
-        ),
-      },
-      {
-        name: 'project_targets',
-        globalCheck: () => !!(
-          window.DarklabProjectTargets
-          && typeof window.DarklabProjectTargets.createProjectTargetsController === 'function'
-        ),
-      },
-      {
-        name: 'project_runs',
-        globalCheck: () => !!(
-          window.DarklabProjectRuns
-          && typeof window.DarklabProjectRuns.createProjectRunsController === 'function'
-        ),
-      },
-      {
-        name: 'project_mobile_compare',
-        globalCheck: () => !!(
-          window.DarklabProjectMobileCompare
-          && typeof window.DarklabProjectMobileCompare.createProjectMobileCompareController === 'function'
-        ),
-      },
-      {
-        name: 'project_mobile_shell',
-        globalCheck: () => !!(
-          window.DarklabProjectMobileShell
-          && typeof window.DarklabProjectMobileShell.createProjectMobileShellController === 'function'
-        ),
-      },
-      {
-        name: 'project_mobile_detail',
-        globalCheck: () => !!(
-          window.DarklabProjectMobileDetail
-          && typeof window.DarklabProjectMobileDetail.createProjectMobileDetailController === 'function'
-        ),
-      },
-      {
-        name: 'project_findings_data',
-        globalCheck: () => !!(
-          window.DarklabProjectFindingsData
-          && typeof window.DarklabProjectFindingsData.createProjectFindingsDataController === 'function'
-        ),
-      },
-      {
-        name: 'project_filters',
-        globalCheck: () => !!(
-          window.DarklabProjectFilters
-          && typeof window.DarklabProjectFilters.createProjectFiltersController === 'function'
-        ),
-      },
-      {
-        name: 'project_entities',
-        globalCheck: () => !!(
-          window.DarklabProjectEntities
-          && typeof window.DarklabProjectEntities.createProjectEntitiesController === 'function'
-        ),
-      },
-      {
-        name: 'project_findings',
-        globalCheck: () => !!(
-          window.DarklabProjectFindings
-          && typeof window.DarklabProjectFindings.createProjectFindingsController === 'function'
-        ),
-      },
-      {
-        name: 'project_findings_board',
-        globalCheck: () => !!(
-          window.DarklabProjectFindingsBoard
-          && typeof window.DarklabProjectFindingsBoard.createProjectFindingsBoardController === 'function'
-        ),
-      },
-    ]);
-    return window.DarklabProjectWorkspaceShell;
+    const loadProjectNamespace = async (name, globalName, controllerName) => {
+      const moduleApi = await loadLazyAsset(name);
+      const namespace = moduleApi?.[globalName] || window[globalName];
+      if (!namespace || typeof namespace[controllerName] !== 'function') {
+        const err = new Error(`Lazy module ${name} did not expose ${globalName}.${controllerName}`);
+        _logLazyModuleExportMissing(moduleApi, err, {
+          assetName: name,
+          exportName: globalName,
+          controllerName,
+        });
+        throw err;
+      }
+      window[globalName] = namespace;
+      return namespace;
+    };
+
+    const DarklabProjectDetails = await loadProjectNamespace(
+      'project_details',
+      'DarklabProjectDetails',
+      'createProjectDetailsController',
+    );
+    const DarklabProjectList = await loadProjectNamespace(
+      'project_list',
+      'DarklabProjectList',
+      'createProjectListController',
+    );
+    const DarklabProjectNavigation = await loadProjectNamespace(
+      'project_navigation',
+      'DarklabProjectNavigation',
+      'createProjectNavigationController',
+    );
+    const DarklabProjectEntityEditor = await loadProjectNamespace(
+      'project_entity_editor',
+      'DarklabProjectEntityEditor',
+      'createProjectEntityEditorController',
+    );
+    const DarklabProjectWorkspaceActions = await loadProjectNamespace(
+      'project_workspace_actions',
+      'DarklabProjectWorkspaceActions',
+      'createProjectWorkspaceActionsController',
+    );
+    const DarklabProjectWorkspaceShell = await loadProjectNamespace(
+      'project_workspace_shell',
+      'DarklabProjectWorkspaceShell',
+      'createProjectWorkspaceShellController',
+    );
+    const DarklabProjectWorkspaceLifecycle = await loadProjectNamespace(
+      'project_workspace_lifecycle',
+      'DarklabProjectWorkspaceLifecycle',
+      'createProjectWorkspaceLifecycleController',
+    );
+    const DarklabProjectWorkspaceRenderer = await loadProjectNamespace(
+      'project_workspace_renderer',
+      'DarklabProjectWorkspaceRenderer',
+      'createProjectWorkspaceRendererController',
+    );
+    const DarklabProjectWorkspaceBootstrap = await loadProjectNamespace(
+      'project_workspace_bootstrap',
+      'DarklabProjectWorkspaceBootstrap',
+      'createProjectWorkspaceBootstrapController',
+    );
+    const DarklabProjectNestedSheets = await loadProjectNamespace(
+      'project_nested_sheets',
+      'DarklabProjectNestedSheets',
+      'createProjectNestedSheetsController',
+    );
+    const DarklabProjectWorkspaceEvents = await loadProjectNamespace(
+      'project_workspace_events',
+      'DarklabProjectWorkspaceEvents',
+      'createProjectWorkspaceEventsController',
+    );
+    const DarklabProjectTargets = await loadProjectNamespace(
+      'project_targets',
+      'DarklabProjectTargets',
+      'createProjectTargetsController',
+    );
+    const DarklabProjectRuns = await loadProjectNamespace(
+      'project_runs',
+      'DarklabProjectRuns',
+      'createProjectRunsController',
+    );
+    const DarklabProjectMobileCompare = await loadProjectNamespace(
+      'project_mobile_compare',
+      'DarklabProjectMobileCompare',
+      'createProjectMobileCompareController',
+    );
+    const DarklabProjectMobileShell = await loadProjectNamespace(
+      'project_mobile_shell',
+      'DarklabProjectMobileShell',
+      'createProjectMobileShellController',
+    );
+    const DarklabProjectMobileDetail = await loadProjectNamespace(
+      'project_mobile_detail',
+      'DarklabProjectMobileDetail',
+      'createProjectMobileDetailController',
+    );
+    const DarklabProjectFindingsData = await loadProjectNamespace(
+      'project_findings_data',
+      'DarklabProjectFindingsData',
+      'createProjectFindingsDataController',
+    );
+    const DarklabProjectFilters = await loadProjectNamespace(
+      'project_filters',
+      'DarklabProjectFilters',
+      'createProjectFiltersController',
+    );
+    const DarklabProjectEntities = await loadProjectNamespace(
+      'project_entities',
+      'DarklabProjectEntities',
+      'createProjectEntitiesController',
+    );
+    const DarklabProjectFindings = await loadProjectNamespace(
+      'project_findings',
+      'DarklabProjectFindings',
+      'createProjectFindingsController',
+    );
+    const DarklabProjectFindingsBoard = await loadProjectNamespace(
+      'project_findings_board',
+      'DarklabProjectFindingsBoard',
+      'createProjectFindingsBoardController',
+    );
+
+    return {
+      DarklabProjectDetails,
+      DarklabProjectList,
+      DarklabProjectNavigation,
+      DarklabProjectEntityEditor,
+      DarklabProjectWorkspaceActions,
+      DarklabProjectWorkspaceShell,
+      DarklabProjectWorkspaceLifecycle,
+      DarklabProjectWorkspaceRenderer,
+      DarklabProjectWorkspaceBootstrap,
+      DarklabProjectNestedSheets,
+      DarklabProjectWorkspaceEvents,
+      DarklabProjectTargets,
+      DarklabProjectRuns,
+      DarklabProjectMobileCompare,
+      DarklabProjectMobileShell,
+      DarklabProjectMobileDetail,
+      DarklabProjectFindingsData,
+      DarklabProjectFilters,
+      DarklabProjectEntities,
+      DarklabProjectFindings,
+      DarklabProjectFindingsBoard,
+    };
   }
 
   async function loadHistoryRunDetails() {
-    await loadLazyAsset('history_run_details', () => !!(
-      window.openHistoryRunDetails
-      && window.openHistoryRunDetails !== lazyOpenHistoryRunDetails
-    ));
-    return window.openHistoryRunDetails;
+    const detailsModule = await loadLazyAsset('history_run_details');
+    return _requireLazyModuleExport(
+      detailsModule,
+      'openHistoryRunDetails',
+      value => typeof value === 'function' && value !== lazyOpenHistoryRunDetails,
+    );
   }
 
   async function loadOptionsPanels() {
-    await loadLazyClassicScripts([
-      {
-        name: 'options_session_token_controls',
-        globalCheck: () => typeof window._updateOptionsSessionTokenStatus === 'function',
-      },
-      {
-        name: 'options_secrets_panel',
-        globalCheck: () => !!(
-          window.refreshOptionsSecrets
-          && window.refreshOptionsSecrets !== lazyRefreshOptionsSecrets
-          && window.invalidateOptionsSecrets
-          && window.invalidateOptionsSecrets !== lazyInvalidateOptionsSecrets
-        ),
-      },
-      {
-        name: 'options_teams_panel',
-        globalCheck: () => !!(
-          window.refreshOptionsTeams
-          && window.refreshOptionsTeams !== lazyRefreshOptionsTeams
-        ),
-      },
-      {
-        name: 'options_notification_channels',
-        globalCheck: () => !!(
-          window.refreshNotificationChannels
-          && window.refreshNotificationChannels !== lazyRefreshNotificationChannels
-        ),
-      },
-    ]);
-    return true;
+    const sessionTokenControls = await loadLazyAsset('options_session_token_controls');
+    const secretsPanel = await loadLazyAsset('options_secrets_panel');
+    const teamsPanel = await loadLazyAsset('options_teams_panel');
+    const notificationChannels = await loadLazyAsset('options_notification_channels');
+    return {
+      _updateOptionsSessionTokenStatus: _requireLazyModuleExport(
+        sessionTokenControls,
+        '_updateOptionsSessionTokenStatus',
+        value => typeof value === 'function',
+      ),
+      refreshOptionsSecrets: _requireLazyModuleExport(secretsPanel, 'refreshOptionsSecrets', value => (
+        typeof value === 'function' && value !== lazyRefreshOptionsSecrets
+      )),
+      invalidateOptionsSecrets: _requireLazyModuleExport(secretsPanel, 'invalidateOptionsSecrets', value => (
+        typeof value === 'function' && value !== lazyInvalidateOptionsSecrets
+      )),
+      openSecretEditor: secretsPanel?.openSecretEditor || null,
+      openProviderStatusModal: secretsPanel?.openProviderStatusModal || null,
+      refreshOptionsTeams: _requireLazyModuleExport(teamsPanel, 'refreshOptionsTeams', value => (
+        typeof value === 'function' && value !== lazyRefreshOptionsTeams
+      )),
+      refreshNotificationChannels: _requireLazyModuleExport(
+        notificationChannels,
+        'refreshNotificationChannels',
+        value => typeof value === 'function' && value !== lazyRefreshNotificationChannels,
+      ),
+      openNotificationChannelEditor: notificationChannels?.openNotificationChannelEditor || null,
+    };
   }
 
   async function loadCommandRegistry() {
-    await loadLazyAsset('command_registry', () => !!(
-      window.openCommandRegistry
-      && window.openCommandRegistry !== lazyOpenCommandRegistry
-    ));
-    return window.openCommandRegistry;
+    const registryModule = await loadLazyAsset('command_registry');
+    return {
+      showCommandRegistryOverlay: registryModule?.showCommandRegistryOverlay || null,
+      hideCommandRegistryOverlay: registryModule?.hideCommandRegistryOverlay || null,
+      isCommandRegistryOverlayOpen: registryModule?.isCommandRegistryOverlayOpen || null,
+      closeCommandRegistry: registryModule?.closeCommandRegistry || null,
+      renderCommandRegistry: registryModule?.renderCommandRegistry || null,
+      openCommandRegistry: _requireLazyModuleExport(registryModule, 'openCommandRegistry', value => (
+        typeof value === 'function' && value !== lazyOpenCommandRegistry
+      )),
+      showCommandCatalogOverlay: registryModule?.showCommandCatalogOverlay || null,
+      hideCommandCatalogOverlay: registryModule?.hideCommandCatalogOverlay || null,
+      closeCommandCatalogModal: registryModule?.closeCommandCatalogModal || null,
+      isCommandCatalogOverlayOpen: registryModule?.isCommandCatalogOverlayOpen || null,
+      wireCommandCatalogExamples: registryModule?.wireCommandCatalogExamples || null,
+      renderCommandCatalogModal: registryModule?.renderCommandCatalogModal || null,
+      openCommandCatalogModal: registryModule?.openCommandCatalogModal || null,
+    };
   }
 
   async function loadWorkflows() {
-    await loadLazyAsset('workflows', () => !!(
-      window.renderWorkflowItems
-      && window.renderWorkflowItems !== lazyRenderWorkflowItems
-      && window.handleWorkflowTerminalCommand
-      && window.handleWorkflowTerminalCommand !== lazyHandleWorkflowTerminalCommand
-    ));
-    return true;
+    const workflowsModule = await loadLazyAsset('workflows');
+    return {
+      renderWorkflowItems: _requireLazyModuleExport(workflowsModule, 'renderWorkflowItems', value => (
+        typeof value === 'function' && value !== lazyRenderWorkflowItems
+      )),
+      reloadWorkflowCatalog: workflowsModule?.reloadWorkflowCatalog || null,
+      ensureWorkflowCatalogLoaded: workflowsModule?.ensureWorkflowCatalogLoaded || null,
+      handleWorkflowTerminalCommand: _requireLazyModuleExport(
+        workflowsModule,
+        'handleWorkflowTerminalCommand',
+        value => typeof value === 'function' && value !== lazyHandleWorkflowTerminalCommand,
+      ),
+      _runtimeWorkflowContext: workflowsModule?._runtimeWorkflowContext || null,
+      openWorkflowEditor: workflowsModule?.openWorkflowEditor || null,
+      closeWorkflowEditor: workflowsModule?.closeWorkflowEditor || null,
+    };
   }
 
   async function lazyOpenWorkflowEditor(workflow = null) {
-    await loadWorkflows();
+    const workflows = await loadWorkflows();
+    const open = workflows?.openWorkflowEditor;
     if (
-      typeof window.openWorkflowEditor !== 'function'
-      || window.openWorkflowEditor === lazyOpenWorkflowEditor
+      typeof open !== 'function'
+      || open === lazyOpenWorkflowEditor
     ) {
       return false;
     }
-    return window.openWorkflowEditor(workflow);
+    return open(workflow);
   }
 
   async function loadHistoryCompare() {
-    await loadLazyClassicScripts([
-      {
-        name: 'history_compare_core',
-        globalCheck: () => !!window.DarklabHistoryCompareCore,
-      },
-      {
-        name: 'history_compare_overlay',
-        globalCheck: () => !!(
-          window.closeHistoryCompareOverlay
-          && window.closeHistoryCompareOverlay !== lazyCloseHistoryCompareOverlay
-          && window.isHistoryCompareOverlayOpen
-          && window.isHistoryCompareOverlayOpen !== lazyIsHistoryCompareOverlayOpen
-        ),
-      },
-      {
-        name: 'history_compare_controls',
-        globalCheck: () => typeof window._closeHistoryCompareActionMenus === 'function',
-      },
-      {
-        name: 'history_compare_navigation',
-        globalCheck: () => typeof window._historyCompareScrollToLine === 'function',
-      },
-      {
-        name: 'history_compare_renderer',
-        globalCheck: () => !!(
-          window.fetchAndRenderHistoryComparison
-          && window.fetchAndRenderHistoryComparison !== lazyFetchAndRenderHistoryComparison
-        ),
-      },
-      {
-        name: 'history_compare_launcher',
-        globalCheck: () => !!(
-          window.openHistoryCompareLauncher
-          && window.openHistoryCompareLauncher !== lazyOpenHistoryCompareLauncher
-        ),
-      },
-    ]);
-    return window.openHistoryCompareLauncher;
+    const coreModule = await loadLazyAsset('history_compare_core');
+    const overlayModule = await loadLazyAsset('history_compare_overlay');
+    const controlsModule = await loadLazyAsset('history_compare_controls');
+    const navigationModule = await loadLazyAsset('history_compare_navigation');
+    const rendererModule = await loadLazyAsset('history_compare_renderer');
+    const launcherModule = await loadLazyAsset('history_compare_launcher');
+    _requireLazyModuleExport(coreModule, 'DarklabHistoryCompareCore');
+    _requireLazyModuleExport(controlsModule, '_closeHistoryCompareActionMenus', value => typeof value === 'function');
+    _requireLazyModuleExport(navigationModule, '_historyCompareScrollToLine', value => typeof value === 'function');
+    return {
+      closeHistoryCompareOverlay: _requireLazyModuleExport(
+        overlayModule,
+        'closeHistoryCompareOverlay',
+        value => typeof value === 'function' && value !== lazyCloseHistoryCompareOverlay,
+      ),
+      isHistoryCompareOverlayOpen: _requireLazyModuleExport(
+        overlayModule,
+        'isHistoryCompareOverlayOpen',
+        value => typeof value === 'function' && value !== lazyIsHistoryCompareOverlayOpen,
+      ),
+      fetchAndRenderHistoryComparison: _requireLazyModuleExport(
+        rendererModule,
+        'fetchAndRenderHistoryComparison',
+        value => typeof value === 'function' && value !== lazyFetchAndRenderHistoryComparison,
+      ),
+      openHistoryCompareLauncher: _requireLazyModuleExport(
+        launcherModule,
+        'openHistoryCompareLauncher',
+        value => typeof value === 'function' && value !== lazyOpenHistoryCompareLauncher,
+      ),
+    };
   }
 
   async function loadPtyController() {
@@ -594,54 +745,63 @@
   }
 
   async function loadSchedulesModal() {
-    await loadLazyAsset('schedules_modal', () => !!(
-      window.openSchedulesModal
-      && window.openSchedulesModal !== lazyOpenSchedulesModal
-    ));
-    return window.openSchedulesModal;
+    const schedulesModule = await loadLazyAsset('schedules_modal');
+    return {
+      openSchedulesModal: _requireLazyModuleExport(schedulesModule, 'openSchedulesModal', value => (
+        typeof value === 'function' && value !== lazyOpenSchedulesModal
+      )),
+      closeSchedulesModal: schedulesModule?.closeSchedulesModal || null,
+      isSchedulesOverlayOpen: schedulesModule?.isSchedulesOverlayOpen || null,
+    };
   }
 
   async function loadTourModal() {
-    await loadLazyAsset('tour_modal', () => !!(
-      window.openTourModal
-      && window.openTourModal !== lazyOpenTourModal
-    ));
-    return window.openTourModal;
+    const tourModule = await loadLazyAsset('tour_modal');
+    return {
+      openTourModal: _requireLazyModuleExport(tourModule, 'openTourModal', value => (
+        typeof value === 'function' && value !== lazyOpenTourModal
+      )),
+      closeTourModal: tourModule?.closeTourModal || null,
+      _visibleTourModalChapters: tourModule?._visibleTourModalChapters || null,
+      _renderTourIllustration: tourModule?._renderTourIllustration || null,
+    };
   }
 
   async function loadStatusMonitor() {
-    await loadLazyClassicScripts([
-      {
-        name: 'status_monitor_core',
-        globalCheck: () => !!window.DarklabStatusMonitorCore,
-      },
-      {
-        name: 'status_monitor_data',
-        globalCheck: () => !!window.DarklabStatusMonitorData,
-      },
-      {
-        name: 'status_monitor_resources',
-        globalCheck: () => !!window.DarklabStatusMonitorResources,
-      },
-      {
-        name: 'status_monitor',
-        globalCheck: () => !!(
-          window.openStatusMonitor
-          && window.openStatusMonitor !== lazyOpenStatusMonitor
-        ),
-      },
-    ]);
-    return window.openStatusMonitor;
+    const coreModule = await loadLazyAsset('status_monitor_core');
+    const dataModule = await loadLazyAsset('status_monitor_data');
+    const resourcesModule = await loadLazyAsset('status_monitor_resources');
+    const monitorModule = await loadLazyAsset('status_monitor');
+    return {
+      DarklabStatusMonitorCore: _requireLazyModuleExport(coreModule, 'DarklabStatusMonitorCore'),
+      DarklabStatusMonitorData: _requireLazyModuleExport(dataModule, 'DarklabStatusMonitorData'),
+      DarklabStatusMonitorResources: _requireLazyModuleExport(resourcesModule, 'DarklabStatusMonitorResources'),
+      openStatusMonitor: _requireLazyModuleExport(monitorModule, 'openStatusMonitor', value => (
+        typeof value === 'function' && value !== lazyOpenStatusMonitor
+      )),
+      closeStatusMonitor: monitorModule?.closeStatusMonitor || null,
+      isStatusMonitorOpen: monitorModule?.isStatusMonitorOpen || null,
+      refreshStatusMonitor: monitorModule?.refreshStatusMonitor || null,
+    };
+  }
+
+  async function loadMobileRunningIndicator() {
+    const moduleApi = await loadLazyAsset('mobile_running_indicator');
+    return moduleApi && typeof moduleApi.createMobileRunningIndicator === 'function'
+      ? { create: moduleApi.createMobileRunningIndicator }
+      : null;
   }
 
   async function lazyOpenFindingsBoard(options = {}) {
-    const open = await loadFindingsBoard();
+    const board = await loadFindingsBoard();
+    const open = board?.openFindingsBoard;
     if (typeof open !== 'function' || open === lazyOpenFindingsBoard) return false;
     return open(options);
   }
 
   async function lazyOpenAtlas(options = {}) {
-    const open = await loadAtlasOverlay();
+    const atlas = await loadAtlasOverlay();
+    const open = atlas?.openAtlas;
     if (typeof open !== 'function' || open === lazyOpenAtlas) return false;
     return open(options);
   }
@@ -674,43 +834,80 @@
   }
 
   async function lazyOpenWatchersModal(options = {}) {
-    const open = await loadWatchersModal();
+    const watchers = await loadWatchersModal();
+    const open = watchers?.openWatchersModal;
     if (typeof open !== 'function' || open === lazyOpenWatchersModal) return false;
     return open(options);
   }
 
-  function lazyCloseWatchersModal(options = {}) {
-    if (window.closeWatchersModal === lazyCloseWatchersModal) return false;
+  async function lazyCloseWatchersModal(options = {}) {
+    if (window.closeWatchersModal === lazyCloseWatchersModal) {
+      const watchers = await loadWatchersModal();
+      const close = watchers?.closeWatchersModal;
+      if (typeof close === 'function') return close(options);
+      return false;
+    }
     if (typeof window.closeWatchersModal === 'function') return window.closeWatchersModal(options);
     return false;
   }
 
+  function lazyIsWatchersOverlayOpen() {
+    if (window.isWatchersOverlayOpen === lazyIsWatchersOverlayOpen) {
+      return !!document.getElementById('watchers-overlay')?.classList.contains('open');
+    }
+    if (typeof window.isWatchersOverlayOpen === 'function') return window.isWatchersOverlayOpen();
+    return false;
+  }
+
   async function lazyOpenSchedulesModal(options = {}) {
-    const open = await loadSchedulesModal();
+    const schedules = await loadSchedulesModal();
+    const open = schedules?.openSchedulesModal;
     if (typeof open !== 'function' || open === lazyOpenSchedulesModal) return false;
     return open(options);
   }
 
-  function lazyCloseSchedulesModal(options = {}) {
-    if (window.closeSchedulesModal === lazyCloseSchedulesModal) return false;
+  async function lazyCloseSchedulesModal(options = {}) {
+    if (window.closeSchedulesModal === lazyCloseSchedulesModal) {
+      const schedules = await loadSchedulesModal();
+      const close = schedules?.closeSchedulesModal;
+      if (typeof close === 'function') return close(options);
+      return false;
+    }
     if (typeof window.closeSchedulesModal === 'function') return window.closeSchedulesModal(options);
     return false;
   }
 
+  function lazyIsSchedulesOverlayOpen() {
+    if (window.isSchedulesOverlayOpen === lazyIsSchedulesOverlayOpen) {
+      return !!document.getElementById('schedules-overlay')?.classList.contains('open');
+    }
+    if (typeof window.isSchedulesOverlayOpen === 'function') return window.isSchedulesOverlayOpen();
+    return false;
+  }
+
   async function lazyOpenTourModal(options = {}) {
-    const open = await loadTourModal();
+    const tour = await loadTourModal();
+    const open = tour?.openTourModal;
     if (typeof open !== 'function' || open === lazyOpenTourModal) return false;
     return open(options);
   }
 
   function lazyCloseTourModal(options = {}) {
-    if (window.closeTourModal === lazyCloseTourModal) return false;
+    if (window.closeTourModal === lazyCloseTourModal) {
+      const overlay = document.getElementById('tour-overlay');
+      if (!overlay) return false;
+      overlay.classList.remove('open');
+      overlay.classList.add('u-hidden');
+      overlay.setAttribute('aria-hidden', 'true');
+      return true;
+    }
     if (typeof window.closeTourModal === 'function') return window.closeTourModal(options);
     return false;
   }
 
   async function lazyOpenStatusMonitor(options = {}) {
-    const open = await loadStatusMonitor();
+    const monitor = await loadStatusMonitor();
+    const open = monitor?.openStatusMonitor;
     if (typeof open !== 'function' || open === lazyOpenStatusMonitor) return false;
     return open(options);
   }
@@ -722,36 +919,39 @@
   }
 
   async function lazyRefreshOptionsSecrets(options = {}) {
-    await loadOptionsPanels();
+    const panels = await loadOptionsPanels();
+    const refresh = panels?.refreshOptionsSecrets;
     if (
-      typeof window.refreshOptionsSecrets !== 'function'
-      || window.refreshOptionsSecrets === lazyRefreshOptionsSecrets
+      typeof refresh !== 'function'
+      || refresh === lazyRefreshOptionsSecrets
     ) {
       return false;
     }
-    return window.refreshOptionsSecrets(options);
+    return refresh(options);
   }
 
   async function lazyRefreshOptionsTeams(options = {}) {
-    await loadOptionsPanels();
+    const panels = await loadOptionsPanels();
+    const refresh = panels?.refreshOptionsTeams;
     if (
-      typeof window.refreshOptionsTeams !== 'function'
-      || window.refreshOptionsTeams === lazyRefreshOptionsTeams
+      typeof refresh !== 'function'
+      || refresh === lazyRefreshOptionsTeams
     ) {
       return false;
     }
-    return window.refreshOptionsTeams(options);
+    return refresh(options);
   }
 
   async function lazyRefreshNotificationChannels(options = {}) {
-    await loadOptionsPanels();
+    const panels = await loadOptionsPanels();
+    const refresh = panels?.refreshNotificationChannels;
     if (
-      typeof window.refreshNotificationChannels !== 'function'
-      || window.refreshNotificationChannels === lazyRefreshNotificationChannels
+      typeof refresh !== 'function'
+      || refresh === lazyRefreshNotificationChannels
     ) {
       return false;
     }
-    return window.refreshNotificationChannels(options);
+    return refresh(options);
   }
 
   function lazyInvalidateOptionsSecrets() {
@@ -761,16 +961,14 @@
   }
 
   async function lazyOpenCommandRegistry() {
-    const open = await loadCommandRegistry();
+    const registry = await loadCommandRegistry();
+    const open = registry?.openCommandRegistry;
     if (typeof open !== 'function' || open === lazyOpenCommandRegistry) return false;
     return open();
   }
 
   function lazyCloseCommandRegistry() {
-    if (window.closeCommandRegistry === lazyCloseCommandRegistry) return false;
-    if (typeof window.closeCommandRegistry === 'function') return window.closeCommandRegistry();
-    if (typeof window.hideCommandRegistryOverlay === 'function') return window.hideCommandRegistryOverlay();
-    return false;
+    return lazyHideCommandRegistryOverlay();
   }
 
   function lazyHideCommandRegistryOverlay() {
@@ -783,12 +981,8 @@
   }
 
   function lazyIsCommandRegistryOverlayOpen() {
-    if (window.isCommandRegistryOverlayOpen === lazyIsCommandRegistryOverlayOpen) {
-      const overlay = document.getElementById('command-registry-overlay');
-      return !!(overlay && overlay.classList.contains('open'));
-    }
-    if (typeof window.isCommandRegistryOverlayOpen === 'function') return window.isCommandRegistryOverlayOpen();
-    return false;
+    const overlay = document.getElementById('command-registry-overlay');
+    return !!(overlay && overlay.classList.contains('open'));
   }
 
   function _workflowCachedItems() {
@@ -803,8 +997,8 @@
   }
 
   function _emitWorkflowCatalog(items) {
-    if (typeof window.emitUiEvent === 'function') {
-      window.emitUiEvent('app:workflows-rendered', {
+    if (typeof importedEmitUiEvent === 'function') {
+      importedEmitUiEvent('app:workflows-rendered', {
         count: items.length,
         items: items.slice(),
       });
@@ -821,9 +1015,9 @@
 
   async function lazyReloadWorkflowCatalog() {
     if (_workflowCatalogLoadPromise) return _workflowCatalogLoadPromise;
-    if (typeof window.apiFetch !== 'function') return _workflowCachedItems();
+    if (typeof importedApiFetch !== 'function' || !importedHasRuntimeHandler?.('apiFetch')) return _workflowCachedItems();
     _workflowCatalogLoadPromise = (async () => {
-      const resp = await window.apiFetch('/workflows');
+      const resp = await importedApiFetch('/workflows');
       if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       return lazyRenderWorkflowItems(data.items || []);
@@ -842,31 +1036,29 @@
   }
 
   async function lazyHandleWorkflowTerminalCommand(cmd, tabId) {
-    await loadWorkflows();
+    const workflows = await loadWorkflows();
+    const handle = workflows?.handleWorkflowTerminalCommand;
     if (
-      typeof window.handleWorkflowTerminalCommand !== 'function'
-      || window.handleWorkflowTerminalCommand === lazyHandleWorkflowTerminalCommand
+      typeof handle !== 'function'
+      || handle === lazyHandleWorkflowTerminalCommand
     ) {
       return false;
     }
-    return window.handleWorkflowTerminalCommand(cmd, tabId);
+    return handle(cmd, tabId);
   }
 
   async function lazyOpenHistoryCompareLauncher(run) {
-    const open = await loadHistoryCompare();
+    const compare = await loadHistoryCompare();
+    const open = compare?.openHistoryCompareLauncher;
     if (typeof open !== 'function' || open === lazyOpenHistoryCompareLauncher) return false;
     return open(run);
   }
 
   async function lazyFetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
-    await loadHistoryCompare();
-    if (
-      typeof window.fetchAndRenderHistoryComparison !== 'function'
-      || window.fetchAndRenderHistoryComparison === lazyFetchAndRenderHistoryComparison
-    ) {
-      return false;
-    }
-    return window.fetchAndRenderHistoryComparison(leftId, rightId, options);
+    const compare = await loadHistoryCompare();
+    const fetchAndRender = compare?.fetchAndRenderHistoryComparison;
+    if (typeof fetchAndRender !== 'function' || fetchAndRender === lazyFetchAndRenderHistoryComparison) return false;
+    return fetchAndRender(leftId, rightId, options);
   }
 
   function lazyCloseHistoryCompareOverlay(options = {}) {
@@ -885,16 +1077,30 @@
   }
 
   function lazyCloseStatusMonitor(options = {}) {
-    if (window.closeStatusMonitor === lazyCloseStatusMonitor) return false;
+    if (window.closeStatusMonitor === lazyCloseStatusMonitor) {
+      document.body?.classList?.remove('status-monitor-mobile-open', 'status-monitor-desktop-open');
+      document.querySelector('.status-monitor-scrim')?.classList?.add('u-hidden');
+      document.getElementById('status-monitor')?.classList?.add('u-hidden');
+      return true;
+    }
     if (typeof window.closeStatusMonitor === 'function') return window.closeStatusMonitor(options);
     return false;
   }
 
   function lazyIsStatusMonitorOpen() {
-    if (window.isStatusMonitorOpen === lazyIsStatusMonitorOpen) return false;
+    if (window.isStatusMonitorOpen === lazyIsStatusMonitorOpen) {
+      const monitor = document.getElementById('status-monitor');
+      return !!(monitor && !monitor.classList.contains('u-hidden'));
+    }
     if (typeof window.isStatusMonitorOpen === 'function') return window.isStatusMonitorOpen();
-    const monitor = document.getElementById('status-monitor');
-    return !!(monitor && !monitor.classList.contains('u-hidden'));
+    return false;
+  }
+
+  async function lazyRefreshStatusMonitor(options = {}) {
+    const monitor = await loadStatusMonitor();
+    const refresh = monitor?.refreshStatusMonitor;
+    if (typeof refresh !== 'function' || refresh === lazyRefreshStatusMonitor) return false;
+    return refresh(options);
   }
 
   function _splitInteractivePtyCommand(cmd) {
@@ -902,10 +1108,10 @@
   }
 
   function _interactivePtySpecs() {
-    const configured = (
-      window.APP_CONFIG
-      && Array.isArray(window.APP_CONFIG.interactive_pty_commands)
-    ) ? window.APP_CONFIG.interactive_pty_commands : [];
+    const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    const configured = Array.isArray(appConfig.interactive_pty_commands)
+      ? appConfig.interactive_pty_commands
+      : [];
     if (configured.length) return configured;
     return [{ root: 'mtr', trigger_flag: '--interactive' }];
   }
@@ -958,31 +1164,73 @@
   window.loadSchedulesModal = loadSchedulesModal;
   window.loadTourModal = loadTourModal;
   window.loadStatusMonitor = loadStatusMonitor;
+  window.loadMobileRunningIndicator = loadMobileRunningIndicator;
+  exportedLoadMobileRunningIndicator = loadMobileRunningIndicator;
   if (typeof window.openAtlas !== 'function') window.openAtlas = lazyOpenAtlas;
   if (typeof window.closeAtlas !== 'function') window.closeAtlas = lazyCloseAtlas;
   if (typeof window.isAtlasOverlayOpen !== 'function') window.isAtlasOverlayOpen = lazyIsAtlasOverlayOpen;
   if (typeof window.cycleAtlasTab !== 'function') window.cycleAtlasTab = lazyCycleAtlasTab;
+  if (typeof importedSetAtlasHandlers === 'function') {
+    importedSetAtlasHandlers({
+      openAtlas: lazyOpenAtlas,
+      closeAtlas: lazyCloseAtlas,
+      isAtlasOverlayOpen: lazyIsAtlasOverlayOpen,
+      cycleAtlasTab: lazyCycleAtlasTab,
+    });
+  }
   if (typeof window.openFindingsBoard !== 'function') window.openFindingsBoard = lazyOpenFindingsBoard;
   if (typeof window.closeFindingsBoard !== 'function') window.closeFindingsBoard = lazyCloseFindingsBoard;
   if (typeof window.openSchedulesModal !== 'function') window.openSchedulesModal = lazyOpenSchedulesModal;
   if (typeof window.closeSchedulesModal !== 'function') window.closeSchedulesModal = lazyCloseSchedulesModal;
+  if (typeof window.isSchedulesOverlayOpen !== 'function') window.isSchedulesOverlayOpen = lazyIsSchedulesOverlayOpen;
   if (typeof window.openTourModal !== 'function') window.openTourModal = lazyOpenTourModal;
   if (typeof window.closeTourModal !== 'function') window.closeTourModal = lazyCloseTourModal;
   if (typeof window.openStatusMonitor !== 'function') window.openStatusMonitor = lazyOpenStatusMonitor;
+  if (typeof importedSetRuntimeHandlers === 'function') {
+    importedSetRuntimeHandlers({
+      openStatusMonitor: lazyOpenStatusMonitor,
+      refreshStatusMonitor: lazyRefreshStatusMonitor,
+    });
+  }
   if (typeof window.closeStatusMonitor !== 'function') window.closeStatusMonitor = lazyCloseStatusMonitor;
   if (typeof window.isStatusMonitorOpen !== 'function') window.isStatusMonitorOpen = lazyIsStatusMonitorOpen;
   if (typeof window.openWatchersModal !== 'function') window.openWatchersModal = lazyOpenWatchersModal;
   if (typeof window.closeWatchersModal !== 'function') window.closeWatchersModal = lazyCloseWatchersModal;
+  if (typeof window.isWatchersOverlayOpen !== 'function') window.isWatchersOverlayOpen = lazyIsWatchersOverlayOpen;
   if (typeof window.openHistoryCompareLauncher !== 'function') window.openHistoryCompareLauncher = lazyOpenHistoryCompareLauncher;
   if (typeof window.fetchAndRenderHistoryComparison !== 'function') window.fetchAndRenderHistoryComparison = lazyFetchAndRenderHistoryComparison;
+  if (typeof importedSetHistoryCompareHandlers === 'function') {
+    importedSetHistoryCompareHandlers({
+      fetchAndRenderHistoryComparison: lazyFetchAndRenderHistoryComparison,
+      openHistoryCompareLauncher: lazyOpenHistoryCompareLauncher,
+    });
+  }
   if (typeof window.closeHistoryCompareOverlay !== 'function') window.closeHistoryCompareOverlay = lazyCloseHistoryCompareOverlay;
   if (typeof window.isHistoryCompareOverlayOpen !== 'function') window.isHistoryCompareOverlayOpen = lazyIsHistoryCompareOverlayOpen;
   if (typeof window.openHistoryRunDetails !== 'function') window.openHistoryRunDetails = lazyOpenHistoryRunDetails;
+  if (typeof importedSetHistoryRunModalStateHandlers === 'function') {
+    importedSetHistoryRunModalStateHandlers({
+      openHistoryRunDetails: lazyOpenHistoryRunDetails,
+    });
+  }
   if (typeof window.refreshOptionsSecrets !== 'function') window.refreshOptionsSecrets = lazyRefreshOptionsSecrets;
   if (typeof window.invalidateOptionsSecrets !== 'function') window.invalidateOptionsSecrets = lazyInvalidateOptionsSecrets;
+  if (typeof importedSetSecretsHandlers === 'function') {
+    importedSetSecretsHandlers({
+      refreshOptionsSecrets: lazyRefreshOptionsSecrets,
+      invalidateOptionsSecrets: lazyInvalidateOptionsSecrets,
+    });
+  }
   if (typeof window.refreshOptionsTeams !== 'function') window.refreshOptionsTeams = lazyRefreshOptionsTeams;
   if (typeof window.refreshNotificationChannels !== 'function') window.refreshNotificationChannels = lazyRefreshNotificationChannels;
   if (typeof window.openCommandRegistry !== 'function') window.openCommandRegistry = lazyOpenCommandRegistry;
+  if (typeof importedSetCommandRegistryHandlers === 'function') {
+    importedSetCommandRegistryHandlers({
+      openCommandRegistry: lazyOpenCommandRegistry,
+      closeCommandRegistry: lazyCloseCommandRegistry,
+      isCommandRegistryOverlayOpen: lazyIsCommandRegistryOverlayOpen,
+    });
+  }
   if (typeof window.closeCommandRegistry !== 'function') window.closeCommandRegistry = lazyCloseCommandRegistry;
   if (typeof window.hideCommandRegistryOverlay !== 'function') window.hideCommandRegistryOverlay = lazyHideCommandRegistryOverlay;
   if (typeof window.isCommandRegistryOverlayOpen !== 'function') {
@@ -997,7 +1245,26 @@
     window.handleWorkflowTerminalCommand = lazyHandleWorkflowTerminalCommand;
   }
   if (typeof window.openWorkflowEditor !== 'function') window.openWorkflowEditor = lazyOpenWorkflowEditor;
+  if (typeof importedSetWorkflowHandlers === 'function') {
+    importedSetWorkflowHandlers({
+      renderWorkflowItems: lazyRenderWorkflowItems,
+      reloadWorkflowCatalog: lazyReloadWorkflowCatalog,
+      ensureWorkflowCatalogLoaded: lazyEnsureWorkflowCatalogLoaded,
+      handleWorkflowTerminalCommand: lazyHandleWorkflowTerminalCommand,
+      openWorkflowEditor: lazyOpenWorkflowEditor,
+    });
+  }
   if (typeof window.isInteractivePtyCommand !== 'function') window.isInteractivePtyCommand = lazyIsInteractivePtyCommand;
   if (typeof window.startInteractivePtyCommand !== 'function') window.startInteractivePtyCommand = lazyStartInteractivePtyCommand;
   if (typeof window.attachInteractivePtyCommand !== 'function') window.attachInteractivePtyCommand = lazyAttachInteractivePtyCommand;
 })();
+
+function loadMobileRunningIndicator(...args) {
+  return typeof exportedLoadMobileRunningIndicator === 'function'
+    ? exportedLoadMobileRunningIndicator(...args)
+    : Promise.resolve(null);
+}
+
+export {
+  loadMobileRunningIndicator,
+};

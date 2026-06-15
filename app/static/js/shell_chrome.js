@@ -3,8 +3,172 @@
 // Loaded after the shell core, the active-project HUD helpers, and controller.js.
 // The heavier Projects workspace controllers are loaded on first workspace open.
 
+import {
+  openOptions as importedOpenOptions,
+  openThemeSelector as importedOpenThemeSelector,
+} from './app.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from './ui/overlay_actions_bridge.js';
+import { setControllerActionHandlers as importedSetControllerActionHandlers } from './controller_action_bridge.js';
+import {
+  openFaq as importedOpenFaq,
+  openWorkflows as importedOpenWorkflows,
+  toggleHistoryPanelSurface as importedToggleHistoryPanelSurface,
+} from './controller.js';
+import { openWorkspace as importedOpenWorkspace } from './workspace.js';
+import { setProjectContextHandlers as importedSetProjectContextHandlers } from './features/projects/project_context_bridge.js';
+import { setProjectHudHandlers as importedSetProjectHudHandlers } from './features/projects/project_hud_bridge.js';
+import { DarklabProjectActiveContext as importedProjectActiveContext } from './features/projects/project_active_context.js';
+import { DarklabProjectSharedUi as importedProjectSharedUi } from './features/projects/project_shared_ui.js';
+import { DarklabProjectWorkspaceState as importedProjectWorkspaceState } from './features/projects/project_workspace_state.js';
+import {
+  copyTab as importedCopyTab,
+  exportTabHtml as importedExportTabHtml,
+  exportTabPdf as importedExportTabPdf,
+  permalinkTab as importedPermalinkTab,
+  saveTab as importedSaveTab,
+} from './features/tabs/tab_exports.js';
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from './features/team_scope.js';
+import {
+  ensureWorkflowCatalogLoaded as importedEnsureWorkflowCatalogLoaded,
+  hasWorkflowHandler as importedHasWorkflowHandler,
+  renderWorkflowItems as importedRenderWorkflowItems,
+} from './features/workflows/workflows_bridge.js';
+import {
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  getTab as importedGetTab,
+  getTabs as importedGetTabs,
+  emitUiEvent as importedEmitUiEvent,
+  onUiEvent as importedOnUiEvent,
+} from './core/state.js';
+import {
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  downloadUrlAsAttachment as importedDownloadUrlAsAttachment,
+  showToast as importedShowToast,
+} from './core/utils.js';
+import {
+  apiFetch as importedApiFetch,
+  logClientError as importedLogClientError,
+  maskSessionToken as importedMaskSessionToken,
+} from './session.js';
+import { confirmKill as importedConfirmKill } from './runner_bridge.js';
+import {
+  getHudClockPreference as importedGetHudClockPreference,
+  getPreference as importedGetPreference,
+  setPreferenceCookie as importedSetPreferenceCookie,
+} from './features/preferences/preferences.js';
+import { _getStarred as importedGetStarred } from './features/history/history_actions.js';
+import { DarklabEntityMetadata as importedEntityMetadata } from './ui/ui_entity_metadata.js';
+import { ProjectTargetValidation as importedProjectTargetValidation } from './features/projects/project_target_validation.js';
+import { DarklabProjectWorkspaceConstants as importedProjectWorkspaceConstants } from './features/projects/project_workspace_constants.js';
+import { bindDisclosure as importedBindDisclosure } from './ui/ui_disclosure.js';
+import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.js';
+import { bindMobileSheet as importedBindMobileSheet } from './ui/mobile_sheet.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import { showConfirm as importedShowConfirm } from './ui/ui_confirm.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  enhanceAppSelects as importedEnhanceAppSelects,
+  markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  showWorkflowsOverlay as importedShowWorkflowsOverlay,
+} from './ui/ui_helpers.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
+
+let importedOpenAtlas;
+let importedOpenFindingsBoard;
+let importedOpenCommandRegistry;
+let importedOpenSchedulesModal;
+let importedOpenStatusMonitor;
+let importedOpenWatchersModal;
+let importedProjectActivity;
+let importedProjectArtifacts;
+let importedProjectDetails;
+let importedProjectEntities;
+let importedProjectEntityEditor;
+let importedProjectFilters;
+let importedProjectFindings;
+let importedProjectFindingsBoard;
+let importedProjectFindingsData;
+let importedProjectList;
+let importedProjectMobileCompare;
+let importedProjectMobileDetail;
+let importedProjectMobileShell;
+let importedProjectNavigation;
+let importedProjectNestedSheets;
+let importedProjectPackages;
+let importedProjectReport;
+let importedProjectRuns;
+let importedProjectTargets;
+let importedProjectWorkspaceActions;
+let importedProjectWorkspaceBootstrap;
+let importedProjectWorkspaceEvents;
+let importedProjectWorkspaceLifecycle;
+let importedProjectWorkspaceRenderer;
+let importedProjectWorkspaceShell;
+
 (function initShellChrome(global) {
   if (typeof document === 'undefined') return;
+
+  function _shellFn(name, imported = null) {
+    if (typeof imported === 'function') return imported;
+    const fn = global && global[name];
+    return typeof fn === 'function' ? fn : null;
+  }
+
+  function _shellValue(name, imported = undefined) {
+    return imported !== undefined ? imported : (global ? global[name] : undefined);
+  }
+
+  function _projectModule(name, imported = undefined) {
+    return _shellValue(name, imported) || null;
+  }
+
+  const _shellApiFetch = (...args) => _shellFn('apiFetch', importedApiFetch)?.(...args);
+  const _shellLogClientError = (...args) => _shellFn('logClientError', importedLogClientError)?.(...args);
+  const _shellShowToast = (...args) => _shellFn('showToast', importedShowToast)?.(...args);
+  const _shellBindPressable = (...args) => _shellFn('bindPressable', importedBindPressable)?.(...args);
+  const _shellBindOutsideClickClose = (...args) => _shellFn('bindOutsideClickClose', importedBindOutsideClickClose)?.(...args);
+  const _shellBindDisclosure = (...args) => _shellFn('bindDisclosure', importedBindDisclosure)?.(...args);
+  const _shellGetPreference = (name) => _shellFn('getPreference', importedGetPreference)?.(name) || '';
+  const _shellSetPreferenceCookie = (name, value) => _shellFn('setPreferenceCookie', importedSetPreferenceCookie)?.(name, value);
+  const _shellRefocusComposer = (...args) => _shellFn('refocusComposerAfterAction', importedRefocusComposerAfterAction)?.(...args);
+  const _shellSetComposerValue = (...args) => _shellFn('setComposerValue', importedSetComposerValue)?.(...args);
+  const _shellDownloadBlobAsAttachment = (...args) => _shellFn('downloadBlobAsAttachment', importedDownloadBlobAsAttachment)?.(...args);
+  const _shellDownloadUrlAsAttachment = (...args) => _shellFn('downloadUrlAsAttachment', importedDownloadUrlAsAttachment)?.(...args);
+  const _shellMaskSessionToken = (token) => _shellFn('maskSessionToken', importedMaskSessionToken)?.(token) || token;
+  const _shellShowConfirm = (...args) => _shellFn('showConfirm', importedShowConfirm)?.(...args);
+  const _shellUseMobileTerminalViewportMode = () => !!_shellFn('useMobileTerminalViewportMode', importedUseMobileTerminalViewportMode)?.();
+  const _shellGetActiveTabId = () => _shellFn('getActiveTabId', importedGetActiveTabId)?.() || null;
+  const _shellGetAppState = () => _shellFn('getAppState', importedGetAppState)?.() || {};
+  const _shellGetTab = (id) => _shellFn('getTab', importedGetTab)?.(id) || null;
+  const _shellTabs = () => {
+    const list = _shellFn('getTabs', importedGetTabs)?.();
+    return Array.isArray(list) ? list : [];
+  };
+  const _shellEmitUiEvent = (...args) => _shellFn('emitUiEvent', importedEmitUiEvent)?.(...args);
+  const _shellOnUiEvent = (...args) => _shellFn('onUiEvent', importedOnUiEvent)?.(...args);
+
+  function _shellActiveTeamScopeCan(capability) {
+    const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan) || null;
+    return typeof can === 'function' ? can(capability) : true;
+  }
+
+  function _shellTeamScopeDeniedMessage(action) {
+    const denied = (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage) || null;
+    return typeof denied === 'function'
+      ? denied(action)
+      : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+  }
+
+  function _shellEnhanceAppSelects() {
+    return (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects) || null;
+  }
 
   // ── Elements ────────────────────────────────────────────────────
   const rail              = document.getElementById('rail');
@@ -86,13 +250,7 @@
   const projectLabelsInput = document.getElementById('project-labels-input');
   const projectLabelsSaveButton = document.getElementById('project-labels-save-btn');
   const projectWorkspaceMessage = document.getElementById('project-workspace-message');
-  const EntityMetadataClient = (
-    typeof window !== 'undefined' && window.DarklabEntityMetadata
-  ) || (
-    typeof global !== 'undefined' && global.DarklabEntityMetadata
-  ) || (
-    typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
-  ) || {};
+  const EntityMetadataClient = (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
 
   // ── Prefs (cookie-backed) ───────────────────────────────────────
   const PREF_COLLAPSED = 'pref_rail_collapsed';
@@ -103,27 +261,30 @@
   const MIN_W = 180, MAX_W = 360, DEFAULT_W = 214;
   const NARROW_BRAND_W = 200;
   const MIN_SECTION_H = 80;
-  const PROJECT_TARGET_HELPERS = global.ProjectTargetValidation || window.ProjectTargetValidation;
+  const PROJECT_TARGET_HELPERS = (typeof importedProjectTargetValidation !== 'undefined' && importedProjectTargetValidation) || null;
   if (!PROJECT_TARGET_HELPERS) throw new Error('ProjectTargetValidation is unavailable');
   const PROJECT_TARGET_TYPES = PROJECT_TARGET_HELPERS.TARGET_TYPES;
-  const PROJECT_WORKSPACE_CONSTANTS = global.DarklabProjectWorkspaceConstants || window.DarklabProjectWorkspaceConstants;
+  const PROJECT_WORKSPACE_CONSTANTS = (
+    typeof importedProjectWorkspaceConstants !== 'undefined'
+    && importedProjectWorkspaceConstants
+  ) || null;
   if (!PROJECT_WORKSPACE_CONSTANTS) throw new Error('DarklabProjectWorkspaceConstants is unavailable');
 
   const readBool = (name, dflt) => {
-    const v = typeof getPreference === 'function' ? getPreference(name) : '';
+    const v = _shellGetPreference(name);
     if (v === '1' || v === 'true') return true;
     if (v === '0' || v === 'false') return false;
     return dflt;
   };
   const writePref = (name, value) => {
-    if (typeof setPreferenceCookie === 'function') setPreferenceCookie(name, String(value));
+    _shellSetPreferenceCookie(name, String(value));
   };
 
   // ── State ────────────────────────────────────────────────────────
   const ui = {
     collapsed: readBool(PREF_COLLAPSED, false),
     railW: (() => {
-      const raw = typeof getPreference === 'function' ? parseInt(getPreference(PREF_WIDTH), 10) : NaN;
+      const raw = parseInt(_shellGetPreference(PREF_WIDTH), 10);
       return Number.isFinite(raw) ? Math.max(MIN_W, Math.min(MAX_W, raw)) : DEFAULT_W;
     })(),
     recentOpen: readBool(PREF_RECENT, true),
@@ -132,8 +293,8 @@
   };
 
   let allWorkflows = [];
-  const projectWorkspaceStateFactory = global.DarklabProjectWorkspaceState
-    && global.DarklabProjectWorkspaceState.createProjectWorkspaceState;
+  const projectWorkspaceStateFactory = importedProjectWorkspaceState
+    && importedProjectWorkspaceState.createProjectWorkspaceState;
   if (typeof projectWorkspaceStateFactory !== 'function') throw new Error('DarklabProjectWorkspaceState is unavailable');
   const projectWorkspaceState = projectWorkspaceStateFactory();
   const PROJECT_WORKSPACE_LAZY_GLOBALS = [
@@ -240,6 +401,9 @@
     applyCollapsed();
     writePref(PREF_COLLAPSED, ui.collapsed ? '1' : '0');
   }
+  function toggleRailCollapsed() {
+    setCollapsed(!ui.collapsed);
+  }
   railCollapseBtn?.addEventListener('click', () => setCollapsed(!ui.collapsed));
 
   // ── Horizontal drag ──────────────────────────────────────────────
@@ -319,7 +483,7 @@
   }
 
   if (railRecentHeader) {
-    bindDisclosure(railRecentHeader, {
+    _shellBindDisclosure(railRecentHeader, {
       panel: null,
       openClass: null,
       initialOpen: ui.recentOpen,
@@ -327,7 +491,7 @@
     });
   }
   if (railWorkflowsHeader) {
-    bindDisclosure(railWorkflowsHeader, {
+    _shellBindDisclosure(railWorkflowsHeader, {
       panel: null,
       openClass: null,
       initialOpen: ui.workflowsOpen,
@@ -338,7 +502,8 @@
   // ── Recent list rendering ───────────────────────────────────────
   function renderRailRecent() {
     if (!railRecentBody) return;
-    const items = Array.isArray(global.recentPreviewHistory) ? global.recentPreviewHistory : [];
+    const recentPreviewHistory = _shellGetAppState().recentPreviewHistory;
+    const items = Array.isArray(recentPreviewHistory) ? recentPreviewHistory : [];
     railRecentBody.replaceChildren();
     if (railRecentCount) railRecentCount.textContent = String(items.length);
 
@@ -353,7 +518,7 @@
     // each group. The star toggle lives in the history drawer / mobile sheet
     // (one source of truth); the rail only reflects the state via ordering
     // and an amber left-edge stripe.
-    const starred = typeof global._getStarred === 'function' ? global._getStarred() : new Set();
+    const starred = typeof importedGetStarred === 'function' ? importedGetStarred() : new Set();
     const ordered = [
       ...items.filter(cmd => starred.has(cmd)),
       ...items.filter(cmd => !starred.has(cmd)),
@@ -369,11 +534,9 @@
       text.textContent = cmd;
       row.appendChild(text);
       row.addEventListener('click', () => {
-        if (typeof setComposerValue === 'function') {
-          setComposerValue(cmd, cmd.length, cmd.length);
-        }
-        refocusComposerAfterAction({ preventScroll: true });
-        if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
+        _shellSetComposerValue(cmd, cmd.length, cmd.length);
+        _shellRefocusComposer({ preventScroll: true });
+        _shellFn('resetCmdHistoryNav')?.();
       });
       railRecentBody.appendChild(row);
     });
@@ -415,16 +578,15 @@
   async function openScopedWorkflow(idx) {
     const item = allWorkflows[idx];
     if (!item) return;
-    if (typeof loadWorkflows === 'function') {
-      try { await loadWorkflows(); } catch (_) { /* non-critical */ }
+    const loadWorkflowsFn = _shellFn('loadWorkflows');
+    if (loadWorkflowsFn) {
+      try { await loadWorkflowsFn(); } catch (_) { /* non-critical */ }
     }
-    if (typeof renderWorkflowItems === 'function') {
-      renderWorkflowItems([item], { emitCatalogEvent: false });
-    }
-    if (typeof openWorkflows === 'function') {
-      openWorkflows();
-    } else if (typeof showWorkflowsOverlay === 'function') {
-      showWorkflowsOverlay();
+    const openWorkflowsFn = _shellFn('openWorkflows', importedOpenWorkflows);
+    if (openWorkflowsFn) {
+      openWorkflowsFn({ items: [item], emitCatalogEvent: false });
+    } else {
+      _shellFn('showWorkflowsOverlay', importedShowWorkflowsOverlay)?.();
     }
   }
 
@@ -509,52 +671,58 @@
       return;
     }
     closeRailMoreMenu();
-    if (action === 'history' && typeof global.toggleHistoryPanelSurface === 'function') {
-      global.toggleHistoryPanelSurface();
+    if (action === 'history' && typeof importedToggleHistoryPanelSurface === 'function') {
+      importedToggleHistoryPanelSurface();
       return;
     }
-    if (action === 'atlas' && typeof global.openAtlas === 'function') {
-      void global.openAtlas({ source: 'rail' });
+    const openAtlas = _shellFn('openAtlas', importedOpenAtlas);
+    const openFindingsBoard = _shellFn('openFindingsBoard', importedOpenFindingsBoard);
+    const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
+    const openCommandRegistry = _shellFn('openCommandRegistry', importedOpenCommandRegistry);
+    const openSchedulesModal = _shellFn('openSchedulesModal', importedOpenSchedulesModal);
+    const openWatchersModal = _shellFn('openWatchersModal', importedOpenWatchersModal);
+    if (action === 'atlas' && typeof openAtlas === 'function') {
+      void openAtlas({ source: 'rail' });
       return;
     }
-    if (action === 'findings-board' && typeof global.openFindingsBoard === 'function') {
-      void global.openFindingsBoard({ source: 'rail' });
+    if (action === 'findings-board' && typeof openFindingsBoard === 'function') {
+      void openFindingsBoard({ source: 'rail' });
       return;
     }
-    if (action === 'status-monitor' && typeof global.openStatusMonitor === 'function') {
-      void global.openStatusMonitor({ source: 'rail' });
+    if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
+      void openStatusMonitor({ source: 'rail' });
       return;
     }
-    if (action === 'command-registry' && typeof global.openCommandRegistry === 'function') {
-      global.openCommandRegistry();
+    if (action === 'command-registry' && typeof openCommandRegistry === 'function') {
+      openCommandRegistry();
       return;
     }
-    if (action === 'schedules' && typeof global.openSchedulesModal === 'function') {
-      void global.openSchedulesModal();
+    if (action === 'schedules' && typeof openSchedulesModal === 'function') {
+      void openSchedulesModal();
       return;
     }
-    if (action === 'watchers' && typeof global.openWatchersModal === 'function') {
-      void global.openWatchersModal();
+    if (action === 'watchers' && typeof openWatchersModal === 'function') {
+      void openWatchersModal();
       return;
     }
-    if (action === 'projects' && typeof global.openProjectWorkspace === 'function') {
-      void global.openProjectWorkspace();
+    if (action === 'projects') {
+      void openProjectWorkspace();
       return;
     }
-    if (action === 'options' && typeof global.openOptions === 'function') {
-      global.openOptions();
+    if (action === 'options' && typeof importedOpenOptions === 'function') {
+      importedOpenOptions();
       return;
     }
-    if (action === 'theme' && typeof global.openThemeSelector === 'function') {
-      global.openThemeSelector();
+    if (action === 'theme' && typeof importedOpenThemeSelector === 'function') {
+      importedOpenThemeSelector();
       return;
     }
-    if (action === 'workspace' && typeof global.openWorkspace === 'function') {
-      global.openWorkspace();
+    if (action === 'workspace' && typeof importedOpenWorkspace === 'function') {
+      importedOpenWorkspace();
       return;
     }
-    if (action === 'faq' && typeof global.openFaq === 'function') {
-      global.openFaq();
+    if (action === 'faq' && typeof importedOpenFaq === 'function') {
+      importedOpenFaq();
     }
   });
 
@@ -589,23 +757,19 @@
     event?.preventDefault?.();
     event?.stopPropagation?.();
     closeHudProjectMenu();
-    if (typeof global.openProjectWorkspace === 'function') {
-      void global.openProjectWorkspace();
-    }
+    void openProjectWorkspace();
   }
 
   function _canCreateProjectFromHud() {
-    return typeof global.activeTeamScopeCan === 'function' ? global.activeTeamScopeCan('mutate_projects') : true;
+    return _shellActiveTeamScopeCan('mutate_projects');
   }
 
   function _projectCreateDeniedTitle() {
-    return typeof global.teamScopeDeniedMessage === 'function'
-      ? global.teamScopeDeniedMessage('create team projects')
-      : "View-only team members can't create team projects. Switch to Personal or ask for operator access.";
+    return _shellTeamScopeDeniedMessage('create team projects');
   }
 
   function _showHudProjectToast(message, tone = 'info') {
-    if (typeof showToast === 'function') showToast(message, tone);
+      _shellShowToast(message, tone);
   }
 
   async function _hudProjectResponseMessage(resp, fallback) {
@@ -630,8 +794,9 @@
       btn.disabled = true;
       btn.setAttribute('aria-disabled', 'true');
     }
-    if (typeof bindPressable === 'function') {
-      bindPressable(btn, {
+    const pressable = _shellFn('bindPressable', importedBindPressable);
+    if (pressable) {
+      pressable(btn, {
         refocusComposer: false,
         onActivate,
       });
@@ -698,7 +863,7 @@
     event?.stopPropagation?.();
     if (!project || !project.id) return;
     try {
-      const resp = await apiFetch('/projects/active', {
+      const resp = await _shellApiFetch('/projects/active', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: project.id }),
@@ -711,7 +876,7 @@
     } catch (err) {
       const message = err?.message || 'Unable to set active project.';
       _setHudProjectMenuNote(message);
-      if (typeof logClientError === 'function') logClientError('failed to set active project from HUD switcher', err);
+      _shellLogClientError('failed to set active project from HUD switcher', err);
       _showHudProjectToast(message, 'error');
     }
   }
@@ -720,7 +885,7 @@
     event?.preventDefault?.();
     event?.stopPropagation?.();
     try {
-      const resp = await apiFetch('/projects/active', { method: 'DELETE' });
+      const resp = await _shellApiFetch('/projects/active', { method: 'DELETE' });
       if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to clear active project.'));
       _setActiveProject(null);
       closeHudProjectMenu();
@@ -728,7 +893,7 @@
     } catch (err) {
       const message = err?.message || 'Unable to clear active project.';
       _setHudProjectMenuNote(message);
-      if (typeof logClientError === 'function') logClientError('failed to clear active project from HUD switcher', err);
+      _shellLogClientError('failed to clear active project from HUD switcher', err);
       _showHudProjectToast(message, 'error');
     }
   }
@@ -743,9 +908,7 @@
       return;
     }
     closeHudProjectMenu();
-    if (typeof global.openProjectWorkspace === 'function') {
-      void global.openProjectWorkspace();
-    }
+    void openProjectWorkspace();
   }
 
   function _renderHudProjectMenuProjects(projects, query = '') {
@@ -795,7 +958,7 @@
       _setHudProjectMenuNote('Loading projects...');
     }
     try {
-      const resp = await apiFetch(`/projects?${params.toString()}`, { cache: 'no-store' });
+      const resp = await _shellApiFetch(`/projects?${params.toString()}`, { cache: 'no-store' });
       if (requestId !== hudProjectMenuRequestId) return;
       if (!resp.ok) throw new Error(await _hudProjectResponseMessage(resp, 'Unable to load projects.'));
       const data = await resp.json();
@@ -806,7 +969,7 @@
       const message = err?.message || 'Unable to load projects.';
       hudProjectMenuProjects.textContent = '';
       _setHudProjectMenuNote(message);
-      if (typeof logClientError === 'function') logClientError('failed to load HUD project switcher', err);
+      _shellLogClientError('failed to load HUD project switcher', err);
     }
   }
 
@@ -907,7 +1070,8 @@
     hudProjectMenuProjects = projectsSection;
     hudProjectMenuNote = note;
 
-    if (typeof bindOutsideClickClose === 'function') {
+    const bindOutsideClickClose = _shellFn('bindOutsideClickClose', importedBindOutsideClickClose);
+    if (bindOutsideClickClose) {
       bindOutsideClickClose(menu, {
         capture: true,
         triggers: hudProjectCell,
@@ -939,8 +1103,8 @@
     hudProjectMenuSearchInput?.focus({ preventScroll: true });
   }
 
-  if (hudProjectCell && typeof bindPressable === 'function') {
-    bindPressable(hudProjectCell, {
+  if (hudProjectCell && _shellFn('bindPressable', importedBindPressable)) {
+    _shellBindPressable(hudProjectCell, {
       refocusComposer: false,
       onActivate: toggleHudProjectMenu,
     });
@@ -974,7 +1138,7 @@
   let hudShareSnapshotBtn = null;
 
   function _currentTabId() {
-    return (typeof getActiveTabId === 'function') ? getActiveTabId() : null;
+    return _shellGetActiveTabId();
   }
 
   function _closeHudSaveMenu() {
@@ -992,7 +1156,7 @@
     // retains user attention. Every other HUD button returns focus to the
     // composer after activation.
     const isDisclosure = action === 'save-menu';
-    bindPressable(btn, {
+    _shellBindPressable(btn, {
       refocusComposer: !isDisclosure,
       onActivate: e => {
         e.preventDefault();
@@ -1003,20 +1167,18 @@
   }
 
   function _bindProjectRuntimePressable(el, options = {}) {
-    if (el && typeof bindPressable === 'function') {
-      bindPressable(el, { onActivate: () => {}, refocusComposer: false, ...options });
+    if (el && _shellFn('bindPressable', importedBindPressable)) {
+      _shellBindPressable(el, { onActivate: () => {}, refocusComposer: false, ...options });
     }
     return el;
   }
 
   function _canCreateHudShareSnapshot() {
-    return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+    return _shellActiveTeamScopeCan('manage_history');
   }
 
   function _hudShareSnapshotDeniedTitle() {
-    return typeof teamScopeDeniedMessage === 'function'
-      ? teamScopeDeniedMessage('create team history snapshots')
-      : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+    return _shellTeamScopeDeniedMessage('create team history snapshots');
   }
 
   function _refreshHudShareSnapshotState() {
@@ -1031,23 +1193,40 @@
   function buildHudActions() {
     if (!hudActions) return;
     hudActions.replaceChildren();
+    const copyCurrentTab = typeof importedCopyTab === 'function'
+      ? importedCopyTab
+      : _shellFn('copyTab');
+    const permalinkCurrentTab = typeof importedPermalinkTab === 'function'
+      ? importedPermalinkTab
+      : _shellFn('permalinkTab');
+    const saveCurrentTab = typeof importedSaveTab === 'function'
+      ? importedSaveTab
+      : _shellFn('saveTab');
+    const exportCurrentTabHtml = typeof importedExportTabHtml === 'function'
+      ? importedExportTabHtml
+      : _shellFn('exportTabHtml');
+    const exportCurrentTabPdf = typeof importedExportTabPdf === 'function'
+      ? importedExportTabPdf
+      : _shellFn('exportTabPdf');
 
     hudKillBtn = _makeHudBtn('\u25A0 Kill', 'kill', () => {
       const id = _currentTabId();
-      if (id && typeof confirmKill === 'function') confirmKill(id);
+      const confirmKill = (typeof importedConfirmKill === 'function' && importedConfirmKill)
+        || _shellFn('confirmKill');
+      if (id) confirmKill?.(id);
     }, 'btn btn-destructive btn-compact u-hidden', 'Kill current run');
     hudActions.appendChild(hudKillBtn);
 
     hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
-      if (id && typeof permalinkTab === 'function') permalinkTab(id);
+      if (id && permalinkCurrentTab) permalinkCurrentTab(id);
     }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)');
     hudActions.appendChild(hudShareSnapshotBtn);
     _refreshHudShareSnapshotState();
 
     hudActions.appendChild(_makeHudBtn('copy', 'copy', () => {
       const id = _currentTabId();
-      if (id && typeof copyTab === 'function') copyTab(id);
+      if (id && copyCurrentTab) copyCurrentTab(id);
     }, 'btn btn-secondary btn-compact', 'Copy tab output (Option+Shift+C)'));
 
     // Save menu — shares .save-menu markup so existing CSS applies.
@@ -1060,16 +1239,16 @@
     const saveMenu = document.createElement('div');
     saveMenu.className = 'save-menu dropdown-surface dropdown-up';
     [
-      ['Plain text (.txt)',   'save-txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
-      ['Styled HTML (.html)', 'save-html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
-      ['PDF document (.pdf)', 'save-pdf',  () => { const id = _currentTabId(); if (id && typeof exportTabPdf === 'function') exportTabPdf(id); }],
+      ['Plain text (.txt)',   'save-txt',  () => { const id = _currentTabId(); if (id && saveCurrentTab) saveCurrentTab(id); }],
+      ['Styled HTML (.html)', 'save-html', () => { const id = _currentTabId(); if (id && exportCurrentTabHtml) exportCurrentTabHtml(id); }],
+      ['PDF document (.pdf)', 'save-pdf',  () => { const id = _currentTabId(); if (id && exportCurrentTabPdf) exportCurrentTabPdf(id); }],
     ].forEach(([label, action, fn]) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'dropdown-item dropdown-item-compact';
       item.textContent = label;
       item.dataset.action = action;
-      bindPressable(item, {
+      _shellBindPressable(item, {
         onActivate: e => {
           e.preventDefault();
           e.stopPropagation();
@@ -1086,13 +1265,12 @@
     hudActions.appendChild(_makeHudBtn('clear', 'clear', () => {
       const id = _currentTabId();
       if (!id) return;
-      const cancelWelcomeFn = (typeof window !== 'undefined' && window.cancelWelcome)
-        || (typeof cancelWelcome !== 'undefined' ? cancelWelcome : null);
+      const cancelWelcomeFn = _shellFn('cancelWelcome');
       if (typeof cancelWelcomeFn === 'function') cancelWelcomeFn(id);
-      if (typeof clearTab === 'function') clearTab(id, { preserveRunState: true });
+      _shellFn('clearTab')?.(id, { preserveRunState: true });
     }, 'btn btn-secondary btn-compact', 'Clear active tab (Ctrl+L)'));
 
-    bindOutsideClickClose(saveWrap, {
+    _shellBindOutsideClickClose(saveWrap, {
       triggers: saveBtn,
       isOpen: () => saveWrap.classList.contains('open'),
       onClose: () => _closeHudSaveMenu(),
@@ -1106,7 +1284,7 @@
 
   function refreshHudActions(tabId) {
     const id = tabId || _currentTabId();
-    const tab = (typeof getTab === 'function') ? getTab(id) : null;
+    const tab = _shellGetTab(id);
     _setHudKillVisible(!!(tab && tab.st === 'running'));
     _refreshHudShareSnapshotState();
   }
@@ -1204,8 +1382,9 @@
   function _renderLastExit() {
     if (!hudLastExitEl) return;
     const v = hudState.lastExit;
-    const list = Array.isArray(global.tabs) ? global.tabs : [];
-    const activeRunning = list.some(t => t && t.id === global.activeTabId && t.st === 'running');
+    const list = _shellTabs();
+    const activeTabId = _shellGetActiveTabId();
+    const activeRunning = list.some(t => t && t.id === activeTabId && t.st === 'running');
     if (v === null || v === undefined) {
       hudLastExitEl.textContent = '—';
       _setValueColor(hudLastExitEl, 'hud-muted');
@@ -1237,7 +1416,7 @@
 
   function _renderTabs() {
     if (!hudTabsEl) return;
-    const list = Array.isArray(global.tabs) ? global.tabs : [];
+    const list = _shellTabs();
     const running = list.reduce((n, t) => n + (t && t.st === 'running' ? 1 : 0), 0);
     const total = list.length;
     if (!total) hudTabsEl.textContent = '0';
@@ -1255,7 +1434,7 @@
     let token = '';
     try { token = global.localStorage?.getItem('session_token') || ''; } catch (_) {}
     if (token && token.startsWith('tok_')) {
-      const masked = (typeof maskSessionToken === 'function') ? maskSessionToken(token) : token;
+      const masked = _shellMaskSessionToken(token);
       hudSessionEl.textContent = masked;
       hudSessionEl.title = `Active session token (${masked})`;
       _setValueColor(hudSessionEl, 'hud-value-green');
@@ -1270,12 +1449,12 @@
 
   function _projectSharedUiController() {
     if (projectSharedUiController) return projectSharedUiController;
-    const factory = global.DarklabProjectSharedUi && global.DarklabProjectSharedUi.createProjectSharedUiController;
+    const factory = importedProjectSharedUi && importedProjectSharedUi.createProjectSharedUiController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectSharedUi is unavailable');
     projectSharedUiController = factory({
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
-      downloadBlobAsAttachment,
-      downloadUrlAsAttachment,
+      downloadBlobAsAttachment: _shellDownloadBlobAsAttachment,
+      downloadUrlAsAttachment: _shellDownloadUrlAsAttachment,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
     });
     return projectSharedUiController;
@@ -1289,25 +1468,25 @@
 
   function _projectActiveContextController() {
     if (projectActiveContextController) return projectActiveContextController;
-    const factory = global.DarklabProjectActiveContext
-      && global.DarklabProjectActiveContext.createProjectActiveContextController;
+    const factory = importedProjectActiveContext
+      && importedProjectActiveContext.createProjectActiveContextController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectActiveContext is unavailable');
     projectActiveContextController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       emitUiEvent: (eventName, detail) => {
-        if (typeof emitUiEvent === 'function') emitUiEvent(eventName, detail);
+        _shellEmitUiEvent(eventName, detail);
       },
       hudProjectCell,
       hudProjectEl,
       isProjectWorkspaceOpen,
       logClientError: (message, err, details) => {
-        if (typeof logClientError === 'function') logClientError(message, err, details);
+        _shellLogClientError(message, err, details);
       },
       projectDisplayName: _projectDisplayName,
       railNav,
       refreshProjectWorkspace,
       setValueColor: _setValueColor,
-      showToast: typeof showToast === 'function' ? showToast : null,
+      showToast: _shellFn('showToast', importedShowToast),
       syncProjectNotesForm: _syncProjectNotesForm,
     });
     return projectActiveContextController;
@@ -1333,16 +1512,16 @@
 
   function _projectWorkspaceShellController() {
     if (projectWorkspaceShellController) return projectWorkspaceShellController;
-    const factory = global.DarklabProjectWorkspaceShell
-      && global.DarklabProjectWorkspaceShell.createProjectWorkspaceShellController;
+    const projectWorkspaceShell = _projectModule('DarklabProjectWorkspaceShell', importedProjectWorkspaceShell);
+    const factory = projectWorkspaceShell && projectWorkspaceShell.createProjectWorkspaceShellController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectWorkspaceShell is unavailable');
     projectWorkspaceShellController = factory({
       EntityMetadataClient,
       blurVisibleComposerInputIfMobile: () => {
-        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+        _shellFn('blurVisibleComposerInputIfMobile', importedBlurVisibleComposerInputIfMobile)?.();
       },
       closeMajorOverlays: () => {
-        if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
+        if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
       },
       closeProjectEntityEditor: _closeProjectEntityEditor,
       closeProjectMobileActionSheet: _closeProjectMobileActionSheet,
@@ -1351,11 +1530,11 @@
       closeProjectPackageWizard: _closeProjectPackageWizard,
       closeProjectTargetEditor: _closeProjectTargetEditor,
       emitUiEvent: (eventName, detail) => {
-        if (typeof emitUiEvent === 'function') emitUiEvent(eventName, detail);
+        _shellEmitUiEvent(eventName, detail);
       },
       flushProjectNotesAutosave: _flushProjectNotesAutosave,
       markInteractionSurfaceReady: (surfaceName, overlay, modal) => {
-        if (typeof markInteractionSurfaceReady === 'function') markInteractionSurfaceReady(surfaceName, overlay, modal);
+        _shellFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.(surfaceName, overlay, modal);
       },
       projectEntitiesController: _projectEntitiesController,
       projectWorkspaceBody,
@@ -1368,7 +1547,7 @@
       projectWorkspaceNameInput,
       projectWorkspaceOverlay,
       refocusComposerAfterAction: (options) => {
-        if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction(options);
+        _shellRefocusComposer(options);
       },
       refreshProjectWorkspace,
       selectedProjectId: () => projectWorkspaceState.selectedId(),
@@ -1376,7 +1555,7 @@
       setProjectPaginationOffset: _setProjectPaginationOffset,
       setProjectWorkspaceTab: projectWorkspaceState.setTab,
       setSelectedProjectId: projectWorkspaceState.setSelectedId,
-      showToast: typeof showToast === 'function' ? showToast : null,
+      showToast: _shellFn('showToast', importedShowToast),
     });
     return projectWorkspaceShellController;
   }
@@ -1385,18 +1564,18 @@
 
   function _projectWorkspaceActionsController() {
     if (projectWorkspaceActionsController) return projectWorkspaceActionsController;
-    const factory = global.DarklabProjectWorkspaceActions
-      && global.DarklabProjectWorkspaceActions.createProjectWorkspaceActionsController;
+    const projectWorkspaceActions = _projectModule('DarklabProjectWorkspaceActions', importedProjectWorkspaceActions);
+    const factory = projectWorkspaceActions && projectWorkspaceActions.createProjectWorkspaceActionsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectWorkspaceActions is unavailable');
     projectWorkspaceActionsController = factory({
       EntityMetadataClient,
-      apiFetch,
+      apiFetch: _shellApiFetch,
       projectRunItems: _projectRunItems,
       projectWorkspaceRequest: _projectWorkspaceRequest,
       refreshProjectWorkspace,
       selectedProjectId: () => projectWorkspaceState.selectedId(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
-      showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
+      showConfirm: _shellFn('showConfirm', importedShowConfirm),
     });
     return projectWorkspaceActionsController;
   }
@@ -1408,7 +1587,7 @@
 
   function _setProjectWorkspaceMessage(text = '', { error = false, toast = true } = {}) {
     if (!_projectWorkspaceModulesReady()) {
-      if (toast && text && typeof showToast === 'function') showToast(text, error ? 'error' : 'info');
+      if (toast && text) _shellShowToast(text, error ? 'error' : 'info');
       return;
     }
     _projectWorkspaceShellController().setMessage(text, { error, toast });
@@ -1446,10 +1625,11 @@
 
   function _projectEntitiesController() {
     if (projectEntitiesController) return projectEntitiesController;
-    const factory = global.DarklabProjectEntities && global.DarklabProjectEntities.createProjectEntitiesController;
+    const projectEntities = _projectModule('DarklabProjectEntities', importedProjectEntities);
+    const factory = projectEntities && projectEntities.createProjectEntitiesController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectEntities is unavailable');
     projectEntitiesController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       getSummary: projectId => projectWorkspaceState.summary(projectId),
       getActiveTab: projectWorkspaceState.entityTab,
       setActiveTab: projectWorkspaceState.setEntityTab,
@@ -1481,14 +1661,14 @@
       renderProjectMobileDetail: _renderProjectMobileDetail,
       mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
-      showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
+      showConfirm: _shellFn('showConfirm', importedShowConfirm),
       logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+        _shellLogClientError(message, err);
       },
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
       downloadUrlAsAttachment: _downloadUrlAsAttachment,
       closeProjectWorkspace,
-      openAtlas: global.openAtlas,
+      openAtlas: _shellFn('openAtlas', importedOpenAtlas),
       projectDisplayName: _projectDisplayName,
       setWorkspaceTab: projectWorkspaceState.setTab,
     });
@@ -1500,10 +1680,11 @@
 
   function _projectPackagesController() {
     if (projectPackagesController) return projectPackagesController;
-    const factory = global.DarklabProjectPackages && global.DarklabProjectPackages.createProjectPackagesController;
+    const projectPackages = _projectModule('DarklabProjectPackages', importedProjectPackages);
+    const factory = projectPackages && projectPackages.createProjectPackagesController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectPackages is unavailable');
     projectPackagesController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       EntityMetadataClient,
       manifestOverlay: projectPackageManifestOverlay,
       manifestTitle: projectPackageManifestTitle,
@@ -1577,7 +1758,8 @@
 
   function _projectActivityController() {
     if (projectActivityController) return projectActivityController;
-    const factory = global.DarklabProjectActivity && global.DarklabProjectActivity.createProjectActivityController;
+    const projectActivity = _projectModule('DarklabProjectActivity', importedProjectActivity);
+    const factory = projectActivity && projectActivity.createProjectActivityController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectActivity is unavailable');
     projectActivityController = factory({
       projectWorkspaceRequest: _projectWorkspaceRequest,
@@ -1602,7 +1784,10 @@
     if (projectActivityControllerPromise) return projectActivityControllerPromise;
     const loader = global.loadProjectActivity;
     projectActivityControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
-      .then(() => _projectActivityController())
+      .then((namespace) => {
+        if (namespace) importedProjectActivity = namespace;
+        return _projectActivityController();
+      })
       .finally(() => {
         projectActivityControllerPromise = null;
       });
@@ -1611,10 +1796,11 @@
 
   function _projectReportController() {
     if (projectReportController) return projectReportController;
-    const factory = global.DarklabProjectReport && global.DarklabProjectReport.createProjectReportController;
+    const projectReport = _projectModule('DarklabProjectReport', importedProjectReport);
+    const factory = projectReport && projectReport.createProjectReportController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectReport is unavailable');
     projectReportController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       getSelectedProjectId: projectWorkspaceState.selectedId,
       selectedProject: _selectedProject,
       projectSummary: _projectSummary,
@@ -1635,9 +1821,9 @@
       mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       downloadUrlAsAttachment: _downloadUrlAsAttachment,
-      showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
+      showConfirm: _shellFn('showConfirm', importedShowConfirm),
       logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+        _shellLogClientError(message, err);
       },
     });
     return projectReportController;
@@ -1652,7 +1838,10 @@
     if (projectReportControllerPromise) return projectReportControllerPromise;
     const loader = global.loadProjectReport;
     projectReportControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
-      .then(() => _projectReportController())
+      .then((namespace) => {
+        if (namespace) importedProjectReport = namespace;
+        return _projectReportController();
+      })
       .finally(() => {
         projectReportControllerPromise = null;
       });
@@ -1663,7 +1852,8 @@
 
   function _projectFiltersController() {
     if (projectFiltersController) return projectFiltersController;
-    const factory = global.DarklabProjectFilters && global.DarklabProjectFilters.createProjectFiltersController;
+    const projectFilters = _projectModule('DarklabProjectFilters', importedProjectFilters);
+    const factory = projectFilters && projectFilters.createProjectFiltersController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectFilters is unavailable');
     projectFiltersController = factory({
       getSelectedProjectId: projectWorkspaceState.selectedId,
@@ -1700,10 +1890,11 @@
 
   function _projectFindingsDataController() {
     if (projectFindingsDataController) return projectFindingsDataController;
-    const factory = global.DarklabProjectFindingsData && global.DarklabProjectFindingsData.createProjectFindingsDataController;
+    const projectFindingsData = _projectModule('DarklabProjectFindingsData', importedProjectFindingsData);
+    const factory = projectFindingsData && projectFindingsData.createProjectFindingsDataController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectFindingsData is unavailable');
     projectFindingsDataController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       selectedProjectId: projectWorkspaceState.selectedId,
       mobileView: () => _projectMobileShellController().currentView(),
       projectSummary: _projectSummary,
@@ -1719,7 +1910,7 @@
       projectPackageWizardActive: _projectPackageWizardActive,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+        _shellLogClientError(message, err);
       },
     });
     return projectFindingsDataController;
@@ -1731,8 +1922,8 @@
 
   function _projectFindingsBoardController() {
     if (projectFindingsBoardController) return projectFindingsBoardController;
-    const factory = global.DarklabProjectFindingsBoard
-      && global.DarklabProjectFindingsBoard.createProjectFindingsBoardController;
+    const projectFindingsBoard = _projectModule('DarklabProjectFindingsBoard', importedProjectFindingsBoard);
+    const factory = projectFindingsBoard && projectFindingsBoard.createProjectFindingsBoardController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectFindingsBoard is unavailable');
     projectFindingsBoardController = factory({
       entityMetadataChipClass: _entityMetadataChipClass,
@@ -1749,7 +1940,8 @@
 
   function _projectFindingsController() {
     if (projectFindingsController) return projectFindingsController;
-    const factory = global.DarklabProjectFindings && global.DarklabProjectFindings.createProjectFindingsController;
+    const projectFindings = _projectModule('DarklabProjectFindings', importedProjectFindings);
+    const factory = projectFindings && projectFindings.createProjectFindingsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectFindings is unavailable');
     projectFindingsController = factory({
       findingReviewStates: PROJECT_WORKSPACE_CONSTANTS.findingReviewStates,
@@ -1793,20 +1985,21 @@
 
   function _projectArtifactsFactoryReady() {
     return !!(
-      global.DarklabProjectArtifacts
-      && typeof global.DarklabProjectArtifacts.createProjectArtifactsController === 'function'
+      _projectModule('DarklabProjectArtifacts', importedProjectArtifacts)
+      && typeof _projectModule('DarklabProjectArtifacts', importedProjectArtifacts).createProjectArtifactsController === 'function'
     );
   }
 
   function _projectArtifactsController() {
     if (projectArtifactsController) return projectArtifactsController;
-    const factory = global.DarklabProjectArtifacts && global.DarklabProjectArtifacts.createProjectArtifactsController;
+    const projectArtifacts = _projectModule('DarklabProjectArtifacts', importedProjectArtifacts);
+    const factory = projectArtifacts && projectArtifacts.createProjectArtifactsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectArtifacts is unavailable');
     projectArtifactsController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       projectResponseError: _projectResponseError,
       collapsedArtifactGroups: projectWorkspaceState.collapsedArtifactGroups,
-      filesEnabled: () => !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true),
+      filesEnabled: () => !!(_shellValue('APP_CONFIG') && _shellValue('APP_CONFIG').workspace_enabled === true),
       selectedProjectId: projectWorkspaceState.selectedId,
       projectTargetFilterActive: _projectTargetFilterActive,
       projectFindingsLoaded: _projectFindingsLoaded,
@@ -1828,7 +2021,7 @@
       mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+        _shellLogClientError(message, err);
       },
       groupBy: _groupBy,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
@@ -1850,7 +2043,10 @@
       return Promise.reject(new Error('Project artifacts loader is unavailable'));
     }
     projectArtifactsControllerPromise = loader()
-      .then(() => _projectArtifactsController())
+      .then((namespace) => {
+        if (namespace) importedProjectArtifacts = namespace;
+        return _projectArtifactsController();
+      })
       .finally(() => {
         projectArtifactsControllerPromise = null;
       });
@@ -1861,10 +2057,11 @@
 
   function _projectDetailsController() {
     if (projectDetailsController) return projectDetailsController;
-    const factory = global.DarklabProjectDetails && global.DarklabProjectDetails.createProjectDetailsController;
+    const projectDetails = _projectModule('DarklabProjectDetails', importedProjectDetails);
+    const factory = projectDetails && projectDetails.createProjectDetailsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectDetails is unavailable');
     projectDetailsController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       entityMetadataClient: EntityMetadataClient,
       projectNotesForm,
       projectNotesInput,
@@ -1907,7 +2104,8 @@
 
   function _projectListController() {
     if (projectListController) return projectListController;
-    const factory = global.DarklabProjectList && global.DarklabProjectList.createProjectListController;
+    const projectList = _projectModule('DarklabProjectList', importedProjectList);
+    const factory = projectList && projectList.createProjectListController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectList is unavailable');
     projectListController = factory({
       projectWorkspaceBody,
@@ -1935,7 +2133,8 @@
 
   function _projectNavigationController() {
     if (projectNavigationController) return projectNavigationController;
-    const factory = global.DarklabProjectNavigation && global.DarklabProjectNavigation.createProjectNavigationController;
+    const projectNavigation = _projectModule('DarklabProjectNavigation', importedProjectNavigation);
+    const factory = projectNavigation && projectNavigation.createProjectNavigationController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectNavigation is unavailable');
     projectNavigationController = factory({
       projectWorkspaceModal,
@@ -1972,7 +2171,8 @@
 
   function _projectNestedSheetsController() {
     if (projectNestedSheetsController) return projectNestedSheetsController;
-    const factory = global.DarklabProjectNestedSheets && global.DarklabProjectNestedSheets.createProjectNestedSheetsController;
+    const projectNestedSheets = _projectModule('DarklabProjectNestedSheets', importedProjectNestedSheets);
+    const factory = projectNestedSheets && projectNestedSheets.createProjectNestedSheetsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectNestedSheets is unavailable');
     projectNestedSheetsController = factory({
       projectWorkspaceModal,
@@ -1992,14 +2192,14 @@
 
   function _projectWorkspaceRendererController() {
     if (projectWorkspaceRendererController) return projectWorkspaceRendererController;
-    const factory = global.DarklabProjectWorkspaceRenderer
-      && global.DarklabProjectWorkspaceRenderer.createProjectWorkspaceRendererController;
+    const projectWorkspaceRenderer = _projectModule('DarklabProjectWorkspaceRenderer', importedProjectWorkspaceRenderer);
+    const factory = projectWorkspaceRenderer && projectWorkspaceRenderer.createProjectWorkspaceRendererController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectWorkspaceRenderer is unavailable');
     projectWorkspaceRendererController = factory({
       closeProjectEntityEditor: _closeProjectEntityEditor,
       closeProjectTargetEditor: _closeProjectTargetEditor,
       emptyProjectPanel: _emptyProjectPanel,
-      enhanceAppSelects: typeof global.enhanceAppSelects === 'function' ? global.enhanceAppSelects : null,
+      enhanceAppSelects: _shellEnhanceAppSelects(),
       ensureSelectedProject: _ensureSelectedProject,
       flushProjectNotesAutosave: _flushProjectNotesAutosave,
       focusProjectWorkspaceTab: _focusProjectWorkspaceTab,
@@ -2048,15 +2248,11 @@
 
   function _projectWorkspaceBootstrapController() {
     if (projectWorkspaceBootstrapController) return projectWorkspaceBootstrapController;
-    const factory = global.DarklabProjectWorkspaceBootstrap
-      && global.DarklabProjectWorkspaceBootstrap.createProjectWorkspaceBootstrapController;
+    const projectWorkspaceBootstrap = _projectModule('DarklabProjectWorkspaceBootstrap', importedProjectWorkspaceBootstrap);
+    const factory = projectWorkspaceBootstrap && projectWorkspaceBootstrap.createProjectWorkspaceBootstrapController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectWorkspaceBootstrap is unavailable');
-    const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
-      ? global.bindDismissible
-      : (typeof bindDismissible === 'function' ? bindDismissible : null);
-    const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
-      ? global.bindMobileSheet
-      : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+    const bindDismissibleFn = _shellFn('bindDismissible', importedBindDismissible);
+    const bindMobileSheetFn = _shellFn('bindMobileSheet', importedBindMobileSheet);
     projectWorkspaceBootstrapController = factory({
       bindDismissible: bindDismissibleFn,
       bindMobileSheet: bindMobileSheetFn,
@@ -2068,6 +2264,7 @@
       isProjectEntityEditorOpen,
       isProjectPackageManifestOpen,
       isProjectPackageWizardOpen,
+      isProjectWorkspaceOpen,
       isProjectTargetEditorOpen,
       projectDetailsController: _projectDetailsController,
       projectEntityEditorController: _projectEntityEditorController,
@@ -2080,6 +2277,7 @@
       projectTargetEditorOverlay,
       projectTargetsController: _projectTargetsController,
       projectWorkspaceEventsController: _projectWorkspaceEventsController,
+      projectWorkspaceModal,
       projectWorkspaceOverlay,
       projectWorkspaceShellController: _projectWorkspaceShellController,
       syncProjectMobileTabEdges: _syncProjectMobileTabEdges,
@@ -2091,7 +2289,8 @@
 
   function _projectTargetsController() {
     if (projectTargetsController) return projectTargetsController;
-    const factory = global.DarklabProjectTargets && global.DarklabProjectTargets.createProjectTargetsController;
+    const projectTargets = _projectModule('DarklabProjectTargets', importedProjectTargets);
+    const factory = projectTargets && projectTargets.createProjectTargetsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectTargets is unavailable');
     projectTargetsController = factory({
       EntityMetadataClient,
@@ -2127,9 +2326,7 @@
       loadProjectTargetPage: (projectId, options) => _projectDetailsController().loadTargetPage(projectId, options),
       renderProjectMobileDetail: _renderProjectMobileDetail,
       loadProjectAutocompleteTargets: () => {
-        if (typeof loadProjectAutocompleteTargets === 'function') {
-          loadProjectAutocompleteTargets().catch(() => {});
-        }
+        _shellFn('loadProjectAutocompleteTargets')?.().catch(() => {});
       },
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       syncProjectWorkspaceNestedSuppression: _syncProjectWorkspaceNestedSuppression,
@@ -2143,10 +2340,11 @@
 
   function _projectRunsController() {
     if (projectRunsController) return projectRunsController;
-    const factory = global.DarklabProjectRuns && global.DarklabProjectRuns.createProjectRunsController;
+    const projectRuns = _projectModule('DarklabProjectRuns', importedProjectRuns);
+    const factory = projectRuns && projectRuns.createProjectRunsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectRuns is unavailable');
     projectRunsController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       projectResponseError: _projectResponseError,
       projectExplorerBody: () => projectExplorerBody,
       projectRunItems: _projectRunItems,
@@ -2170,7 +2368,7 @@
       mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+        _shellLogClientError(message, err);
       },
     });
     return projectRunsController;
@@ -2180,7 +2378,8 @@
 
   function _projectMobileCompareController() {
     if (projectMobileCompareController) return projectMobileCompareController;
-    const factory = global.DarklabProjectMobileCompare && global.DarklabProjectMobileCompare.createProjectMobileCompareController;
+    const projectMobileCompare = _projectModule('DarklabProjectMobileCompare', importedProjectMobileCompare);
+    const factory = projectMobileCompare && projectMobileCompare.createProjectMobileCompareController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectMobileCompare is unavailable');
     projectMobileCompareController = factory({
       projectWorkspaceModal,
@@ -2201,7 +2400,8 @@
 
   function _projectMobileShellController() {
     if (projectMobileShellController) return projectMobileShellController;
-    const factory = global.DarklabProjectMobileShell && global.DarklabProjectMobileShell.createProjectMobileShellController;
+    const projectMobileShell = _projectModule('DarklabProjectMobileShell', importedProjectMobileShell);
+    const factory = projectMobileShell && projectMobileShell.createProjectMobileShellController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectMobileShell is unavailable');
     projectMobileShellController = factory({
       activeProject: _activeProject,
@@ -2240,7 +2440,8 @@
 
   function _projectMobileDetailController() {
     if (projectMobileDetailController) return projectMobileDetailController;
-    const factory = global.DarklabProjectMobileDetail && global.DarklabProjectMobileDetail.createProjectMobileDetailController;
+    const projectMobileDetail = _projectModule('DarklabProjectMobileDetail', importedProjectMobileDetail);
+    const factory = projectMobileDetail && projectMobileDetail.createProjectMobileDetailController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectMobileDetail is unavailable');
     projectMobileDetailController = factory({
       projectWorkspaceModal,
@@ -2321,7 +2522,8 @@
 
   function _projectEntityEditorController() {
     if (projectEntityEditorController) return projectEntityEditorController;
-    const factory = global.DarklabProjectEntityEditor && global.DarklabProjectEntityEditor.createProjectEntityEditorController;
+    const projectEntityEditor = _projectModule('DarklabProjectEntityEditor', importedProjectEntityEditor);
+    const factory = projectEntityEditor && projectEntityEditor.createProjectEntityEditorController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectEntityEditor is unavailable');
     projectEntityEditorController = factory({
       overlay: projectEntityEditorOverlay,
@@ -2359,11 +2561,11 @@
 
   function _projectWorkspaceLifecycleController() {
     if (projectWorkspaceLifecycleController) return projectWorkspaceLifecycleController;
-    const factory = global.DarklabProjectWorkspaceLifecycle
-      && global.DarklabProjectWorkspaceLifecycle.createProjectWorkspaceLifecycleController;
+    const projectWorkspaceLifecycle = _projectModule('DarklabProjectWorkspaceLifecycle', importedProjectWorkspaceLifecycle);
+    const factory = projectWorkspaceLifecycle && projectWorkspaceLifecycle.createProjectWorkspaceLifecycleController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectWorkspaceLifecycle is unavailable');
     projectWorkspaceLifecycleController = factory({
-      apiFetch,
+      apiFetch: _shellApiFetch,
       projectWorkspaceBody,
       selectedProjectId: projectWorkspaceState.selectedId,
       setSelectedProjectId: projectWorkspaceState.setSelectedId,
@@ -2387,7 +2589,7 @@
       syncProjectNotesForm: _syncProjectNotesForm,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       logClientError: (message, err) => {
-        if (typeof logClientError === 'function') logClientError(message, err);
+        _shellLogClientError(message, err);
       },
     });
     return projectWorkspaceLifecycleController;
@@ -2397,8 +2599,8 @@
 
   function _projectWorkspaceEventsController() {
     if (projectWorkspaceEventsController) return projectWorkspaceEventsController;
-    const factory = global.DarklabProjectWorkspaceEvents
-      && global.DarklabProjectWorkspaceEvents.createProjectWorkspaceEventsController;
+    const projectWorkspaceEvents = _projectModule('DarklabProjectWorkspaceEvents', importedProjectWorkspaceEvents);
+    const factory = projectWorkspaceEvents && projectWorkspaceEvents.createProjectWorkspaceEventsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectWorkspaceEvents is unavailable');
     projectWorkspaceEventsController = factory({
       activeProject: _activeProject,
@@ -2424,6 +2626,7 @@
       filtersController: _projectFiltersController,
       findingGroupKey: _projectFindingGroupKey,
       findingSelectMode: projectWorkspaceState.findingSelectMode,
+      findingTriageEditor: _shellValue('DarklabFindingTriageEditor'),
       flushProjectNotesAutosave: _flushProjectNotesAutosave,
       invalidateProjectFindings: _invalidateProjectFindings,
       isProjectWorkspaceOpen,
@@ -2431,9 +2634,7 @@
       ensureProjectSummary: _ensureProjectSummary,
       loadProjectRuns: _loadProjectRuns,
       loadProjectAutocompleteTargets: () => {
-        if (typeof loadProjectAutocompleteTargets === 'function') {
-          loadProjectAutocompleteTargets().catch(() => {});
-        }
+        _shellFn('loadProjectAutocompleteTargets')?.().catch(() => {});
       },
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
       loadProjectFindings: _loadProjectFindings,
@@ -2441,6 +2642,7 @@
       mobileView: () => _projectMobileShellController().currentView(),
       openProjectEntityEditor: _openProjectEntityEditor,
       openProjectEntityInAtlas: _openProjectEntityInAtlas,
+      openFindingsBoard: _shellFn('openFindingsBoard'),
       openProjectEntityPicker: _openProjectEntityPicker,
       openProjectMobileActionSheet: _openProjectMobileActionSheet,
       openProjectMobileCompareSheet: _openProjectMobileCompareSheet,
@@ -2505,6 +2707,7 @@
       setProjectRunCompareMode: _setProjectRunCompareMode,
       setSelectedProjectId: projectWorkspaceState.setSelectedId,
       setWorkspaceTab: projectWorkspaceState.setTab,
+      restoreHistoryRunIntoTab: _shellFn('restoreHistoryRunIntoTab'),
       syncProjectRunCompareMode: _syncProjectRunCompareMode,
       toggleArtifactGroup: projectWorkspaceState.toggleArtifactGroup,
       toggleFindingGroup: projectWorkspaceState.toggleFindingGroup,
@@ -2725,7 +2928,7 @@
   }
 
   function _projectFilesEnabled() {
-    return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
+    return !!(_shellValue('APP_CONFIG') && _shellValue('APP_CONFIG').workspace_enabled === true);
   }
 
   function _projectArtifactsVisible() {
@@ -2887,7 +3090,7 @@
     _loadProjectPackagesController()
       .then(controller => controller.openManifest(pkg))
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project package manifest', err);
+        _shellLogClientError('failed to load project package manifest', err);
         _setProjectWorkspaceMessage('Could not load package manifest.', { error: true });
       });
   }
@@ -2941,17 +3144,17 @@
     _projectEntityEditorController().open(projectId, entityType, entity, options);
   }
 
-  global.openEntityMetadataEditor = function openEntityMetadataEditor(entityType, entity, options = {}) {
+  function openEntityMetadataEditor(entityType, entity, options = {}) {
     const projectId = options && Object.prototype.hasOwnProperty.call(options, 'projectId')
       ? options.projectId
       : '';
     _ensureProjectWorkspaceModules()
       .then(() => _openProjectEntityEditor(projectId, entityType, entity, options))
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project entity editor', err);
-        if (typeof showToast === 'function') showToast('Could not open the metadata editor.', 'error');
+        _shellLogClientError('failed to load project entity editor', err);
+        _shellShowToast('Could not open the metadata editor.', 'error');
       });
-  };
+  }
 
   function _renderProjectPackageWizardModal(options = {}) {
     const controller = _projectPackagesControllerIfReady();
@@ -2962,7 +3165,7 @@
     _loadProjectPackagesController()
       .then(controller => controller.openWizard(projectId, preset))
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project package wizard', err);
+        _shellLogClientError('failed to load project package wizard', err);
         _setProjectWorkspaceMessage('Could not load package builder.', { error: true });
       });
   }
@@ -2971,7 +3174,7 @@
     _loadProjectPackagesController()
       .then(controller => controller.openWizardFromPackage(projectId, pkg))
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project package wizard', err);
+        _shellLogClientError('failed to load project package wizard', err);
         _setProjectWorkspaceMessage('Could not load package builder.', { error: true });
       });
   }
@@ -3282,15 +3485,18 @@
     return _projectListController().mobileSection(label, count, { open });
   }
 
-  function _setProjectMobileCreateOpen(open, { focus = false } = {}) {
+  async function _setProjectMobileCreateOpen(open, { focus = false } = {}) {
+    await _ensureProjectWorkspaceModules();
     _projectMobileShellController().setCreateOpen(open, { focus });
   }
 
-  function _setProjectMobileView(view) {
+  async function _setProjectMobileView(view) {
+    await _ensureProjectWorkspaceModules();
     _projectMobileShellController().setView(view);
   }
 
-  function _selectProjectFromMobile(projectId, tab = '') {
+  async function _selectProjectFromMobile(projectId, tab = '') {
+    await _ensureProjectWorkspaceModules();
     _projectMobileShellController().selectProject(projectId, tab);
   }
 
@@ -3411,7 +3617,7 @@
         controller.renderArtifacts(container, projectId, summary);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project artifacts', err);
+        _shellLogClientError('failed to load project artifacts', err);
         if (!container.isConnected) return;
         container.replaceChildren(_emptyProjectPanel('Could not load project artifacts.'));
       });
@@ -3429,7 +3635,7 @@
         controller.renderPackages(container, projectId, summary);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project packages', err);
+        _shellLogClientError('failed to load project packages', err);
         if (!container.isConnected) return;
         container.replaceChildren(_emptyProjectPanel('Could not load evidence packages.'));
       });
@@ -3447,7 +3653,7 @@
         controller.renderActivity(container, projectId, summary);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project activity', err);
+        _shellLogClientError('failed to load project activity', err);
         if (!container.isConnected) return;
         container.replaceChildren(_emptyProjectPanel('Could not load project activity.'));
       });
@@ -3482,7 +3688,7 @@
         return controller.load(normalizedProjectId);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to open project activity', err);
+        _shellLogClientError('failed to open project activity', err);
       });
   }
 
@@ -3498,7 +3704,7 @@
         controller.renderReport(container, projectId, summary);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load project report builder', err);
+        _shellLogClientError('failed to load project report builder', err);
         if (!container.isConnected) return;
         container.replaceChildren(_emptyProjectPanel('Could not load the report builder.'));
       });
@@ -3514,7 +3720,7 @@
         }
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load mobile project report builder', err);
+        _shellLogClientError('failed to load mobile project report builder', err);
         if (panel.isConnected) panel.replaceChildren('Could not load the report builder.');
       });
     return panel;
@@ -3530,7 +3736,7 @@
         }
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load mobile project packages', err);
+        _shellLogClientError('failed to load mobile project packages', err);
         if (panel.isConnected) panel.replaceChildren('Could not load evidence packages.');
       });
     return panel;
@@ -3546,7 +3752,7 @@
         }
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load mobile project activity', err);
+        _shellLogClientError('failed to load mobile project activity', err);
         if (panel.isConnected) panel.replaceChildren('Could not load project activity.');
       });
     return panel;
@@ -3586,7 +3792,7 @@
       _ensureProjectWorkspaceModules()
         .then(() => _scheduleProjectWorkspaceExternalRefresh())
         .catch((err) => {
-          if (typeof logClientError === 'function') logClientError('failed to load project workspace for external refresh', err);
+          _shellLogClientError('failed to load project workspace for external refresh', err);
         });
       return;
     }
@@ -3601,6 +3807,18 @@
   _projectActiveContextController().bindTargetDiscoveryEvent();
 
   async function openProjectWorkspace() {
+    if (!_projectWorkspaceModulesReady() && projectWorkspaceOverlay) {
+      projectWorkspaceOverlay.classList.remove('u-hidden');
+      projectWorkspaceOverlay.classList.add('open');
+      projectWorkspaceOverlay.setAttribute('aria-hidden', 'false');
+      if (projectWorkspaceBody && !String(projectWorkspaceBody.textContent || '').trim()) {
+        projectWorkspaceBody.textContent = 'Loading projects...';
+      }
+      if (projectMobileBody && !String(projectMobileBody.textContent || '').trim()) {
+        projectMobileBody.textContent = 'Loading projects...';
+      }
+      _shellFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.('projects', projectWorkspaceOverlay, projectWorkspaceModal);
+    }
     await _ensureProjectWorkspaceModules();
     await _projectWorkspaceShellController().open();
   }
@@ -3628,14 +3846,14 @@
   }
 
   async function _promptAutoPromoteRuleProject(preferredProjectId = '') {
-    if (typeof showConfirm !== 'function') return '';
-    const resp = await apiFetch('/projects?include_archived=1&include_counts=0&limit=100&offset=0', { cache: 'no-store' });
+    if (!_shellFn('showConfirm', importedShowConfirm)) return '';
+    const resp = await _shellApiFetch('/projects?include_archived=1&include_counts=0&limit=100&offset=0', { cache: 'no-store' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const projects = (Array.isArray(data.projects) ? data.projects : [])
       .filter(project => String(project && project.status || 'active') !== 'archived');
     if (!projects.length) {
-      if (typeof showToast === 'function') showToast('Create an active project before creating an auto-promote rule.', 'error');
+      _shellShowToast('Create an active project before creating an auto-promote rule.', 'error');
       return '';
     }
     const activeProject = _activeProject();
@@ -3643,7 +3861,7 @@
       || (activeProject && activeProject.id ? String(activeProject.id) : '');
     const ordered = _orderedProjectRows(preferredId, projects);
     const { wrap, select } = _autoPromoteProjectPickerContent(ordered, preferredId);
-    const choicePromise = showConfirm({
+    const choicePromise = _shellShowConfirm({
       body: 'Create auto-promote rule from Atlas view',
       content: wrap,
       defaultFocus: select,
@@ -3653,9 +3871,10 @@
       ],
       refocusOnResolve: false,
     });
+    const enhanceAppSelects = _shellEnhanceAppSelects();
     if (typeof enhanceAppSelects === 'function') {
       enhanceAppSelects(wrap);
-      if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+      if (_shellUseMobileTerminalViewportMode()) {
         wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
       }
     }
@@ -3682,6 +3901,7 @@
   function closeProjectWorkspace({ refocus = true } = {}) {
     if (!_projectWorkspaceModulesReady()) {
       if (!projectWorkspaceOverlay) return;
+      projectWorkspaceOverlay.classList.add('u-hidden');
       projectWorkspaceOverlay.classList.remove('open');
       projectWorkspaceOverlay.setAttribute('aria-hidden', 'true');
       return;
@@ -3747,8 +3967,8 @@
 
   function _renderClock() {
     if (!hudClockEl) return;
-    const mode = typeof global.getHudClockPreference === 'function'
-      ? global.getHudClockPreference()
+    const mode = typeof importedGetHudClockPreference === 'function'
+      ? importedGetHudClockPreference()
       : 'utc';
     const now = Date.now();
     hudClockEl.textContent = mode === 'local' ? _formatLocalClock(now) : _formatUtcClock(now);
@@ -3856,42 +4076,45 @@
     _scheduleProjectFilterSortDividerSync(projectExplorerBody);
   });
 
-  if (typeof onUiEvent === 'function') {
-    onUiEvent('app:history-rendered', () => {
+  if (_shellFn('onUiEvent', importedOnUiEvent)) {
+    _shellOnUiEvent('app:history-rendered', () => {
       try { renderRailRecent(); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:workflows-rendered', (e) => {
+    _shellOnUiEvent('app:workflows-rendered', (e) => {
       try { renderRailWorkflows(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:workflows-closed', () => {
-      if (typeof renderWorkflowItems === 'function') {
-        try { renderWorkflowItems(allWorkflows); } catch (_) { /* non-critical */ }
-      }
+    _shellOnUiEvent('app:workflows-closed', () => {
+      try {
+        const renderWorkflowItemsFn = (typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('renderWorkflowItems'))
+          ? importedRenderWorkflowItems
+          : _shellFn('renderWorkflowItems');
+        renderWorkflowItemsFn?.(allWorkflows);
+      } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:tab-status-changed', () => {
+    _shellOnUiEvent('app:tab-status-changed', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:tab-activated', () => {
+    _shellOnUiEvent('app:tab-activated', () => {
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:tab-created', () => {
+    _shellOnUiEvent('app:tab-created', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:tab-closed', () => {
+    _shellOnUiEvent('app:tab-closed', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:last-exit-changed', (e) => {
+    _shellOnUiEvent('app:last-exit-changed', (e) => {
       hudState.lastExit = e.detail ? e.detail.value : null;
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
     });
-    onUiEvent('app:tab-kill-visibility-changed', (e) => {
+    _shellOnUiEvent('app:tab-kill-visibility-changed', (e) => {
       const tabId = e.detail && e.detail.tabId;
-      const activeId = (typeof getActiveTabId === 'function') ? getActiveTabId() : null;
+      const activeId = _shellGetActiveTabId();
       if (tabId !== activeId) return;
       try { _setHudKillVisible(!!(e.detail && e.detail.visible)); } catch (_) { /* non-critical */ }
     });
@@ -3916,28 +4139,56 @@
   applyWidth();
   applySectionsState();
   renderRailRecent();
-  if (typeof ensureWorkflowCatalogLoaded === 'function') {
-    ensureWorkflowCatalogLoaded()
+  const ensureWorkflowCatalogLoadedFn = (
+    typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('ensureWorkflowCatalogLoaded')
+  ) ? importedEnsureWorkflowCatalogLoaded : _shellFn('ensureWorkflowCatalogLoaded');
+  if (ensureWorkflowCatalogLoadedFn) {
+    ensureWorkflowCatalogLoadedFn()
       .then(items => renderRailWorkflows(items))
       .catch(() => {});
   }
   refreshHudActions();
   loadActiveProjectContext().catch(() => {});
 
+  document.addEventListener('click', (event) => {
+    if (event.target?.closest?.('#project-mobile-new-btn')) {
+      event.preventDefault();
+      event.stopPropagation();
+      _setProjectWorkspaceMessage('');
+      _setProjectMobileCreateOpen(true, { focus: true }).catch((err) => {
+        _shellLogClientError('failed to open mobile project create form', err);
+      });
+      return;
+    }
+    if (event.target?.closest?.('#project-mobile-create-form [data-project-mobile-action="cancel-create"]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      _setProjectWorkspaceMessage('');
+      _setProjectMobileCreateOpen(false).catch((err) => {
+        _shellLogClientError('failed to close mobile project create form', err);
+      });
+    }
+  }, true);
+
   // Expose the workflows renderer for controller.js to call after /workflows loads.
-  global.renderHudClock = _renderClock;
-  global.toggleRailCollapsed = () => setCollapsed(!ui.collapsed);
-  global.getActiveProjectContext = _activeProject;
-  global.refreshActiveProjectContext = loadActiveProjectContext;
-  global.openProjectWorkspace = openProjectWorkspace;
-  global.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
-  global.closeProjectWorkspace = closeProjectWorkspace;
-  global.isProjectWorkspaceOpen = isProjectWorkspaceOpen;
-  global.cycleProjectWorkspaceTab = cycleProjectWorkspaceTab;
-  global.closeProjectTargetEditor = _closeProjectTargetEditor;
-  global.isProjectTargetEditorOpen = isProjectTargetEditorOpen;
-  global.isProjectPackageManifestOpen = isProjectPackageManifestOpen;
-  global.refreshProjectWorkspace = refreshProjectWorkspace;
-  global.notifyProjectWorkspaceChanged = _notifyProjectWorkspaceChanged;
+  if (typeof importedSetProjectHudHandlers === 'function') {
+    importedSetProjectHudHandlers({ renderHudClock: _renderClock });
+  }
+  if (typeof importedSetProjectContextHandlers === 'function') {
+    importedSetProjectContextHandlers({
+      closeProjectWorkspace,
+      cycleProjectWorkspaceTab,
+      getActiveProjectContext: _activeProject,
+      isProjectWorkspaceOpen,
+      openEntityMetadataEditor,
+      openProjectAutoPromoteRuleFromAtlas,
+      openProjectWorkspace,
+      refreshActiveProjectContext: loadActiveProjectContext,
+      refreshProjectWorkspace,
+    });
+  }
+  if (typeof importedSetControllerActionHandlers === 'function') {
+    importedSetControllerActionHandlers({ toggleRailCollapsed });
+  }
 
 })(globalThis);

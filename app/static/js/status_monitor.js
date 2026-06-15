@@ -2,11 +2,104 @@
 // First-class session/status surface: centered modal on desktop, bottom sheet
 // on mobile. Active-run attach/kill remains the bottom section.
 
-(function () {
+import { getTabs as importedGetTabs } from './core/state.js';
+import { showToast as importedShowToast } from './core/utils.js';
+import {
+  DarklabStatusMonitorCore as importedStatusMonitorCore,
+} from './features/status-monitor/status_monitor_core.js';
+import {
+  DarklabStatusMonitorData as importedStatusMonitorData,
+} from './features/status-monitor/status_monitor_data.js';
+import {
+  DarklabStatusMonitorResources as importedStatusMonitorResources,
+} from './features/status-monitor/status_monitor_resources.js';
+import {
+  openHistoryWithFilters as importedOpenHistoryWithFilters,
+} from './features/history/history_panel_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from './runtime_bridge.js';
+import {
+  attachActiveRunFromMonitor as importedAttachActiveRunFromMonitor,
+  killActiveRunFromMonitor as importedKillActiveRunFromMonitor,
+  pauseBackgroundRunStreamsForStatusMonitor as importedPauseBackgroundRunStreamsForStatusMonitor,
+  resumeBackgroundRunStreamsAfterStatusMonitor as importedResumeBackgroundRunStreamsAfterStatusMonitor,
+} from './runner.js';
+import { activateTab as importedActivateTab } from './tabs.js';
+import {
+  applyConstellationFullDayPreference as importedApplyConstellationFullDayPreference,
+  getConstellationFullDayPreference as importedGetConstellationFullDayPreference,
+} from './features/preferences/preferences.js';
+import { restoreHistoryRun as importedRestoreHistoryRun } from './features/history/history_restore_bridge.js';
+import { setRuntimeHandlers as importedSetRuntimeHandlers } from './runtime_bridge.js';
+import { bindMobileSheet as importedBindMobileSheet } from './ui/mobile_sheet.js';
+import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from './ui/ui_focus_trap.js';
+import { syncModalOverlayState as importedSyncModalOverlayState } from './ui/ui_helpers.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+
+let exportedOpenStatusMonitor = null;
+let exportedCloseStatusMonitor = null;
+let exportedIsStatusMonitorOpen = null;
+let exportedRefreshStatusMonitor = null;
+let exportedConstellationTestHelpers = null;
+
+(function (global) {
+  function _statusMonitorGlobalFunction(name) {
+    const fn = global && global[name];
+    return typeof fn === 'function' ? fn : null;
+  }
+
+  function _statusMonitorGlobalValue(name) {
+    return global ? global[name] : undefined;
+  }
+
   const _statusMonitorCore = (
-    typeof window !== 'undefined' && window.DarklabStatusMonitorCore
-  ) || (typeof DarklabStatusMonitorCore !== 'undefined' ? DarklabStatusMonitorCore : null);
+    (typeof importedStatusMonitorCore !== 'undefined' && importedStatusMonitorCore)
+    || _statusMonitorGlobalValue('DarklabStatusMonitorCore')
+  );
   if (!_statusMonitorCore) throw new Error('DarklabStatusMonitorCore is unavailable');
+  const getTabsFn = (
+    (typeof importedGetTabs !== 'undefined' && importedGetTabs)
+    || _statusMonitorGlobalFunction('getTabs')
+  );
+  const showToastFn = (
+    (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || _statusMonitorGlobalFunction('showToast')
+  );
+  const openHistoryWithFiltersFn = (
+    typeof importedOpenHistoryWithFilters !== 'undefined' && importedOpenHistoryWithFilters
+  ) || _statusMonitorGlobalFunction('openHistoryWithFilters');
+  const restoreHistoryRunFn = (
+    typeof importedRestoreHistoryRun !== 'undefined' && importedRestoreHistoryRun
+  ) || _statusMonitorGlobalFunction('restoreHistoryRun');
+  const activateTabFn = (
+    (typeof importedActivateTab !== 'undefined' && importedActivateTab)
+    || _statusMonitorGlobalFunction('activateTab')
+  );
+  const attachActiveRunFromMonitorFn = (
+    typeof importedAttachActiveRunFromMonitor !== 'undefined' && importedAttachActiveRunFromMonitor
+  ) || _statusMonitorGlobalFunction('attachActiveRunFromMonitor');
+  const killActiveRunFromMonitorFn = (
+    typeof importedKillActiveRunFromMonitor !== 'undefined' && importedKillActiveRunFromMonitor
+  ) || _statusMonitorGlobalFunction('killActiveRunFromMonitor');
+  const bindMobileSheetFn = (
+    typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet
+  ) || _statusMonitorGlobalFunction('bindMobileSheet');
+  const bindDismissibleFn = (
+    typeof importedBindDismissible !== 'undefined' && importedBindDismissible
+  ) || _statusMonitorGlobalFunction('bindDismissible');
+  const bindFocusTrapFn = (
+    typeof importedBindFocusTrap !== 'undefined' && importedBindFocusTrap
+  ) || _statusMonitorGlobalFunction('bindFocusTrap');
+  const bindPressableFn = (
+    typeof importedBindPressable !== 'undefined' && importedBindPressable
+  ) || _statusMonitorGlobalFunction('bindPressable');
+
+  function _attachInteractivePtyCommand() {
+    return _statusMonitorGlobalFunction('attachInteractivePtyCommand');
+  }
 
   let monitorEl = null;
   let scrimEl = null;
@@ -83,10 +176,14 @@
 
   function _statusMonitorResources() {
     if (!statusMonitorResources) {
-      if (typeof DarklabStatusMonitorResources === 'undefined' || !DarklabStatusMonitorResources?.create) {
+      const resourcesFactory = (
+        (typeof importedStatusMonitorResources !== 'undefined' && importedStatusMonitorResources)
+        || _statusMonitorGlobalValue('DarklabStatusMonitorResources')
+      );
+      if (!resourcesFactory?.create) {
         throw new Error('DarklabStatusMonitorResources is unavailable');
       }
-      statusMonitorResources = DarklabStatusMonitorResources.create({
+      statusMonitorResources = resourcesFactory.create({
         core: _statusMonitorCore,
         svgEl: _svgEl,
         pathFromPoints: _pathFromPoints,
@@ -97,10 +194,21 @@
 
   function _statusMonitorData() {
     if (!statusMonitorData) {
-      if (typeof DarklabStatusMonitorData === 'undefined' || !DarklabStatusMonitorData?.create) {
+      const dataFactory = (
+        (typeof importedStatusMonitorData !== 'undefined' && importedStatusMonitorData)
+        || _statusMonitorGlobalValue('DarklabStatusMonitorData')
+      );
+      if (!dataFactory?.create) {
         throw new Error('DarklabStatusMonitorData is unavailable');
       }
-      statusMonitorData = DarklabStatusMonitorData.create({ apiFetch });
+      const fetchImpl = (
+        typeof importedHasRuntimeHandler === 'function'
+        && importedHasRuntimeHandler('apiFetch')
+        && typeof importedRuntimeApiFetch === 'function'
+          ? importedRuntimeApiFetch
+          : null
+      ) || _statusMonitorGlobalFunction('apiFetch');
+      statusMonitorData = dataFactory.create({ apiFetch: fetchImpl });
     }
     return statusMonitorData;
   }
@@ -889,7 +997,7 @@
 
   function _tabForRun(run) {
     const runId = String(run?.run_id || run?.id || '');
-    const currentTabs = typeof getTabs === 'function' ? getTabs() : [];
+    const currentTabs = typeof getTabsFn === 'function' ? getTabsFn() : [];
     if (!runId || !Array.isArray(currentTabs)) return null;
     return currentTabs.find(candidate => (
       candidate && (candidate.runId === runId || candidate.historyRunId === runId)
@@ -902,7 +1010,7 @@
 
   function _ptyAttachUnavailableMessage(run) {
     if (!_isPtyRun(run) || _tabForRun(run)) return '';
-    if (typeof attachInteractivePtyCommand === 'function') return '';
+    if (typeof _attachInteractivePtyCommand() === 'function') return '';
     return 'Interactive PTY is still running, but this browser cannot attach to the live terminal. Use Status Monitor to track or kill it.';
   }
 
@@ -926,8 +1034,8 @@
       Promise.resolve(result).then(attached => {
         if (attached && options.closeOnSuccess !== false) closeStatusMonitor();
       }).catch(err => {
-        if (typeof showToast === 'function') {
-          showToast(err?.message || 'Could not complete run action', 'error');
+        if (typeof showToastFn === 'function') {
+          showToastFn(err?.message || 'Could not complete run action', 'error');
         }
       });
     });
@@ -937,11 +1045,11 @@
   function _openHistoryForCommandRoot(root) {
     const commandRoot = String(root || '').trim();
     if (!commandRoot) return false;
-    if (typeof window.openHistoryWithFilters !== 'function') {
-      if (typeof showToast === 'function') showToast('History filtering is not available', 'error');
+    if (typeof openHistoryWithFiltersFn !== 'function') {
+      if (typeof showToastFn === 'function') showToastFn('History filtering is not available', 'error');
       return false;
     }
-    window.openHistoryWithFilters({ type: 'runs', commandRoot });
+    openHistoryWithFiltersFn({ type: 'runs', commandRoot });
     closeStatusMonitor();
     return true;
   }
@@ -949,18 +1057,18 @@
   function _restoreConstellationRun(star) {
     const runId = String(star?.id || '').trim();
     if (!runId) return Promise.resolve(false);
-    if (typeof window.restoreHistoryRun !== 'function') {
-      if (typeof showToast === 'function') showToast('Run restore is not available', 'error');
+    if (typeof restoreHistoryRunFn !== 'function') {
+      if (typeof showToastFn === 'function') showToastFn('Run restore is not available', 'error');
       return Promise.resolve(false);
     }
-    return Promise.resolve(window.restoreHistoryRun(runId, { hidePanelOnSuccess: false }))
+    return Promise.resolve(restoreHistoryRunFn(runId, { hidePanelOnSuccess: false }))
       .then(() => {
         closeStatusMonitor();
         return true;
       })
       .catch(err => {
-        if (typeof showToast === 'function') {
-          showToast(err?.message || 'Failed to restore run', 'error');
+        if (typeof showToastFn === 'function') {
+          showToastFn(err?.message || 'Failed to restore run', 'error');
         }
         return false;
       });
@@ -1099,9 +1207,9 @@
     monitorEl.append(header, listEl);
     monitorEl.addEventListener('click', event => event.stopPropagation());
     document.body.append(scrimEl, monitorEl);
-    if (typeof bindFocusTrap === 'function') bindFocusTrap(monitorEl);
-    if (typeof bindDismissible === 'function') {
-      bindDismissible(monitorEl, {
+    if (typeof bindFocusTrapFn === 'function') bindFocusTrapFn(monitorEl);
+    if (typeof bindDismissibleFn === 'function') {
+      bindDismissibleFn(monitorEl, {
         level: 'modal',
         isOpen: () => isOpen,
         onClose: () => closeStatusMonitor(),
@@ -1109,8 +1217,8 @@
         closeButtons: closeBtn,
       });
     }
-    if (typeof bindMobileSheet === 'function') {
-      bindMobileSheet(monitorEl, { onClose: () => closeStatusMonitor() });
+    if (typeof bindMobileSheetFn === 'function') {
+      bindMobileSheetFn(monitorEl, { onClose: () => closeStatusMonitor() });
     }
   }
 
@@ -1985,8 +2093,10 @@
   }
 
   function _isConstellationFullDay() {
-    return typeof getConstellationFullDayPreference === 'function'
-      && getConstellationFullDayPreference() === 'on';
+    const readPreference = (typeof importedGetConstellationFullDayPreference !== 'undefined'
+      && importedGetConstellationFullDayPreference)
+      || _statusMonitorGlobalFunction('getConstellationFullDayPreference');
+    return typeof readPreference === 'function' && readPreference() === 'on';
   }
 
   // Daylight gradient backdrop. Stops are anchored to clock hours so the
@@ -2100,9 +2210,10 @@
 
   function _toggleConstellationFullDay() {
     const next = _isConstellationFullDay() ? 'off' : 'on';
-    if (typeof applyConstellationFullDayPreference === 'function') {
-      applyConstellationFullDayPreference(next, true);
-    }
+    const applyPreference = (typeof importedApplyConstellationFullDayPreference !== 'undefined'
+      && importedApplyConstellationFullDayPreference)
+      || _statusMonitorGlobalFunction('applyConstellationFullDayPreference');
+    if (typeof applyPreference === 'function') applyPreference(next, true);
     _rerenderConstellationPanelInPlace();
   }
 
@@ -2123,8 +2234,8 @@
       ? 'Constellation showing full 24-hour day. Activate to switch to active-hours layout.'
       : 'Constellation showing active hours. Activate to switch to full 24-hour layout.');
     btn.textContent = fullDay ? 'Full day' : 'Active hours';
-    if (typeof bindPressable === 'function') {
-      bindPressable(btn, {
+    if (typeof bindPressableFn === 'function') {
+      bindPressableFn(btn, {
         onActivate: _toggleConstellationFullDay,
         refocusComposer: false,
       });
@@ -3244,13 +3355,13 @@
   }
 
   function _activeRunActionsSignature(run) {
-    const ptyUnavailable = _isPtyRun(run) && !_tabForRun(run) && typeof attachInteractivePtyCommand !== 'function';
+    const ptyUnavailable = _isPtyRun(run) && !_tabForRun(run) && typeof _attachInteractivePtyCommand() !== 'function';
     const hasAttach = (
-      (typeof activateTab === 'function' && !!_tabForRun(run))
-      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
-      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')
+      (typeof activateTabFn === 'function' && !!_tabForRun(run))
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitorFn === 'function')
+      || (_isPtyRun(run) && typeof _attachInteractivePtyCommand() === 'function')
     );
-    const hasKill = typeof killActiveRunFromMonitor === 'function';
+    const hasKill = typeof killActiveRunFromMonitorFn === 'function';
     return [
       hasAttach ? 'A' : '',
       ptyUnavailable ? 'P' : '',
@@ -3261,19 +3372,20 @@
 
   function _openOrAttachActiveRun(run) {
     const currentTab = _tabForRun(run);
-    if (currentTab && typeof activateTab === 'function') {
-      activateTab(currentTab.id, { focusComposer: false });
+    if (currentTab && typeof activateTabFn === 'function') {
+      activateTabFn(currentTab.id, { focusComposer: false });
       return Promise.resolve(true);
     }
     if (_isPtyRun(run)) {
-      if (typeof attachInteractivePtyCommand === 'function') {
-        return Promise.resolve(attachInteractivePtyCommand(run));
+      const attachPty = _attachInteractivePtyCommand();
+      if (typeof attachPty === 'function') {
+        return Promise.resolve(attachPty(run));
       }
-      if (typeof showToast === 'function') showToast(_ptyAttachUnavailableMessage(run), 'error');
+      if (typeof showToastFn === 'function') showToastFn(_ptyAttachUnavailableMessage(run), 'error');
       return Promise.resolve(false);
     }
-    if (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function') {
-      return Promise.resolve(attachActiveRunFromMonitor(run));
+    if (!_isPtyRun(run) && typeof attachActiveRunFromMonitorFn === 'function') {
+      return Promise.resolve(attachActiveRunFromMonitorFn(run));
     }
     return Promise.resolve(false);
   }
@@ -3282,9 +3394,9 @@
     const actions = document.createElement('div');
     actions.className = 'status-monitor-actions';
     actions.dataset.actionsSignature = _activeRunActionsSignature(run);
-    if ((typeof activateTab === 'function' && !!_tabForRun(run))
-      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
-      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')) {
+    if ((typeof activateTabFn === 'function' && !!_tabForRun(run))
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitorFn === 'function')
+      || (_isPtyRun(run) && typeof _attachInteractivePtyCommand() === 'function')) {
       actions.append(_statusMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
         const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return _openOrAttachActiveRun(latest);
@@ -3300,10 +3412,10 @@
       unavailable.setAttribute('aria-disabled', 'true');
       actions.append(unavailable);
     }
-    if (typeof killActiveRunFromMonitor === 'function') {
+    if (typeof killActiveRunFromMonitorFn === 'function') {
       actions.append(_statusMonitorActionButton('Kill', 'Kill this active run', () => {
         const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
-        return killActiveRunFromMonitor(latest);
+        return killActiveRunFromMonitorFn(latest);
       }, { className: 'status-monitor-action-btn-kill', closeOnSuccess: false }));
     }
     return actions;
@@ -3325,8 +3437,8 @@
 
     const tab = _tabForRun(run);
     if (tab
-      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
-      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitorFn === 'function')
+      || (_isPtyRun(run) && typeof _attachInteractivePtyCommand() === 'function')
       || _isPtyRun(run)) {
       item.classList.add('status-monitor-item-clickable', 'chrome-row-clickable');
       item.setAttribute('role', 'button');
@@ -3335,14 +3447,14 @@
       item.addEventListener('click', event => {
         if (event.target && event.target.closest && event.target.closest('.status-monitor-action-btn')) return;
         openRun().catch(err => {
-          if (typeof showToast === 'function') showToast(err?.message || 'Could not open run', 'error');
+          if (typeof showToastFn === 'function') showToastFn(err?.message || 'Could not open run', 'error');
         });
       });
       item.addEventListener('keydown', event => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         openRun().catch(err => {
-          if (typeof showToast === 'function') showToast(err?.message || 'Could not open run', 'error');
+          if (typeof showToastFn === 'function') showToastFn(err?.message || 'Could not open run', 'error');
         });
       });
     }
@@ -3709,11 +3821,14 @@
     monitorEl?.classList.toggle('status-monitor-modal', !mobile);
     scrimEl?.classList.remove('u-hidden');
     monitorEl?.classList.remove('u-hidden');
-    window.syncModalOverlayState?.();
+    const syncModalOverlayStateFn = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState)
+      || _statusMonitorGlobalFunction('syncModalOverlayState');
+    syncModalOverlayStateFn?.();
     if (monitorEl) monitorEl.dataset.source = source;
-    if (typeof pauseBackgroundRunStreamsForStatusMonitor === 'function') {
-      pauseBackgroundRunStreamsForStatusMonitor();
-    }
+    const pauseBackgroundStreams = (typeof importedPauseBackgroundRunStreamsForStatusMonitor !== 'undefined'
+      && importedPauseBackgroundRunStreamsForStatusMonitor)
+      || _statusMonitorGlobalFunction('pauseBackgroundRunStreamsForStatusMonitor');
+    if (typeof pauseBackgroundStreams === 'function') pauseBackgroundStreams();
     _resetPulseVisualsForOpen();
     suppressPulseLoadUntilFresh = true;
     _renderDashboard([], { loadingActiveRuns: true });
@@ -3725,7 +3840,7 @@
     } catch (err) {
       suppressPulseLoadUntilFresh = false;
       closeStatusMonitor();
-      if (typeof showToast === 'function') showToast(err?.message || 'Status monitor failed to load', 'error');
+      if (typeof showToastFn === 'function') showToastFn(err?.message || 'Status monitor failed to load', 'error');
       return false;
     }
     suppressPulseLoadUntilFresh = false;
@@ -3741,14 +3856,17 @@
     _stopPolling();
     _clearOpenFollowupTimer();
     if (cachedRuns.length && _activeHudStatusIsRunning()) _startClosedPolling();
-    if (typeof resumeBackgroundRunStreamsAfterStatusMonitor === 'function') {
-      resumeBackgroundRunStreamsAfterStatusMonitor();
-    }
+    const resumeBackgroundStreams = (typeof importedResumeBackgroundRunStreamsAfterStatusMonitor !== 'undefined'
+      && importedResumeBackgroundRunStreamsAfterStatusMonitor)
+      || _statusMonitorGlobalFunction('resumeBackgroundRunStreamsAfterStatusMonitor');
+    if (typeof resumeBackgroundStreams === 'function') resumeBackgroundStreams();
     document.body.classList.remove('status-monitor-mobile-open');
     document.body.classList.remove('status-monitor-desktop-open');
     scrimEl?.classList.add('u-hidden');
     monitorEl?.classList.add('u-hidden');
-    window.syncModalOverlayState?.();
+    const syncModalOverlayStateFn = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState)
+      || _statusMonitorGlobalFunction('syncModalOverlayState');
+    syncModalOverlayStateFn?.();
   }
 
   function isStatusMonitorOpen() {
@@ -3836,25 +3954,29 @@
     document.addEventListener('DOMContentLoaded', _bindHudTriggers, { once: true });
   }
 
-  window.openStatusMonitor = openStatusMonitor;
-  window.closeStatusMonitor = closeStatusMonitor;
-  window.isStatusMonitorOpen = isStatusMonitorOpen;
-  window.refreshStatusMonitor = refreshStatusMonitor;
+  if (typeof importedSetRuntimeHandlers === 'function') {
+    importedSetRuntimeHandlers({ openStatusMonitor, refreshStatusMonitor });
+  }
+  exportedOpenStatusMonitor = openStatusMonitor;
+  exportedCloseStatusMonitor = closeStatusMonitor;
+  exportedIsStatusMonitorOpen = isStatusMonitorOpen;
+  exportedRefreshStatusMonitor = refreshStatusMonitor;
 
-  // Test-only hook: lets unit tests exercise the constellation math
-  // helpers directly without rendering the full Status Monitor. These
-  // are not part of the public surface and only exist to keep the
-  // jsdom unit suite focused on the helper contracts (hour density,
-  // active-window detection, minute-to-x mapping) rather than asserting
-  // them indirectly via SVG output.
-  window.__constellationTestHelpers = {
+  exportedConstellationTestHelpers = {
     hourDensity: _constellationHourDensity,
     activeWindow: _constellationActiveWindow,
-    minuteToX: _constellationMinuteToX,
     deadBands: _constellationDeadBands,
     visibleSegments: _constellationVisibleSegments,
-    fullDayWindow: CONSTELLATION_FULL_DAY_WINDOW,
+    minuteToX: _constellationMinuteToX,
     plotLeft: CONSTELLATION_PLOT_LEFT,
     plotWidth: CONSTELLATION_PLOT_WIDTH,
   };
-}());
+})(typeof window !== 'undefined' ? window : globalThis);
+
+export {
+  exportedOpenStatusMonitor as openStatusMonitor,
+  exportedCloseStatusMonitor as closeStatusMonitor,
+  exportedConstellationTestHelpers as __constellationTestHelpers,
+  exportedIsStatusMonitorOpen as isStatusMonitorOpen,
+  exportedRefreshStatusMonitor as refreshStatusMonitor,
+};

@@ -3,6 +3,11 @@ import { readFileSync } from 'fs'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
+import { bindMobileSheet } from '../../../app/static/js/ui/mobile_sheet.js'
+import { bindDisclosure } from '../../../app/static/js/ui/ui_disclosure.js'
+import { bindDismissible } from '../../../app/static/js/ui/ui_dismissible.js'
+import { bindOutsideClickClose } from '../../../app/static/js/ui/ui_outside_click.js'
+import { bindPressable } from '../../../app/static/js/ui/ui_pressable.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -238,9 +243,14 @@ function mountMobileHarness({
     dispatchMobileMenuAction,
     openHistoryRunDetails: vi.fn(),
     activeTeamScopeCan,
+    bindPressable,
   }
 
   window.apiFetch = apiFetch
+  window.bindDisclosure = bindDisclosure
+  window.bindDismissible = bindDismissible
+  window.bindMobileSheet = bindMobileSheet
+  window.bindOutsideClickClose = bindOutsideClickClose
   window.showToast = globals.showToast
   window.confirmHistAction = globals.confirmHistAction
   window.restoreHistoryRunIntoTab = globals.restoreHistoryRunIntoTab

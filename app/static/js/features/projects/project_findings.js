@@ -1,5 +1,11 @@
 // Project Findings tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+
+let exportedDarklabProjectFindings = null;
 
 (function projectFindingsModule(global) {
   'use strict';
@@ -32,14 +38,14 @@
     }
 
     function activeTeamScopeCan(capability) {
-      return typeof global.activeTeamScopeCan === 'function'
-        ? global.activeTeamScopeCan(capability)
-        : true;
+      const can = typeof importedActiveTeamScopeCan === 'function' ? importedActiveTeamScopeCan : null;
+      return typeof can === 'function' ? can(capability) : true;
     }
 
     function teamScopeDeniedMessage(action) {
-      return typeof global.teamScopeDeniedMessage === 'function'
-        ? global.teamScopeDeniedMessage(action)
+      const deniedMessage = typeof importedTeamScopeDeniedMessage === 'function' ? importedTeamScopeDeniedMessage : null;
+      return typeof deniedMessage === 'function'
+        ? deniedMessage(action)
         : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
@@ -304,7 +310,11 @@
     };
   }
 
-  global.DarklabProjectFindings = {
+  const DarklabProjectFindings = {
     createProjectFindingsController,
   };
+  exportedDarklabProjectFindings = DarklabProjectFindings;
 })(globalThis);
+
+export {
+  exportedDarklabProjectFindings as DarklabProjectFindings,};

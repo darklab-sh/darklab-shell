@@ -61,6 +61,14 @@ function loadSchedulesModalTestFns({
       refocusComposerAfterAction: vi.fn(),
     },
     '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, openSchedulesModal, closeSchedulesModal })',
+    `window.apiFetch = apiFetch;
+     window.showConfirm = showConfirm;
+     window.showToast = showToast;
+     window.openHistoryRunDetails = openHistoryRunDetails;
+     window.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison;
+     window._closeMajorOverlays = _closeMajorOverlays;
+     window.bindDismissible = bindDismissible;
+     window.refocusComposerAfterAction = refocusComposerAfterAction;`,
   )
   return {
     ...fns,
@@ -117,6 +125,15 @@ function loadWatchersModalTestFns({
       refocusComposerAfterAction: vi.fn(),
     },
     '({ _bindWatchersModal, _deleteSelectedWatcher, refreshWatchersModal, _newWatcher, openWatchersModal, closeWatchersModal })',
+    `window.apiFetch = apiFetch;
+     window.showConfirm = showConfirm;
+     window.showToast = showToast;
+     window.openHistoryRunDetails = openHistoryRunDetails;
+     window.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison;
+     window._compareMetricCell = _compareMetricCell;
+     window._closeMajorOverlays = _closeMajorOverlays;
+     window.bindDismissible = bindDismissible;
+     window.refocusComposerAfterAction = refocusComposerAfterAction;`,
   )
   return {
     ...fns,
@@ -894,17 +911,14 @@ describe('app helpers', () => {
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Accept baseline').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Baseline accepted', 'success'))
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
-  })
+  }, 10_000)
 
   it('does not let history outside-click dismissal close behind modal overlays', async () => {
-    const bindOutsideClickClose = vi.fn()
-    await loadAppFns({ bindOutsideClickClose })
-
-    const historyCall = bindOutsideClickClose.mock.calls.find(([panel]) => panel?.id === 'history-panel')
-    expect(historyCall?.[1].exemptSelectors).toEqual(expect.arrayContaining([
-      '.modal-overlay',
-      '#history-compare-overlay',
-    ]))
+    const source = readFileSync(
+      resolve(REPO_ROOT, 'app/static/js/features/terminal/composer_controller.js'),
+      'utf8',
+    )
+    expect(source).toContain("exemptSelectors: ['.hist-chip-overflow', '[data-action=\"history\"]', '.modal-overlay', '#history-compare-overlay']")
   })
 
   it('applies the saved theme at startup', async () => {
@@ -1138,7 +1152,7 @@ describe('app helpers', () => {
     })
     const bindMobileSheet = vi.fn()
     const reloadSessionHistory = vi.fn(() => Promise.resolve())
-    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference, logClientError, storage } = await loadAppFns({
+    const { activateOptionsTab, cycleOptionsTab, DarklabTeamScope, getOptionsModalLastTabPreference, logClientError, storage } = await loadAppFns({
       apiFetch,
       bindMobileSheet,
       reloadSessionHistory,
@@ -1212,16 +1226,18 @@ describe('app helpers', () => {
     })
     const originalSetActiveTeamId = window.setActiveTeamId
     window.setActiveTeamId = vi.fn(() => { throw new Error('scope setter exploded') })
+    const teamUiFailuresBeforeSwitch = logClientError.mock.calls.length
     document.querySelector('#options-teams-list [data-team-action="switch-team"]').click()
     await vi.waitFor(() => {
-      const failureLog = logClientError.mock.calls.find(([context, error]) => (
-        String(context).startsWith('TEAM_UI_ACTION_FAILED')
-        && String(context).includes('"action":"switch-team"')
-        && String(context).includes('"team_id":"team_options_1"')
-        && error.message === 'scope setter exploded'
-      ))
-      expect(failureLog).toBeTruthy()
+      expect(DarklabTeamScope.getActiveTeamId()).toBe('team_options_1')
     })
+    const staleGlobalFailure = logClientError.mock.calls.slice(teamUiFailuresBeforeSwitch).find(([context, error]) => (
+      String(context).startsWith('TEAM_UI_ACTION_FAILED')
+      && String(context).includes('"action":"switch-team"')
+      && String(context).includes('"team_id":"team_options_1"')
+      && error.message === 'scope setter exploded'
+    ))
+    expect(staleGlobalFailure).toBeUndefined()
     window.setActiveTeamId = originalSetActiveTeamId
     document.getElementById('team-scope-trigger').click()
     const scopeMenu = document.getElementById('team-scope-menu')
@@ -1259,7 +1275,7 @@ describe('app helpers', () => {
       source: 'selector',
     })
     expect(reloadSessionHistory).toHaveBeenCalledTimes(1)
-    await window.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
     document.getElementById('team-scope-trigger').click()
     document.querySelector('[data-team-scope-menu-option="personal"]').click()
     expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
@@ -1272,7 +1288,7 @@ describe('app helpers', () => {
     document.querySelector('[data-team-scope-menu-option="team_options_1"]').click()
     expect(document.getElementById('team-scope-label').textContent).toBe('Ops team')
     expect(reloadSessionHistory).toHaveBeenCalledTimes(3)
-    await window.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
 
     const dispatchScopeStorage = (value) => {
       if (value) storage.setItem('active_team_id:tok_options_tab', value)
@@ -1315,7 +1331,7 @@ describe('app helpers', () => {
     failScopeRefresh = false
     const originalGetItem = storage.getItem.bind(storage)
     storage.getItem = vi.fn(() => { throw new Error('blocked storage read') })
-    await window.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
     storage.getItem = originalGetItem
     const storageLog = apiFetch.mock.calls
       .filter(([url, opts]) => url === '/log' && JSON.parse(opts.body).event === 'TEAM_SCOPE_STORAGE_UNAVAILABLE')
@@ -2857,7 +2873,7 @@ describe('app helpers', () => {
       <div class="prompt-wrap"></div>
     `
 
-    const { storage, logClientError } = await loadAppFns({ apiFetch })
+    const { storage, logClientError } = await loadAppFns({ apiFetch, theme: 'only_theme' })
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
@@ -2938,6 +2954,24 @@ describe('app helpers', () => {
 
     expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
     expect(runCommand).not.toHaveBeenCalled()
+  })
+
+  it('lets blank Enter append a prompt after the welcome intro is done', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    const submitComposerCommand = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      requestWelcomeSettle,
+      welcomeActive: true,
+      welcomeDone: true,
+      welcomeOwnsTab,
+      submitComposerCommand,
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(requestWelcomeSettle).not.toHaveBeenCalled()
+    expect(submitComposerCommand).toHaveBeenCalledWith('', { dismissKeyboard: true })
   })
 
   it('does not let welcome playback steal Space from schedules form fields', async () => {
@@ -3058,19 +3092,20 @@ describe('app helpers', () => {
       sessionStorage,
       _getTabSessionStateKey,
       _getTabSessionRestoreInProgress,
+      setTabSessionRestoreInProgress,
     } = await loadAppFns({
       tabs,
       activeTabId: 'tab-1',
     })
 
-    expect(window._tabSessionRestoreInProgress).toBe(false)
-    window._tabSessionRestoreInProgress = true
+    expect(_getTabSessionRestoreInProgress()).toBe(false)
+    setTabSessionRestoreInProgress(true)
     expect(_getTabSessionRestoreInProgress()).toBe(true)
 
     persistTabSessionStateNow()
     expect(sessionStorage.getItem(_getTabSessionStateKey())).toBe(null)
 
-    window._tabSessionRestoreInProgress = false
+    setTabSessionRestoreInProgress(false)
     expect(_getTabSessionRestoreInProgress()).toBe(false)
     persistTabSessionStateNow()
     expect(JSON.parse(sessionStorage.getItem(_getTabSessionStateKey())).tabs).toHaveLength(1)

@@ -1,5 +1,8 @@
 // Project nested sheet controller.
 // Loaded before shell_chrome.js; shell chrome supplies the nested modal elements.
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+
+let exportedDarklabProjectNestedSheets = null;
 
 (function projectNestedSheetsModule(global) {
   'use strict';
@@ -11,7 +14,7 @@
     function mobileModeActive() {
       return !!(
         document.body.classList.contains('mobile-terminal-mode')
-        || (typeof global.useMobileTerminalViewportMode === 'function' && global.useMobileTerminalViewportMode())
+        || (typeof importedUseMobileTerminalViewportMode === 'function' && importedUseMobileTerminalViewportMode())
       );
     }
 
@@ -110,7 +113,11 @@
     };
   }
 
-  global.DarklabProjectNestedSheets = {
+  const DarklabProjectNestedSheets = {
     createProjectNestedSheetsController,
   };
+  exportedDarklabProjectNestedSheets = DarklabProjectNestedSheets;
 })(globalThis);
+
+export {
+  exportedDarklabProjectNestedSheets as DarklabProjectNestedSheets,};

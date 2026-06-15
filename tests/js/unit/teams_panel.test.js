@@ -386,6 +386,31 @@ describe('Options Teams permissions UI', () => {
     expect(showToast).toHaveBeenCalledWith('Personal scope selected', 'success')
   })
 
+  it('preserves in-progress create form values when teams refresh', async () => {
+    const apiFetch = buildApiFetch({ role: 'owner' })
+    const harness = await loadAppFns({
+      apiFetch,
+      sessionId: 'tok_team_panel_create_refresh',
+    })
+    harness.activateOptionsTab('teams')
+    await vi.waitFor(() => {
+      expect(document.getElementById('options-teams-list').textContent).toContain('Permissions Team')
+    })
+
+    document.getElementById('options-team-create-btn').click()
+    const form = document.querySelector('[data-team-form="create"]')
+    form.querySelector('[name="name"]').value = 'Refresh Race Team'
+    form.querySelector('[name="slug"]').value = 'refresh-race-team'
+    form.querySelector('[name="display_name"]').value = 'Owner'
+
+    await harness.refreshOptionsTeams()
+
+    const refreshedForm = document.querySelector('[data-team-form="create"]')
+    expect(refreshedForm.querySelector('[name="name"]').value).toBe('Refresh Race Team')
+    expect(refreshedForm.querySelector('[name="slug"]').value).toBe('refresh-race-team')
+    expect(refreshedForm.querySelector('[name="display_name"]').value).toBe('Owner')
+  })
+
   it('shows owner team activity with filters and safe details', async () => {
     const apiFetch = buildApiFetch({ role: 'owner' })
     await loadTeamsPanel({ role: 'owner', apiFetch })

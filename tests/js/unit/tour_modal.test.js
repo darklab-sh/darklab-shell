@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
+import { bindFocusTrap } from '../../../app/static/js/ui/ui_focus_trap.js'
 
 function loadTourModal({
   mobile = false,
@@ -45,7 +46,9 @@ function loadTourModal({
       {
         document,
         window,
+        getAppConfig: () => window.APP_CONFIG,
         refocusComposerAfterAction,
+        bindFocusTrap,
         setComposerValue,
         setTimeout: (fn) => {
           fn()
@@ -55,13 +58,13 @@ function loadTourModal({
         Event,
       },
       `{
-        openTourModal: window.openTourModal,
-        closeTourModal: window.closeTourModal,
+        openTourModal: exportedOpenTourModal,
+        closeTourModal: exportedCloseTourModal,
         closeTopmostDismissible: window.closeTopmostDismissible,
-        _renderTourIllustration: window._renderTourIllustration,
-        _visibleTourModalChapters: window._visibleTourModalChapters,
+        _renderTourIllustration: exportedRenderTourIllustration,
+        _visibleTourModalChapters: exportedVisibleTourModalChapters,
       }`,
-      'window.refocusComposerAfterAction = refocusComposerAfterAction; window.setComposerValue = setComposerValue;',
+      'window.refocusComposerAfterAction = refocusComposerAfterAction; window.bindFocusTrap = bindFocusTrap; window.setComposerValue = setComposerValue;',
     ),
     recordTourOpened,
     refocusComposerAfterAction,

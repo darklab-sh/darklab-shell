@@ -1,6 +1,8 @@
 // Shared Project workspace constants.
 // Loaded before shell_chrome.js so controller composition can pass these values around.
 
+let exportedDarklabProjectWorkspaceConstants = null;
+
 (function projectWorkspaceConstantsModule(global) {
   'use strict';
 
@@ -20,7 +22,7 @@
     info: 4,
   };
 
-  global.DarklabProjectWorkspaceConstants = {
+  const DarklabProjectWorkspaceConstants = {
     findingNoteStateOptions: [
       { value: 'all', label: 'All notes' },
       { value: 'noted', label: 'With notes' },
@@ -64,4 +66,9 @@
     projectNotesAutosaveDelayMs: 450,
     workspaceBroadcastKey: 'darklab_project_workspace_changed',
   };
+  exportedDarklabProjectWorkspaceConstants = DarklabProjectWorkspaceConstants;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceConstants as DarklabProjectWorkspaceConstants,
+};

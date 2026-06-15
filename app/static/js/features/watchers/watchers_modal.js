@@ -1,4 +1,28 @@
 // Browser change-detection watchers modal.
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import {
+  loadWatcherAutocompleteHints as importedLoadWatcherAutocompleteHints,
+} from '../autocomplete/suggestions.js';
+import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_details.js';
+import {
+  _compareMetricCell as importedCompareMetricCell,
+  fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
+} from '../run-comparison/history_compare_renderer.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { refocusComposerAfterAction as importedRefocusComposerAfterAction, syncModalOverlayState as importedSyncModalOverlayState } from '../../ui/ui_helpers.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import {
+  hasHistoryPanelHandler as importedHasHistoryPanelHandler,
+  refreshHistoryPanel as importedRefreshHistoryPanel,
+} from '../history/history_panel_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from '../../runtime_bridge.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
 
 const WATCHERS_DEFAULT_CRON = '0 * * * *';
 const WATCHERS_FIRES_LIMIT = 20;
@@ -24,6 +48,8 @@ const WATCHERS_COMMON_TIMEZONES = [
   'Australia/Sydney',
 ];
 
+const WATCHERS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
 let _watchersState = {
   watchers: [],
   selectedId: '',
@@ -43,6 +69,87 @@ let _watchersState = {
   discardPromptOpen: false,
 };
 
+function _watcherAppConfig() {
+  if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
+  return WATCHERS_GLOBAL.APP_CONFIG || null;
+}
+
+function _watcherApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || (typeof WATCHERS_GLOBAL.apiFetch === 'function' ? WATCHERS_GLOBAL.apiFetch : null);
+  if (!fetcher) return Promise.reject(new Error('apiFetch is not available'));
+  return fetcher(...args);
+}
+
+function _watcherRefocusComposerAfterAction(options) {
+  const refocus = typeof importedRefocusComposerAfterAction === 'function'
+    ? importedRefocusComposerAfterAction
+    : (typeof WATCHERS_GLOBAL.refocusComposerAfterAction === 'function' ? WATCHERS_GLOBAL.refocusComposerAfterAction : null);
+  if (refocus) refocus(options);
+}
+
+function _watcherSyncModalOverlayState() {
+  const sync = typeof importedSyncModalOverlayState === 'function'
+    ? importedSyncModalOverlayState
+    : null;
+  if (sync) sync();
+}
+
+function _watcherShowConfirm(options) {
+  const confirm = typeof WATCHERS_GLOBAL.showConfirm === 'function' ? WATCHERS_GLOBAL.showConfirm : null;
+  return confirm ? confirm(options) : Promise.resolve(null);
+}
+
+function _watcherBindDismissible(overlay, options) {
+  const bind = typeof importedBindDismissible === 'function'
+    ? importedBindDismissible
+    : (typeof WATCHERS_GLOBAL.bindDismissible === 'function' ? WATCHERS_GLOBAL.bindDismissible : null);
+  return bind ? bind(overlay, options) : null;
+}
+
+function _watcherEmitUiEvent(name, detail) {
+  const emit = typeof importedEmitUiEvent === 'function'
+    ? importedEmitUiEvent
+    : (typeof WATCHERS_GLOBAL.emitUiEvent === 'function' ? WATCHERS_GLOBAL.emitUiEvent : null);
+  if (emit) emit(name, detail);
+}
+
+function _watcherOpenHistoryRunDetails(runId) {
+  const open = typeof importedOpenHistoryRunDetails === 'function'
+    ? importedOpenHistoryRunDetails
+    : (typeof WATCHERS_GLOBAL.openHistoryRunDetails === 'function' ? WATCHERS_GLOBAL.openHistoryRunDetails : null);
+  if (open) open({ id: runId || '' });
+}
+
+function _watcherFetchAndRenderHistoryComparison(...args) {
+  const compare = typeof importedFetchAndRenderHistoryComparison === 'function'
+    ? importedFetchAndRenderHistoryComparison
+    : (typeof WATCHERS_GLOBAL.fetchAndRenderHistoryComparison === 'function'
+        ? WATCHERS_GLOBAL.fetchAndRenderHistoryComparison
+        : null);
+  if (!compare) return Promise.reject(new Error('Run comparison is not available.'));
+  return compare(...args);
+}
+
+function _watcherCompareMetricCell(label, value, tone = '') {
+  const render = typeof importedCompareMetricCell === 'function'
+    ? importedCompareMetricCell
+    : (typeof window !== 'undefined' && typeof window._compareMetricCell === 'function' ? window._compareMetricCell : null);
+  return render ? render(label, value, tone) : null;
+}
+
+function _watcherLoadAutocompleteHints() {
+  const load = typeof importedLoadWatcherAutocompleteHints === 'function'
+    ? importedLoadWatcherAutocompleteHints
+    : (typeof WATCHERS_GLOBAL.loadWatcherAutocompleteHints === 'function' ? WATCHERS_GLOBAL.loadWatcherAutocompleteHints : null);
+  return load ? load() : Promise.resolve();
+}
+
 function _watcherEls() {
   return {
     overlay: document.getElementById('watchers-overlay'),
@@ -55,11 +162,7 @@ function _watcherEls() {
 }
 
 function _watcherDefaultTimezone() {
-  const configured = String(
-    typeof APP_CONFIG !== 'undefined' && APP_CONFIG
-      ? APP_CONFIG.scheduler_default_timezone || ''
-      : '',
-  ).trim();
+  const configured = String(_watcherAppConfig()?.scheduler_default_timezone || '').trim();
   return configured || 'UTC';
 }
 
@@ -106,7 +209,7 @@ function _watcherDraftFromWatcher(watcher = null, baselineRun = null) {
 }
 
 async function _watcherJson(url, options = {}) {
-  const resp = await apiFetch(url, options);
+  const resp = await _watcherApiFetch(url, options);
   let data = {};
   try {
     data = await resp.json();
@@ -122,11 +225,39 @@ async function _watcherJson(url, options = {}) {
 }
 
 function _watcherToast(message, tone = 'success') {
-  if (typeof showToast === 'function') showToast(message, tone);
+  const toast = typeof importedShowToast === 'function'
+    ? importedShowToast
+    : (typeof WATCHERS_GLOBAL.showToast === 'function' ? WATCHERS_GLOBAL.showToast : null);
+  if (toast) toast(message, tone);
 }
 
 function _watcherClientError(context, err) {
-  if (typeof logClientError === 'function') logClientError(context, err);
+  const log = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedRuntimeLogClientError === 'function'
+      ? importedRuntimeLogClientError
+      : null
+  ) || (typeof WATCHERS_GLOBAL.logClientError === 'function' ? WATCHERS_GLOBAL.logClientError : null);
+  if (log) log(context, err);
+}
+
+function _watcherCloseMajorOverlays() {
+  const close = (typeof importedCloseMajorOverlays === 'function' && importedCloseMajorOverlays)
+    || WATCHERS_GLOBAL._closeMajorOverlays;
+  if (typeof close === 'function') close();
+}
+
+function _watcherRefreshHistoryPanel() {
+  if (
+    typeof importedHasHistoryPanelHandler === 'function'
+    && importedHasHistoryPanelHandler('refreshHistoryPanel')
+    && typeof importedRefreshHistoryPanel === 'function'
+  ) {
+    return importedRefreshHistoryPanel();
+  }
+  if (typeof WATCHERS_GLOBAL.refreshHistoryPanel === 'function') return WATCHERS_GLOBAL.refreshHistoryPanel();
+  return null;
 }
 
 function _watcherDateLabel(value) {
@@ -211,8 +342,11 @@ function _watcherDiffTone(kind) {
 
 function _bindWatcherPressable(el, onActivate, options = {}) {
   if (!el || typeof onActivate !== 'function') return;
-  if (typeof bindPressable === 'function') {
-    bindPressable(el, { refocusComposer: false, ...options, onActivate });
+  const bind = typeof importedBindPressable === 'function'
+    ? importedBindPressable
+    : (typeof WATCHERS_GLOBAL.bindPressable === 'function' ? WATCHERS_GLOBAL.bindPressable : null);
+  if (bind) {
+    bind(el, { refocusComposer: false, ...options, onActivate });
     return;
   }
   el.addEventListener('click', onActivate);
@@ -230,7 +364,7 @@ function _setWatchersOpen(open) {
   overlay.classList.toggle('u-hidden', !open);
   overlay.classList.toggle('open', !!open);
   overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
-  window.syncModalOverlayState?.();
+  _watcherSyncModalOverlayState();
   if (open) _focusWatchersModal();
 }
 
@@ -312,10 +446,9 @@ function _watcherHasUnsavedChanges() {
 async function _confirmWatcherDiscardChanges() {
   if (!_watcherHasUnsavedChanges()) return true;
   if (_watchersState.discardPromptOpen) return false;
-  if (typeof showConfirm !== 'function') return true;
   _watchersState.discardPromptOpen = true;
   try {
-    const choice = await showConfirm({
+    const choice = await _watcherShowConfirm({
       body: 'Discard unsaved watcher changes?',
       tone: 'warning',
       actions: [
@@ -323,7 +456,7 @@ async function _confirmWatcherDiscardChanges() {
         { id: 'discard', label: 'Discard changes', role: 'destructive' },
       ],
     });
-    return choice === 'discard';
+    return choice === null ? true : choice === 'discard';
   } finally {
     _watchersState.discardPromptOpen = false;
   }
@@ -335,9 +468,7 @@ async function closeWatchersModal({ refocus = true, force = false } = {}) {
   _watchersState.cleanDraft = null;
   _watchersState.formDirty = false;
   _setWatchersOpen(false);
-  if (refocus && typeof refocusComposerAfterAction === 'function') {
-    refocusComposerAfterAction({ preventScroll: true, defer: true });
-  }
+  if (refocus) _watcherRefocusComposerAfterAction({ preventScroll: true, defer: true });
   return true;
 }
 
@@ -952,16 +1083,18 @@ function _renderWatcherDiffSummary(summary = {}, { kind = '', truncated = false,
   const metrics = document.createElement('div');
   metrics.className = 'history-compare-metrics watchers-diff-metrics';
   const classifier = String(summary.classifier || 'unknown');
-  if (typeof window._compareMetricCell === 'function') {
-    metrics.appendChild(window._compareMetricCell('Classifier', classifier));
+  const classifierCell = _watcherCompareMetricCell('Classifier', classifier);
+  if (classifierCell) {
+    metrics.appendChild(classifierCell);
     _watcherSummaryCounts(summary).forEach(([label, value]) => {
-      metrics.appendChild(window._compareMetricCell(label, Number(value || 0).toLocaleString(), Number(value || 0) ? 'is-changed' : ''));
+      const metricCell = _watcherCompareMetricCell(label, Number(value || 0).toLocaleString(), Number(value || 0) ? 'is-changed' : '');
+      if (metricCell) metrics.appendChild(metricCell);
     });
   } else {
-    const classifierCell = document.createElement('div');
-    classifierCell.className = 'history-compare-metric';
-    classifierCell.textContent = `Classifier: ${classifier}`;
-    metrics.appendChild(classifierCell);
+    const fallbackCell = document.createElement('div');
+    fallbackCell.className = 'history-compare-metric';
+    fallbackCell.textContent = `Classifier: ${classifier}`;
+    metrics.appendChild(fallbackCell);
   }
   wrap.appendChild(metrics);
   if (truncated || summary.truncated) {
@@ -1202,9 +1335,7 @@ async function refreshWatchersModal({ selectId = '', baselineRun = null } = {}) 
   try {
     const data = await _watcherJson('/watchers', { cache: 'no-store' });
     _watchersState.watchers = Array.isArray(data.watchers) ? data.watchers : [];
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:watchers-rendered', { items: _watchersState.watchers.slice() });
-    }
+    _watcherEmitUiEvent('app:watchers-rendered', { items: _watchersState.watchers.slice() });
     _watchersState.missingWatcherId = '';
     const requestedId = String(selectId || '');
     const currentId = String(selectId || _watchersState.selectedId || '');
@@ -1244,7 +1375,7 @@ async function refreshWatchersModal({ selectId = '', baselineRun = null } = {}) 
 async function openWatchersModal(options = {}) {
   const { overlay } = _watcherEls();
   if (!overlay) return;
-  if (typeof _closeMajorOverlays === 'function') _closeMajorOverlays();
+  _watcherCloseMajorOverlays();
   _setWatchersOpen(true);
   const baselineRun = options.baselineRun || (
     options.baselineRunId
@@ -1290,7 +1421,7 @@ async function _saveWatcherForm(event) {
     _watcherToast(isNew ? 'Watcher created' : 'Watcher saved');
     _watchersState.mode = 'view';
     await refreshWatchersModal({ selectId: watcher.id || selected?.id || '' });
-    if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
+    _watcherLoadAutocompleteHints().catch(() => {});
   } catch (err) {
     _watcherClientError(isNew ? 'failed to create watcher' : 'failed to update watcher', err);
     _watcherToast(err?.message || 'Could not save watcher', 'error');
@@ -1303,24 +1434,22 @@ async function _saveWatcherForm(event) {
 async function _deleteSelectedWatcher(watcher) {
   if (!watcher) return;
   let confirmed = true;
-  if (typeof showConfirm === 'function') {
-    const choice = await showConfirm({
-      body: `Delete watcher "${_watcherTitle(watcher)}"?`,
-      tone: 'danger',
-      actions: [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'delete', label: 'Delete', role: 'destructive' },
-      ],
-    });
-    confirmed = choice === 'delete';
-  }
+  const choice = await _watcherShowConfirm({
+    body: `Delete watcher "${_watcherTitle(watcher)}"?`,
+    tone: 'danger',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'delete', label: 'Delete', role: 'destructive' },
+    ],
+  });
+  if (choice !== null) confirmed = choice === 'delete';
   if (!confirmed) return;
   try {
     await _watcherJson(`/watchers/${encodeURIComponent(watcher.id)}`, { method: 'DELETE' });
     _watcherToast('Watcher deleted');
     _watchersState.selectedId = '';
     await refreshWatchersModal();
-    if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
+    _watcherLoadAutocompleteHints().catch(() => {});
   } catch (err) {
     _watcherClientError('failed to delete watcher', err);
     _watcherToast(err?.message || 'Could not delete watcher', 'error');
@@ -1337,7 +1466,7 @@ async function _patchSelectedWatcher(watcher, updates, successMessage) {
     });
     _watcherToast(successMessage);
     await refreshWatchersModal({ selectId: response.watcher?.id || watcher.id });
-    if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
+    _watcherLoadAutocompleteHints().catch(() => {});
   } catch (err) {
     _watcherClientError('failed to update watcher', err);
     _watcherToast(err?.message || 'Could not update watcher', 'error');
@@ -1350,7 +1479,7 @@ async function _runSelectedWatcher(watcher) {
     const data = await _watcherJson(`/watchers/${encodeURIComponent(watcher.id)}/run-now`, { method: 'POST' });
     _watcherToast(data.status === 'fired' ? 'Watcher fired' : 'Watcher skipped');
     await refreshWatchersModal({ selectId: watcher.id });
-    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+    _watcherRefreshHistoryPanel();
   } catch (err) {
     _watcherClientError('failed to run watcher now', err);
     _watcherToast(err?.message || 'Could not fire watcher', 'error');
@@ -1360,17 +1489,15 @@ async function _runSelectedWatcher(watcher) {
 async function _acceptSelectedWatcherBaseline(watcher) {
   if (!watcher) return;
   let confirmed = true;
-  if (typeof showConfirm === 'function') {
-    const choice = await showConfirm({
-      body: `Accept the latest watcher run as the new baseline for "${_watcherTitle(watcher)}"?`,
-      tone: 'warning',
-      actions: [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'accept', label: 'Accept baseline', role: 'primary' },
-      ],
-    });
-    confirmed = choice === 'accept';
-  }
+  const choice = await _watcherShowConfirm({
+    body: `Accept the latest watcher run as the new baseline for "${_watcherTitle(watcher)}"?`,
+    tone: 'warning',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'accept', label: 'Accept baseline', role: 'primary' },
+    ],
+  });
+  if (choice !== null) confirmed = choice === 'accept';
   if (!confirmed) return;
   try {
     const response = await _watcherJson(`/watchers/${encodeURIComponent(watcher.id)}/accept-baseline`, {
@@ -1411,19 +1538,10 @@ async function _compareWatcherFireToBaseline(fire = {}) {
     _watcherToast('Choose a watcher fire with a baseline and completed run to compare.', 'error');
     return;
   }
-  const compareFn = typeof fetchAndRenderHistoryComparison === 'function'
-    ? fetchAndRenderHistoryComparison
-    : typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
-      ? window.fetchAndRenderHistoryComparison
-      : null;
-  if (!compareFn) {
-    _watcherToast('Run comparison is not available.', 'error');
-    return;
-  }
   const closed = await closeWatchersModal({ refocus: false });
   if (!closed) return;
   try {
-    await compareFn(baselineRunId, runId);
+    await _watcherFetchAndRenderHistoryComparison(baselineRunId, runId);
   } catch (err) {
     _watcherClientError('failed to compare watcher fire to baseline', err);
     _watcherToast(err?.message || 'Could not open run comparison', 'error');
@@ -1433,9 +1551,7 @@ async function _compareWatcherFireToBaseline(fire = {}) {
 async function _openWatcherRun(runId) {
   const closed = await closeWatchersModal({ refocus: false });
   if (!closed) return;
-  if (typeof openHistoryRunDetails === 'function') {
-    openHistoryRunDetails({ id: runId || '' });
-  }
+  _watcherOpenHistoryRunDetails(runId);
 }
 
 async function _selectWatcher(watcherId) {
@@ -1503,19 +1619,20 @@ function _bindWatchersModal() {
   refreshBtn?.addEventListener('click', async () => {
     if (await _confirmWatcherDiscardChanges()) refreshWatchersModal({ selectId: _watchersState.selectedId });
   });
-  if (typeof bindDismissible === 'function') {
-    bindDismissible(overlay, {
-      level: 'modal',
-      isOpen: isWatchersOverlayOpen,
-      onClose: closeWatchersModal,
-      closeButtons: overlay.querySelectorAll('.watchers-close, .sheet-grab'),
-    });
-  }
+  _watcherBindDismissible(overlay, {
+    level: 'modal',
+    isOpen: isWatchersOverlayOpen,
+    onClose: closeWatchersModal,
+    closeButtons: overlay.querySelectorAll('.watchers-close, .sheet-grab'),
+  });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _bindWatchersModal);
 else _bindWatchersModal();
 
-window.openWatchersModal = openWatchersModal;
-window.closeWatchersModal = closeWatchersModal;
-window.isWatchersOverlayOpen = isWatchersOverlayOpen;
+
+export {
+  openWatchersModal,
+  closeWatchersModal,
+  isWatchersOverlayOpen,
+};

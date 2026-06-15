@@ -1,6 +1,54 @@
 // ── Run comparison overlay shell ─────────────────────────────────────────
 // Loaded before history.js. The History drawer still owns launcher/result rendering,
 // while this module owns the compare modal's open/close/focus lifecycle.
+import {
+  closeAppSelects as importedCloseAppSelects,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncModalOverlayState as importedSyncModalOverlayState,
+} from '../../ui/ui_helpers.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+
+const HISTORY_COMPARE_OVERLAY_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyCompareOverlayBindDismissible(overlay) {
+  const bind = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible)
+    || (typeof HISTORY_COMPARE_OVERLAY_GLOBAL.bindDismissible === 'function'
+      ? HISTORY_COMPARE_OVERLAY_GLOBAL.bindDismissible
+      : null);
+  if (typeof bind !== 'function') return;
+  bind(overlay, {
+    level: 'modal',
+    isOpen: () => overlay.classList.contains('open'),
+    onClose: closeHistoryCompareOverlay,
+    closeButtons: overlay.querySelectorAll('.history-compare-close, .sheet-grab'),
+  });
+}
+
+function _historyCompareOverlayCloseAppSelects() {
+  const close = (typeof importedCloseAppSelects !== 'undefined' && importedCloseAppSelects)
+    || (typeof HISTORY_COMPARE_OVERLAY_GLOBAL.closeAppSelects === 'function'
+      ? HISTORY_COMPARE_OVERLAY_GLOBAL.closeAppSelects
+      : null);
+  if (typeof close === 'function') close();
+}
+
+function _historyCompareOverlaySyncModalState() {
+  const sync = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState)
+    || HISTORY_COMPARE_OVERLAY_GLOBAL.syncModalOverlayState
+    || null;
+  if (typeof sync === 'function') sync();
+}
+
+function _historyCompareOverlayRefocusComposer() {
+  const refocus = (
+    typeof importedRefocusComposerAfterAction !== 'undefined'
+    && importedRefocusComposerAfterAction
+  )
+    || (typeof HISTORY_COMPARE_OVERLAY_GLOBAL.refocusComposerAfterAction === 'function'
+      ? HISTORY_COMPARE_OVERLAY_GLOBAL.refocusComposerAfterAction
+      : null);
+  if (typeof refocus === 'function') refocus({ preventScroll: true });
+}
 
 function _ensureHistoryCompareOverlay() {
   let overlay = document.getElementById('history-compare-overlay');
@@ -35,14 +83,7 @@ function _ensureHistoryCompareOverlay() {
       }
     });
   });
-  if (typeof bindDismissible === 'function') {
-    bindDismissible(overlay, {
-      level: 'modal',
-      isOpen: () => overlay.classList.contains('open'),
-      onClose: closeHistoryCompareOverlay,
-      closeButtons: overlay.querySelectorAll('.history-compare-close, .sheet-grab'),
-    });
-  }
+  _historyCompareOverlayBindDismissible(overlay);
   return overlay;
 }
 
@@ -51,15 +92,13 @@ function closeHistoryCompareOverlay() {
   if (!overlay) return;
   // Close (and unportal) any open dropdowns before hiding the overlay,
   // otherwise a portaled menu would remain visible in document.body.
-  _closeHistoryCompareActionMenus();
-  if (typeof closeAppSelects === 'function') closeAppSelects();
+  HISTORY_COMPARE_OVERLAY_GLOBAL._closeHistoryCompareActionMenus?.();
+  _historyCompareOverlayCloseAppSelects();
   overlay.classList.remove('open');
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
-  window.syncModalOverlayState?.();
-  if (typeof refocusComposerAfterAction === 'function') {
-    refocusComposerAfterAction({ preventScroll: true });
-  }
+  _historyCompareOverlaySyncModalState();
+  _historyCompareOverlayRefocusComposer();
 }
 
 function _focusHistoryCompareOverlay() {
@@ -87,7 +126,7 @@ function _openHistoryCompareOverlay() {
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
-  window.syncModalOverlayState?.();
+  _historyCompareOverlaySyncModalState();
   _queueHistoryCompareInitialFocus();
 }
 
@@ -96,9 +135,12 @@ function isHistoryCompareOverlayOpen() {
   return !!(overlay && overlay.classList.contains('open'));
 }
 
-window._ensureHistoryCompareOverlay = _ensureHistoryCompareOverlay;
-window.closeHistoryCompareOverlay = closeHistoryCompareOverlay;
-window._focusHistoryCompareOverlay = _focusHistoryCompareOverlay;
-window._queueHistoryCompareInitialFocus = _queueHistoryCompareInitialFocus;
-window._openHistoryCompareOverlay = _openHistoryCompareOverlay;
-window.isHistoryCompareOverlayOpen = isHistoryCompareOverlayOpen;
+
+export {
+  _ensureHistoryCompareOverlay,
+  _focusHistoryCompareOverlay,
+  _openHistoryCompareOverlay,
+  _queueHistoryCompareInitialFocus,
+  closeHistoryCompareOverlay,
+  isHistoryCompareOverlayOpen,
+};

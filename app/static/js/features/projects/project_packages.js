@@ -1,6 +1,11 @@
 // Project evidence package controller.
 // Loaded before shell_chrome.js; shell chrome supplies Projects state and shared UI helpers.
 
+import { enhanceAppSelects as importedEnhanceAppSelects } from '../../ui/ui_helpers.js';
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+
+let exportedDarklabProjectPackages = null;
+
 (function initProjectPackages(global) {
   if (typeof document === 'undefined') return;
 
@@ -9,6 +14,7 @@
     let wizard = null;
     const downloadTimers = new WeakMap();
     const packageJobPollMs = 750;
+    const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig : () => ({});
     const defaultPackagePresets = Object.freeze([
       Object.freeze({
         id: 'evidence',
@@ -436,8 +442,10 @@
       ctx.wizardOverlay.classList.add('open');
       ctx.wizardOverlay.setAttribute('aria-hidden', 'false');
       ctx.installProjectMobileKeyboardGuards?.();
-      if (typeof global.enhanceAppSelects === 'function') {
-        global.enhanceAppSelects(ctx.wizardBody);
+      const enhanceAppSelects = (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects)
+        || null;
+      if (typeof enhanceAppSelects === 'function') {
+        enhanceAppSelects(ctx.wizardBody);
       }
       if (Number.isFinite(scrollTop)) {
         const scrollBody = ctx.wizardBody.querySelector('.project-package-wizard-body');
@@ -1270,7 +1278,8 @@
           || (wizard.redactionMode === 'redacted' && !!redactedArtifactWarning(artifact))
         )).length
         : 0;
-      const maxLines = Math.max(1, Number(global.APP_CONFIG?.max_output_lines || 5000));
+      const config = appConfig() || {};
+      const maxLines = Math.max(1, Number(config.max_output_lines || 5000));
       const transcriptHtmlBytes = selectedTranscriptRuns.reduce((total, run) => {
         const lineCount = Math.max(0, Number(run.output_line_count || 0));
         return total + estimateTranscriptHtmlBytes(lineCount, maxLines);
@@ -1293,10 +1302,10 @@
         + transcriptHtmlBytes
         + metadataBytes;
       const estimatedUncompressedBytes = requiredArchiveBytes + transcriptTextCompanionBytes;
-      const maxArchiveBytes = Math.max(0, Number(global.APP_CONFIG?.evidence_package_max_mb || 0)) * 1024 * 1024;
+      const maxArchiveBytes = Math.max(0, Number(config.evidence_package_max_mb || 0)) * 1024 * 1024;
       const maxUncompressedArchiveBytes = Math.max(
         0,
-        Number(global.APP_CONFIG?.evidence_package_max_uncompressed_mb || 0),
+        Number(config.evidence_package_max_uncompressed_mb || 0),
       ) * 1024 * 1024;
       const estimatedCompressedArchiveBytes = rawArtifactBytes
         + estimateTextZipBytes(redactedArtifactBytes)
@@ -1919,7 +1928,11 @@
     };
   }
 
-  global.DarklabProjectPackages = {
+  const DarklabProjectPackages = {
     createProjectPackagesController,
   };
+  exportedDarklabProjectPackages = DarklabProjectPackages;
 })(globalThis);
+
+export {
+  exportedDarklabProjectPackages as DarklabProjectPackages,};

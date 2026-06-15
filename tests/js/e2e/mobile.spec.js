@@ -223,9 +223,11 @@ test.beforeEach(async ({ page }) => {
     await expect
       .poll(async () =>
         output.evaluate((el) => {
-          const activeId = window.activeTabId
-          const activeTab = Array.isArray(window.tabs)
-            ? window.tabs.find((tab) => tab && tab.id === activeId)
+          const api = window.APP_STATE_API
+          const activeId = api?.getActiveTabId()
+          const tabs = api?.getTabs?.()
+          const activeTab = Array.isArray(tabs)
+            ? tabs.find((tab) => tab && tab.id === activeId)
             : null
           if (activeTab) {
             activeTab.followOutput = false

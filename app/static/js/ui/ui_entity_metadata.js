@@ -1,4 +1,7 @@
 // ── Shared entity metadata client ──
+import { apiFetch as importedApiFetch } from '../session.js';
+
+let DarklabEntityMetadata = null;
 
 (function initEntityMetadataClient(global) {
   function parseLabelInput(value) {
@@ -21,8 +24,7 @@
 
   function _metadataFetch(apiFetchImpl) {
     if (typeof apiFetchImpl === 'function') return apiFetchImpl;
-    if (global && typeof global.apiFetch === 'function') return global.apiFetch;
-    if (typeof apiFetch === 'function') return apiFetch;
+    if (typeof importedApiFetch === 'function') return importedApiFetch;
     throw new Error('Entity metadata requests are unavailable');
   }
 
@@ -105,7 +107,7 @@
     }
   }
 
-  global.DarklabEntityMetadata = {
+  DarklabEntityMetadata = {
     parseLabelInput,
     entityMetadataUrl,
     entityMetadataRequest,
@@ -113,3 +115,20 @@
     syncEntityNote,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
+
+const {
+  entityMetadataRequest,
+  entityMetadataUrl,
+  parseLabelInput,
+  syncEntityLabels,
+  syncEntityNote,
+} = DarklabEntityMetadata;
+
+export {
+  DarklabEntityMetadata,
+  entityMetadataRequest,
+  entityMetadataUrl,
+  parseLabelInput,
+  syncEntityLabels,
+  syncEntityNote,
+};

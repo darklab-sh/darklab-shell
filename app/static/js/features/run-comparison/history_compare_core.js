@@ -1,10 +1,19 @@
 // ── Run comparison pure helpers ──────────────────────────────────────────
 // Loaded before history.js. DOM rendering and route calls stay in history.js;
 // comparison formatting, preferences, and deterministic summary helpers live here.
+import { DarklabPreferenceCore as importedPreferenceCore } from '../../core/app_preferences_core.js';
+import { DarklabHistoryCore as importedHistoryCore } from '../../core/history_core.js';
+import {
+  getCompareContextPreference as importedGetCompareContextPreference,
+  getCompareViewModePreference as importedGetCompareViewModePreference,
+  getPreference as importedGetPreference,
+} from '../preferences/preferences.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+
 var DarklabHistoryCompareCore = (function (global) {
   function historyCore() {
-    return global.DarklabHistoryCore
-      || (typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null);
+    return (typeof importedHistoryCore !== 'undefined' && importedHistoryCore)
+      || null;
   }
 
   function compareFormatDate(value) {
@@ -40,9 +49,7 @@ var DarklabHistoryCompareCore = (function (global) {
   }
 
   function preferenceCore() {
-    return (typeof window !== 'undefined' && window.DarklabPreferenceCore)
-      || (typeof globalThis !== 'undefined' && globalThis.DarklabPreferenceCore)
-      || global.DarklabPreferenceCore
+    return (typeof importedPreferenceCore !== 'undefined' && importedPreferenceCore)
       || null;
   }
 
@@ -60,19 +67,44 @@ var DarklabHistoryCompareCore = (function (global) {
   }
 
   function storedViewMode() {
-    if (typeof getCompareViewModePreference === 'function') return coerceViewMode(getCompareViewModePreference());
+    const getCompareViewModePreference = typeof importedGetCompareViewModePreference === 'function'
+      ? importedGetCompareViewModePreference
+      : null;
+    const getPreference = typeof importedGetPreference === 'function'
+      ? importedGetPreference
+      : null;
+    if (typeof getCompareViewModePreference === 'function') {
+      return coerceViewMode(getCompareViewModePreference());
+    }
     if (typeof getPreference === 'function') return coerceViewMode(getPreference('pref_compare_view_mode'));
     return 'auto';
   }
 
   function storedContext() {
-    if (typeof getCompareContextPreference === 'function') return coerceContext(getCompareContextPreference());
+    const getCompareContextPreference = typeof importedGetCompareContextPreference === 'function'
+      ? importedGetCompareContextPreference
+      : null;
+    const getPreference = typeof importedGetPreference === 'function'
+      ? importedGetPreference
+      : null;
+    if (typeof getCompareContextPreference === 'function') {
+      return coerceContext(getCompareContextPreference());
+    }
     if (typeof getPreference === 'function') return coerceContext(getPreference('pref_compare_context'));
     return '3';
   }
 
+  function useMobileViewportMode() {
+    const useMobile = (
+      typeof importedUseMobileTerminalViewportMode !== 'undefined'
+      && importedUseMobileTerminalViewportMode
+    )
+      || null;
+    return typeof useMobile === 'function' ? useMobile() : false;
+  }
+
   function viewportMode() {
-    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return 'unified';
+    if (useMobileViewportMode()) return 'unified';
     if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
       try {
         if (window.matchMedia('(max-width: 760px)').matches) return 'unified';
@@ -179,6 +211,54 @@ var DarklabHistoryCompareCore = (function (global) {
     viewportMode,
     viewModeOptions,
   });
-  global.DarklabHistoryCompareCore = api;
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+const {
+  anchorTone,
+  bucketTone,
+  buildAnchorMap,
+  coerceContext,
+  coerceViewMode,
+  compareDateGroupLabel,
+  compareFormatDate,
+  compareFormatDelta,
+  compareFormatDuration,
+  contextLimit,
+  cssEscape,
+  lineLimit,
+  number,
+  omittedTotal,
+  resolveViewMode,
+  storedContext,
+  storedViewMode,
+  totalChangedLines,
+  usesMobileLayout,
+  viewportMode,
+  viewModeOptions,
+} = DarklabHistoryCompareCore;
+
+export {
+  DarklabHistoryCompareCore,
+  anchorTone,
+  bucketTone,
+  buildAnchorMap,
+  coerceContext,
+  coerceViewMode,
+  compareDateGroupLabel,
+  compareFormatDate,
+  compareFormatDelta,
+  compareFormatDuration,
+  contextLimit,
+  cssEscape,
+  lineLimit,
+  number,
+  omittedTotal,
+  resolveViewMode,
+  storedContext,
+  storedViewMode,
+  totalChangedLines,
+  usesMobileLayout,
+  viewportMode,
+  viewModeOptions,
+};

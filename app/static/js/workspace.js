@@ -2,6 +2,65 @@
 // App-mediated file helper only. This does not expose shell navigation,
 // redirection, or arbitrary host paths.
 
+import {
+  workspaceBreadcrumbs,
+  workspaceCancelEditBtn,
+  workspaceCloseViewerBtn,
+  workspaceEditor,
+  workspaceEditorOverlay,
+  workspaceEditorTitle,
+  workspaceFileList,
+  workspaceLabelsInput,
+  workspaceMessage,
+  workspaceModal,
+  workspaceNewBtn,
+  workspaceNewFolderBtn,
+  workspaceNotesInput,
+  workspaceOverlay,
+  workspacePathInput,
+  workspaceRefreshBtn,
+  workspaceSaveBtn,
+  workspaceSummary,
+  workspaceTextInput,
+  workspaceViewer,
+  workspaceViewerAutoRefreshLabel,
+  workspaceViewerAutoRefreshToggle,
+  workspaceViewerControls,
+  workspaceViewerOverlay,
+  workspaceViewerRefreshBtn,
+  workspaceViewerText,
+  workspaceViewerTitle,
+} from './core/dom.js';
+import { downloadUrlAsAttachment, showToast } from './core/utils.js';
+import { APP_CONFIG } from './core/config.js';
+import { DarklabWorkspaceCore as importedWorkspaceCore } from './core/workspace_core.js';
+import { apiFetch as importedApiFetch } from './session.js';
+import { activeTeamScopeCan, getActiveTeamId, teamScopeDeniedMessage } from './features/team_scope.js';
+import {
+  getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
+  getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
+  getWorkspaceDirectoryEntries as importedGetWorkspaceDirectoryEntries,
+  refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache,
+} from './features/workspace/workspace_autocomplete_cache.js';
+import {
+  DarklabWorkspaceViewerFormats as importedWorkspaceViewerFormats,
+  viewerPayload as importedViewerPayload,
+  viewerRawText as importedViewerRawText,
+} from './features/workspace/workspace_viewer_formats.js';
+import { createTextSearchController } from './search.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from './ui/overlay_actions_bridge.js';
+import { DarklabEntityMetadata as importedEntityMetadata } from './ui/ui_entity_metadata.js';
+import {
+  applyMobileTextInputDefaults,
+  blurVisibleComposerInputIfMobile,
+  hideWorkspaceOverlay,
+  markInteractionSurfaceReady,
+  refocusComposerAfterAction,
+  showWorkspaceOverlay,
+} from './ui/ui_helpers.js';
+import { showConfirm } from './ui/ui_confirm.js';
+import { bindPressable } from './ui/ui_pressable.js';
+
 let _workspaceFiles = [];
 let _workspaceDirs = [];
 let _workspaceLimits = {};
@@ -19,6 +78,11 @@ let _workspaceOwner = {
 
 function _workspaceGlobal() {
   return typeof window !== 'undefined' ? window : globalThis;
+}
+
+function _workspaceApiFetch() {
+  if (typeof importedApiFetch !== 'function') throw new Error('apiFetch is not available');
+  return importedApiFetch;
 }
 
 function _publishWorkspaceState() {
@@ -66,6 +130,50 @@ function _publishWorkspaceState() {
       get: () => _workspaceCurrentScopeKey,
       set: value => { _workspaceCurrentScopeKey = String(value || 'personal'); },
     },
+    apiFetch: {
+      configurable: true,
+      value: (...args) => _workspaceApiFetch()(...args),
+    },
+    activeScopeKeyFromOwner: {
+      configurable: true,
+      value: _workspaceActiveScopeKeyFromOwner,
+    },
+    formatBytes: {
+      configurable: true,
+      value: _formatWorkspaceBytes,
+    },
+    errorMessage: {
+      configurable: true,
+      value: _workspaceErrorMessage,
+    },
+    getDirectoryEntries: {
+      configurable: true,
+      value: _workspaceDirectEntries,
+    },
+    isEnabled: {
+      configurable: true,
+      value: isWorkspaceEnabled,
+    },
+    movePath: {
+      configurable: true,
+      value: moveWorkspacePath,
+    },
+    ownerFromPayload: {
+      configurable: true,
+      value: _workspaceOwnerFromPayload,
+    },
+    parseJson: {
+      configurable: true,
+      value: _workspaceJson,
+    },
+    renderFiles: {
+      configurable: true,
+      value: renderWorkspaceFiles,
+    },
+    resetForScopeChange: {
+      configurable: true,
+      value: _workspaceResetForScopeChange,
+    },
   });
 }
 
@@ -81,16 +189,29 @@ let _workspaceViewerRefreshInFlight = false;
 let _workspaceViewerAutoRefreshEnabled = false;
 let _workspaceViewedSize = null;
 function WorkspaceCore() {
-  return (typeof window !== 'undefined' && window.DarklabWorkspaceCore)
-    || (typeof DarklabWorkspaceCore !== 'undefined' ? DarklabWorkspaceCore : null);
+  return (typeof importedWorkspaceCore !== 'undefined' && importedWorkspaceCore)
+    || null;
 }
 
 function _workspaceEntityMetadataClient() {
-  return (
-    typeof window !== 'undefined' && window.DarklabEntityMetadata
-  ) || (
-    typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
-  ) || {};
+  return (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
+}
+
+function _workspaceViewerFormats() {
+  return (typeof importedWorkspaceViewerFormats !== 'undefined' && importedWorkspaceViewerFormats) || {};
+}
+
+function _workspaceFileCacheApi() {
+  return {
+    getDirectoryEntries: (typeof importedGetWorkspaceDirectoryEntries !== 'undefined' && importedGetWorkspaceDirectoryEntries)
+      || null,
+    getDirectoryHints: (typeof importedGetWorkspaceAutocompleteDirectoryHints !== 'undefined' && importedGetWorkspaceAutocompleteDirectoryHints)
+      || null,
+    getFileHints: (typeof importedGetWorkspaceAutocompleteFileHints !== 'undefined' && importedGetWorkspaceAutocompleteFileHints)
+      || null,
+    refresh: (typeof importedRefreshWorkspaceFileCache !== 'undefined' && importedRefreshWorkspaceFileCache)
+      || null,
+  };
 }
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
@@ -527,13 +648,17 @@ function _workspaceAfterPaint() {
 }
 
 function _workspaceViewerPayload(path = '', text = '') {
-  return window.DarklabWorkspaceViewerFormats.viewerPayload(path, text, {
+  const formatter = (typeof importedViewerPayload !== 'undefined' && importedViewerPayload)
+    || _workspaceViewerFormats().viewerPayload;
+  return formatter(path, text, {
     tableLimit: WORKSPACE_PREVIEW_TABLE_LIMIT,
   });
 }
 
 function _workspaceViewerRawText(payload) {
-  return window.DarklabWorkspaceViewerFormats.viewerRawText(payload);
+  const formatter = (typeof importedViewerRawText !== 'undefined' && importedViewerRawText)
+    || _workspaceViewerFormats().viewerRawText;
+  return formatter(payload);
 }
 
 function _workspaceUsesLargeSearchMode({ lineCount = 0, charCount = 0, size = null } = {}) {
@@ -1207,7 +1332,7 @@ async function refreshWorkspaceFiles() {
   if (!isWorkspaceEnabled()) throw new Error('Files are disabled on this instance');
   setWorkspaceMessage('');
   if (workspaceSummary) workspaceSummary.textContent = 'Loading…';
-  const resp = await apiFetch('/workspace/files');
+  const resp = await _workspaceApiFetch()('/workspace/files');
   const data = await _workspaceJson(resp);
   renderWorkspaceFiles(data);
   return data;
@@ -1244,7 +1369,7 @@ async function refreshWorkspaceFilesFromButton() {
 
 async function saveWorkspaceFile(path, text, metadata = null) {
   if (!workspaceCanWrite('save Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('save Files'));
-  const resp = await apiFetch('/workspace/files', {
+  const resp = await _workspaceApiFetch()('/workspace/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, text }),
@@ -1270,7 +1395,7 @@ async function saveWorkspaceFile(path, text, metadata = null) {
 async function createWorkspaceDirectory(path) {
   if (!workspaceCanWrite('create folders in Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('create folders in Files'));
   const normalized = _normalizeWorkspaceDir(path);
-  const resp = await apiFetch('/workspace/directories', {
+  const resp = await _workspaceApiFetch()('/workspace/directories', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: normalized }),
@@ -1433,13 +1558,13 @@ async function promptWorkspaceMove(sourcePath, { kind = 'file' } = {}) {
 }
 
 async function readWorkspaceFile(path) {
-  const resp = await apiFetch(`/workspace/files/read?path=${encodeURIComponent(path)}`);
+  const resp = await _workspaceApiFetch()(`/workspace/files/read?path=${encodeURIComponent(path)}`);
   return _workspaceJson(resp);
 }
 
 async function deleteWorkspacePath(path) {
   if (!workspaceCanWrite('delete Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('delete Files'));
-  const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+  const resp = await _workspaceApiFetch()(`/workspace/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
   const data = await _workspaceJson(resp);
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceViewer();
@@ -1451,7 +1576,7 @@ async function deleteWorkspacePath(path) {
 
 async function moveWorkspacePath(source, destination) {
   if (!workspaceCanWrite('move Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('move Files'));
-  const resp = await apiFetch('/workspace/files/move', {
+  const resp = await _workspaceApiFetch()('/workspace/files/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, destination }),
@@ -1469,7 +1594,7 @@ async function deleteWorkspaceFile(path) {
 }
 
 async function downloadWorkspaceFile(path) {
-  const resp = await apiFetch('/workspace/files/download-ticket', {
+  const resp = await _workspaceApiFetch()('/workspace/files/download-ticket', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
@@ -1488,7 +1613,8 @@ async function downloadWorkspaceFile(path) {
 
 async function openWorkspace() {
   if (!isWorkspaceEnabled()) return;
-  _closeMajorOverlays();
+  const global = _workspaceGlobal();
+  if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkspaceOverlay();
   hideWorkspaceEditor();
@@ -1714,7 +1840,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     if (workspaceSummary) workspaceSummary.textContent = 'Loading...';
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (isWorkspaceEnabled()) {
-      window.refreshWorkspaceFileCache?.().catch(() => {});
+      _workspaceFileCacheApi().refresh?.().catch(() => {});
     }
   });
   window.addEventListener('app:scope-capabilities-changed', () => {
@@ -1723,51 +1849,17 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   });
 }
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    WorkspaceCore,
-    isWorkspaceEnabled,
-    _formatWorkspaceBytes,
-    _workspaceErrorMessage,
-    _workspaceActiveScopeKeyFromOwner,
-    _workspaceReadOnlyReason,
-    isWorkspaceReadOnly,
-    workspaceCanWrite,
-    _workspaceOwnerFromPayload,
-    _workspaceSetCurrentDir,
-    _workspaceApplyOwner,
-    _workspaceOwnerLabel,
-    _workspaceSyncWriteControls,
-    _workspaceResetForScopeChange,
-    _workspaceJson,
-    setWorkspaceMessage,
-    _showWorkspaceToast,
-    _workspaceDirectEntries,
-    _normalizeWorkspaceDir,
-    normalizeWorkspaceCommandPath,
-    workspaceDisplayPath,
-    renderWorkspaceFiles,
-    renderWorkspaceBrowser,
-    refreshWorkspaceFiles,
-    refreshWorkspaceFilesFromButton,
-    saveWorkspaceFile,
-    createWorkspaceDirectory,
-    promptWorkspaceFolderName,
-    promptWorkspaceMove,
-    readWorkspaceFile,
-    deleteWorkspacePath,
-    moveWorkspacePath,
-    deleteWorkspaceFile,
-    downloadWorkspaceFile,
-    openWorkspace,
-    openWorkspaceEditorFromCommand,
-    closeWorkspace,
-    handleWorkspaceFileAction,
-    hideWorkspaceEditor,
-    hideWorkspaceViewer,
-    showWorkspaceViewerLoading,
-    showWorkspaceEditor,
-    showWorkspaceViewer,
-    refreshWorkspaceViewedFile,
-  });
-  if (isWorkspaceEnabled()) setTimeout(() => { window.refreshWorkspaceFileCache?.(); }, 0);
+  if (isWorkspaceEnabled()) setTimeout(() => { _workspaceFileCacheApi().refresh?.(); }, 0);
 }
+
+export {
+  closeWorkspace,
+  hideWorkspaceEditor,
+  hideWorkspaceViewer,
+  moveWorkspacePath,
+  openWorkspace,
+  openWorkspaceEditorFromCommand,
+  readWorkspaceFile,
+  refreshWorkspaceFiles,
+  showWorkspaceViewer,
+};

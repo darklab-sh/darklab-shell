@@ -2,15 +2,16 @@ import { vi, describe, it, beforeEach, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
 // ui_outside_click.js is an IIFE that installs bindOutsideClickClose on
 // window. Each test reloads the source so there is no cross-test state.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const UI_OUTSIDE_CLICK_SRC = readFileSync(
+const UI_OUTSIDE_CLICK_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/ui/ui_outside_click.js'),
   'utf8',
-)
+))
 
 function loadHelper() {
   delete window.bindOutsideClickClose

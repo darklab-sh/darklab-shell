@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { vi, beforeEach, afterEach } from 'vitest'
+import { stripEsmExports } from './helpers/extract.js'
 
 // Silence jsdom's "Not implemented: navigation to another Document" warning
 // that fires when a.click() is called on a download anchor. The actual download
@@ -15,7 +16,7 @@ afterEach(() => {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../../')
-const PERMALINK_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/permalink.js'), 'utf8')
+const PERMALINK_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/permalink.js'), 'utf8'))
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,7 @@ function loadPermalink({
   const ansiUp = makeAnsiUpMock()
   const ExportHtmlUtils = makeExportHtmlUtilsMock()
   const ExportPdfUtils = makeExportPdfUtilsMock()
+  const loadExportPdfUtils = vi.fn(() => Promise.resolve(ExportPdfUtils))
   const copyTextToClipboard = vi.fn(() => Promise.resolve())
   const showToast = vi.fn()
   const URL = makeUrlMock()
@@ -197,7 +199,7 @@ function loadPermalink({
     PermData: window.PermData,
     AnsiUp: ansiUp.Ctor,
     ExportHtmlUtils,
-    ExportPdfUtils,
+    loadExportPdfUtils,
     copyTextToClipboard,
     showToast,
     URL,
@@ -239,6 +241,7 @@ function loadPermalink({
       AnsiUp: ansiUp.Ctor,
       ExportHtmlUtils,
       ExportPdfUtils,
+      loadExportPdfUtils,
       copyTextToClipboard,
       showToast,
       URL,
@@ -678,6 +681,7 @@ describe('data-action dispatch', () => {
     btn.click()
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
     expect(mocks.ExportPdfUtils.buildTerminalExportPdf).toHaveBeenCalledOnce()
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledOnce()
@@ -695,6 +699,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
+    await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
 
@@ -719,6 +724,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
+    await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
     const doc = mocks.ExportPdfUtils._doc

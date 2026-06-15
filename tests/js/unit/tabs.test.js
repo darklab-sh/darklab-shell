@@ -44,6 +44,7 @@ function loadTabsFns({
     createObjectURL: () => 'blob:mock',
     revokeObjectURL: () => {},
   },
+  loadExportPdfUtils = undefined,
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -131,6 +132,7 @@ function loadTabsFns({
       exitHistSearch: () => {},
       acHide: acHideOverride,
       acFiltered: acFilteredOverride,
+      ...(loadExportPdfUtils ? { loadExportPdfUtils } : {}),
     },
     `{
     updateNewTabBtn,
@@ -153,8 +155,9 @@ function loadTabsFns({
     permalinkTab,
     _getTabs: () => getTabs(),
     _getActiveTabId: () => getActiveTabId(),
-    _getAcFiltered: () => acFiltered,
+    _getAcFiltered: () => getAutocompleteState().filtered,
   }`,
+    'if (typeof resetAppState === "function") resetAppState(); if (typeof setTabs === "function") setTabs([]); if (typeof setActiveTabId === "function") setActiveTabId(null); window.tabsBar = tabsBar;',
   )
 
   return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap, doKill }
@@ -193,6 +196,7 @@ function loadTabsAndOutputFns({
     [
       'app/static/js/core/utils.js',
       'app/static/js/core/output_core.js',
+      'app/static/js/output_bridge.js',
       'app/static/js/output.js',
       'app/static/js/tabs.js',
       'app/static/js/features/tabs/tab_exports.js',
@@ -245,6 +249,14 @@ function loadTabsAndOutputFns({
       Blob,
       shellPromptWrap,
       getOutput: (id) => document.getElementById(`output-${id}`),
+      syncOutputPrefixes: (scope = document) => {
+        const out = scope && scope.classList && scope.classList.contains('output')
+          ? scope
+          : document.getElementById(`output-${getActiveTabId()}`)
+        if (!out) return
+        const prompt = out.querySelector('#shell-prompt-wrap')
+        if (prompt) prompt.dataset.lineNumber = String((Number(out.dataset.outputLineCounter || 0) || 0) + 1)
+      },
       _welcomeBootPending: false,
     },
     `{
@@ -259,6 +271,7 @@ function loadTabsAndOutputFns({
     _maybeMountDeferredPrompt,
     _syncTabRawLines,
   }`,
+    'if (typeof resetAppState === "function") resetAppState(); if (typeof setTabs === "function") setTabs([]); if (typeof setActiveTabId === "function") setActiveTabId(null); window.tabsBar = tabsBar;',
   )
 
   return { ...fns, shellPromptWrap }
@@ -957,15 +970,23 @@ describe('tabs helpers', () => {
     expect(document.querySelector('[data-action="permalink"][data-tab]')?.disabled).toBe(true)
   })
 
-  it('permalinkTab shows a failure toast when the share request rejects', async () => {
-    const apiFetch = vi.fn(() => Promise.reject(new Error('share failed')))
-    const { createTab, permalinkTab, _getTabs } = loadTabsFns({ apiFetch })
+  it('permalinkTab treats a rejected share response as a failure instead of copying an undefined URL', async () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        json: () => Promise.resolve({ error: 'session_required' }),
+      }),
+    )
+    const { createTab, permalinkTab, _getTabs, clipboardWrites } = loadTabsFns({ apiFetch })
     const id = createTab('tab 1')
     _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
 
     permalinkTab(id)
     await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
+    expect(apiFetch).toHaveBeenCalledWith('/share', expect.objectContaining({ method: 'POST' }))
+    expect(clipboardWrites).toEqual([])
     expect(document.getElementById('permalink-toast').textContent).toBe(
       'Failed to create permalink',
     )
@@ -1210,6 +1231,7 @@ describe('tabs helpers', () => {
       {
         document,
         window,
+        _getThemeRegistry: () => window.ThemeRegistry,
       },
       'ExportHtmlUtils',
     )
@@ -1505,7 +1527,6 @@ describe('tabs helpers', () => {
 
   it('exportTabPdf shows a toast when jsPDF is not loaded', () => {
     delete window.jspdf
-    delete window.ExportPdfUtils
     const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
     const id = createTab('tab 1')
     _getTabs()[0].rawLines.push({ text: 'hello', cls: '', tsC: '', tsE: '' })
@@ -1517,6 +1538,13 @@ describe('tabs helpers', () => {
 
   it('exportTabPdf omits raw-only intel output', async () => {
     const captured = {}
+    const loadExportPdfUtils = vi.fn(() => Promise.resolve({
+      loadJsPdf: vi.fn(() => Promise.resolve(vi.fn())),
+      buildTerminalExportPdf: vi.fn((args) => {
+        captured.rawLines = args.rawLines
+        return Promise.resolve({ save: vi.fn() })
+      }),
+    }))
     window.ExportHtmlUtils = {
       normalizeExportTranscriptLines: (lines) => lines,
       buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
@@ -1527,14 +1555,7 @@ describe('tabs helpers', () => {
         rawLines,
       }),
     }
-    window.ExportPdfUtils = {
-      loadJsPdf: vi.fn(() => Promise.resolve(vi.fn())),
-      buildTerminalExportPdf: vi.fn((args) => {
-        captured.rawLines = args.rawLines
-        return Promise.resolve({ save: vi.fn() })
-      }),
-    }
-    const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
+    const { createTab, exportTabPdf, _getTabs } = loadTabsFns({ loadExportPdfUtils })
     const id = createTab('intel ip 8.8.8.8')
     _getTabs()[0].rawLines.push(
       { text: 'GreyNoise', cls: '', command_root: 'intel', tsC: '', tsE: '' },
@@ -1548,8 +1569,8 @@ describe('tabs helpers', () => {
       'Intel data omitted from share',
       '[process exited with code 0]',
     ])
+    expect(loadExportPdfUtils).toHaveBeenCalledOnce()
     delete window.ExportHtmlUtils
-    delete window.ExportPdfUtils
   })
 
   it('permalinkTab applies configured redaction rules before creating a snapshot', async () => {

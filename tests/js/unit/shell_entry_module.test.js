@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +7,16 @@ import { MemoryStorage } from './helpers/extract.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../../')
 const SHELL_ENTRY_URL = pathToFileURL(resolve(REPO_ROOT, 'app/static/js/shell_bootstrap.entry.js')).href
+const moduleUrl = relativePath => pathToFileURL(resolve(REPO_ROOT, relativePath)).href
+const buildFile = assetPath => resolve(REPO_ROOT, 'app', assetPath.replace(/^\/+/, ''))
+
+function readBuildAsset(assetPath) {
+  return readFileSync(buildFile(assetPath), 'utf8')
+}
+
+function importedBuildChunks(text) {
+  return new Set([...text.matchAll(/["']\.\/(static-chunk-[^"']+\.js)["']/g)].map(match => match[1]))
+}
 
 const SHELL_IDS = [
   'ac-dropdown',
@@ -338,15 +349,30 @@ describe('shell module entry', () => {
   it('loads the source-mode shell graph and keeps cross-module bridges live', async () => {
     await import(`${SHELL_ENTRY_URL}?test=${Date.now()}`)
     await Promise.resolve()
+    const [
+      tabsModule,
+      outputModule,
+      faqHelpersModule,
+      themeModule,
+      preferencesModule,
+      stateModule,
+    ] = await Promise.all([
+      import(moduleUrl('app/static/js/tabs.js')),
+      import(moduleUrl('app/static/js/output.js')),
+      import(moduleUrl('app/static/js/features/command-registry/faq_helpers.js')),
+      import(moduleUrl('app/static/js/features/theme/theme.js')),
+      import(moduleUrl('app/static/js/features/preferences/preferences.js')),
+      import(moduleUrl('app/static/js/core/state.js')),
+    ])
 
-    expect(typeof window.createTab).toBe('function')
-    expect(typeof window._stickOutputToBottom).toBe('function')
-    expect(typeof window.openAutocompleteForVisibleComposer).toBe('function')
-    expect(typeof window.applyThemeSelection).toBe('function')
+    expect(typeof tabsModule.createTab).toBe('function')
+    expect(typeof outputModule._stickOutputToBottom).toBe('function')
+    expect(typeof faqHelpersModule.openAutocompleteForVisibleComposer).toBe('function')
+    expect(typeof themeModule.applyThemeSelection).toBe('function')
 
-    const tabId = window.createTab('module smoke')
-    const tab = window.getTab(tabId)
-    const out = window.getOutput(tabId)
+    const tabId = tabsModule.createTab('module smoke')
+    const tab = stateModule.getTab(tabId)
+    const out = tabsModule.getOutput(tabId)
     let scrollTop = 0
     Object.defineProperty(out, 'clientHeight', { configurable: true, get: () => 100 })
     Object.defineProperty(out, 'scrollHeight', { configurable: true, get: () => 300 })
@@ -358,23 +384,62 @@ describe('shell module entry', () => {
       },
     })
 
-    window._stickOutputToBottom(out, tab)
+    outputModule._stickOutputToBottom(out, tab)
     expect(scrollTop).toBe(300)
 
-    window.applyThemeSelection('light', true)
-    await window._persistCurrentSessionPreferences()
+    themeModule.applyThemeSelection('light', true)
+    await preferencesModule._persistCurrentSessionPreferences()
     expect(document.body.dataset.theme).toBe('light')
-    expect(window.getPreference('pref_theme_name')).toBe('light')
+    expect(preferencesModule.getPreference('pref_theme_name')).toBe('light')
 
     const cmd = document.getElementById('cmd')
     cmd.value = 'nmap -'
     cmd.setSelectionRange(6, 6)
-    window.acContextRegistry = {
+    stateModule.getAppState().acContextRegistry = {
       nmap: {
         flags: [{ value: '-sV', description: 'Version detection' }],
       },
     }
-    expect(window.openAutocompleteForVisibleComposer()).toBe(true)
+    expect(faqHelpersModule.openAutocompleteForVisibleComposer()).toBe(true)
     expect(document.querySelectorAll('#ac-dropdown .ac-item')).toHaveLength(1)
+  })
+
+  it('keeps bundle-mode lazy entries on shared chunks instead of re-running shell modules', () => {
+    const manifest = JSON.parse(readFileSync(resolve(REPO_ROOT, 'app/static/build/manifest.json'), 'utf8'))
+    const shellBundle = readBuildAsset(manifest.bundles['shell-bootstrap'].path)
+    const shellChunks = importedBuildChunks(shellBundle)
+    const lazyEntries = [
+      '/static/js/features/atlas/atlas_overlay.js',
+      '/static/js/features/atlas/atlas_mobile.js',
+      '/static/js/features/history/history_run_details.js',
+      '/static/js/features/workflows/workflows.js',
+    ].map(source => ({
+      source,
+      text: readBuildAsset(manifest.static_assets[source].path),
+    }))
+
+    for (const { source, text } of lazyEntries) {
+      const lazyChunks = importedBuildChunks(text)
+      const sharedChunks = [...lazyChunks].filter(chunk => shellChunks.has(chunk))
+
+      expect(lazyChunks.size, source).toBeGreaterThan(0)
+      expect(sharedChunks.length, source).toBeGreaterThan(0)
+      expect(text, source).not.toContain('setRunnerHandlers({')
+      expect(text, source).not.toContain('setTabsHandlers({')
+      expect(text, source).not.toContain('setOutputHandlers({')
+      expect(text, source).not.toContain('setOutputModeHandlers({')
+      expect(text, source).not.toContain('addEventListener("storage"')
+      expect(text, source).not.toContain('addEventListener("pagehide"')
+    }
+
+    const atlasOverlayChunks = importedBuildChunks(lazyEntries[0].text)
+    const atlasMobileChunks = importedBuildChunks(lazyEntries[1].text)
+    const atlasBridgeChunks = importedBuildChunks(
+      readBuildAsset(manifest.static_assets['/static/js/features/atlas/atlas_mobile_bridge.js'].path),
+    )
+    const sharedAtlasBridgeChunks = [...atlasBridgeChunks]
+      .filter(chunk => atlasOverlayChunks.has(chunk) && atlasMobileChunks.has(chunk))
+
+    expect(sharedAtlasBridgeChunks.length).toBeGreaterThan(0)
   })
 })

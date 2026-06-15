@@ -1,4 +1,160 @@
 // ── Shared command execution + desktop input wrapper ──
+import { DarklabRunnerCore as importedRunnerCore } from './core/runner_core.js';
+import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_output_model.js';
+import { copyTextToClipboard as importedCopyTextToClipboard } from './core/utils.js';
+import {
+  cmdInput as importedCmdInput,
+  mobileCmdInput as importedMobileCmdInput,
+  mobileRunBtn as importedMobileRunBtn,
+  runBtn as importedRunBtn,
+  runTimer as importedRunTimer,
+  status as importedStatus,
+} from './core/dom.js';
+import {
+  emitUiEvent as importedEmitUiEvent,
+  getActiveTab as importedGetActiveTab,
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  getTab as importedGetTab,
+  getTabs as importedGetTabs,
+  getWelcomeState as importedGetWelcomeState,
+} from './core/state.js';
+import {
+  apiFetch as importedApiFetch,
+  describeFetchError as importedDescribeFetchError,
+  getSessionId as importedGetSessionId,
+  logClientError as importedLogClientError,
+  maskSessionToken as importedMaskSessionToken,
+  updateSessionId as importedUpdateSessionId,
+} from './session.js';
+import {
+  appendHighVolumeOutputFinalSummary as importedAppendHighVolumeOutputFinalSummary,
+  appendLine as importedAppendLine,
+  appendLines as importedAppendLines,
+  currentPromptWorkspacePath as importedCurrentPromptWorkspacePath,
+  disableHighVolumeOutputResumeControls as importedDisableHighVolumeOutputResumeControls,
+  discardPendingOutputBatch as importedDiscardPendingOutputBatch,
+  _maybeMountDeferredPrompt as importedMaybeMountDeferredPrompt,
+  recordLiveOutputCoalescedLines as importedRecordLiveOutputCoalescedLines,
+  renderCommandOutcomeSummary as importedRenderCommandOutcomeSummary,
+  resetHighVolumeOutputState as importedResetHighVolumeOutputState,
+  setTabCommandOutcomeSummary as importedSetTabCommandOutcomeSummary,
+} from './output.js';
+import {
+  activateTab as importedActivateTab,
+  clearTab as importedClearTab,
+  createDefaultTabLabel as importedCreateDefaultTabLabel,
+  createTab as importedCreateTab,
+  setTabLabel as importedSetTabLabel,
+  setTabRunningCommand as importedSetTabRunningCommand,
+  setTabStatus as importedSetTabStatus,
+} from './tabs.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  getComposerValue as importedGetComposerValue,
+  hideTabKillBtn as importedHideTabKillBtn,
+  isHistoryPanelOpen as importedIsHistoryPanelOpen,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  showTabKillBtn as importedShowTabKillBtn,
+  syncRunButtonDisabled as importedSyncRunButtonDisabled,
+} from './ui/ui_helpers.js';
+import { showConfirm as importedShowConfirm } from './ui/ui_confirm.js';
+import {
+  cancelWelcome as importedCancelWelcome,
+  welcomeOwnsTab as importedWelcomeOwnsTab,
+} from './welcome_bridge.js';
+import {
+  closeTab as importedCloseTab,
+  finalizeClosingTab as importedFinalizeClosingTab,
+} from './features/tabs/tab_close_lifecycle.js';
+import {
+  moveWorkspacePath as importedMoveWorkspacePath,
+  openWorkspaceEditorFromCommand as importedOpenWorkspaceEditorFromCommand,
+  readWorkspaceFile as importedReadWorkspaceFile,
+  refreshWorkspaceFiles as importedRefreshWorkspaceFiles,
+} from './workspace.js';
+import {
+  getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
+  getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
+  getWorkspaceDirectoryEntries as importedGetWorkspaceDirectoryEntries,
+  refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache,
+} from './features/workspace/workspace_autocomplete_cache.js';
+import {
+  _isActiveRunDetachedForRestore as importedIsActiveRunDetachedForRestore,
+  _pruneDetachedActiveRunRestoreIds as importedPruneDetachedActiveRunRestoreIds,
+  clearActiveRunDetachedForRestore as importedClearActiveRunDetachedForRestore,
+} from './features/runner/runner_active_restore.js';
+import { createRunnerPersistence as importedCreateRunnerPersistence } from './features/runner/runner_persistence.js';
+import {
+  _ensureWorkspaceCache as importedEnsureWorkspaceCache,
+  _isWorkspaceDeleteCommand as importedIsWorkspaceDeleteCommand,
+  _isWorkspaceDownloadCommand as importedIsWorkspaceDownloadCommand,
+  _isWorkspaceEditorCommand as importedIsWorkspaceEditorCommand,
+  _isWorkspaceMoveCommand as importedIsWorkspaceMoveCommand,
+  _isWorkspaceTerminalCommand as importedIsWorkspaceTerminalCommand,
+  _resolveExistingWorkspaceCommandPath as importedResolveExistingWorkspaceCommandPath,
+  _resolveWorkspaceCommandPath as importedResolveWorkspaceCommandPath,
+  _setWorkspaceCwd as importedSetWorkspaceCwd,
+  _workspaceCommandTokens as importedWorkspaceCommandTokens,
+  _workspaceCwd as importedWorkspaceCwd,
+  _workspaceDeleteCommand as importedWorkspaceDeleteCommand,
+  _workspaceDisplayPath as importedWorkspaceDisplayPath,
+  _workspaceDownloadTarget as importedWorkspaceDownloadTarget,
+  _workspaceEditorCommand as importedWorkspaceEditorCommand,
+  _workspaceExpandPathPattern as importedWorkspaceExpandPathPattern,
+  _workspaceListCommand as importedWorkspaceListCommand,
+  _workspaceMoveCommand as importedWorkspaceMoveCommand,
+  _workspacePathExists as importedWorkspacePathExists,
+  _workspacePathHasGlob as importedWorkspacePathHasGlob,
+} from './features/runner/runner_workspace.js';
+import {
+  addToHistory as importedAddToHistory,
+  addToRecentPreview as importedAddToRecentPreview,
+  hydrateCmdHistory as importedHydrateCmdHistory,
+} from './features/history/history_recall.js';
+import { loadSessionVariables as importedLoadSessionVariables } from './features/autocomplete/runtime_context.js';
+import {
+  flushRecentValues as importedFlushRecentValues,
+  loadRecentValues as importedLoadRecentValues,
+  rememberRecentValuesFromCommand as importedRememberRecentValuesFromCommand,
+} from './features/autocomplete/suggestions.js';
+import {
+  loadStarredFromServer as importedLoadStarredFromServer,
+  reloadSessionHistory as importedReloadSessionHistory,
+} from './features/history/history_actions.js';
+import {
+  handleConfigCommand as importedHandleConfigCommand,
+  handleThemeCommand as importedHandleThemeCommand,
+} from './features/terminal/local_commands.js';
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from './features/team_scope.js';
+import { handleTourCommand as importedHandleTourCommand } from './features/tour/tour_cli.js';
+import {
+  hasComposerPromptHandler as importedHasComposerPromptHandler,
+  setComposerPromptMode as importedSetComposerPromptMode,
+} from './features/terminal/composer_prompt_bridge.js';
+import {
+  handleWorkflowTerminalCommand as importedHandleWorkflowTerminalCommand,
+  hasWorkflowHandler as importedHasWorkflowHandler,
+  reloadWorkflowCatalog as importedReloadWorkflowCatalog,
+} from './features/workflows/workflows_bridge.js';
+import {
+  handleSecretCommand as importedHandleSecretCommand,
+  hasSecretsHandler as importedHasSecretsHandler,
+} from './features/preferences/secrets_bridge.js';
+import {
+  dismissMobileKeyboardAfterSubmit as importedDismissMobileKeyboardAfterSubmit,
+  hasMobileShellLayoutHandler as importedHasMobileShellLayoutHandler,
+} from './features/mobile/mobile_shell_layout_bridge.js';
+import { setRunnerHandlers as importedSetRunnerHandlers } from './runner_bridge.js';
+import {
+  hasHistoryPanelHandler as importedHasHistoryPanelHandler,
+  refreshHistoryPanel as importedRefreshHistoryPanel,
+} from './features/history/history_panel_bridge.js';
+
 // If no chunk arrives from the SSE stream for 45 seconds (> 2× the 20s server heartbeat),
 // verify the backend's active-run registry before changing the tab state. Tiny heartbeat
 // frames can be buffered by browsers, WSGI, proxies, or Docker networking, so "quiet stream"
@@ -8,21 +164,285 @@ const _stalledTimeouts = new Map();
 const _stalledRuns = new Set();
 const _runStreamStateByTabId = new Map();
 const _streamRecoveryTimers = new Map();
+const RUNNER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+let timerStart = 0;
+let timerInterval = null;
+
+function _runnerFn(name, imported = null) {
+  if (typeof imported === 'function') return imported;
+  const fn = RUNNER_GLOBAL && RUNNER_GLOBAL[name];
+  if (typeof fn === 'function') return fn;
+  return null;
+}
+
+function _runnerValue(name, imported = undefined) {
+  return imported !== undefined ? imported : (RUNNER_GLOBAL ? RUNNER_GLOBAL[name] : undefined);
+}
+
+function _runnerIgnoreFailure(value) {
+  return Promise.resolve(value).catch(() => {});
+}
+
+function _runnerEl(name, imported = undefined) {
+  return _runnerValue(name, imported) || null;
+}
+
+function _runnerCurrentSessionId() {
+  if (typeof importedGetSessionId === 'function') return importedGetSessionId();
+  return SESSION_ID || _runnerValue('SESSION_ID') || '';
+}
+
+function _runnerState() {
+  const state = _runnerFn('getAppState', importedGetAppState)?.();
+  return state || _runnerValue('APP_STATE') || {};
+}
+
+function _runnerActiveTabId() {
+  const id = _runnerFn('getActiveTabId', importedGetActiveTabId)?.();
+  return id || _runnerState().activeTabId || null;
+}
+
+function _runnerTabs() {
+  const tabs = _runnerFn('getTabs', importedGetTabs)?.();
+  if (Array.isArray(tabs)) return tabs;
+  const state = _runnerState();
+  return Array.isArray(state.tabs) ? state.tabs : [];
+}
+
+var cmdInput = _runnerEl('cmdInput', importedCmdInput);
+var mobileCmdInput = _runnerEl('mobileCmdInput', importedMobileCmdInput);
+var runBtn = _runnerEl('runBtn', importedRunBtn);
+var runTimer = _runnerEl('runTimer', importedRunTimer);
+var status = _runnerEl('status', importedStatus);
+var apiFetch = (...args) => _runnerFn('apiFetch', importedApiFetch)?.(...args);
+var appendLine = (...args) => _runnerFn('appendLine', importedAppendLine)?.(...args);
+var appendLines = (...args) => _runnerFn('appendLines', importedAppendLines)?.(...args);
+var getTab = (...args) => _runnerFn('getTab', importedGetTab)?.(...args);
+var getActiveTab = (...args) => _runnerFn('getActiveTab', importedGetActiveTab)?.(...args);
+var activateTab = (...args) => _runnerFn('activateTab', importedActivateTab)?.(...args);
+var clearTab = (...args) => _runnerFn('clearTab', importedClearTab)?.(...args);
+var createTab = (...args) => _runnerFn('createTab', importedCreateTab)?.(...args);
+var createDefaultTabLabel = (...args) => _runnerFn('createDefaultTabLabel', importedCreateDefaultTabLabel)?.(...args);
+var closeTab = (...args) => _runnerFn('closeTab', importedCloseTab)?.(...args);
+var finalizeClosingTab = (...args) => _runnerFn('finalizeClosingTab', importedFinalizeClosingTab)?.(...args);
+var setTabStatus = (...args) => _runnerFn('setTabStatus', importedSetTabStatus)?.(...args);
+var setTabRunningCommand = (tabId, command) => {
+  const fn = _runnerFn('setTabRunningCommand', importedSetTabRunningCommand);
+  if (typeof fn === 'function') return fn(tabId, command);
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) tab.command = command;
+  return undefined;
+};
+var setTabLabel = (...args) => _runnerFn('setTabLabel', importedSetTabLabel)?.(...args);
+var hideTabKillBtn = (...args) => _runnerFn('hideTabKillBtn', importedHideTabKillBtn)?.(...args);
+var showTabKillBtn = (...args) => _runnerFn('showTabKillBtn', importedShowTabKillBtn)?.(...args);
+var emitUiEvent = (...args) => _runnerFn('emitUiEvent', importedEmitUiEvent)?.(...args);
+var logClientError = (...args) => _runnerFn('logClientError', importedLogClientError)?.(...args);
+var maskSessionToken = (...args) => _runnerFn('maskSessionToken', importedMaskSessionToken)?.(...args);
+var updateSessionId = (...args) => {
+  const fn = _runnerFn('updateSessionId', importedUpdateSessionId);
+  const result = typeof fn === 'function' ? fn(...args) : undefined;
+  if (typeof importedGetSessionId === 'function') SESSION_ID = importedGetSessionId();
+  else if (args.length) SESSION_ID = args[0] || SESSION_ID;
+  return result;
+};
+var describeFetchError = (...args) => _runnerFn('describeFetchError', importedDescribeFetchError)?.(...args);
+var isHistoryPanelOpen = (...args) => _runnerFn('isHistoryPanelOpen', importedIsHistoryPanelOpen)?.(...args);
+var refreshHistoryPanel = (...args) => {
+  const bridge = (
+    typeof importedHasHistoryPanelHandler === 'function'
+    && importedHasHistoryPanelHandler('refreshHistoryPanel')
+    && typeof importedRefreshHistoryPanel === 'function'
+      ? importedRefreshHistoryPanel
+      : null
+  );
+  return _runnerFn('refreshHistoryPanel', bridge)?.(...args);
+};
+var refocusComposerAfterAction = (...args) => _runnerFn('refocusComposerAfterAction', importedRefocusComposerAfterAction)?.(...args);
+var setComposerValue = (...args) => _runnerFn('setComposerValue', importedSetComposerValue)?.(...args);
+var getComposerValue = (...args) => _runnerFn('getComposerValue', importedGetComposerValue)?.(...args);
+var blurVisibleComposerInputIfMobile = (...args) => _runnerFn('blurVisibleComposerInputIfMobile', importedBlurVisibleComposerInputIfMobile)?.(...args);
+var syncRunButtonDisabled = (...args) => _runnerFn('syncRunButtonDisabled', importedSyncRunButtonDisabled)?.(...args);
+var appendHighVolumeOutputFinalSummary = (...args) => _runnerFn('appendHighVolumeOutputFinalSummary', importedAppendHighVolumeOutputFinalSummary)?.(...args);
+var disableHighVolumeOutputResumeControls = (...args) => _runnerFn('disableHighVolumeOutputResumeControls', importedDisableHighVolumeOutputResumeControls)?.(...args);
+var discardPendingOutputBatch = (...args) => _runnerFn('discardPendingOutputBatch', importedDiscardPendingOutputBatch)?.(...args);
+var recordLiveOutputCoalescedLines = (...args) => _runnerFn('recordLiveOutputCoalescedLines', importedRecordLiveOutputCoalescedLines)?.(...args);
+var renderCommandOutcomeSummary = (...args) => _runnerFn('renderCommandOutcomeSummary', importedRenderCommandOutcomeSummary)?.(...args);
+var resetHighVolumeOutputState = (...args) => _runnerFn('resetHighVolumeOutputState', importedResetHighVolumeOutputState)?.(...args);
+var setTabCommandOutcomeSummary = (...args) => _runnerFn('setTabCommandOutcomeSummary', importedSetTabCommandOutcomeSummary)?.(...args);
+var currentPromptWorkspacePath = (...args) => _runnerFn('currentPromptWorkspacePath', importedCurrentPromptWorkspacePath)?.(...args);
+var addToHistory = (...args) => _runnerFn('addToHistory', importedAddToHistory)?.(...args);
+var addToRecentPreview = (...args) => _runnerFn('addToRecentPreview', importedAddToRecentPreview)?.(...args);
+var hydrateCmdHistory = (...args) => _runnerFn('hydrateCmdHistory', importedHydrateCmdHistory)?.(...args);
+var _runnerEnsureWorkspaceCacheAdapter = (...args) => _runnerFn('_ensureWorkspaceCache', importedEnsureWorkspaceCache)?.(...args);
+var _runnerIsWorkspaceDeleteCommandAdapter = (...args) => _runnerFn('_isWorkspaceDeleteCommand', importedIsWorkspaceDeleteCommand)?.(...args);
+var _runnerIsWorkspaceDownloadCommandAdapter = (...args) => _runnerFn('_isWorkspaceDownloadCommand', importedIsWorkspaceDownloadCommand)?.(...args);
+var _runnerIsWorkspaceEditorCommandAdapter = (...args) => _runnerFn('_isWorkspaceEditorCommand', importedIsWorkspaceEditorCommand)?.(...args);
+var _runnerIsWorkspaceMoveCommandAdapter = (...args) => _runnerFn('_isWorkspaceMoveCommand', importedIsWorkspaceMoveCommand)?.(...args);
+var _runnerIsWorkspaceTerminalCommandAdapter = (...args) => _runnerFn('_isWorkspaceTerminalCommand', importedIsWorkspaceTerminalCommand)?.(...args);
+var _runnerResolveExistingWorkspaceCommandPathAdapter = (...args) => _runnerFn('_resolveExistingWorkspaceCommandPath', importedResolveExistingWorkspaceCommandPath)?.(...args);
+var _runnerResolveWorkspaceCommandPathAdapter = (...args) => _runnerFn('_resolveWorkspaceCommandPath', importedResolveWorkspaceCommandPath)?.(...args);
+var _runnerSetWorkspaceCwdAdapter = (...args) => _runnerFn('_setWorkspaceCwd', importedSetWorkspaceCwd)?.(...args);
+var _runnerWorkspaceCommandTokensAdapter = (...args) => _runnerFn('_workspaceCommandTokens', importedWorkspaceCommandTokens)?.(...args);
+var _runnerWorkspaceCwdAdapter = (...args) => _runnerFn('_workspaceCwd', importedWorkspaceCwd)?.(...args);
+var _runnerWorkspaceDeleteCommandAdapter = (...args) => _runnerFn('_workspaceDeleteCommand', importedWorkspaceDeleteCommand)?.(...args);
+var _runnerWorkspaceDisplayPathAdapter = (...args) => _runnerFn('_workspaceDisplayPath', importedWorkspaceDisplayPath)?.(...args);
+var _runnerWorkspaceDownloadTargetAdapter = (...args) => _runnerFn('_workspaceDownloadTarget', importedWorkspaceDownloadTarget)?.(...args);
+var _runnerWorkspaceEditorCommandAdapter = (...args) => _runnerFn('_workspaceEditorCommand', importedWorkspaceEditorCommand)?.(...args);
+var _runnerWorkspaceExpandPathPatternAdapter = (...args) => _runnerFn('_workspaceExpandPathPattern', importedWorkspaceExpandPathPattern)?.(...args);
+var _runnerWorkspaceListCommandAdapter = (...args) => _runnerFn('_workspaceListCommand', importedWorkspaceListCommand)?.(...args);
+var _runnerWorkspaceMoveCommandAdapter = (...args) => _runnerFn('_workspaceMoveCommand', importedWorkspaceMoveCommand)?.(...args);
+var _runnerWorkspacePathExistsAdapter = (...args) => _runnerFn('_workspacePathExists', importedWorkspacePathExists)?.(...args);
+var _runnerWorkspacePathHasGlobAdapter = (...args) => _runnerFn('_workspacePathHasGlob', importedWorkspacePathHasGlob)?.(...args);
+var _formatWorkspaceBytes = (...args) => _runnerFn('_formatWorkspaceBytes')?.(...args);
+var _maybeMountDeferredPrompt = (...args) => _runnerFn('_maybeMountDeferredPrompt', importedMaybeMountDeferredPrompt)?.(...args);
+var _runnerActiveTeamScopeCanAdapter = (...args) => {
+  const fn = _runnerFn('activeTeamScopeCan', importedActiveTeamScopeCan);
+  return typeof fn === 'function' ? fn(...args) : true;
+};
+var attachInteractivePtyCommand = (...args) => _runnerFn('attachInteractivePtyCommand')?.(...args);
+var _runnerCopyTextToClipboardAdapter = (...args) => {
+  const fn = _runnerFn('copyTextToClipboard', importedCopyTextToClipboard);
+  return typeof fn === 'function' ? fn(...args) : Promise.reject(new Error('clipboard unavailable'));
+};
+var createWorkspaceDirectory = (...args) => _runnerFn('createWorkspaceDirectory')?.(...args);
+var dismissMobileKeyboardAfterSubmit = (...args) => {
+  const fn = (
+    typeof importedHasMobileShellLayoutHandler === 'function'
+    && importedHasMobileShellLayoutHandler('dismissMobileKeyboardAfterSubmit')
+  ) ? importedDismissMobileKeyboardAfterSubmit : _runnerFn('dismissMobileKeyboardAfterSubmit');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var downloadWorkspaceFile = (...args) => _runnerFn('downloadWorkspaceFile')?.(...args);
+var flushRecentValues = _runnerFn('flushRecentValues', importedFlushRecentValues);
+var getRunNotifyPreference = (...args) => _runnerFn('getRunNotifyPreference')?.(...args);
+var _runnerHandleConfigCommandAdapter = (...args) => {
+  const fn = (typeof importedHandleConfigCommand === 'function' && importedHandleConfigCommand)
+    || _runnerFn('handleConfigCommand');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var _runnerHandleSecretCommandAdapter = (...args) => {
+  const fn = (
+    typeof importedHasSecretsHandler === 'function'
+    && importedHasSecretsHandler('handleSecretCommand')
+    && typeof importedHandleSecretCommand === 'function'
+  ) ? importedHandleSecretCommand : _runnerFn('handleSecretCommand');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var _runnerHandleThemeCommandAdapter = (...args) => {
+  const fn = (typeof importedHandleThemeCommand === 'function' && importedHandleThemeCommand)
+    || _runnerFn('handleThemeCommand');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var _runnerHandleTourCommandAdapter = (...args) => {
+  const fn = (typeof importedHandleTourCommand === 'function' && importedHandleTourCommand)
+    || _runnerFn('handleTourCommand');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var _runnerHandleWorkflowTerminalCommandAdapter = (...args) => {
+  const fn = (typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('handleWorkflowTerminalCommand'))
+    ? importedHandleWorkflowTerminalCommand
+    : _runnerFn('handleWorkflowTerminalCommand');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var hideRunTimer = (...args) => _runnerFn('hideRunTimer')?.(...args);
+var isInteractivePtyCommand = (...args) => _runnerFn('isInteractivePtyCommand')?.(...args);
+var isProjectWorkspaceOpen = (...args) => _runnerFn('isProjectWorkspaceOpen')?.(...args);
+var isRunButtonDisabled = (...args) => _runnerFn('isRunButtonDisabled')?.(...args);
+var loadRecentValues = (...args) => _runnerFn('loadRecentValues', importedLoadRecentValues)?.(...args);
+var loadStarredFromServer = (...args) => _runnerFn('loadStarredFromServer', importedLoadStarredFromServer)?.(...args);
+var moveWorkspacePath = (...args) => {
+  const fn = (typeof importedMoveWorkspacePath === 'function' && importedMoveWorkspacePath)
+    || _runnerFn('moveWorkspacePath');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var notifyProjectWorkspaceChanged = (...args) => _runnerFn('notifyProjectWorkspaceChanged')?.(...args);
+var openWorkspaceEditorFromCommand = (...args) => {
+  const fn = (typeof importedOpenWorkspaceEditorFromCommand === 'function' && importedOpenWorkspaceEditorFromCommand)
+    || _runnerFn('openWorkspaceEditorFromCommand');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var readWorkspaceFile = (...args) => {
+  const fn = (typeof importedReadWorkspaceFile === 'function' && importedReadWorkspaceFile)
+    || _runnerFn('readWorkspaceFile');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var refreshActiveProjectContext = (...args) => _runnerFn('refreshActiveProjectContext')?.(...args);
+var refreshProjectWorkspace = (...args) => _runnerFn('refreshProjectWorkspace')?.(...args);
+var refreshWorkspaceFiles = (...args) => {
+  const fn = (typeof importedRefreshWorkspaceFiles === 'function' && importedRefreshWorkspaceFiles)
+    || _runnerFn('refreshWorkspaceFiles');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var reloadSessionHistory = (...args) => _runnerFn('reloadSessionHistory', importedReloadSessionHistory)?.(...args);
+var reloadWorkflowCatalog = (...args) => {
+  const fn = (typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('reloadWorkflowCatalog'))
+    ? importedReloadWorkflowCatalog
+    : _runnerFn('reloadWorkflowCatalog');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var rememberRecentValuesFromCommand = (...args) => {
+  const fn = _runnerFn('rememberRecentValuesFromCommand', importedRememberRecentValuesFromCommand);
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var restoreHistoryRunIntoTab = (...args) => _runnerFn('restoreHistoryRunIntoTab')?.(...args);
+var setComposerPromptMode = (...args) => {
+  const fn = (typeof importedHasComposerPromptHandler === 'function' && importedHasComposerPromptHandler('setComposerPromptMode'))
+    ? importedSetComposerPromptMode
+    : _runnerFn('setComposerPromptMode');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var setRunButtonDisabled = (...args) => {
+  const fn = _runnerFn('setRunButtonDisabled');
+  if (typeof fn === 'function') return fn(...args);
+  if (runBtn) runBtn.disabled = !!args[0];
+  const mobileRunBtn = _runnerEl('mobileRunBtn', importedMobileRunBtn);
+  if (mobileRunBtn) mobileRunBtn.disabled = !!args[0];
+  return undefined;
+};
+var showConfirm = (...args) => _runnerFn('showConfirm', importedShowConfirm)?.(...args);
+var showRunTimer = (...args) => _runnerFn('showRunTimer')?.(...args);
+var showToast = (...args) => _runnerFn('showToast')?.(...args);
+var startInteractivePtyCommand = (...args) => _runnerFn('startInteractivePtyCommand')?.(...args);
+var _runnerTeamScopeDeniedMessageAdapter = (...args) => {
+  const fn = _runnerFn('teamScopeDeniedMessage', importedTeamScopeDeniedMessage);
+  return typeof fn === 'function'
+    ? fn(...args)
+    : `View-only team members can't ${args[0] || 'run commands in team scope'}. Switch to Personal or ask for operator access.`;
+};
+var _runnerWorkspaceCanWriteAdapter = (...args) => {
+  const fn = _runnerFn('workspaceCanWrite');
+  return typeof fn === 'function' ? fn(...args) : true;
+};
+var acSpecialCommands = _runnerValue('acSpecialCommands') || {};
+var pendingKillTabId = _runnerValue('pendingKillTabId') || null;
+var APP_CONFIG = _runnerValue('APP_CONFIG') || {};
+var CLIENT_ID = _runnerValue('CLIENT_ID') || '';
+var SESSION_ID = (typeof importedGetSessionId === 'function' && importedGetSessionId())
+  || _runnerValue('SESSION_ID')
+  || '';
 function _runnerCore() {
-  return (typeof window !== 'undefined' && window.DarklabRunnerCore)
-    || (typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null);
+  return (typeof importedRunnerCore !== 'undefined' && importedRunnerCore)
+    || null;
 }
 function _welcomeApi(name) {
+  if (name === 'cancelWelcome' && typeof importedCancelWelcome === 'function') return importedCancelWelcome;
+  if (name === 'welcomeOwnsTab' && typeof importedWelcomeOwnsTab === 'function') return importedWelcomeOwnsTab;
   return (typeof window !== 'undefined' && window[name])
     || (typeof globalThis !== 'undefined' && globalThis[name])
-    || (name === 'welcomeOwnsTab' && typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null)
-    || (name === 'cancelWelcome' && typeof cancelWelcome !== 'undefined' ? cancelWelcome : null)
-    || (name === 'requestWelcomeSettle' && typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
+    || null;
 }
 
 function _isWelcomeActive() {
-  return !!((typeof _welcomeActive !== 'undefined' && _welcomeActive)
-    || (typeof window !== 'undefined' && window._welcomeActive));
+  const welcomeState = _runnerFn('getWelcomeState', importedGetWelcomeState)?.();
+  return !!((_runnerValue('_welcomeActive'))
+    || (welcomeState && welcomeState.active));
+}
+
+function _isWelcomeDone() {
+  const welcomeState = _runnerFn('getWelcomeState', importedGetWelcomeState)?.();
+  return !!((_runnerValue('_welcomeDone'))
+    || (welcomeState && welcomeState.done));
 }
 
 function _welcomeOwns(tabId) {
@@ -44,6 +464,15 @@ const _RUN_STREAM_MESSAGE_BATCH_MS = 12;
 let _runnerPersistence = null;
 let _activeRunPollTimer = null;
 
+function _runnerWorkspaceCacheApi() {
+  return {
+    getDirectoryEntries: (typeof importedGetWorkspaceDirectoryEntries !== 'undefined' && importedGetWorkspaceDirectoryEntries) || null,
+    getDirectoryHints: (typeof importedGetWorkspaceAutocompleteDirectoryHints !== 'undefined' && importedGetWorkspaceAutocompleteDirectoryHints) || null,
+    getFileHints: (typeof importedGetWorkspaceAutocompleteFileHints !== 'undefined' && importedGetWorkspaceAutocompleteFileHints) || null,
+    refresh: (typeof importedRefreshWorkspaceFileCache !== 'undefined' && importedRefreshWorkspaceFileCache) || null,
+  };
+}
+
 // Pending terminal confirmation: used by transcript-owned yes/no flows such as
 // session-token migration and token-clear confirmation. While set, the next
 // typed answer is consumed as part of the active script-style prompt instead of
@@ -52,10 +481,12 @@ let _pendingTerminalConfirm = null;
 
 function _runnerPersistenceHelpers() {
   if (!_runnerPersistence) {
-    if (typeof DarklabRunnerPersistence === 'undefined' || !DarklabRunnerPersistence?.create) {
+    const createPersistence = (typeof importedCreateRunnerPersistence !== 'undefined' && importedCreateRunnerPersistence)
+      || null;
+    if (typeof createPersistence !== 'function') {
       throw new Error('DarklabRunnerPersistence is unavailable');
     }
-    _runnerPersistence = DarklabRunnerPersistence.create({
+    _runnerPersistence = createPersistence({
       apiFetch,
       maskSessionToken,
       isHistoryPanelOpen: typeof isHistoryPanelOpen === 'function' ? isHistoryPanelOpen : null,
@@ -64,6 +495,28 @@ function _runnerPersistenceHelpers() {
     });
   }
   return _runnerPersistence;
+}
+
+function _runnerIsActiveRunDetachedForRestore(runId) {
+  const isDetached = (typeof importedIsActiveRunDetachedForRestore !== 'undefined' && importedIsActiveRunDetachedForRestore)
+    || null;
+  return typeof isDetached === 'function' ? isDetached(runId) : false;
+}
+
+function _runnerPruneDetachedActiveRunRestoreIds(activeRunIds) {
+  const prune = (
+    typeof importedPruneDetachedActiveRunRestoreIds !== 'undefined'
+    && importedPruneDetachedActiveRunRestoreIds
+  ) || null;
+  if (typeof prune === 'function') prune(activeRunIds);
+}
+
+function _runnerClearActiveRunDetachedForRestore(runId) {
+  const clear = (
+    typeof importedClearActiveRunDetachedForRestore !== 'undefined'
+    && importedClearActiveRunDetachedForRestore
+  ) || null;
+  if (typeof clear === 'function') clear(runId);
 }
 
 function _resetStalledTimeout(tabId) {
@@ -103,7 +556,7 @@ function _recoverStalledRun(tabId) {
   appendLine('[connection re-established — live output resumed]', 'exit-ok', tabId);
   const t = getTab(tabId);
   if (!t || t.killed) return;
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('running');
     syncActiveRunTimer(tabId);
   }
@@ -148,7 +601,7 @@ function _markStalledButRunning(tabId) {
     appendLine('[stream quiet — no output or heartbeat reached the browser for 45s]', 'notice', tabId);
     appendLine('[process is still running; Kill remains available and live output will continue here if the stream resumes]', 'notice', tabId);
   }
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('running');
     syncActiveRunTimer(tabId);
   }
@@ -165,7 +618,7 @@ function _markStalledAndInactive(tabId) {
     appendLine('[connection stalled — no stream activity arrived from the server for 45s]', 'denied', tabId);
   }
   appendLine('[process is no longer listed as active; check the history panel for the final result]', 'denied', tabId);
-  if (tabId === activeTabId) setStatus('fail');
+  if (tabId === _runnerActiveTabId()) setStatus('fail');
   setTabStatus(tabId, 'fail');
   stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
 }
@@ -255,6 +708,13 @@ function setStatus(s) {
   }
 }
 
+function setLastExit(value) {
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value });
+  if (typeof importedEmitUiEvent === 'function' && importedEmitUiEvent !== emitUiEvent) {
+    importedEmitUiEvent('app:last-exit-changed', { value });
+  }
+}
+
 // ── Run notifications ──
 
 function _maybeNotify(command, codeOrStatus, elapsed) {
@@ -291,7 +751,7 @@ function stopTimer() {
   hideRunTimer();
 }
 
-function syncActiveRunTimer(tabId = activeTabId) {
+function syncActiveRunTimer(tabId = _runnerActiveTabId()) {
   const t = getTab(tabId);
   if (!t || t.st !== 'running' || !t.runStart) {
     stopTimer();
@@ -301,13 +761,13 @@ function syncActiveRunTimer(tabId = activeTabId) {
 }
 
 function _activeReconnectTabs() {
-  return tabs.filter(t => t && t.st === 'running' && t.reconnectedRun && t.historyRunId);
+  return _runnerTabs().filter(t => t && t.st === 'running' && t.reconnectedRun && t.historyRunId);
 }
 
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
   if (run.scheduled) return false;
-  if (_isActiveRunDetachedForRestore(run.run_id)) return false;
+  if (_runnerIsActiveRunDetachedForRestore(run.run_id)) return false;
   if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
@@ -328,12 +788,12 @@ function _startedAtLabel(started) {
 
 function _activeRunTabForRestore(run) {
   const runId = String(run && run.run_id || '');
-  if (!runId || !Array.isArray(tabs)) return null;
+  if (!runId || !Array.isArray(_runnerTabs())) return null;
   const byRunId = _tabForActiveRunId(runId);
   if (byRunId) return byRunId;
   const ownerTabId = String(run && run.owner_tab_id || '');
   if (run && run.owned_by_this_client && ownerTabId) {
-    return tabs.find(tab => tab && tab.id === ownerTabId) || null;
+    return _runnerTabs().find(tab => tab && tab.id === ownerTabId) || null;
   }
   return null;
 }
@@ -397,7 +857,7 @@ function _reattachActiveRunToTab(
   }
   if (afterStreamRecovery) t.streamRecoveryNoticeRunId = runId;
   setTabStatus(tabId, 'running');
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('running');
     syncActiveRunTimer(tabId);
   }
@@ -409,7 +869,7 @@ function _reattachActiveRunToTab(
 }
 
 function restoreActiveRunsAfterReload(runs) {
-  _pruneDetachedActiveRunRestoreIds(new Set((Array.isArray(runs) ? runs : [])
+  _runnerPruneDetachedActiveRunRestoreIds(new Set((Array.isArray(runs) ? runs : [])
     .map(run => run && run.run_id)
     .filter(Boolean)));
   const items = (Array.isArray(runs) ? runs : []).filter(_shouldAutoRestoreActiveRun);
@@ -437,7 +897,7 @@ function restoreActiveRunsAfterReload(runs) {
       });
       return;
     }
-    const bootstrapTab = index === 0 && tabs.length === 1 ? tabs[0] : null;
+    const bootstrapTab = index === 0 && _runnerTabs().length === 1 ? _runnerTabs()[0] : null;
     const canReuseBootstrapTab = !!(bootstrapTab
       && bootstrapTab.st === 'idle'
       && !bootstrapTab.renamed
@@ -463,14 +923,18 @@ function restoreActiveRunsAfterReload(runs) {
     });
   });
 
-  if (firstRestoredTabId) activateTab(firstRestoredTabId);
-  syncActiveRunTimer(activeTabId);
+  if (!firstRestoredTabId) {
+    stopPollingActiveRunsAfterReload();
+    return false;
+  }
+  activateTab(firstRestoredTabId);
+  syncActiveRunTimer(_runnerActiveTabId());
   return true;
 }
 
 function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   if (!run || !tabId) return false;
-  clearActiveRunDetachedForRestore(run.run_id);
+  _runnerClearActiveRunDetachedForRestore(run.run_id);
   clearTab(tabId);
   const t = getTab(tabId);
   if (!t) return false;
@@ -504,7 +968,7 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   );
   appendLine('[restored available output; live output will continue here]', 'notice', tabId);
   setTabStatus(tabId, 'running');
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('running');
     syncActiveRunTimer(tabId);
   }
@@ -528,8 +992,8 @@ function attachActiveRunFromMonitor(run) {
 
 function _tabForActiveRunId(runId) {
   const normalized = String(runId || '');
-  if (!normalized || !Array.isArray(tabs)) return null;
-  return tabs.find(tab => (
+  if (!normalized || !Array.isArray(_runnerTabs())) return null;
+  return _runnerTabs().find(tab => (
     tab && (tab.runId === normalized || tab.historyRunId === normalized)
   )) || null;
 }
@@ -583,7 +1047,7 @@ function _restoreCompletedReconnectedRun(tab, run) {
     .then(() => {
       const refreshed = getTab(tab.id);
       if (refreshed) refreshed.reconnectedRun = false;
-      if (tab.id === activeTabId) stopTimer();
+      if (tab.id === _runnerActiveTabId()) stopTimer();
     })
     .catch(() => {
       appendLine('[reconnected run finished, but the saved result could not be restored automatically]', 'notice', tab.id);
@@ -591,7 +1055,7 @@ function _restoreCompletedReconnectedRun(tab, run) {
       setTabStatus(tab.id, 'fail');
       const refreshed = getTab(tab.id);
       if (refreshed) refreshed.reconnectedRun = false;
-      if (tab.id === activeTabId) stopTimer();
+      if (tab.id === _runnerActiveTabId()) stopTimer();
     });
 }
 
@@ -605,7 +1069,7 @@ function _markReconnectedRunUnavailable(tab) {
     refreshed.reconnectedRun = false;
     refreshed.runId = null;
   }
-  if (tab.id === activeTabId) {
+  if (tab.id === _runnerActiveTabId()) {
     setStatus('fail');
     stopTimer();
   }
@@ -654,23 +1118,62 @@ function elapsedSeconds() {
 }
 
 function _setRunButtonDisabled(disabled) {
+  if (disabled) {
+    if (runBtn) runBtn.disabled = true;
+    const mobileRunBtn = _runnerEl('mobileRunBtn', importedMobileRunBtn);
+    if (mobileRunBtn) mobileRunBtn.disabled = true;
+  }
+  if (disabled && typeof setRunButtonDisabled === 'function') {
+    setRunButtonDisabled(disabled);
+    return;
+  }
+  if (typeof setRunButtonDisabled === 'function') {
+    setRunButtonDisabled(false);
+    return;
+  }
+  if (runBtn) runBtn.disabled = false;
+  const mobileRunBtn = _runnerEl('mobileRunBtn', importedMobileRunBtn);
+  if (mobileRunBtn) mobileRunBtn.disabled = false;
+}
+
+function _syncMobileRunButtonAfterRunSettled() {
+  if (typeof document === 'undefined' || !document.body?.classList?.contains('mobile-terminal-mode')) return;
+  const mobileRunBtn = _runnerEl('mobileRunBtn', importedMobileRunBtn);
+  const mobileCmd = _runnerEl('mobileCmdInput', importedMobileCmdInput);
+  if (!mobileRunBtn || !mobileCmd) return;
   if (typeof syncRunButtonDisabled === 'function') {
     syncRunButtonDisabled();
     return;
   }
-  if (typeof setRunButtonDisabled === 'function') {
-    setRunButtonDisabled(disabled);
-    return;
-  }
-  if (runBtn) runBtn.disabled = !!disabled;
+  mobileRunBtn.disabled = !String(mobileCmd.value || '').trim();
 }
 
 function _describeRunnerFetchError(err, context = 'server') {
   return describeFetchError(err, context);
 }
 
-function _logRunnerError(context, err) {
-  logClientError(context, err);
+function _logRunnerError(context, err, details = null) {
+  logClientError(context, err, details);
+}
+
+function _logRunStreamCancelFailure(err, tabId, runId, operation) {
+  _logRunnerError('run stream reader cancel failed', err, {
+    event: 'RUN_STREAM_READER_CANCEL_FAILED',
+    level: 'warning',
+    tab_id: String(tabId || ''),
+    run_id: String(runId || ''),
+    operation,
+  });
+}
+
+function _logRunStreamLifecycle(event, tabId, runId, operation) {
+  _logRunnerError('run stream lifecycle', null, {
+    event,
+    level: 'debug',
+    tab_id: String(tabId || ''),
+    run_id: String(runId || ''),
+    operation,
+  });
 }
 
 function _handleKillRequestFailure(err, tabId) {
@@ -689,7 +1192,7 @@ function _handleKillRequestDenied(message, tabId, runId) {
     showTabKillBtn(tabId);
   }
   appendLine(`[kill request denied] ${message || 'The server could not kill this run.'}`, 'notice', tabId);
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('running');
     _setRunButtonDisabled(true);
   }
@@ -737,7 +1240,7 @@ function _handleRunKilled(msg, tabId) {
     disableHighVolumeOutputResumeControls(tabId);
   }
   hideTabKillBtn(tabId);
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('killed');
     _setRunButtonDisabled(false);
   }
@@ -765,7 +1268,7 @@ function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) 
     disableHighVolumeOutputResumeControls(tabId);
   }
   hideTabKillBtn(tabId);
-  if (tabId === activeTabId) {
+  if (tabId === _runnerActiveTabId()) {
     setStatus('killed');
     _setRunButtonDisabled(false);
   }
@@ -777,7 +1280,7 @@ function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) 
 function _handleRunTransportFailure(err, tabId) {
   _logRunnerError('run request failed', err);
   appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
-  if (tabId === activeTabId) setStatus('fail');
+  if (tabId === _runnerActiveTabId()) setStatus('fail');
   setTabStatus(tabId, 'fail');
   if (typeof disableHighVolumeOutputResumeControls === 'function') {
     disableHighVolumeOutputResumeControls(tabId);
@@ -809,12 +1312,12 @@ async function _readRunErrorMessage(res) {
 }
 
 function _runActiveTeamScopeCan(capability) {
-  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan(capability) : true;
+  return typeof _runnerActiveTeamScopeCanAdapter === 'function' ? _runnerActiveTeamScopeCanAdapter(capability) : true;
 }
 
 function _runTeamScopeDeniedMessage(action) {
-  return typeof teamScopeDeniedMessage === 'function'
-    ? teamScopeDeniedMessage(action)
+  return typeof _runnerTeamScopeDeniedMessageAdapter === 'function'
+    ? _runnerTeamScopeDeniedMessageAdapter(action)
     : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
 }
 
@@ -823,12 +1326,12 @@ function _runStartDeniedMessage() {
 }
 
 function _workspaceTerminalCanWrite(action = 'change Files') {
-  if (typeof workspaceCanWrite === 'function') return workspaceCanWrite(action, { toast: false });
+  if (typeof _runnerWorkspaceCanWriteAdapter === 'function') return _runnerWorkspaceCanWriteAdapter(action, { toast: false });
   return true;
 }
 
 function _workspaceTerminalDeniedMessage(action = 'change Files') {
-  if (typeof teamScopeDeniedMessage === 'function') return teamScopeDeniedMessage(action);
+  if (typeof _runnerTeamScopeDeniedMessageAdapter === 'function') return _runnerTeamScopeDeniedMessageAdapter(action);
   return `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
 }
 
@@ -855,7 +1358,8 @@ function _streamOutputMetadata(msg) {
 }
 
 function _runnerRunOutputModel() {
-  return typeof DarklabRunOutputModel !== 'undefined' ? DarklabRunOutputModel : null;
+  if (typeof importedRunOutputModel !== 'undefined' && importedRunOutputModel) return importedRunOutputModel;
+  return null;
 }
 
 function _streamUnknownCollector(streamState) {
@@ -1211,8 +1715,11 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
         disableHighVolumeOutputResumeControls(tabId);
       }
-      if (t.closing && typeof finalizeClosingTab === 'function') {
-        finalizeClosingTab(tabId);
+      const finalizeTabClose = typeof importedFinalizeClosingTab === 'function'
+        ? importedFinalizeClosingTab
+        : (typeof finalizeClosingTab === 'function' ? finalizeClosingTab : null);
+      if (t.closing && finalizeTabClose) {
+        finalizeTabClose(tabId);
         if (isHistoryPanelOpen()) refreshHistoryPanel();
       }
       if (isHistoryPanelOpen()) refreshHistoryPanel();
@@ -1230,7 +1737,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
       if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
       if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
-      if (tabId === activeTabId) setStatus('ok');
+      if (tabId === _runnerActiveTabId()) setStatus('ok');
       setTabStatus(tabId, 'ok');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
         disableHighVolumeOutputResumeControls(tabId);
@@ -1239,7 +1746,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
       appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
       if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
-      if (tabId === activeTabId) setStatus('fail');
+      if (tabId === _runnerActiveTabId()) setStatus('fail');
       setTabStatus(tabId, 'fail');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
         disableHighVolumeOutputResumeControls(tabId);
@@ -1249,25 +1756,29 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
       addToRecentPreview(t.command);
     }
     if (t && t.command) _refreshProjectContextAfterCommand(t.command, msg.code);
-    if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof window.loadSessionVariables === 'function') {
-      window.loadSessionVariables().catch(() => {});
+    if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof importedLoadSessionVariables === 'function') {
+      importedLoadSessionVariables().catch(() => {});
     }
     if (t) t.syntheticClear = false;
     _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
     if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: msg.code });
     _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-    if (t && t.closing && typeof finalizeClosingTab === 'function') {
-      finalizeClosingTab(tabId);
+    _syncMobileRunButtonAfterRunSettled();
+    const finalizeTabClose = typeof importedFinalizeClosingTab === 'function'
+      ? importedFinalizeClosingTab
+      : (typeof finalizeClosingTab === 'function' ? finalizeClosingTab : null);
+    if (t && t.closing && finalizeTabClose) {
+      finalizeTabClose(tabId);
       if (isHistoryPanelOpen()) refreshHistoryPanel();
       return;
     }
     if (isHistoryPanelOpen()) refreshHistoryPanel();
-    if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+    _runnerWorkspaceCacheApi().refresh?.();
     if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
   } else if (msg.type === 'error') {
     _clearStalledTimeout(tabId);
     appendLine('[error] ' + msg.text, 'exit-fail', tabId);
-    if (tabId === activeTabId) setStatus('fail');
+    if (tabId === _runnerActiveTabId()) setStatus('fail');
     setTabStatus(tabId, 'fail');
     if (typeof disableHighVolumeOutputResumeControls === 'function') {
       disableHighVolumeOutputResumeControls(tabId);
@@ -1327,14 +1838,21 @@ function detachRunStreamForTab(tabId) {
   if (reader && typeof reader.cancel === 'function') {
     try {
       const cancelled = reader.cancel();
-      if (cancelled && typeof cancelled.catch === 'function') cancelled.catch(() => {});
-    } catch (_) {}
+      if (cancelled && typeof cancelled.catch === 'function') {
+        cancelled.catch((err) => {
+          _logRunStreamCancelFailure(err, tabId, state.runId, 'detach');
+        });
+      }
+    } catch (err) {
+      _logRunStreamCancelFailure(err, tabId, state.runId, 'detach');
+    }
   }
+  _logRunStreamLifecycle('RUN_STREAM_DETACHED', tabId, state.runId, 'detach');
   return true;
 }
 
 function pauseBackgroundRunStreamsForStatusMonitor() {
-  const keepTabId = activeTabId;
+  const keepTabId = _runnerActiveTabId();
   let paused = 0;
   _runStreamStateByTabId.forEach((state, tabId) => {
     if (!state || tabId === keepTabId || state.pausedForApi || state.detached) return;
@@ -1352,9 +1870,16 @@ function pauseBackgroundRunStreamsForStatusMonitor() {
     if (reader && typeof reader.cancel === 'function') {
       try {
         const cancelled = reader.cancel();
-        if (cancelled && typeof cancelled.catch === 'function') cancelled.catch(() => {});
-      } catch (_) {}
+        if (cancelled && typeof cancelled.catch === 'function') {
+          cancelled.catch((err) => {
+            _logRunStreamCancelFailure(err, tabId, state.runId, 'pause-for-status-monitor');
+          });
+        }
+      } catch (err) {
+        _logRunStreamCancelFailure(err, tabId, state.runId, 'pause-for-status-monitor');
+      }
     }
+    _logRunStreamLifecycle('RUN_STREAM_PAUSED_FOR_STATUS_MONITOR', tabId, state.runId, 'pause-for-status-monitor');
   });
   return paused;
 }
@@ -1429,7 +1954,7 @@ function _streamRunResponse(res, tabId, state = null) {
       if (_finishPausedRunStream(tabId, streamState)) return;
       _runStreamStateByTabId.delete(tabId);
       appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
-      if (tabId === activeTabId) setStatus('fail');
+      if (tabId === _runnerActiveTabId()) setStatus('fail');
       setTabStatus(tabId, 'fail');
       stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
     });
@@ -1463,7 +1988,7 @@ function _subscribeRunStream(runId, tabId, { streamUrl = '', after = '' } = {}) 
         return _readRunErrorMessage(streamRes).then(message => {
           const suffix = message ? ` ${message}` : '';
           appendLine(`[server error] The server could not stream the command.${suffix}`, 'exit-fail', tabId);
-          if (tabId === activeTabId) setStatus('fail');
+          if (tabId === _runnerActiveTabId()) setStatus('fail');
           setTabStatus(tabId, 'fail');
           stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
           return false;
@@ -1476,24 +2001,34 @@ function _subscribeRunStream(runId, tabId, { streamUrl = '', after = '' } = {}) 
       if (streamState.detached) return false;
       _runStreamStateByTabId.delete(tabId);
       appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
-      if (tabId === activeTabId) setStatus('fail');
+      if (tabId === _runnerActiveTabId()) setStatus('fail');
       setTabStatus(tabId, 'fail');
       stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       return false;
     });
 }
 
-function _clearDesktopInput() {
-  setComposerValue('', 0, 0);
+function _clearComposerInputs() {
+  let cleared = false;
+  for (const input of [cmdInput, mobileCmdInput]) {
+    if (!input) continue;
+    input.value = '';
+    if (typeof input.setSelectionRange === 'function') input.setSelectionRange(0, 0);
+    if (typeof input.dispatchEvent === 'function') input.dispatchEvent(new Event('input'));
+    cleared = true;
+  }
+  if (typeof setComposerValue === 'function') setComposerValue('', 0, 0, { allowDuringRun: true });
+  if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  return cleared;
 }
 
-function interruptPromptLine(tabId = activeTabId) {
+function interruptPromptLine(tabId = _runnerActiveTabId()) {
   const t = getTab(tabId);
   if (t && t.st === 'running') return false;
   appendPromptNewline(tabId);
-  _clearDesktopInput();
+  _clearComposerInputs();
   refocusComposerAfterAction();
-  if (tabId === activeTabId) setStatus('idle');
+  if (tabId === _runnerActiveTabId()) setStatus('idle');
   return true;
 }
 
@@ -1602,7 +2137,17 @@ function _isSyntheticWcLineCountCommand(cmd) {
 
 function _isExactSpecialBuiltInCommand(cmd) {
   const normalized = String(cmd || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const known = (typeof acSpecialCommands !== 'undefined' && acSpecialCommands) || [];
+  const rawKnown = (typeof acSpecialCommands !== 'undefined' && acSpecialCommands) || [];
+  const known = Array.isArray(rawKnown)
+    ? rawKnown
+    : Object.values(rawKnown).flatMap((entry) => {
+        if (typeof entry === 'string') return [entry];
+        if (Array.isArray(entry)) return entry;
+        if (entry && typeof entry === 'object') {
+          return [entry.command, entry.value, entry.insertValue].filter(Boolean);
+        }
+        return [];
+      });
   if (known.includes(normalized)) return true;
   // Fork bomb variants use non-standard whitespace; match the regex as a fallback
   // for the brief window before acSpecialCommands loads from /autocomplete.
@@ -1704,16 +2249,16 @@ function _finalizeClientSideCommandStatus(tabId, statusValue) {
     tab.lastEventId = '';
     tab.attachMode = '';
   }
-  if (tabId === activeTabId) setStatus(finalStatus);
+  if (tabId === _runnerActiveTabId()) setStatus(finalStatus);
   setTabStatus(tabId, finalStatus);
   if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: exitCode });
 }
 
-function _persistClientSideRun(command, lineItems, statusValue, tabId = activeTabId) {
+function _persistClientSideRun(command, lineItems, statusValue, tabId = _runnerActiveTabId()) {
   _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, tabId);
 }
 
-function _persistSessionTokenRun(command, lineItems, statusValue = 'ok', tabId = activeTabId) {
+function _persistSessionTokenRun(command, lineItems, statusValue = 'ok', tabId = _runnerActiveTabId()) {
   _persistClientSideRun(command, lineItems, statusValue, tabId);
 }
 
@@ -1835,10 +2380,10 @@ async function _runPendingTerminalConfirmHandler(promptTabId, handler) {
   _finalizeClientSideCommandStatus(promptTabId, finalStatus);
 }
 
-function cancelPendingTerminalConfirm(tabId = activeTabId) {
+function cancelPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
   if (!_pendingTerminalConfirm) return false;
   const pending = _pendingTerminalConfirm;
-  const promptTabId = pending.tabId || tabId || activeTabId;
+  const promptTabId = pending.tabId || tabId || _runnerActiveTabId();
   _setPendingTerminalConfirm(null);
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
@@ -1872,16 +2417,16 @@ function _clearVisibleSessionHistoryState() {
 async function _activateSessionTokenIdentity(token) {
   localStorage.setItem('session_token', token);
   updateSessionId(token);
-  if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
+  if (typeof loadRecentValues === 'function') await _runnerIgnoreFailure(loadRecentValues());
   await _seedLocalStorageStarsToServer();
-  if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-  if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
-  else if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
-  if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+  if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
+  if (typeof refreshWorkspaceFiles === 'function') void _runnerIgnoreFailure(refreshWorkspaceFiles());
+  else _runnerWorkspaceCacheApi().refresh?.()?.catch?.(() => {});
+  if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
 }
 
 async function _sessionTokenGenerate(tabId) {
-  const oldSessionId = SESSION_ID;
+  const oldSessionId = _runnerCurrentSessionId();
   try {
     const resp = await apiFetch('/session/token/generate');
     if (!resp.ok) {
@@ -1894,7 +2439,7 @@ async function _sessionTokenGenerate(tabId) {
     const newToken = data.session_token;
 
     if (typeof flushRecentValues === 'function') {
-      await flushRecentValues().catch(() => {});
+      await _runnerIgnoreFailure(flushRecentValues());
     }
 
     // Check run/workspace counts on old session before switching identity.
@@ -1935,8 +2480,8 @@ async function _sessionTokenGenerate(tabId) {
             localStorage.setItem('session_token', newToken);
             updateSessionId(newToken);
             await _seedLocalStorageStarsToServer();
-            if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-            if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+            if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
+            if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
             _recordSuccessfulLocalCommand('session-token generate');
             _persistSessionTokenRun('session-token generate', [
               { text: `session token generated:  ${maskSessionToken(newToken)}` },
@@ -1949,8 +2494,8 @@ async function _sessionTokenGenerate(tabId) {
           localStorage.setItem('session_token', newToken);
           updateSessionId(newToken);
           await _seedLocalStorageStarsToServer();
-          if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-          if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+          if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
+          if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
           _recordSuccessfulLocalCommand('session-token generate');
           appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
           _persistSessionTokenRun('session-token generate', [
@@ -2022,10 +2567,10 @@ async function _sessionTokenSet(value, tabId) {
     }
   }
 
-  const oldSessionId = SESSION_ID;
+  const oldSessionId = _runnerCurrentSessionId();
 
   if (typeof flushRecentValues === 'function') {
-    await flushRecentValues().catch(() => {});
+    await _runnerIgnoreFailure(flushRecentValues());
   }
 
   // Check current session's run/workspace counts before switching identity.
@@ -2100,7 +2645,7 @@ async function _sessionTokenSet(value, tabId) {
 
 async function _sessionTokenCopy(tabId) {
   if (typeof flushRecentValues === 'function') {
-    await flushRecentValues().catch(() => {});
+    await _runnerIgnoreFailure(flushRecentValues());
   }
   const token = localStorage.getItem('session_token');
   if (!token) {
@@ -2109,7 +2654,7 @@ async function _sessionTokenCopy(tabId) {
     return;
   }
   try {
-    await copyTextToClipboard(token);
+    await _runnerCopyTextToClipboardAdapter(token);
     appendLine(`session token copied to clipboard: ${maskSessionToken(token)}`, '', tabId);
     _recordSuccessfulLocalCommand('session-token copy');
     _persistSessionTokenRun('session-token copy', [
@@ -2136,11 +2681,11 @@ async function _sessionTokenClear(tabId) {
     tabId,
     onYes: async () => {
       localStorage.removeItem('session_token');
-      const uuid = localStorage.getItem('session_id') || SESSION_ID;
+      const uuid = localStorage.getItem('session_id') || _runnerCurrentSessionId();
       updateSessionId(uuid);
       _clearVisibleSessionHistoryState();
-      if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-      if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+      if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
+      if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
       appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
       appendLine('your session token data remains in the server database', '', tabId);
       _recordSuccessfulLocalCommand('session-token clear');
@@ -2159,7 +2704,7 @@ async function _sessionTokenClear(tabId) {
 }
 
 async function _sessionTokenRotate(tabId) {
-  const oldSessionId = SESSION_ID;
+  const oldSessionId = _runnerCurrentSessionId();
   try {
     const resp = await apiFetch('/session/token/generate');
     if (!resp.ok) {
@@ -2192,9 +2737,9 @@ async function _sessionTokenRotate(tabId) {
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
-    else if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
-    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+    if (typeof refreshWorkspaceFiles === 'function') void _runnerIgnoreFailure(refreshWorkspaceFiles());
+    else _runnerWorkspaceCacheApi().refresh?.()?.catch?.(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
 
     appendLine(`session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
     appendLine(_sessionMigrationResultText(migrateData), '', tabId);
@@ -2230,13 +2775,13 @@ async function _sessionTokenList(tabId) {
       if (data.created) appendLine(kv('created', data.created + ' UTC'), 'builtin-kv', tabId);
       appendLine(kv('storage', 'localStorage (session_token)'), 'builtin-kv', tabId);
     } else {
-      appendLine(kv('session', maskSessionToken(SESSION_ID)), 'builtin-kv', tabId);
+      appendLine(kv('session', maskSessionToken(_runnerCurrentSessionId())), 'builtin-kv', tabId);
       appendLine(kv('status', 'anonymous (no session token set)'), 'builtin-kv', tabId);
       appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'builtin-kv', tabId);
     }
     _recordSuccessfulLocalCommand('session-token list');
     _persistSessionTokenRun('session-token list', [
-      { text: data.token ? `session token  ${maskSessionToken(data.token)}` : `session  ${maskSessionToken(SESSION_ID)}`, cls: 'builtin-kv' },
+      { text: data.token ? `session token  ${maskSessionToken(data.token)}` : `session  ${maskSessionToken(_runnerCurrentSessionId())}`, cls: 'builtin-kv' },
       { text: data.token ? 'status          active' : 'status          anonymous (no session token set)', cls: 'builtin-kv' },
     ]);
     setStatus('ok');
@@ -2294,11 +2839,11 @@ async function _sessionTokenRevokeConfirmed(token, tabId) {
       setStatus('fail');
       return;
     }
-    const isCurrentToken = token === SESSION_ID;
+    const isCurrentToken = token === _runnerCurrentSessionId();
     appendLine(`session token revoked: ${maskSessionToken(token)}`, '', tabId);
     if (isCurrentToken) {
       localStorage.removeItem('session_token');
-      const uuid = localStorage.getItem('session_id') || SESSION_ID;
+      const uuid = localStorage.getItem('session_id') || _runnerCurrentSessionId();
       updateSessionId(uuid);
       _clearVisibleSessionHistoryState();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
@@ -2331,10 +2876,15 @@ function _workspaceSplitLines(text = '') {
 }
 
 function _workspaceFileDescription(file) {
-  const size = typeof _formatWorkspaceBytes === 'function'
-    ? _formatWorkspaceBytes(file && file.size)
-    : `${Number(file && file.size) || 0} B`;
+  const size = _workspaceFormatBytes(file && file.size);
   return `${String(file && file.name || file && file.path || '')}${file && file.mtime ? `\t${size}\t${file.mtime}` : `\t${size}`}`;
+}
+
+function _workspaceFormatBytes(size) {
+  const formatted = typeof _formatWorkspaceBytes === 'function'
+    ? _formatWorkspaceBytes(size)
+    : null;
+  return typeof formatted === 'string' && formatted ? formatted : `${Number(size) || 0} B`;
 }
 
 function _workspaceListLines(entries, target = '') {
@@ -2352,9 +2902,7 @@ function _workspaceListLines(entries, target = '') {
     rows.push({
       name: String(file && file.name || file && file.path || ''),
       type: 'file',
-      size: typeof _formatWorkspaceBytes === 'function'
-        ? _formatWorkspaceBytes(file && file.size)
-        : `${Number(file && file.size) || 0} B`,
+      size: _workspaceFormatBytes(file && file.size),
       modified: file && file.mtime ? String(file.mtime) : '',
     });
   });
@@ -2450,8 +2998,9 @@ function _workspaceRecursiveEntries(base = '') {
   const queue = [String(base || '').split('/').filter(Boolean).join('/')];
   while (queue.length) {
     const current = queue.shift();
-    const entries = typeof getWorkspaceDirectoryEntries === 'function'
-      ? getWorkspaceDirectoryEntries(current)
+    const getDirectoryEntries = _runnerWorkspaceCacheApi().getDirectoryEntries;
+    const entries = typeof getDirectoryEntries === 'function'
+      ? getDirectoryEntries(current)
       : { folders: [], files: [] };
     (entries.folders || []).forEach((folder) => {
       const path = String(folder && folder.path || '').split('/').filter(Boolean).join('/');
@@ -2533,79 +3082,83 @@ function _workspaceStandaloneFilterSpec(parts) {
 }
 
 async function _runWorkspaceListCommand(parts, tabId) {
-  const parsed = _workspaceListCommand(parts);
+  const parsed = _runnerWorkspaceListCommandAdapter(parts);
   if (!parsed || parsed.invalid) throw new Error(parsed?.usage || 'Usage: ls [-l] [folder]');
   const rawTarget = parsed.target;
-  await _ensureWorkspaceCache();
-  if (_workspacePathHasGlob(rawTarget)) {
-    const matches = _workspaceExpandPathPattern(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'any', defaultToCwd: true });
+  await _runnerEnsureWorkspaceCacheAdapter();
+  if (_runnerWorkspacePathHasGlobAdapter(rawTarget)) {
+    const matches = _runnerWorkspaceExpandPathPatternAdapter(rawTarget, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'any', defaultToCwd: true });
     if (!matches.length) throw new Error(`no matches: ${rawTarget}`);
     const entries = {
       folders: matches
         .filter(item => item.kind === 'directory')
         .map(item => ({
           path: item.path,
-          name: _workspaceRelativeListName(item.path, _workspaceCwd(tabId), true).replace(/\/+$/, ''),
+          name: _workspaceRelativeListName(item.path, _runnerWorkspaceCwdAdapter(tabId), true).replace(/\/+$/, ''),
         })),
       files: matches
         .filter(item => item.kind === 'file')
         .map(item => ({
           ...(item.item || {}),
           path: item.path,
-          name: _workspaceRelativeListName(item.path, _workspaceCwd(tabId), false),
+          name: _workspaceRelativeListName(item.path, _runnerWorkspaceCwdAdapter(tabId), false),
         })),
     };
     return parsed.long ? _workspaceListLines(entries, '') : _workspaceShortListLines(entries);
   }
-  const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'directory', defaultToCwd: true });
-  const entries = typeof getWorkspaceDirectoryEntries === 'function'
-    ? getWorkspaceDirectoryEntries(target)
+  const target = _runnerResolveExistingWorkspaceCommandPathAdapter(rawTarget, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'directory', defaultToCwd: true });
+  const getDirectoryEntries = _runnerWorkspaceCacheApi().getDirectoryEntries;
+  const entries = typeof getDirectoryEntries === 'function'
+    ? getDirectoryEntries(target)
     : { folders: [], files: [] };
   const isRoot = !target;
-  const directoryExists = isRoot || _workspacePathExists(target, 'directory');
-  const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : [];
+  const directoryExists = isRoot || _runnerWorkspacePathExistsAdapter(target, 'directory');
+  const getFileHints = _runnerWorkspaceCacheApi().getFileHints;
+  const fileHints = typeof getFileHints === 'function' ? getFileHints() : [];
   const file = fileHints.find(item => String(item.value || '') === target);
   if (!directoryExists && file) return [_workspacePlainLine(target)];
-  if (!directoryExists) throw new Error(`folder not found: ${_workspaceDisplayPath(target)}`);
+  if (!directoryExists) throw new Error(`folder not found: ${_runnerWorkspaceDisplayPathAdapter(target)}`);
   const listingEntries = parsed.recursive ? _workspaceRecursiveEntries(target) : _workspaceDirectListEntries(entries, target);
   return parsed.long ? _workspaceListLines(listingEntries, target) : _workspaceShortListLines(listingEntries);
 }
 
 function _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) {
-  const parts = _workspaceCommandTokens(baseCommand);
+  const parts = _runnerWorkspaceCommandTokensAdapter(baseCommand);
   const root = (parts[0] || '').toLowerCase();
   const action = (parts[1] || '').toLowerCase();
   if (!(root === 'ls' || root === 'll' || (root === 'file' && ['list', 'ls'].includes(action)))) {
     return capturedLines;
   }
-  const parsed = _workspaceListCommand(parts);
+  const parsed = _runnerWorkspaceListCommandAdapter(parts);
   if (!parsed || parsed.invalid || parsed.long) return capturedLines;
   try {
     const rawTarget = parsed.target;
-    if (_workspacePathHasGlob(rawTarget)) {
-      const matches = _workspaceExpandPathPattern(rawTarget, {
-        cwd: _workspaceCwd(tabId),
+    if (_runnerWorkspacePathHasGlobAdapter(rawTarget)) {
+      const matches = _runnerWorkspaceExpandPathPatternAdapter(rawTarget, {
+        cwd: _runnerWorkspaceCwdAdapter(tabId),
         kind: 'any',
         defaultToCwd: true,
       });
       if (!matches.length) return capturedLines;
       return matches.map((item) => {
-        const name = _workspaceRelativeListName(item.path, _workspaceCwd(tabId), item.kind === 'directory');
+        const name = _workspaceRelativeListName(item.path, _runnerWorkspaceCwdAdapter(tabId), item.kind === 'directory');
         return _workspacePlainLine(item.kind === 'directory' ? `${name.replace(/\/+$/, '')}/` : name);
       });
     }
-    const target = _resolveExistingWorkspaceCommandPath(rawTarget, {
-      cwd: _workspaceCwd(tabId),
+    const target = _runnerResolveExistingWorkspaceCommandPathAdapter(rawTarget, {
+      cwd: _runnerWorkspaceCwdAdapter(tabId),
       kind: 'directory',
       defaultToCwd: true,
     });
     const isRoot = !target;
-    const directoryExists = isRoot || _workspacePathExists(target, 'directory');
-    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : [];
+    const directoryExists = isRoot || _runnerWorkspacePathExistsAdapter(target, 'directory');
+    const getFileHints = _runnerWorkspaceCacheApi().getFileHints;
+    const fileHints = typeof getFileHints === 'function' ? getFileHints() : [];
     const file = fileHints.find(item => String(item.value || '') === target);
     if (!directoryExists || file) return capturedLines;
-    const entries = typeof getWorkspaceDirectoryEntries === 'function'
-      ? getWorkspaceDirectoryEntries(target)
+    const getDirectoryEntries = _runnerWorkspaceCacheApi().getDirectoryEntries;
+    const entries = typeof getDirectoryEntries === 'function'
+      ? getDirectoryEntries(target)
       : { folders: [], files: [] };
     const listingEntries = parsed.recursive ? _workspaceRecursiveEntries(target) : _workspaceDirectListEntries(entries, target);
     const names = _workspaceListNames(listingEntries);
@@ -2616,23 +3169,23 @@ function _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) {
 }
 
 async function _handleWorkspaceTerminalCommand(cmd, tabId) {
-  const parts = _workspaceCommandTokens(cmd);
+  const parts = _runnerWorkspaceCommandTokensAdapter(cmd);
   const root = (parts[0] || '').toLowerCase();
   const action = (parts[1] || '').toLowerCase();
   appendCommandEcho(cmd, tabId);
   try {
     let outputLines = [];
     if (root === 'pwd') {
-      outputLines = [_workspacePlainLine(_workspaceDisplayPath(_workspaceCwd(tabId)))];
+      outputLines = [_workspacePlainLine(_runnerWorkspaceDisplayPathAdapter(_runnerWorkspaceCwdAdapter(tabId)))];
     } else if (root === 'cd') {
       if (parts.length > 2) throw new Error('Usage: cd [folder]');
-      await _ensureWorkspaceCache();
-      const target = _resolveExistingWorkspaceCommandPath(parts[1] || '/', { cwd: _workspaceCwd(tabId), kind: 'directory', defaultToCwd: false });
-      if (target && !_workspacePathExists(target, 'directory')) {
-        throw new Error(`folder not found: ${_workspaceDisplayPath(target)}`);
+      await _runnerEnsureWorkspaceCacheAdapter();
+      const target = _runnerResolveExistingWorkspaceCommandPathAdapter(parts[1] || '/', { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'directory', defaultToCwd: false });
+      if (target && !_runnerWorkspacePathExistsAdapter(target, 'directory')) {
+        throw new Error(`folder not found: ${_runnerWorkspaceDisplayPathAdapter(target)}`);
       }
-      _setWorkspaceCwd(tabId, target);
-      outputLines = [_workspacePlainLine(_workspaceDisplayPath(target))];
+      _runnerSetWorkspaceCwdAdapter(tabId, target);
+      outputLines = [_workspacePlainLine(_runnerWorkspaceDisplayPathAdapter(target))];
     } else if (root === 'ls' || root === 'll' || (root === 'file' && ['list', 'ls'].includes(action))) {
       outputLines = await _runWorkspaceListCommand(parts, tabId);
     } else if (root === 'cat' || (root === 'file' && action === 'show')) {
@@ -2640,8 +3193,8 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       if (!rawTarget || (root === 'cat' ? parts.length !== 2 : parts.length !== 3)) {
         throw new Error(root === 'cat' ? 'Usage: cat <file>' : 'Usage: file show <file>');
       }
-      await _ensureWorkspaceCache();
-      const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'file' });
+      await _runnerEnsureWorkspaceCacheAdapter();
+      const target = _runnerResolveExistingWorkspaceCommandPathAdapter(rawTarget, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'file' });
       outputLines = await _workspaceReadLines(target);
     } else if (root === 'mkdir' || (root === 'file' && ['add-dir', 'mkdir'].includes(action))) {
       if (!_workspaceTerminalCanWrite('create folders in Files')) {
@@ -2651,15 +3204,15 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       if (!rawTarget || (root === 'mkdir' ? parts.length !== 2 : parts.length !== 3)) {
         throw new Error(root === 'mkdir' ? 'Usage: mkdir <folder>' : 'Usage: file add-dir <folder>');
       }
-      const target = _resolveWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId) });
+      const target = _runnerResolveWorkspaceCommandPathAdapter(rawTarget, { cwd: _runnerWorkspaceCwdAdapter(tabId) });
       const data = await createWorkspaceDirectory(target);
       const path = data && data.directory && data.directory.path ? data.directory.path : target;
       outputLines = [_workspacePlainLine(`file: created folder ${path}`)];
     } else {
       const parsed = _workspaceStandaloneFilterSpec(parts);
       if (!parsed || parsed.error) throw new Error(parsed && parsed.error ? parsed.error : 'unsupported workspace command');
-      await _ensureWorkspaceCache();
-      const target = _resolveExistingWorkspaceCommandPath(parsed.path, { cwd: _workspaceCwd(tabId), kind: 'file' });
+      await _runnerEnsureWorkspaceCacheAdapter();
+      const target = _runnerResolveExistingWorkspaceCommandPathAdapter(parsed.path, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'file' });
       const inputLines = await _workspaceReadLines(target);
       outputLines = _applySyntheticPostFilterLines(inputLines, parsed.spec);
     }
@@ -2702,7 +3255,7 @@ async function _handleSessionTokenCommand(cmd, tabId) {
 }
 
 async function _handleWorkspaceDeleteCommand(cmd, tabId) {
-  const parsedDelete = _workspaceDeleteCommand(cmd);
+  const parsedDelete = _runnerWorkspaceDeleteCommandAdapter(cmd);
   let target = parsedDelete && !parsedDelete.invalid ? parsedDelete.target : '';
   appendCommandEcho(cmd);
   if (!_workspaceTerminalCanWrite('delete Files')) {
@@ -2718,10 +3271,10 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   let targetInfo = null;
   let targetInfos = [];
   try {
-    await _ensureWorkspaceCache();
-    const expandedTargets = _workspacePathHasGlob(target)
-      ? _workspaceExpandPathPattern(target, { cwd: _workspaceCwd(tabId), kind: 'any' })
-      : [{ path: _resolveExistingWorkspaceCommandPath(target, { cwd: _workspaceCwd(tabId), kind: 'any' }) }];
+    await _runnerEnsureWorkspaceCacheAdapter();
+    const expandedTargets = _runnerWorkspacePathHasGlobAdapter(target)
+      ? _runnerWorkspaceExpandPathPatternAdapter(target, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'any' })
+      : [{ path: _runnerResolveExistingWorkspaceCommandPathAdapter(target, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'any' }) }];
     if (!expandedTargets.length) {
       throw new Error(`no matches: ${target}`);
     }
@@ -2781,7 +3334,7 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
           removedLines.push({ text: removedText });
           appendLine(removedText, '', tabId);
         }
-        if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+        _runnerWorkspaceCacheApi().refresh?.();
         _recordSuccessfulLocalCommand(cmd);
         _persistClientSideRun(cmd, removedLines, 'ok');
         setStatus('ok');
@@ -2800,7 +3353,7 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
 }
 
 async function _handleWorkspaceMoveCommand(cmd, tabId) {
-  const parsed = _workspaceMoveCommand(cmd);
+  const parsed = _runnerWorkspaceMoveCommandAdapter(cmd);
   appendCommandEcho(cmd);
   if (!_workspaceTerminalCanWrite('move Files')) {
     appendLine(`[error] ${_workspaceTerminalDeniedMessage('move Files')}`, 'exit-fail', tabId);
@@ -2818,16 +3371,16 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
     return;
   }
   try {
-    await _ensureWorkspaceCache();
-    const sources = _workspacePathHasGlob(parsed.source)
-      ? _workspaceExpandPathPattern(parsed.source, { cwd: _workspaceCwd(tabId), kind: 'any' })
-      : [{ path: _resolveExistingWorkspaceCommandPath(parsed.source, { cwd: _workspaceCwd(tabId), kind: 'any' }) }];
+    await _runnerEnsureWorkspaceCacheAdapter();
+    const sources = _runnerWorkspacePathHasGlobAdapter(parsed.source)
+      ? _runnerWorkspaceExpandPathPatternAdapter(parsed.source, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'any' })
+      : [{ path: _runnerResolveExistingWorkspaceCommandPathAdapter(parsed.source, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'any' }) }];
     if (!sources.length) {
       throw new Error(`no matches: ${parsed.source}`);
     }
-    const destination = _resolveWorkspaceCommandPath(parsed.destination, { cwd: _workspaceCwd(tabId) });
+    const destination = _runnerResolveWorkspaceCommandPathAdapter(parsed.destination, { cwd: _runnerWorkspaceCwdAdapter(tabId) });
     const movingMultiple = sources.length > 1;
-    if (movingMultiple && !_workspacePathExists(destination, 'directory')) {
+    if (movingMultiple && !_runnerWorkspacePathExistsAdapter(destination, 'directory')) {
       throw new Error('destination must be an existing folder when moving multiple matches');
     }
     const movedLines = [];
@@ -2839,7 +3392,7 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
       movedLines.push({ text });
       appendLine(text, '', tabId);
     }
-    if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+    _runnerWorkspaceCacheApi().refresh?.();
     _recordSuccessfulLocalCommand(cmd);
     _persistClientSideRun(cmd, movedLines, 'ok');
     setStatus('ok');
@@ -2851,7 +3404,7 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
 }
 
 async function _handleWorkspaceEditorCommand(cmd, tabId) {
-  const parsed = _workspaceEditorCommand(cmd);
+  const parsed = _runnerWorkspaceEditorCommandAdapter(cmd);
   appendCommandEcho(cmd);
   const writeAction = parsed && parsed.action === 'edit' ? 'edit Files' : 'create Files';
   if (!_workspaceTerminalCanWrite(writeAction)) {
@@ -2872,11 +3425,11 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
     return;
   }
   try {
-    if (parsed.action === 'edit') await _ensureWorkspaceCache();
+    if (parsed.action === 'edit') await _runnerEnsureWorkspaceCacheAdapter();
     const target = parsed.target
       ? (parsed.action === 'edit'
-          ? _resolveExistingWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId), kind: 'file' })
-          : _resolveWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId) }))
+          ? _runnerResolveExistingWorkspaceCommandPathAdapter(parsed.target, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'file' })
+          : _runnerResolveWorkspaceCommandPathAdapter(parsed.target, { cwd: _runnerWorkspaceCwdAdapter(tabId) }))
       : '';
     const opened = await openWorkspaceEditorFromCommand(parsed.action, target);
     if (opened === false) throw new Error(_workspaceTerminalDeniedMessage(writeAction));
@@ -2893,7 +3446,7 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
 }
 
 async function _handleWorkspaceDownloadCommand(cmd, tabId) {
-  let target = _workspaceDownloadTarget(cmd);
+  let target = _runnerWorkspaceDownloadTargetAdapter(cmd);
   appendCommandEcho(cmd);
   if (!target) {
     appendLine('Usage: file download <file>', 'exit-fail', tabId);
@@ -2906,8 +3459,8 @@ async function _handleWorkspaceDownloadCommand(cmd, tabId) {
     return;
   }
   try {
-    await _ensureWorkspaceCache();
-    target = _resolveExistingWorkspaceCommandPath(target, { cwd: _workspaceCwd(tabId), kind: 'file' });
+    await _runnerEnsureWorkspaceCacheAdapter();
+    target = _runnerResolveExistingWorkspaceCommandPathAdapter(target, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'file' });
     const downloaded = await downloadWorkspaceFile(target);
     if (!downloaded) throw new Error('file download failed');
     const text = `file: downloading ${target}`;
@@ -2927,7 +3480,6 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
   const capturedLines = [];
   const originalAppendLine = appendLine;
-  const originalAppendLines = typeof appendLines === 'function' ? appendLines : null;
   const originalAppendCommandEcho = appendCommandEcho;
   const originalRecordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
   const originalPersistSessionTokenRun = _persistSessionTokenRun;
@@ -2939,7 +3491,7 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     tab.command = cmd;
   }
 
-  if (tabId === activeTabId) originalSetStatus('running');
+  if (tabId === _runnerActiveTabId()) originalSetStatus('running');
   if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
   appendCommandEcho(cmd, tabId);
   try {
@@ -2947,18 +3499,18 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     _persistSessionTokenRun = () => {};
     _persistClientSideRun = () => {};
     setStatus = (statusValue) => {
-      if (typeof activeTabId === 'undefined' || activeTabId === tabId) {
+      if (typeof _runnerActiveTabId() === 'undefined' || _runnerActiveTabId() === tabId) {
         finalStatus = statusValue;
       }
       originalSetStatus(statusValue);
     };
     appendCommandEcho = (echoCommand, echoTabId = null) => {
-      const targetTabId = echoTabId || (typeof activeTabId !== 'undefined' ? activeTabId : tabId);
+      const targetTabId = echoTabId || (typeof _runnerActiveTabId() !== 'undefined' ? _runnerActiveTabId() : tabId);
       if (targetTabId === tabId) return;
       originalAppendCommandEcho(echoCommand, echoTabId);
     };
     appendLine = (text, cls = '', lineTabId = null, metadata = null) => {
-      const targetTabId = lineTabId || (typeof activeTabId !== 'undefined' ? activeTabId : tabId);
+      const targetTabId = lineTabId || (typeof _runnerActiveTabId() !== 'undefined' ? _runnerActiveTabId() : tabId);
       if (targetTabId !== tabId) {
         originalAppendLine(text, cls, lineTabId, metadata);
         return;
@@ -2983,13 +3535,10 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
 
   const pipeInputLines = spec ? _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) : capturedLines;
   const outputLines = spec ? _applySyntheticPostFilterLines(pipeInputLines, spec) : capturedLines;
-  if (originalAppendLines) await originalAppendLines(outputLines, tabId);
-  else {
-    outputLines.forEach((line) => {
-      if (line.metadata) originalAppendLine(line.text, line.cls || '', tabId, line.metadata);
-      else originalAppendLine(line.text, line.cls || '', tabId);
-    });
-  }
+  outputLines.forEach((line) => {
+    if (line.metadata) originalAppendLine(line.text, line.cls || '', tabId, line.metadata);
+    else originalAppendLine(line.text, line.cls || '', tabId);
+  });
   if (!_pendingTerminalConfirm) {
     _finalizeClientSideCommandStatus(tabId, finalStatus);
     if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
@@ -3006,13 +3555,13 @@ function submitCommand(rawCmd) {
   // feed output into the active tab while mirroring completion into persistence.
   const cmd = (rawCmd || '').trim();
   if (!cmd) {
-    if (_isWelcomeActive() && _welcomeOwns(activeTabId)) {
-      _requestWelcomeSettle(activeTabId);
+    if (_isWelcomeActive() && !_isWelcomeDone() && _welcomeOwns(_runnerActiveTabId())) {
+      _requestWelcomeSettle(_runnerActiveTabId());
       return 'settle';
     }
     const _activeTab = getActiveTab();
     if (_activeTab && _activeTab.st === 'running') return true;
-    appendPromptNewline(activeTabId);
+    appendPromptNewline(_runnerActiveTabId());
     setStatus('idle');
     return true;
   }
@@ -3020,7 +3569,7 @@ function submitCommand(rawCmd) {
   // Intercept yes/no answer to a pending terminal confirmation prompt.
   if (_pendingTerminalConfirm) {
     const pending = _pendingTerminalConfirm;
-    const promptTabId = pending.tabId || activeTabId;
+    const promptTabId = pending.tabId || _runnerActiveTabId();
     appendCommandEcho(cmd, promptTabId);
     if (pending.kind === 'text') {
       _setPendingTerminalConfirm(null);
@@ -3058,18 +3607,18 @@ function submitCommand(rawCmd) {
   // asynchronously via SSE) to avoid a race condition where rapid Enter presses
   // fire before the server's 'started' message arrives.
   // If the welcome typeout is still running, cancel it and clear partial output
-  if (_welcomeOwns(activeTabId)) {
-    _cancelWelcome(activeTabId);
-    clearTab(activeTabId);
+  if (_welcomeOwns(_runnerActiveTabId())) {
+    _cancelWelcome(_runnerActiveTabId());
+    clearTab(_runnerActiveTabId());
   }
 
   const activeTab = getActiveTab();
   if (activeTab && activeTab.st === 'running') {
     const newId = createTab(typeof createDefaultTabLabel === 'function'
       ? createDefaultTabLabel()
-      : 'shell ' + (tabs.length + 1));
+      : 'shell ' + (_runnerTabs().length + 1));
     if (!newId) return false; // tab limit reached — createTab already showed a toast
-    // createTab calls activateTab internally, so activeTabId now points to the new tab
+    // createTab calls activateTab internally, so the active tab id now points to the new tab
   }
 
   // Client-side validation mirrors server-side checks for immediate feedback
@@ -3078,6 +3627,8 @@ function submitCommand(rawCmd) {
     appendCommandEcho(cmd);
     appendLine('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied');
     setStatus('fail');
+    setLastExit(1);
+    setTabStatus(_runnerActiveTabId(), 'fail');
     return false;
   }
 
@@ -3085,11 +3636,16 @@ function submitCommand(rawCmd) {
     appendCommandEcho(cmd);
     appendLine('[denied] Access to /data and /tmp is not permitted.', 'denied');
     setStatus('fail');
+    setLastExit(1);
+    setTabStatus(_runnerActiveTabId(), 'fail');
     return false;
   }
 
   if (_isTabCloseCommand(cmd)) {
-    if (typeof closeTab === 'function') closeTab(activeTabId);
+    const closeActiveTab = typeof importedCloseTab === 'function'
+      ? importedCloseTab
+      : (typeof closeTab === 'function' ? closeTab : null);
+    if (closeActiveTab) closeActiveTab(_runnerActiveTabId());
     return true;
   }
 
@@ -3099,119 +3655,119 @@ function submitCommand(rawCmd) {
   }
 
   if (typeof isInteractivePtyCommand === 'function' && isInteractivePtyCommand(cmd)) {
-    void startInteractivePtyCommand(cmd, activeTabId);
+    void startInteractivePtyCommand(cmd, _runnerActiveTabId());
     return true;
   }
 
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.
   if (_isSessionTokenSubcommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-      _handleSessionTokenCommand(baseCommand, activeTabId)
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleSessionTokenCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }
 
   if (_isClientSideSecretSetCommand(cmd)) {
     const safeCommand = _historySafeCommand(cmd);
-    void _runClientSideCommandWithOptionalPipe(safeCommand, activeTabId, (baseCommand) => {
-      if (typeof handleSecretCommand === 'function') {
-        return handleSecretCommand(baseCommand, activeTabId);
+    void _runClientSideCommandWithOptionalPipe(safeCommand, _runnerActiveTabId(), (baseCommand) => {
+      if (typeof _runnerHandleSecretCommandAdapter === 'function') {
+        return _runnerHandleSecretCommandAdapter(baseCommand, _runnerActiveTabId());
       }
-      appendLine('[error] secret prompt is not ready — reload the page and try again', 'exit-fail', activeTabId);
+      appendLine('[error] secret prompt is not ready — reload the page and try again', 'exit-fail', _runnerActiveTabId());
       setStatus('fail');
       return true;
     });
     return true;
   }
 
-  if (_isWorkspaceTerminalCommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-      _handleWorkspaceTerminalCommand(baseCommand, activeTabId)
+  if (_runnerIsWorkspaceTerminalCommandAdapter(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleWorkspaceTerminalCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }
 
-  if (_isWorkspaceDeleteCommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-      _handleWorkspaceDeleteCommand(baseCommand, activeTabId)
+  if (_runnerIsWorkspaceDeleteCommandAdapter(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleWorkspaceDeleteCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }
 
-  if (_isWorkspaceMoveCommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-      _handleWorkspaceMoveCommand(baseCommand, activeTabId)
+  if (_runnerIsWorkspaceMoveCommandAdapter(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleWorkspaceMoveCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }
 
-  if (_isWorkspaceEditorCommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-      _handleWorkspaceEditorCommand(baseCommand, activeTabId)
+  if (_runnerIsWorkspaceEditorCommandAdapter(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleWorkspaceEditorCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }
 
-  if (_isWorkspaceDownloadCommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-      _handleWorkspaceDownloadCommand(baseCommand, activeTabId)
+  if (_runnerIsWorkspaceDownloadCommandAdapter(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleWorkspaceDownloadCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }
 
   if (String(cmd || '').trim().toLowerCase().split(/\s+/, 1)[0] === 'workflow') {
-    if (typeof handleWorkflowTerminalCommand === 'function') {
-      void handleWorkflowTerminalCommand(cmd, activeTabId);
+    if (typeof _runnerHandleWorkflowTerminalCommandAdapter === 'function') {
+      void _runnerHandleWorkflowTerminalCommandAdapter(cmd, _runnerActiveTabId());
       return true;
     }
     appendCommandEcho(cmd);
-    appendLine('[error] workflow command is not ready — reload the page and try again', 'exit-fail', activeTabId);
+    appendLine('[error] workflow command is not ready — reload the page and try again', 'exit-fail', _runnerActiveTabId());
     setStatus('fail');
     return true;
   }
 
   if (_isClientSideUiCommand(cmd)) {
     const root = cmd.trim().split(/\s+/, 1)[0].toLowerCase();
-    if (root === 'theme' && typeof handleThemeCommand === 'function') {
-      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-        handleThemeCommand(baseCommand, activeTabId)
+    if (root === 'theme' && typeof _runnerHandleThemeCommandAdapter === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+        _runnerHandleThemeCommandAdapter(baseCommand, _runnerActiveTabId())
       ));
       return true;
     }
-    if (root === 'config' && typeof handleConfigCommand === 'function') {
-      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-        handleConfigCommand(baseCommand, activeTabId)
+    if (root === 'config' && typeof _runnerHandleConfigCommandAdapter === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+        _runnerHandleConfigCommandAdapter(baseCommand, _runnerActiveTabId())
       ));
       return true;
     }
-    if (root === 'tour' && typeof handleTourCommand === 'function') {
-      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
-        handleTourCommand(baseCommand, activeTabId)
+    if (root === 'tour' && typeof _runnerHandleTourCommandAdapter === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+        _runnerHandleTourCommandAdapter(baseCommand, _runnerActiveTabId())
       ));
       return true;
     }
     appendCommandEcho(cmd);
-    appendLine(`[error] ${root} command is not ready — reload the page and try again`, 'exit-fail', activeTabId);
+    appendLine(`[error] ${root} command is not ready — reload the page and try again`, 'exit-fail', _runnerActiveTabId());
     setStatus('fail');
     return true;
   }
 
   if (!_runActiveTeamScopeCan('run_commands')) {
     appendCommandEcho(cmd);
-    appendLine(`[denied] ${_runStartDeniedMessage()}`, 'denied', activeTabId);
+    appendLine(`[denied] ${_runStartDeniedMessage()}`, 'denied', _runnerActiveTabId());
     setStatus('fail');
-    setTabStatus(activeTabId, 'fail');
+    setTabStatus(_runnerActiveTabId(), 'fail');
     return true;
   }
 
   // Re-lookup the active tab after the potential createTab() call above, which
-  // may have changed activeTabId to point at the newly created tab.
+  // may have changed _runnerActiveTabId() to point at the newly created tab.
   const _runTab = getActiveTab();
   if (typeof setTabRunningCommand === 'function') {
-    setTabRunningCommand(activeTabId, cmd);
+    setTabRunningCommand(_runnerActiveTabId(), cmd);
   } else {
-    if (!_runTab || !_runTab.renamed) setTabLabel(activeTabId, cmd);
+    if (!_runTab || !_runTab.renamed) setTabLabel(_runnerActiveTabId(), cmd);
     if (_runTab) _runTab.command = cmd;
   }
   appendCommandEcho(cmd);
@@ -3231,17 +3787,17 @@ function submitCommand(rawCmd) {
     _runTab.deferPromptMount = false;
   }
   setStatus('running');
-  setTabStatus(activeTabId, 'running');
+  setTabStatus(_runnerActiveTabId(), 'running');
   _setRunButtonDisabled(true);
-  showTabKillBtn(activeTabId);
+  showTabKillBtn(_runnerActiveTabId());
   startTimer();
 
-  const tabId = activeTabId;
+  const tabId = _runnerActiveTabId();
 
   apiFetch('/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: cmd, tab_id: tabId, workspace_cwd: _workspaceCwd(tabId) })
+    body: JSON.stringify({ command: cmd, tab_id: tabId, workspace_cwd: _runnerWorkspaceCwdAdapter(tabId) })
   }).then(res => {
     if (res.status === 403) {
       return res.json().then(data => {
@@ -3288,7 +3844,7 @@ function submitCommand(rawCmd) {
 function submitComposerCommand(rawCmd, { dismissKeyboard = false, focusAfterSubmit = true } = {}) {
   const result = submitCommand(rawCmd);
   if (result === true) {
-    _clearDesktopInput();
+    _clearComposerInputs();
     if (focusAfterSubmit) refocusComposerAfterAction();
     if (dismissKeyboard && typeof dismissMobileKeyboardAfterSubmit === 'function') {
       dismissMobileKeyboardAfterSubmit();
@@ -3312,173 +3868,53 @@ function runCommand() {
   submitComposerCommand(value, { dismissKeyboard: true });
 }
 
-if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _runnerCore,
-    _welcomeApi,
-    _isWelcomeActive,
-    _welcomeOwns,
-    _cancelWelcome,
-    _requestWelcomeSettle,
-    _runnerPersistenceHelpers,
-    _resetStalledTimeout,
-    _clearStalledTimeout,
-    _clearStreamRecoveryTimer,
-    _recoverStalledRun,
-    _tabRunGeneration,
-    _isRunStillActive,
-    _activeRunsUrl,
-    _fetchActiveRun,
-    _markStalledButRunning,
-    _markStalledAndInactive,
-    _handleStreamEndedWithoutExit,
-    _scheduleActiveRunStreamRecovery,
-    _shouldSuppressStreamOutputLine,
-    setStatus,
-    _maybeNotify,
-    _formatElapsed,
-    startTimer,
-    stopTimer,
-    syncActiveRunTimer,
-    _activeReconnectTabs,
-    _shouldAutoRestoreActiveRun,
-    _activeRunIsInteractivePty,
-    _startedAtLabel,
-    _activeRunTabForRestore,
-    _activeRunReattachNotice,
-    _reattachActiveRunToTab,
-    restoreActiveRunsAfterReload,
-    _attachActiveRunToTab,
-    attachActiveRunFromMonitor,
-    _tabForActiveRunId,
-    _requestKillActiveRun,
-    killActiveRunFromMonitor,
-    _restoreCompletedReconnectedRun,
-    _markReconnectedRunUnavailable,
-    pollActiveRunsAfterReload,
-    startPollingActiveRunsAfterReload,
-    stopPollingActiveRunsAfterReload,
-    elapsedSeconds,
-    _setRunButtonDisabled,
-    _describeRunnerFetchError,
-    _logRunnerError,
-    _handleKillRequestFailure,
-    _handleKillRequestDenied,
-    _currentClientId,
-    _handleRunOwnerChanged,
-    _handleRunKilled,
-    _markTabKilledByUser,
-    _handleRunTransportFailure,
-    _appendHighVolumeOutputFinalSummary,
-    _readRunErrorMessage,
-    _runActiveTeamScopeCan,
-    _runTeamScopeDeniedMessage,
-    _runStartDeniedMessage,
-    _workspaceTerminalCanWrite,
-    _workspaceTerminalDeniedMessage,
-    _previewTruncationNotice,
-    _streamOutputMetadata,
-    _runnerRunOutputModel,
-    _streamUnknownCollector,
-    _warnRunStreamSchema,
-    _handleRunStreamSchema,
-    _typedRunStreamLineMessage,
-    _appendStreamLine,
-    _forEachStreamTextLine,
-    _recordRunOutputCoalescing,
-    _batchedStreamLineEntry,
-    _handleRunOutputBatch,
-    _runStreamQueueLength,
-    _runStreamNow,
-    _finishRunStreamIfQueueDrained,
-    _scheduleRunStreamMessageDrain,
-    _enqueueRunStreamMessages,
-    _drainRunStreamMessageQueue,
+if (typeof importedSetRunnerHandlers === 'function') {
+  importedSetRunnerHandlers({
+    _recordSuccessfulLocalCommand,
+    _seedLocalStorageStarsToServer,
     appendCommandEcho,
-    appendPromptNewline,
-    _brokerStreamUrl,
-    _sseMessageFromChunk,
-    _markTabRunStarted,
-    _handleRunStreamMessage,
-    _sameTabRunStillActive,
-    _streamResumeAfterId,
-    _finishPausedRunStream,
+    attachActiveRunFromMonitor,
+    cancelPendingTerminalConfirm,
+    confirmKill,
     detachRunStreamForTab,
+    doKill,
+    hasPendingTerminalConfirm,
+    interruptPromptLine,
+    killActiveRunFromMonitor,
     pauseBackgroundRunStreamsForStatusMonitor,
     resumeBackgroundRunStreamsAfterStatusMonitor,
-    _streamRunResponse,
-    _subscribeRunStream,
-    _clearDesktopInput,
-    interruptPromptLine,
-    confirmKill,
-    doKill,
-    _parseSyntheticPostFilterCommand,
-    _applySyntheticPostFilterLines,
-    _isSyntheticPostFilterCommand,
-    _isSyntheticSortCommand,
-    _isSyntheticUniqCommand,
-    _isSyntheticGrepCommand,
-    _isSyntheticHeadCommand,
-    _isSyntheticTailCommand,
-    _isSyntheticWcLineCountCommand,
-    _isExactSpecialBuiltInCommand,
-    _isSessionTokenSubcommand,
-    _isClientSideUiCommand,
-    _isClientSideSecretSetCommand,
-    _isTabCloseCommand,
-    _historySafeCommand,
-    _recordSuccessfulLocalCommand,
-    _isProjectWorkspaceCommand,
-    _runnerProjectWorkspaceSyncStorageKey,
-    _broadcastProjectWorkspaceChanged,
-    _refreshProjectContextAfterCommand,
-    _clientSideRunExitCodeFromStatus,
-    _finalizeClientSideCommandStatus,
-    _persistClientSideRun,
-    _persistSessionTokenRun,
-    _sessionMigrationCountLabel,
-    _sessionMigrationResultText,
-    _doSessionMigration,
-    _seedLocalStorageStarsToServer,
-    _setPendingTerminalConfirm,
-    hasPendingTerminalConfirm,
-    _runPendingTerminalConfirmHandler,
-    cancelPendingTerminalConfirm,
-    _appendSessionTokenSetLines,
-    _clearVisibleSessionHistoryState,
-    _activateSessionTokenIdentity,
-    _sessionTokenGenerate,
-    _sessionTokenSet,
-    _sessionTokenCopy,
-    _sessionTokenClear,
-    _sessionTokenRotate,
-    _sessionTokenList,
-    _sessionTokenRevoke,
-    _sessionTokenRevokeConfirmed,
-    _workspacePlainLine,
-    _workspaceSplitLines,
-    _workspaceFileDescription,
-    _workspaceListLines,
-    _workspaceShortListLines,
-    _workspaceListNames,
-    _workspaceRelativeListName,
-    _workspaceDirectListEntries,
-    _workspaceRecursiveEntries,
-    _workspaceDeleteUsageForCommand,
-    _workspaceReadLines,
-    _workspaceStandaloneFilterSpec,
-    _runWorkspaceListCommand,
-    _workspacePipeInputLinesForCommand,
-    _handleWorkspaceTerminalCommand,
-    _handleSessionTokenCommand,
-    _handleWorkspaceDeleteCommand,
-    _handleWorkspaceMoveCommand,
-    _handleWorkspaceEditorCommand,
-    _handleWorkspaceDownloadCommand,
-    _runClientSideCommandWithOptionalPipe,
+    runCommand,
+    setStatus,
     submitCommand,
     submitComposerCommand,
     submitVisibleComposerCommand,
-    runCommand,
   });
 }
+
+export {
+  _finalizeClientSideCommandStatus,
+  _handleRunStreamMessage,
+  _markTabRunStarted,
+  _persistClientSideRun,
+  _recordSuccessfulLocalCommand,
+  _seedLocalStorageStarsToServer,
+  _setPendingTerminalConfirm,
+  appendCommandEcho,
+  appendPromptNewline,
+  attachActiveRunFromMonitor,
+  cancelPendingTerminalConfirm,
+  confirmKill,
+  detachRunStreamForTab,
+  doKill,
+  hasPendingTerminalConfirm,
+  interruptPromptLine,
+  killActiveRunFromMonitor,
+  pauseBackgroundRunStreamsForStatusMonitor,
+  resumeBackgroundRunStreamsAfterStatusMonitor,
+  restoreActiveRunsAfterReload,
+  runCommand,
+  setStatus,
+  submitCommand,
+  submitComposerCommand,
+  submitVisibleComposerCommand,
+};

@@ -9,8 +9,8 @@
  * dispatch — is fully jsdom-testable and pinned here.
  *
  * The indicator is a lazy module, so the tests load the module source into a
- * fresh Function scope per case and stub `loadLazyAsset()` before evaluating
- * mobile_chrome.js. A synchronous requestAnimationFrame stub collapses the
+ * fresh Function scope per case and stub `loadMobileRunningIndicator()` before
+ * evaluating mobile_chrome.js. A synchronous requestAnimationFrame stub collapses the
  * rAF-coalesced `syncRunningIndicator` into one sync pass, and
  * `location.search` is set before mobile chrome loads so the `?ri=off` /
  * `?ri=0` kill switch can be exercised.
@@ -20,17 +20,18 @@ import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const MOBILE_RUNNING_INDICATOR_SRC = readFileSync(
+const MOBILE_RUNNING_INDICATOR_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/mobile/mobile_running_indicator.js'),
   'utf8',
-)
-const MOBILE_CHROME_SRC = readFileSync(
+))
+const MOBILE_CHROME_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/mobile_chrome.js'),
   'utf8',
-)
+))
 
 function buildHarness({ includePeek = false } = {}) {
   document.body.innerHTML = `
@@ -87,11 +88,12 @@ function mountModule({
   }
 
   const injectedGlobal = window
+  delete injectedGlobal.DarklabMobileRunningIndicator
   injectedGlobal.getTabs = () => tabs
   injectedGlobal.getActiveTabId = () => activeTabId
   injectedGlobal.getActiveTab = () => tabs.find(tab => tab.id === activeTabId) || null
+  injectedGlobal.getAppState = () => ({ recentPreviewHistory })
   injectedGlobal.activateTab = activateTab
-  injectedGlobal.recentPreviewHistory = recentPreviewHistory
   injectedGlobal.openStatusMonitor = openStatusMonitor
   const origMatchMedia = window.matchMedia
   window.matchMedia = vi.fn((query) => ({
@@ -111,14 +113,14 @@ function mountModule({
     document.addEventListener(name, handler, options)
     return () => document.removeEventListener(name, handler, options)
   }
-  injectedGlobal.loadLazyAsset = vi.fn((name, globalCheck) => {
-    if (name !== 'mobile_running_indicator') return Promise.reject(new Error(`Unexpected lazy asset: ${name}`))
-    if (typeof globalCheck === 'function' && !globalCheck()) {
-      new Function('window', MOBILE_RUNNING_INDICATOR_SRC)(injectedGlobal)
-    }
+  injectedGlobal.loadMobileRunningIndicator = vi.fn(() => {
+    const indicator = new Function(
+      'window',
+      `${MOBILE_RUNNING_INDICATOR_SRC}\nreturn { create: createMobileRunningIndicator };`,
+    )(injectedGlobal)
     return {
       then(onResolve) {
-        onResolve()
+        onResolve(indicator)
         return {
           catch() {
             return this
@@ -145,7 +147,7 @@ function mountModule({
     activateTab,
     openStatusMonitor,
     tabs,
-    loadLazyAsset: injectedGlobal.loadLazyAsset,
+    loadMobileRunningIndicator: injectedGlobal.loadMobileRunningIndicator,
     restore() {
       window.requestAnimationFrame = origRaf
       window.matchMedia = origMatchMedia
@@ -511,7 +513,7 @@ describe('mobile running-state indicator', () => {
       activeTabId: 'tab-b',
     })
 
-    expect(ctx.loadLazyAsset).not.toHaveBeenCalled()
+    expect(ctx.loadMobileRunningIndicator).not.toHaveBeenCalled()
     expect(document.getElementById('mobile-running-chip')).toBeNull()
     expect(document.querySelector('.tab-edge-glow-left')).toBeNull()
     expect(document.querySelector('.tab-edge-glow-right')).toBeNull()
@@ -529,7 +531,7 @@ describe('mobile running-state indicator', () => {
       detail: { active: true },
     }))
 
-    expect(ctx.loadLazyAsset).toHaveBeenCalledWith('mobile_running_indicator', expect.any(Function))
+    expect(ctx.loadMobileRunningIndicator).toHaveBeenCalled()
     const chip = document.getElementById('mobile-running-chip')
     expect(chip).not.toBeNull()
     expect(chip.classList.contains('u-hidden')).toBe(false)

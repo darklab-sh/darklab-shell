@@ -1,9 +1,167 @@
 // Tab transcript copy, export, and permalink actions.
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { getTab as importedGetTab } from '../../core/state.js';
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  escapeHtml as importedEscapeHtml,
+  omitRawOnlyLineEntries as importedOmitRawOnlyLineEntries,
+  redactLineEntries as importedRedactLineEntries,
+  shareUrl as importedShareUrl,
+  showToast as importedShowToast,
+} from '../../core/utils.js';
+import { getCommandOutcomeSummariesPreference as importedGetCommandOutcomeSummariesPreference } from '../preferences/preferences.js';
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { apiFetch as importedRuntimeApiFetch } from '../../runtime_bridge.js';
+import {
+  createAnsiUpRenderer as importedCreateAnsiUpRenderer,
+  getLineNumberMode as importedGetLineNumberMode,
+  getTimestampMode as importedGetTimestampMode,
+} from '../../output.js';
+import { refocusComposerAfterAction as importedRefocusComposerAfterAction } from '../../ui/ui_helpers.js';
+import {
+  confirmPermalinkRedactionChoice as importedConfirmPermalinkRedactionChoice,
+  hasShareRedactionHandler as importedHasShareRedactionHandler,
+} from './share_redaction_bridge.js';
+
+const TAB_EXPORT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _tabExportGlobalFunction(name) {
+  const fn = TAB_EXPORT_GLOBAL && TAB_EXPORT_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+var ExportHtmlUtils = TAB_EXPORT_GLOBAL.ExportHtmlUtils || null;
+
+function _refreshTabExportHtmlUtils() {
+  ExportHtmlUtils = TAB_EXPORT_GLOBAL.ExportHtmlUtils || ExportHtmlUtils || null;
+  return ExportHtmlUtils;
+}
+
+function _tabExportConfig() {
+  if (typeof importedGetAppConfig !== 'undefined' && typeof importedGetAppConfig === 'function') {
+    return importedGetAppConfig() || {};
+  }
+  return TAB_EXPORT_GLOBAL.APP_CONFIG || {};
+}
+
+function _tabExportGetTab(id) {
+  const getTabFn = _tabExportGlobalFunction('getTab')
+    || (typeof importedGetTab !== 'undefined' && importedGetTab);
+  return typeof getTabFn === 'function' ? getTabFn(id) : null;
+}
+
+function _tabExportShowToast(...args) {
+  const show = _tabExportGlobalFunction('showToast')
+    || (typeof importedShowToast !== 'undefined' && importedShowToast);
+  if (typeof show === 'function') show(...args);
+}
+
+function _tabExportRefocusComposer(options = { preventScroll: true }) {
+  const refocus = _tabExportGlobalFunction('refocusComposerAfterAction')
+    || (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction);
+  if (typeof refocus === 'function') refocus(options);
+}
+
+function _tabExportCopyTextToClipboard(text) {
+  const copy = _tabExportGlobalFunction('copyTextToClipboard')
+    || (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard);
+  return typeof copy === 'function' ? copy(text) : Promise.reject(new Error('clipboard unavailable'));
+}
+
+function _tabExportDownloadBlobAsAttachment(blob, filename) {
+  const download = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment)
+    || _tabExportGlobalFunction('downloadBlobAsAttachment');
+  if (typeof download === 'function') download(blob, filename);
+}
+
+function _tabExportEscapeHtml(text) {
+  const escape = _tabExportGlobalFunction('escapeHtml')
+    || (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml);
+  return typeof escape === 'function' ? escape(text) : String(text ?? '');
+}
+
+function _tabExportRedactLineEntries(lines, rules) {
+  const redact = _tabExportGlobalFunction('redactLineEntries')
+    || (typeof importedRedactLineEntries !== 'undefined' && importedRedactLineEntries);
+  return typeof redact === 'function' ? redact(lines, rules) : (Array.isArray(lines) ? lines : []);
+}
+
+function _tabExportOmitRawOnlyLineEntries(lines) {
+  const omit = _tabExportGlobalFunction('omitRawOnlyLineEntries')
+    || (typeof importedOmitRawOnlyLineEntries !== 'undefined' && importedOmitRawOnlyLineEntries);
+  return typeof omit === 'function' ? omit(lines) : (Array.isArray(lines) ? lines : []);
+}
+
+function _tabExportCommandOutcomeSummariesPreference() {
+  const getPreference = (
+    _tabExportGlobalFunction('getCommandOutcomeSummariesPreference')
+  ) || (
+    typeof importedGetCommandOutcomeSummariesPreference !== 'undefined'
+    && importedGetCommandOutcomeSummariesPreference
+  );
+  return typeof getPreference === 'function' ? getPreference() : null;
+}
+
+function _tabExportCreateAnsiUpRenderer() {
+  const createRenderer = _tabExportGlobalFunction('createAnsiUpRenderer')
+    || (typeof importedCreateAnsiUpRenderer !== 'undefined' && importedCreateAnsiUpRenderer);
+  return typeof createRenderer === 'function' ? createRenderer() : null;
+}
+
+function _tabExportActiveTeamScopeCan(capability) {
+  const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+    || null;
+  return typeof can === 'function' ? can(capability) : true;
+}
+
+function _tabExportTeamScopeDeniedMessage(action) {
+  const message = (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+    || null;
+  return typeof message === 'function' ? message(action) : '';
+}
+
+function _tabExportShareUrl(url) {
+  const share = _tabExportGlobalFunction('shareUrl')
+    || (typeof importedShareUrl !== 'undefined' && importedShareUrl);
+  return typeof share === 'function' ? share(url) : Promise.reject(new Error('share unavailable'));
+}
+
+function _tabExportApiFetch(url, options) {
+  const api = (typeof importedRuntimeApiFetch === 'function' && importedRuntimeApiFetch)
+    || _tabExportGlobalFunction('apiFetch');
+  if (typeof api === 'function') return options === undefined ? api(url) : api(url, options);
+  return options === undefined ? fetch(url) : fetch(url, options);
+}
+
+function _tabExportConfirmRedactionChoice() {
+  const confirm = (
+    typeof importedHasShareRedactionHandler === 'function'
+    && importedHasShareRedactionHandler('confirmPermalinkRedactionChoice')
+  ) ? importedConfirmPermalinkRedactionChoice : _tabExportGlobalFunction('confirmPermalinkRedactionChoice');
+  return typeof confirm === 'function' ? confirm() : Promise.resolve(_shareRedactionEnabled() ? 'redacted' : 'raw');
+}
+
+function _tabExportLineNumberMode() {
+  const readMode = _tabExportGlobalFunction('getLineNumberMode')
+    || (typeof importedGetLineNumberMode !== 'undefined' && importedGetLineNumberMode);
+  return typeof readMode === 'function' ? readMode() : TAB_EXPORT_GLOBAL.lnMode;
+}
+
+function _tabExportTimestampMode() {
+  const readMode = _tabExportGlobalFunction('getTimestampMode')
+    || (typeof importedGetTimestampMode !== 'undefined' && importedGetTimestampMode);
+  return typeof readMode === 'function' ? readMode() : TAB_EXPORT_GLOBAL.tsMode;
+}
+
 function _getExportableRawLines(tab) {
   if (!tab || !Array.isArray(tab.rawLines)) return [];
   return tab.rawLines.filter(line => {
     if (!line || typeof line.text !== 'string') return false;
-    const cls = window.ExportHtmlUtils && typeof ExportHtmlUtils.lineLegacyClass === 'function'
+    const cls = ExportHtmlUtils && typeof ExportHtmlUtils.lineLegacyClass === 'function'
       ? ExportHtmlUtils.lineLegacyClass(ExportHtmlUtils.lineEventFromWire(line))
       : String(line.cls || '');
     if (['wlc-live'].includes(cls) || cls.startsWith('welcome-')) return false;
@@ -13,25 +171,23 @@ function _getExportableRawLines(tab) {
 }
 
 function _getShareRedactionRules() {
-  return APP_CONFIG && Array.isArray(APP_CONFIG.share_redaction_rules)
-    ? APP_CONFIG.share_redaction_rules
+  const config = _tabExportConfig();
+  return config && Array.isArray(config.share_redaction_rules)
+    ? config.share_redaction_rules
     : [];
 }
 
 function _shareRedactionEnabled() {
-  return !(APP_CONFIG && APP_CONFIG.share_redaction_enabled === false);
+  const config = _tabExportConfig();
+  return !(config && config.share_redaction_enabled === false);
 }
 
 function _getRedactedLines(lines) {
-  return typeof redactLineEntries === 'function'
-    ? redactLineEntries(lines, _getShareRedactionRules())
-    : (Array.isArray(lines) ? lines : []);
+  return _tabExportRedactLineEntries(lines, _getShareRedactionRules());
 }
 
 function _refocusAfterTabAction(options = { preventScroll: true }) {
-  if (typeof refocusComposerAfterAction === 'function') {
-    refocusComposerAfterAction(options);
-  }
+  _tabExportRefocusComposer(options);
 }
 
 function _stripTabExportAnsi(text) {
@@ -39,15 +195,16 @@ function _stripTabExportAnsi(text) {
 }
 
 function _commandOutcomeSummariesEnabledForExport() {
-  if (typeof getCommandOutcomeSummariesPreference === 'function') {
-    return getCommandOutcomeSummariesPreference() !== 'off';
+  const preference = _tabExportCommandOutcomeSummariesPreference();
+  if (preference !== null && typeof preference !== 'undefined') {
+    return preference !== 'off';
   }
   const cookie = typeof document !== 'undefined' ? String(document.cookie || '') : '';
   return !/(?:^|;\s*)pref_command_outcome_summaries=off(?:;|$)/.test(cookie);
 }
 
 function _appendTabCommandOutcomeSummaryLines(tab, lines) {
-  if (!window.ExportHtmlUtils || typeof ExportHtmlUtils.appendCommandOutcomeSummaryLines !== 'function') {
+  if (!ExportHtmlUtils || typeof ExportHtmlUtils.appendCommandOutcomeSummaryLines !== 'function') {
     return _normalizeTabTranscriptLines(lines);
   }
   return ExportHtmlUtils.appendCommandOutcomeSummaryLines(lines, {
@@ -57,28 +214,30 @@ function _appendTabCommandOutcomeSummaryLines(tab, lines) {
 }
 
 function copyTab(id) {
-  const t = getTab(id);
+  _refreshTabExportHtmlUtils();
+  const t = _tabExportGetTab(id);
   const lines = _getExportableRawLines(t);
   if (!lines.length) {
-    showToast('No output to copy yet');
+    _tabExportShowToast('No output to copy yet');
     _refocusAfterTabAction();
     return;
   }
   const exportLines = _appendTabCommandOutcomeSummaryLines(t, lines);
   const text = exportLines.map(line => _stripTabExportAnsi(line.text)).join('\n');
-  copyTextToClipboard(text)
-    .then(() => showToast('Copied to clipboard'))
-    .catch(() => showToast('Failed to copy', 'error'))
+  _tabExportCopyTextToClipboard(text)
+    .then(() => _tabExportShowToast('Copied to clipboard'))
+    .catch(() => _tabExportShowToast('Failed to copy', 'error'))
     .finally(() => _refocusAfterTabAction());
 }
 
 // Reads from rawLines rather than DOM innerText so that CSS ::before timestamp
 // content and ANSI escape codes don't appear in the saved file.
 function saveTab(id) {
-  const t = getTab(id);
+  _refreshTabExportHtmlUtils();
+  const t = _tabExportGetTab(id);
   const lines = _getExportableRawLines(t);
   if (!lines.length) {
-    showToast('No output to export');
+    _tabExportShowToast('No output to export');
     _refocusAfterTabAction();
     return;
   }
@@ -86,39 +245,41 @@ function saveTab(id) {
   const text = exportLines.map(line => _stripTabExportAnsi(line.text)).join('\n');
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const blob = new Blob([text], { type: 'text/plain' });
-  downloadBlobAsAttachment(blob, `${APP_CONFIG.app_name || 'shell'}-${ts}.txt`);
+  const config = _tabExportConfig();
+  _tabExportDownloadBlobAsAttachment(blob, `${config.app_name || 'shell'}-${ts}.txt`);
   _refocusAfterTabAction();
 }
 
 // Returns the gutter prefix for a raw line, respecting the current tsMode/lnMode
 // toggles so exports match what the user sees in the terminal.
 function _exportPrefix(line, zeroBasedIndex) {
-  if (window.ExportHtmlUtils
+  if (ExportHtmlUtils
       && typeof ExportHtmlUtils.isCommandOutcomeSummaryLine === 'function'
       && ExportHtmlUtils.isCommandOutcomeSummaryLine(line)) {
     return '';
   }
   const parts = [];
-  if (typeof lnMode !== 'undefined' && lnMode === 'on') {
+  if (_tabExportLineNumberMode() === 'on') {
     const absoluteLineNumber = Number(line && line.line_number || 0);
     parts.push(String(absoluteLineNumber > 0 ? absoluteLineNumber : zeroBasedIndex + 1));
   }
-  if (typeof tsMode !== 'undefined') {
-    if (tsMode === 'clock' && line.tsC) parts.push(line.tsC);
-    else if (tsMode === 'elapsed' && line.tsE) parts.push(line.tsE);
+  const timestampMode = _tabExportTimestampMode();
+  if (timestampMode) {
+    if (timestampMode === 'clock' && line.tsC) parts.push(line.tsC);
+    else if (timestampMode === 'elapsed' && line.tsE) parts.push(line.tsE);
   }
   return parts.join(' ');
 }
 
 function _normalizeTabTranscriptLine(line) {
-  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLine === 'function') {
+  if (ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLine === 'function') {
     return ExportHtmlUtils.normalizeExportTranscriptLine(line);
   }
   if (typeof line === 'string') {
     return { text: line, cls: '', tsC: '', tsE: '' };
   }
   if (line && typeof line.text === 'string') {
-    return window.ExportHtmlUtils && typeof ExportHtmlUtils.lineEventFromWire === 'function'
+    return ExportHtmlUtils && typeof ExportHtmlUtils.lineEventFromWire === 'function'
       ? ExportHtmlUtils.lineEventFromWire(line)
       : {
         text: line.text,
@@ -132,7 +293,7 @@ function _normalizeTabTranscriptLine(line) {
 }
 
 function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } = {}) {
-  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function') {
+  if (ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function') {
     return ExportHtmlUtils.normalizeExportTranscriptLines(lines, { stripTruncationNotices });
   }
   return (Array.isArray(lines) ? lines : [])
@@ -145,18 +306,17 @@ function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } 
 }
 
 function _omitRawOnlyExportLines(lines) {
-  return typeof omitRawOnlyLineEntries === 'function'
-    ? omitRawOnlyLineEntries(lines)
-    : (Array.isArray(lines) ? lines : []);
+  return _tabExportOmitRawOnlyLineEntries(lines);
 }
 
 function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } = {}) {
+  const config = _tabExportConfig();
   const normalizedCreatedText = String(createdText || new Date().toLocaleString());
   const rawLines = omitRawOnly ? _omitRawOnlyExportLines(tab && tab.rawLines) : (tab && tab.rawLines);
-  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
+  if (ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
     const normalizedRawLineCount = _normalizeTabTranscriptLines(rawLines).length;
     return ExportHtmlUtils.buildExportDocumentModel({
-      appName: APP_CONFIG.app_name || 'darklab_shell',
+      appName: config.app_name || 'darklab_shell',
       title: String(tab && tab.label || ''),
       label: tab && tab.label,
       createdText: normalizedCreatedText,
@@ -164,7 +324,7 @@ function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } =
         exitCode: tab ? tab.exitCode : null,
         duration: null,
         lines: `${normalizedRawLineCount} lines`,
-        version: APP_CONFIG.version || null,
+        version: config.version || null,
       },
       rawLines,
       command: tab && tab.command || '',
@@ -172,7 +332,7 @@ function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } =
     });
   }
   const normalizedRawLines = _normalizeTabTranscriptLines(rawLines);
-  const appName = APP_CONFIG.app_name || 'darklab_shell';
+  const appName = config.app_name || 'darklab_shell';
   return {
     appName,
     title: String(tab && tab.label || ''),
@@ -184,30 +344,31 @@ function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } =
       exitCode: tab ? tab.exitCode : null,
       duration: null,
       lines: `${normalizedRawLines.length} lines`,
-      version: APP_CONFIG.version || null,
+      version: config.version || null,
     },
     rawLines: normalizedRawLines,
   };
 }
 
 async function exportTabHtml(id) {
-  const t = getTab(id);
+  _refreshTabExportHtmlUtils();
+  const t = _tabExportGetTab(id);
   if (!t || !t.rawLines.length) {
-    showToast('No output to export');
+    _tabExportShowToast('No output to export');
     _refocusAfterTabAction();
     return;
   }
-  if (!window.ExportHtmlUtils) {
-    showToast('Failed to export html', 'error');
+  if (!ExportHtmlUtils) {
+    _tabExportShowToast('Failed to export html', 'error');
     _refocusAfterTabAction();
     return;
   }
   try {
     const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
-    const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
+    const ansiRenderer = _tabExportCreateAnsiUpRenderer();
     const { linesHtml, prefixWidth, summaryHtml } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: (line, i) => _exportPrefix(line, i),
-      ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
+      ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : _tabExportEscapeHtml(String(text ?? '')),
     });
     const [fontFacesCss, exportCss] = await Promise.all([
       ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
@@ -225,34 +386,36 @@ async function exportTabHtml(id) {
       exportCss,
     });
     const blob = new Blob([html], { type: 'text/html' });
-    downloadBlobAsAttachment(blob, `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`);
+    _tabExportDownloadBlobAsAttachment(blob, `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`);
   } catch {
-    showToast('Failed to export html', 'error');
+    _tabExportShowToast('Failed to export html', 'error');
   } finally {
     _refocusAfterTabAction();
   }
 }
 
 async function exportTabPdf(id) {
-  const t = getTab(id);
+  _refreshTabExportHtmlUtils();
+  const t = _tabExportGetTab(id);
   if (!t || !t.rawLines.length) {
-    showToast('No output to export');
+    _tabExportShowToast('No output to export');
     _refocusAfterTabAction();
     return;
   }
-  const existingPdfUtils = (typeof ExportPdfUtils !== 'undefined' && ExportPdfUtils) || window.ExportPdfUtils;
-  if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
-    showToast('PDF library not loaded', 'error');
+  const loadPdfUtils = _tabExportGlobalFunction('loadExportPdfUtils');
+  if (!loadPdfUtils) {
+    _tabExportShowToast('PDF library not loaded', 'error');
     _refocusAfterTabAction();
     return;
   }
   try {
-    const pdfUtils = existingPdfUtils || await window.loadExportPdfUtils();
-    const jsPDF = typeof window.loadJsPdf === 'function'
-      ? await window.loadJsPdf()
+    const pdfUtils = await loadPdfUtils();
+    const loadJsPdf = _tabExportGlobalFunction('loadJsPdf');
+    const jsPDF = loadJsPdf
+      ? await loadJsPdf()
       : await pdfUtils.loadJsPdf();
     const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
-    const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
+    const ansiRenderer = _tabExportCreateAnsiUpRenderer();
     const doc = await pdfUtils.buildTerminalExportPdf({
       jsPDF,
       appName: exportModel.appName,
@@ -260,12 +423,12 @@ async function exportTabPdf(id) {
       runMeta: exportModel.runMeta,
       rawLines: exportModel.rawLines,
       getPrefix: (line, i) => _exportPrefix(line, i),
-      ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
+      ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : _tabExportEscapeHtml(String(text ?? '')),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     doc.save(`${exportModel.appName}-${ts}.pdf`);
   } catch {
-    showToast('Failed to export pdf', 'error');
+    _tabExportShowToast('Failed to export pdf', 'error');
   } finally {
     _refocusAfterTabAction();
   }
@@ -282,7 +445,7 @@ function _extractLatestFullRunShareContent(tab, fullRun) {
     : rawLines.length;
   const exitIndex = (() => {
     for (let i = rawLines.length - 1; i >= 0; i -= 1) {
-      const event = window.ExportHtmlUtils && typeof ExportHtmlUtils.lineEventFromWire === 'function'
+      const event = ExportHtmlUtils && typeof ExportHtmlUtils.lineEventFromWire === 'function'
         ? ExportHtmlUtils.lineEventFromWire(rawLines[i])
         : { role: String(rawLines[i] && rawLines[i].role || rawLines[i] && rawLines[i].cls || '') };
       if (['exit-ok', 'exit-fail'].includes(String(event.role || ''))) return i;
@@ -309,37 +472,35 @@ function _shareSnapshotLabel(tab) {
 }
 
 function _canCreateShareSnapshot() {
-  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+  return _tabExportActiveTeamScopeCan('manage_history');
 }
 
 function _shareSnapshotDeniedMessage() {
-  return typeof teamScopeDeniedMessage === 'function'
-    ? teamScopeDeniedMessage('create team history snapshots')
-    : "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
+  return _tabExportTeamScopeDeniedMessage('create team history snapshots')
+    || "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
 }
 
 async function permalinkTab(id) {
+  _refreshTabExportHtmlUtils();
   if (!_canCreateShareSnapshot()) {
-    showToast(_shareSnapshotDeniedMessage(), 'error');
-    refocusComposerAfterAction();
+    _tabExportShowToast(_shareSnapshotDeniedMessage(), 'error');
+    _refocusAfterTabAction();
     return;
   }
-  const t = getTab(id);
+  const t = _tabExportGetTab(id);
   if (!t || !t.rawLines.length) {
-    showToast('No output to share yet');
+    _tabExportShowToast('No output to share yet');
     return;
   }
-  const redactionMode = typeof confirmPermalinkRedactionChoice === 'function'
-    ? await confirmPermalinkRedactionChoice()
-    : (_shareRedactionEnabled() ? 'redacted' : 'raw');
+  const redactionMode = await _tabExportConfirmRedactionChoice();
   if (redactionMode !== 'raw' && redactionMode !== 'redacted') {
-    refocusComposerAfterAction();
+    _refocusAfterTabAction();
     return;
   }
   let shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
   if (t.fullOutputAvailable && !t.fullOutputLoaded && t.historyRunId) {
     try {
-      const res = await apiFetch(`/history/${t.historyRunId}?json`);
+      const res = await _tabExportApiFetch(`/history/${t.historyRunId}?json`);
       const fullRun = await res.json();
       shareContent = _extractLatestFullRunShareContent(t, fullRun);
     } catch {
@@ -348,7 +509,7 @@ async function permalinkTab(id) {
   }
   const applyRedaction = redactionMode === 'redacted';
   if (applyRedaction) shareContent = _getRedactedLines(shareContent);
-  apiFetch('/share', {
+  _tabExportApiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -357,39 +518,43 @@ async function permalinkTab(id) {
       apply_redaction: applyRedaction,
       run_id: String(t.historyRunId || ''),
     })
-  }).then(r => r.json()).then(data => {
+  }).then(async (r) => {
+    const data = await r.json();
+    if (r.ok === false || !data || typeof data.url !== 'string') {
+      throw new Error((data && (data.error || data.message)) || 'share failed');
+    }
+    return data;
+  }).then(data => {
     const url = `${location.origin}${data.url}`;
-    shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
-  }).catch(() => showToast('Failed to create permalink', 'error'))
+    _tabExportShareUrl(url).catch(() => _tabExportShowToast('Failed to copy link', 'error'));
+  }).catch(() => _tabExportShowToast('Failed to create permalink', 'error'))
     .finally(() => {
-      refocusComposerAfterAction();
+      _refocusAfterTabAction();
     });
 }
 
-if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _getExportableRawLines,
-    _getShareRedactionRules,
-    _shareRedactionEnabled,
-    _getRedactedLines,
-    _refocusAfterTabAction,
-    _stripTabExportAnsi,
-    _commandOutcomeSummariesEnabledForExport,
-    _appendTabCommandOutcomeSummaryLines,
-    copyTab,
-    saveTab,
-    _exportPrefix,
-    _normalizeTabTranscriptLine,
-    _normalizeTabTranscriptLines,
-    _omitRawOnlyExportLines,
-    _buildTabExportModel,
-    exportTabHtml,
-    exportTabPdf,
-    _shareLinesWithoutTruncationNotices,
-    _extractLatestFullRunShareContent,
-    _shareSnapshotLabel,
-    _canCreateShareSnapshot,
-    _shareSnapshotDeniedMessage,
-    permalinkTab,
-  });
-}
+export {
+  _appendTabCommandOutcomeSummaryLines,
+  _buildTabExportModel,
+  _canCreateShareSnapshot,
+  _commandOutcomeSummariesEnabledForExport,
+  _exportPrefix,
+  _extractLatestFullRunShareContent,
+  _getExportableRawLines,
+  _getRedactedLines,
+  _getShareRedactionRules,
+  _normalizeTabTranscriptLine,
+  _normalizeTabTranscriptLines,
+  _omitRawOnlyExportLines,
+  _refocusAfterTabAction,
+  _shareLinesWithoutTruncationNotices,
+  _shareRedactionEnabled,
+  _shareSnapshotDeniedMessage,
+  _shareSnapshotLabel,
+  _stripTabExportAnsi,
+  copyTab,
+  exportTabHtml,
+  exportTabPdf,
+  permalinkTab,
+  saveTab,
+};

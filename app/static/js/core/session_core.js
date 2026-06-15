@@ -2,7 +2,7 @@
 // Loaded before session.js. Kept in a small namespace so unit tests and the
 // classic browser bundle can share the same pure transforms without extracting
 // them from the full session script.
-(function (global) {
+const DarklabSessionCore = (function (global) {
   function _cryptoApi(preferred) {
     if (preferred && typeof preferred === 'object') return preferred;
     if (global && global.crypto) return global.crypto;
@@ -74,7 +74,7 @@
     };
   }
 
-  global.DarklabSessionCore = Object.freeze({
+  const api = Object.freeze({
     generateUUID,
     getOrCreateStorageValue,
     resolveSessionId,
@@ -82,4 +82,8 @@
     describeFetchError,
     withSessionHeaders,
   });
+  return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { describeFetchError, generateUUID, getOrCreateStorageValue, maskSessionToken, resolveSessionId, withSessionHeaders } = DarklabSessionCore;
+export { DarklabSessionCore };

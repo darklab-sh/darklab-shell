@@ -1,4 +1,19 @@
 // Options modal team management.
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  showToast as importedShowToast,
+} from '../../core/utils.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import { enhanceAppSelects as importedEnhanceAppSelects } from '../../ui/ui_helpers.js';
+import {
+  apiFetch as importedApiFetch,
+  getSessionId as importedGetSessionId,
+  logClientError as importedLogClientError,
+} from '../../runtime_bridge.js';
+
+let exportedRefreshOptionsTeams = null;
+
 (function initOptionsTeamsPanel(global) {
   let _teams = [];
   let _detail = null;
@@ -34,12 +49,11 @@
   }
 
   function _apiFetch() {
-    if (typeof apiFetch === 'function') return apiFetch;
-    return typeof global.apiFetch === 'function' ? global.apiFetch.bind(global) : global.fetch.bind(global);
+    return typeof importedApiFetch === 'function' ? importedApiFetch : global.fetch.bind(global);
   }
 
   function _tokenSessionActive() {
-    return typeof SESSION_ID !== 'undefined' && String(SESSION_ID || '').startsWith('tok_');
+    return String(typeof importedGetSessionId === 'function' ? importedGetSessionId() : '').startsWith('tok_');
   }
 
   function _msg(text, { error = false } = {}) {
@@ -52,9 +66,8 @@
 
   function _toast(text, tone = 'success') {
     _msg('');
-    const toast = typeof showToast === 'function'
-      ? showToast
-      : (typeof global.showToast === 'function' ? global.showToast.bind(global) : null);
+    const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+      || null;
     if (toast) {
       toast(text, tone);
       return;
@@ -63,8 +76,9 @@
   }
 
   function _clipboardWriter() {
-    if (typeof copyTextToClipboard === 'function') return copyTextToClipboard;
-    if (typeof global.copyTextToClipboard === 'function') return global.copyTextToClipboard.bind(global);
+    if (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard) {
+      return importedCopyTextToClipboard;
+    }
     if (global.navigator?.clipboard && typeof global.navigator.clipboard.writeText === 'function') {
       return value => global.navigator.clipboard.writeText(value);
     }
@@ -113,9 +127,7 @@
   }
 
   function _logTeamClientError(event, action, error, context = {}) {
-    const logError = typeof logClientError === 'function'
-      ? logClientError
-      : (typeof global.logClientError === 'function' ? global.logClientError.bind(global) : null);
+    const logError = typeof importedLogClientError === 'function' ? importedLogClientError : null;
     if (!logError) return;
     const teamId = String(context.team_id || context.teamId || _detail?.team?.id || _selectedTeamId || '');
     const payload = {
@@ -178,6 +190,14 @@
     input.value = value || '';
     input.required = !!required;
     return input;
+  }
+
+  function _formValues(form) {
+    const values = {};
+    form?.querySelectorAll?.('input[name], select[name], textarea[name]').forEach((field) => {
+      values[field.name] = field.value;
+    });
+    return values;
   }
 
   function _numberInput(name, value = '1') {
@@ -324,19 +344,16 @@
   }
 
   function _activeTeamId() {
-    if (typeof getActiveTeamId === 'function') return getActiveTeamId() || '';
-    if (typeof global.getActiveTeamId === 'function') return global.getActiveTeamId() || '';
-    return '';
+    return global.DarklabTeamScope?.getActiveTeamId?.() || '';
+  }
+
+  function _setActiveTeamScope(teamId, options = {}) {
+    const setScope = global.DarklabTeamScope?.setActiveTeamId;
+    return typeof setScope === 'function' ? setScope(teamId, options) : false;
   }
 
   async function _syncScopeSelector() {
-    const replace = typeof replaceTeamScopes === 'function'
-      ? replaceTeamScopes
-      : (typeof global.replaceTeamScopes === 'function'
-        ? global.replaceTeamScopes.bind(global)
-        : (typeof global.DarklabTeamScope?.replaceTeamScopes === 'function'
-          ? global.DarklabTeamScope.replaceTeamScopes
-          : null));
+    const replace = global.DarklabTeamScope?.replaceTeamScopes;
     if (replace) replace({ teams: _teams });
   }
 
@@ -357,6 +374,11 @@
 
   function _renderTopForm() {
     const host = _el('options-team-form');
+    const existingForm = host?.querySelector?.('[data-team-form]');
+    const existingMode = existingForm?.dataset?.teamForm || '';
+    const existingValues = existingMode === _formMode && existingForm
+      ? _formValues(existingForm)
+      : {};
     _clear(host);
     if (!host || !_formMode) return;
 
@@ -372,15 +394,15 @@
     const fields = _node('div', 'options-team-fields');
     if (_formMode === 'create') {
       fields.append(
-        _field('Team name', _input('name', 'Darklab ops', '', { required: true })),
-        _field('Slug', _input('slug', 'darklab-ops')),
-        _field('Your display name', _input('display_name', 'nona'))
+        _field('Team name', _input('name', 'Darklab ops', existingValues.name || '', { required: true })),
+        _field('Slug', _input('slug', 'darklab-ops', existingValues.slug || '')),
+        _field('Your display name', _input('display_name', 'nona', existingValues.display_name || ''))
       );
     } else {
       const codeLabel = _formMode === 'recover' ? 'Recovery code' : 'Invite code';
       fields.append(
-        _field(codeLabel, _input('code', _formMode === 'recover' ? 'trec_...' : 'tinv_...', '', { required: true })),
-        _field('Your display name', _input('display_name', 'nona'))
+        _field(codeLabel, _input('code', _formMode === 'recover' ? 'trec_...' : 'tinv_...', existingValues.code || '', { required: true })),
+        _field('Your display name', _input('display_name', 'nona', existingValues.display_name || ''))
       );
     }
     const actions = _node('div', 'options-session-token-actions options-team-field-full');
@@ -673,8 +695,10 @@
   }
 
   function _bindActivityDisclosure(toggle, panel) {
-    const disclosure = typeof global.bindDisclosure === 'function'
-      ? global.bindDisclosure(toggle, {
+    const bindDisclosure = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure)
+      || null;
+    const disclosure = typeof bindDisclosure === 'function'
+      ? bindDisclosure(toggle, {
         panel,
         openClass: null,
         hiddenClass: 'u-hidden',
@@ -1029,9 +1053,8 @@
     }
 
     host.appendChild(panel);
-    const enhanceSelects = typeof enhanceAppSelects === 'function'
-      ? enhanceAppSelects
-      : (typeof global.enhanceAppSelects === 'function' ? global.enhanceAppSelects.bind(global) : null);
+    const enhanceSelects = (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects)
+      || null;
     if (enhanceSelects) {
       host.querySelectorAll('select.form-select').forEach((select) => { select.dataset.portalMenu = 'true'; });
       enhanceSelects(host);
@@ -1098,9 +1121,8 @@
   }
 
   async function _confirm(body, { tone = 'warning', confirmLabel = 'Continue', destructive = false } = {}) {
-    const confirmModal = typeof showConfirm === 'function'
-      ? showConfirm
-      : (typeof global.showConfirm === 'function' ? global.showConfirm.bind(global) : null);
+    const confirmModal = (typeof importedShowConfirm !== 'undefined' && importedShowConfirm)
+      || null;
     if (confirmModal) {
       const choice = await confirmModal({
         body,
@@ -1219,18 +1241,12 @@
     if (action === 'select-team') {
       await _loadTeamDetail(teamId);
     } else if (action === 'switch-personal') {
-      const setScope = typeof setActiveTeamId === 'function'
-        ? setActiveTeamId
-        : (typeof global.setActiveTeamId === 'function' ? global.setActiveTeamId.bind(global) : null);
-      if (setScope && setScope('')) {
+      if (_setActiveTeamScope('', { source: 'selector' })) {
         _toast('Personal scope selected');
         _render();
       }
     } else if (action === 'switch-team') {
-      const setScope = typeof setActiveTeamId === 'function'
-        ? setActiveTeamId
-        : (typeof global.setActiveTeamId === 'function' ? global.setActiveTeamId.bind(global) : null);
-      if (setScope && setScope(teamId)) {
+      if (_setActiveTeamScope(teamId, { source: 'selector' })) {
         _toast('Team scope selected');
         _render();
       }
@@ -1280,10 +1296,7 @@
       return;
     }
     if (action === 'switch-team') {
-      const setScope = typeof setActiveTeamId === 'function'
-        ? setActiveTeamId
-        : (typeof global.setActiveTeamId === 'function' ? global.setActiveTeamId.bind(global) : null);
-      if (setScope && setScope(teamId)) {
+      if (_setActiveTeamScope(teamId, { source: 'selector' })) {
         _toast('Team scope selected');
         _render();
       }
@@ -1417,7 +1430,8 @@
       _formMode = _formMode === 'recover' ? '' : 'recover';
       _renderTopForm();
     });
-    _el('options-team-form')?.addEventListener('submit', (event) => {
+    panel?.addEventListener('submit', (event) => {
+      if (!event.target?.matches?.('[data-team-form]')) return;
       event.preventDefault();
       const mode = event.target.dataset.teamForm || 'unknown';
       const action = mode === 'create'
@@ -1425,7 +1439,7 @@
         : (mode === 'recover' ? 'redeem_recovery_code' : 'join_team');
       _submitTopForm(event.target).catch(error => _logTeamUiActionFailure(action, error));
     });
-    _el('options-team-form')?.addEventListener('click', (event) => {
+    panel?.addEventListener('click', (event) => {
       const action = event.target.closest('[data-team-action]')?.dataset.teamAction;
       if (action === 'cancel-form') {
         _formMode = '';
@@ -1471,5 +1485,7 @@
   }
 
   _bind();
-  global.refreshOptionsTeams = refreshOptionsTeams;
+  exportedRefreshOptionsTeams = refreshOptionsTeams;
 })(window);
+
+export { exportedRefreshOptionsTeams as refreshOptionsTeams };

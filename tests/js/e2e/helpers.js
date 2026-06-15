@@ -136,7 +136,9 @@ export async function ensurePromptReady(
 ) {
   await page.waitForFunction(
     () => {
-      const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const activeTab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+        ? window.APP_STATE_API.getActiveTab()
+        : null
       const input = document.getElementById('cmd')
       return !!activeTab && input instanceof HTMLInputElement
     },
@@ -146,7 +148,9 @@ export async function ensurePromptReady(
 
   await page.evaluate(
     ({ cancel }) => {
-      const tabId = typeof activeTabId !== 'undefined' ? activeTabId : null
+      const tabId = typeof window.APP_STATE_API?.getActiveTabId === 'function'
+        ? window.APP_STATE_API.getActiveTabId()
+        : null
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
       if (cancel) {
         if (typeof cancelWelcome === 'function') cancelWelcome(tabId)
@@ -169,7 +173,9 @@ export async function ensurePromptReady(
       const active = typeof _welcomeActive !== 'undefined' ? _welcomeActive : false
       const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
-      const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
+      const activeTab = typeof window.APP_STATE_API?.getActiveTabId === 'function'
+        ? window.APP_STATE_API.getActiveTabId()
+        : null
       return !bootPending || (active && welcomeTabId !== activeTab)
     },
     undefined,
@@ -186,6 +192,16 @@ export async function ensurePromptReady(
       const style = window.getComputedStyle(target)
       return style.display !== 'none' && style.visibility !== 'hidden'
     },
+    undefined,
+    { timeout },
+  )
+
+  await page.waitForFunction(
+    () => (
+      typeof window.DarklabRunner?.submitVisibleComposerCommand === 'function' &&
+      typeof window.DarklabRunner?.hasRunnerHandler === 'function' &&
+      window.DarklabRunner.hasRunnerHandler('submitVisibleComposerCommand')
+    ),
     undefined,
     { timeout },
   )
@@ -254,7 +270,9 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
   const input = page.locator('#cmd')
   await input.waitFor({ state: 'visible', timeout })
   const beforeLineCount = await page.evaluate(() => {
-    const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+    const tab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+      ? window.APP_STATE_API.getActiveTab()
+      : null
     return Array.isArray(tab?.rawLines) ? tab.rawLines.length : 0
   })
   await input.focus()
@@ -262,7 +280,9 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
   await input.press('Enter')
   await page.waitForFunction(
     ({ expectedCmd, previousLineCount }) => {
-      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const tab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+        ? window.APP_STATE_API.getActiveTab()
+        : null
       if (!tab || tab.st === 'running') return false
       const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : []
       const output = document.querySelector('.tab-panel.active .output')
@@ -288,7 +308,9 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
 export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}) {
   await page.waitForFunction(
     () => {
-      const tabId = typeof activeTabId !== 'undefined' ? activeTabId : null
+      const tabId = typeof window.APP_STATE_API?.getActiveTabId === 'function'
+        ? window.APP_STATE_API.getActiveTabId()
+        : null
       if (!tabId) return false
       const pending =
         typeof _pendingOutputBatches !== 'undefined' ? _pendingOutputBatches.get(tabId) : null
@@ -328,7 +350,10 @@ export async function setComposerValueForTest(
         input.dispatchEvent(new Event('input', { bubbles: true }))
       }
       if (typeof getAutocompleteMatches === 'function') {
-        const matches = getAutocompleteMatches(nextValue, nextValue.length).slice(0, 12)
+        const rawMatches = getAutocompleteMatches(nextValue, nextValue.length)
+        const matches = typeof limitAutocompleteMatchesForDisplay === 'function'
+          ? limitAutocompleteMatchesForDisplay(rawMatches, 12)
+          : rawMatches.slice(0, 12)
         if (matches.length && typeof acShow === 'function') acShow(matches)
         else if (typeof acHide === 'function') acHide()
       }

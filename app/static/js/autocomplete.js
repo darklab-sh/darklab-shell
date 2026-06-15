@@ -1,27 +1,182 @@
 // Autocomplete dropdown rendering and keyboard interaction.
-const autocompleteDropdownCore = (typeof window !== 'undefined' && window.DarklabAutocompleteCore)
-  ? window.DarklabAutocompleteCore
-  : (typeof DarklabAutocompleteCore !== 'undefined' ? DarklabAutocompleteCore : null);
+import { DarklabAutocompleteCore as importedAutocompleteCore } from './core/autocomplete_core.js';
+import {
+  acDropdown as importedAcDropdown,
+  cmdInput as importedCmdInput,
+  mobileCmdInput as importedMobileCmdInput,
+  mobileComposerHost as importedMobileComposerHost,
+  mobileComposerRow as importedMobileComposerRow,
+  shellPromptWrap as importedShellPromptWrap,
+} from './core/dom.js';
+import {
+  getAutocompleteState as importedGetAutocompleteState,
+  getComposerState as importedGetComposerState,
+  setAutocompleteState as importedSetAutocompleteState,
+} from './core/state.js';
+import { escapeHtml as importedEscapeHtml } from './core/utils.js';
+import {
+  getComposerValue as importedGetComposerValue,
+  getVisibleComposerInput as importedGetVisibleComposerInput,
+  hideAcDropdown as importedHideAcDropdown,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  showAcDropdown as importedShowAcDropdown,
+} from './ui/ui_helpers.js';
+import { _autocompleteTokenContext as importedAutocompleteTokenContext } from './features/autocomplete/suggestions.js';
+
+const AUTOCOMPLETE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _autocompleteGlobalFunction(name) {
+  const fn = AUTOCOMPLETE_GLOBAL && AUTOCOMPLETE_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+const autocompleteDropdownCore = typeof importedAutocompleteCore !== 'undefined' && importedAutocompleteCore
+  ? importedAutocompleteCore
+  : AUTOCOMPLETE_GLOBAL.DarklabAutocompleteCore;
+
+const _autocompleteDom = {
+  acDropdown: (typeof importedAcDropdown !== 'undefined' && importedAcDropdown)
+    || AUTOCOMPLETE_GLOBAL.acDropdown
+    || null,
+  cmdInput: (typeof importedCmdInput !== 'undefined' && importedCmdInput)
+    || AUTOCOMPLETE_GLOBAL.cmdInput
+    || null,
+  mobileCmdInput: (typeof importedMobileCmdInput !== 'undefined' && importedMobileCmdInput)
+    || AUTOCOMPLETE_GLOBAL.mobileCmdInput
+    || null,
+  mobileComposerHost: (typeof importedMobileComposerHost !== 'undefined' && importedMobileComposerHost)
+    || AUTOCOMPLETE_GLOBAL.mobileComposerHost
+    || null,
+  mobileComposerRow: (typeof importedMobileComposerRow !== 'undefined' && importedMobileComposerRow)
+    || AUTOCOMPLETE_GLOBAL.mobileComposerRow
+    || null,
+  shellPromptWrap: (typeof importedShellPromptWrap !== 'undefined' && importedShellPromptWrap)
+    || AUTOCOMPLETE_GLOBAL.shellPromptWrap
+    || null,
+};
+
+function _autocompleteGetState() {
+  const readState = _autocompleteGlobalFunction('getAutocompleteState')
+    || (typeof importedGetAutocompleteState !== 'undefined' && importedGetAutocompleteState);
+  return typeof readState === 'function' ? readState() : {};
+}
+
+function _autocompleteSetState(next) {
+  const writeState = _autocompleteGlobalFunction('setAutocompleteState')
+    || (typeof importedSetAutocompleteState !== 'undefined' && importedSetAutocompleteState);
+  if (typeof writeState === 'function') writeState(next);
+}
+
+function _autocompleteComposerState() {
+  const readState = _autocompleteGlobalFunction('getComposerState')
+    || (typeof importedGetComposerState !== 'undefined' && importedGetComposerState);
+  return typeof readState === 'function' ? readState() : {};
+}
+
+function _autocompleteComposerValue() {
+  const readValue = _autocompleteGlobalFunction('getComposerValue')
+    || (typeof importedGetComposerValue !== 'undefined' && importedGetComposerValue);
+  if (typeof readValue === 'function') return readValue();
+  return _autocompleteDom.cmdInput ? _autocompleteDom.cmdInput.value : '';
+}
+
+function _autocompleteSetComposerValue(value, start = null, end = null) {
+  const writeValue = _autocompleteGlobalFunction('setComposerValue')
+    || (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue);
+  if (typeof writeValue === 'function') writeValue(value, start, end);
+}
+
+function _autocompleteVisibleInput() {
+  const readInput = _autocompleteGlobalFunction('getVisibleComposerInput')
+    || (typeof importedGetVisibleComposerInput !== 'undefined' && importedGetVisibleComposerInput);
+  return typeof readInput === 'function' ? readInput() : _autocompleteDom.cmdInput;
+}
+
+function _autocompleteHideDropdown() {
+  const hideDropdown = _autocompleteGlobalFunction('hideAcDropdown')
+    || (typeof importedHideAcDropdown !== 'undefined' && importedHideAcDropdown);
+  if (typeof hideDropdown === 'function') hideDropdown();
+}
+
+function _autocompleteShowDropdown() {
+  const showDropdown = _autocompleteGlobalFunction('showAcDropdown')
+    || (typeof importedShowAcDropdown !== 'undefined' && importedShowAcDropdown);
+  if (typeof showDropdown === 'function') showDropdown();
+}
+
+function _autocompleteRefocusComposer() {
+  const refocus = _autocompleteGlobalFunction('refocusComposerAfterAction')
+    || (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction);
+  if (typeof refocus === 'function') refocus({ preventScroll: true });
+}
+
+function _autocompleteEscapeHtml(value) {
+  const escape = _autocompleteGlobalFunction('escapeHtml')
+    || (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml);
+  return typeof escape === 'function' ? escape(value) : String(value || '');
+}
 
 function _isAutocompleteBlockedByTerminalConfirm() {
-  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
+  const hasPending = _autocompleteGlobalFunction('hasPendingTerminalConfirm');
+  return typeof hasPending === 'function' && hasPending();
 }
 
 function _isAutocompleteBlockedByActiveRun() {
-  return typeof isActiveTabRunning === 'function' && isActiveTabRunning();
+  const isRunning = _autocompleteGlobalFunction('isActiveTabRunning');
+  return typeof isRunning === 'function' && isRunning();
+}
+
+function _readAutocompleteState() {
+  const apiState = _autocompleteGetState();
+  return {
+    filtered: Array.isArray(apiState.filtered) ? apiState.filtered : [],
+    index: apiState.index ?? -1,
+    suppressInputOnce: !!apiState.suppressInputOnce,
+  };
+}
+
+function _writeAutocompleteState(next = {}) {
+  _autocompleteSetState(next);
+  return _readAutocompleteState();
+}
+
+function _autocompleteTokenContextForValue(value, cursor) {
+  const tokenContext = (typeof importedAutocompleteTokenContext !== 'undefined' && importedAutocompleteTokenContext)
+    || _autocompleteGlobalFunction('_autocompleteTokenContext');
+  return typeof tokenContext === 'function'
+    ? tokenContext(value, cursor)
+    : { currentToken: String(value || '') };
 }
 
 function _positionAutocomplete(itemsCount) {
   // Desktop anchors the dropdown to the prompt row; mobile anchors it above the
   // simplified composer so suggestions never hide behind the keyboard.
+  const acDropdown = _autocompleteDom.acDropdown;
   if (!acDropdown) return false;
-  const wrap = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) || acDropdown.parentElement;
-  const composerHost = (typeof mobileComposerHost !== 'undefined' && mobileComposerHost) || null;
-  const composerRow = (typeof mobileComposerRow !== 'undefined' && mobileComposerRow) || null;
-  const prefix = wrap && wrap.querySelector ? wrap.querySelector('.prompt-prefix') : null;
+  const parentWrap = acDropdown.parentElement;
+  const wrap = parentWrap && parentWrap.classList?.contains('shell-prompt-wrap')
+    ? parentWrap
+    : (_autocompleteDom.shellPromptWrap || parentWrap);
+  const composerHost = _autocompleteDom.mobileComposerHost || null;
+  const composerRow = _autocompleteDom.mobileComposerRow || null;
+  const visibleInput = _autocompleteVisibleInput();
   const mobileTerminalMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
   const mobileComposerMode = mobileTerminalMode;
-  const anchor = mobileTerminalMode && composerRow ? composerRow : (mobileTerminalMode && composerHost ? composerHost : wrap);
+  let anchor = mobileTerminalMode && composerRow ? composerRow : (mobileTerminalMode && composerHost ? composerHost : wrap);
+  if (!mobileTerminalMode && anchor && typeof anchor.getBoundingClientRect === 'function') {
+    const anchorRect = anchor.getBoundingClientRect();
+    if (
+      anchorRect.width <= 0
+      && anchorRect.height <= 0
+      && anchorRect.top === 0
+      && anchorRect.bottom === 0
+      && visibleInput
+    ) {
+      anchor = visibleInput;
+    }
+  }
+  const prefix = anchor === wrap && wrap && wrap.querySelector ? wrap.querySelector('.prompt-prefix') : null;
   acDropdown.classList.toggle('ac-mobile', mobileTerminalMode);
   if (mobileTerminalMode) {
     const rect = anchor && typeof anchor.getBoundingClientRect === 'function'
@@ -88,6 +243,7 @@ function _positionAutocomplete(itemsCount) {
 }
 
 function _scrollAutocompleteActiveItem() {
+  const acDropdown = _autocompleteDom.acDropdown;
   if (!acDropdown) return;
   const activeItem = acDropdown.querySelector('.ac-item.ac-active');
   if (!activeItem) return;
@@ -153,18 +309,22 @@ function acShow(items) {
     acHide();
     return;
   }
+  const acDropdown = _autocompleteDom.acDropdown;
+  if (!acDropdown) return;
   acDropdown.innerHTML = '';
-  if (!items.length) { hideAcDropdown(); return; }
+  if (!items.length) { _autocompleteHideDropdown(); return; }
   _positionAutocomplete(items.length);
-  if (acIndex >= items.length) acIndex = acLastSelectableIndex(items);
-  if (acIndex >= 0 && acIsHintOnly(items[acIndex])) acIndex = acFirstSelectableIndex(items);
-  const currentValue = (typeof getComposerValue === 'function')
-    ? getComposerValue()
-    : cmdInput.value;
-  const currentCursor = (typeof getComposerState === 'function')
-    ? getComposerState().selectionStart
+  let nextIndex = _readAutocompleteState().index;
+  if (nextIndex >= items.length) nextIndex = acLastSelectableIndex(items);
+  if (nextIndex >= 0 && acIsHintOnly(items[nextIndex])) nextIndex = acFirstSelectableIndex(items);
+  _writeAutocompleteState({ index: nextIndex });
+  const currentValue = _autocompleteComposerValue();
+  const composerState = _autocompleteComposerState();
+  const cmdInput = _autocompleteDom.cmdInput;
+  const currentCursor = typeof composerState.selectionStart === 'number'
+    ? composerState.selectionStart
     : (cmdInput && typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : currentValue.length);
-  const tokenCtx = _autocompleteTokenContext(currentValue, currentCursor);
+  const tokenCtx = _autocompleteTokenContextForValue(currentValue, currentCursor);
   const matchValue = (items.length && typeof items[0] === 'object') ? tokenCtx.currentToken : currentValue;
   const maxExampleLabelLen = items.reduce((max, s) =>
     (s && s.isExample ? Math.max(max, autocompleteDropdownCore.itemText(s).length) : max), 0);
@@ -175,7 +335,7 @@ function acShow(items) {
     const hintSeparated = hintOnly && hasRenderedConcrete && !hasRenderedHint;
     const div = document.createElement('div');
     div.className = 'ac-item dropdown-item dropdown-item-dense'
-      + (!hintOnly && i === acIndex ? ' ac-active dropdown-item-active' : '')
+      + (!hintOnly && i === nextIndex ? ' ac-active dropdown-item-active' : '')
       + (s && s.isExample ? ' ac-example' : '')
       + (hintOnly ? ' ac-hint-only' : '')
       + (hintSeparated ? ' ac-hint-separated' : '');
@@ -189,7 +349,7 @@ function acShow(items) {
     main.className = 'ac-item-main';
     if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
     main.innerHTML = hintOnly
-      ? escapeHtml(label)
+      ? _autocompleteEscapeHtml(label)
       : autocompleteDropdownCore.highlightedLabel(label, val);
     div.appendChild(main);
     if (description) {
@@ -224,22 +384,30 @@ function acShow(items) {
     if (hintOnly) hasRenderedHint = true;
     else hasRenderedConcrete = true;
   });
-  showAcDropdown();
+  _autocompleteShowDropdown();
   _positionAutocomplete(items.length);
   _scrollAutocompleteActiveItem();
 }
 
 function acHide() {
-  hideAcDropdown();
-  acIndex = -1;
-  if (typeof acFiltered !== 'undefined' && Array.isArray(acFiltered)) acFiltered = [];
+  _autocompleteHideDropdown();
+  _writeAutocompleteState({ index: -1, filtered: [] });
+}
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('click', (event) => {
+    const rawTarget = event.target;
+    const target = rawTarget && rawTarget.nodeType === 1 ? rawTarget : rawTarget?.parentElement;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('#ac-dropdown')) return;
+    if (target === _autocompleteDom.cmdInput || target === _autocompleteDom.mobileCmdInput) return;
+    acHide();
+  }, true);
 }
 
 function acExpandSharedPrefix(items) {
   if (!Array.isArray(items) || items.length < 2) return false;
-  const currentValue = (typeof getComposerValue === 'function')
-    ? getComposerValue()
-    : (cmdInput ? cmdInput.value || '' : '');
+  const currentValue = _autocompleteComposerValue();
   const firstItem = items[0];
   const sharedPrefix = autocompleteDropdownCore.sharedPrefix(items);
   if (!sharedPrefix) return false;
@@ -252,20 +420,21 @@ function acExpandSharedPrefix(items) {
     if (!sharedPrefix.toLowerCase().startsWith(currentToken.toLowerCase())) return false;
     const next = currentValue.slice(0, replaceStart) + sharedPrefix + currentValue.slice(replaceEnd);
     const caret = replaceStart + sharedPrefix.length;
-    setComposerValue(next, caret, caret);
+    _autocompleteSetComposerValue(next, caret, caret);
     return true;
   }
   if (sharedPrefix.length <= currentValue.length) return false;
   if (!sharedPrefix.toLowerCase().startsWith(currentValue.toLowerCase())) return false;
-  setComposerValue(sharedPrefix, sharedPrefix.length, sharedPrefix.length);
+  _autocompleteSetComposerValue(sharedPrefix, sharedPrefix.length, sharedPrefix.length);
   return true;
 }
 
 function _scheduleAutocompleteRefreshAfterAccept(insertValue) {
   if (!String(insertValue || '').endsWith('/')) return;
   setTimeout(() => {
-    if (typeof window.openAutocompleteForVisibleComposer === 'function' && window.openAutocompleteForVisibleComposer()) return;
-    const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
+    const openAutocomplete = _autocompleteGlobalFunction('openAutocompleteForVisibleComposer');
+    if (openAutocomplete && openAutocomplete()) return;
+    const input = _autocompleteVisibleInput();
     if (input && typeof input.dispatchEvent === 'function') {
       input.dispatchEvent(new Event('input'));
     }
@@ -276,56 +445,65 @@ function acAccept(s) {
   let acceptedInsertValue = '';
   if (_isAutocompleteBlockedByTerminalConfirm()) {
     acHide();
-    refocusComposerAfterAction({ preventScroll: true });
+    _autocompleteRefocusComposer();
     return;
   }
   if (s && typeof s === 'object') {
     // Placeholder-only hints (e.g. "<token>") are display-only: Tab should hide
     // the dropdown, not insert the literal placeholder text into the prompt.
     if (s.hintOnly) {
-      refocusComposerAfterAction({ preventScroll: true });
+      _autocompleteRefocusComposer();
       return;
     }
-    const currentValue = (typeof getComposerValue === 'function')
-      ? getComposerValue()
-      : (cmdInput ? cmdInput.value || '' : '');
+    const currentValue = _autocompleteComposerValue();
     const insertValue = autocompleteDropdownCore.itemInsertText(s);
     acceptedInsertValue = insertValue;
     const replaceStart = Number(s.replaceStart);
     const replaceEnd = Number(s.replaceEnd);
-    if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
+    _writeAutocompleteState({ suppressInputOnce: true });
     if (Number.isFinite(replaceStart) && Number.isFinite(replaceEnd)) {
       const next = currentValue.slice(0, replaceStart) + insertValue + currentValue.slice(replaceEnd);
       const caret = replaceStart + insertValue.length;
       acHide();
-      setComposerValue(next, caret, caret);
+      _autocompleteSetComposerValue(next, caret, caret);
     } else {
       acHide();
-      setComposerValue(insertValue, insertValue.length, insertValue.length);
+      _autocompleteSetComposerValue(insertValue, insertValue.length, insertValue.length);
     }
   } else {
     acceptedInsertValue = String(s || '');
-    if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
+    _writeAutocompleteState({ suppressInputOnce: true });
     acHide();
-    setComposerValue(s, s.length, s.length);
+    _autocompleteSetComposerValue(s, s.length, s.length);
   }
-  refocusComposerAfterAction({ preventScroll: true });
+  _autocompleteRefocusComposer();
   _scheduleAutocompleteRefreshAfterAccept(acceptedInsertValue);
 }
 
 if (typeof window !== 'undefined') {
   Object.assign(window, {
-    _positionAutocomplete,
-    _scrollAutocompleteActiveItem,
-    acIsHintOnly,
-    acSelectableItems,
-    acSelectableIndexes,
-    acFirstSelectableIndex,
-    acLastSelectableIndex,
-    acNextSelectableIndex,
-    acShow,
-    acHide,
-    acExpandSharedPrefix,
     acAccept,
+    acAutocompleteIsHintOnly: acIsHintOnly,
+    acAutocompleteNextSelectableIndex: acNextSelectableIndex,
+    acAutocompleteSelectableIndexes: acSelectableIndexes,
+    acAutocompleteSelectableItems: acSelectableItems,
+    acExpandSharedPrefix,
+    acHide,
+    acIsHintOnly,
+    acNextSelectableIndex,
+    acSelectableIndexes,
+    acSelectableItems,
+    acShow,
   });
 }
+
+export {
+  acAccept,
+  acExpandSharedPrefix,
+  acHide,
+  acIsHintOnly,
+  acNextSelectableIndex,
+  acSelectableIndexes,
+  acSelectableItems,
+  acShow,
+};

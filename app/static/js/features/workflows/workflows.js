@@ -1,11 +1,127 @@
 // Workflows modal, editor, terminal command, and runtime autocomplete support.
+import {
+  emitUiEvent as importedEmitUiEvent,
+  getActiveTabId as importedGetActiveTabId,
+  onUiEvent as importedOnUiEvent,
+} from '../../core/state.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import {
+  appendLine as importedAppendLine,
+  hasPendingOutputBatch as importedHasPendingOutputBatch,
+} from '../../output.js';
+import {
+  _finalizeClientSideCommandStatus as importedFinalizeClientSideCommandStatus,
+  _persistClientSideRun as importedPersistClientSideRun,
+  _recordSuccessfulLocalCommand as importedRecordSuccessfulLocalCommand,
+  _setPendingTerminalConfirm as importedSetPendingTerminalConfirm,
+  appendCommandEcho as importedAppendCommandEcho,
+  setStatus as importedSetStatus,
+  submitComposerCommand as importedSubmitComposerCommand,
+} from '../../runner.js';
+import {
+  activateTab as importedActivateTab,
+  clearTab as importedClearTab,
+  setTabStatus as importedSetTabStatus,
+} from '../../tabs.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
+import { cancelWelcome as importedCancelWelcome, welcomeOwnsTab as importedWelcomeOwnsTab } from '../../welcome.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+import { wireFaqCommandChips as importedWireFaqCommandChips } from '../command-registry/faq_helpers.js';
+import { _workspaceCommandTokens as importedWorkspaceCommandTokens } from '../runner/runner_workspace.js';
+import {
+  _runtimeContextSpec as importedRuntimeContextSpec,
+  _runtimeHint as importedRuntimeHint,
+  _runtimePlaceholderHint as importedRuntimePlaceholderHint,
+} from '../autocomplete/runtime_context.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from '../../runtime_bridge.js';
+import { setWorkflowHandlers as importedSetWorkflowHandlers } from './workflows_bridge.js';
+
+const WORKFLOWS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _workflowGlobalFunction(name) {
+  const fn = WORKFLOWS_GLOBAL && WORKFLOWS_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _workflowActiveTabId() {
+  if (typeof importedGetActiveTabId === 'function') return importedGetActiveTabId();
+  const readActiveTabId = _workflowGlobalFunction('getActiveTabId');
+  if (readActiveTabId) return readActiveTabId();
+  return WORKFLOWS_GLOBAL?.APP_STATE?.activeTabId || null;
+}
+
+function _workflowAppendLine(text, cls = '', tabId = _workflowActiveTabId()) {
+  const append = (typeof importedAppendLine === 'function' && importedAppendLine)
+    || _workflowGlobalFunction('appendLine');
+  if (append) append(text, cls, tabId);
+}
+
+function _workflowBindPressable(el, opts) {
+  const bind = (typeof importedBindPressable === 'function' && importedBindPressable)
+    || _workflowGlobalFunction('bindPressable');
+  return bind ? bind(el, opts) : null;
+}
+
+function _workflowCloseMajorOverlays() {
+  const close = (typeof importedCloseMajorOverlays === 'function' && importedCloseMajorOverlays)
+    || _workflowGlobalFunction('_closeMajorOverlays');
+  if (close) close();
+  const workflowOverlay = document.getElementById('workflows-overlay');
+  if (workflowOverlay && workflowOverlay.classList.contains('open')) {
+    workflowOverlay.classList.remove('open');
+    workflowOverlay.classList.add('u-hidden');
+    workflowOverlay.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function _workflowWireFaqCommandChips(root) {
+  const wire = (typeof importedWireFaqCommandChips === 'function' && importedWireFaqCommandChips)
+    || _workflowGlobalFunction('wireFaqCommandChips');
+  if (wire) wire(root);
+}
+
+function _workflowApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || _workflowGlobalFunction('apiFetch');
+  if (!fetcher) throw new Error('apiFetch is unavailable');
+  return fetcher(...args);
+}
+
+function _workflowRuntimeHint(value, description = '', insertValue = null) {
+  const hint = (typeof importedRuntimeHint === 'function' && importedRuntimeHint)
+    || _workflowGlobalFunction('_runtimeHint');
+  return hint ? hint(value, description, insertValue) : { value, description, ...(insertValue != null ? { insertValue } : {}) };
+}
+
+function _workflowRuntimePlaceholderHint(value, description = '') {
+  const hint = (typeof importedRuntimePlaceholderHint === 'function' && importedRuntimePlaceholderHint)
+    || _workflowGlobalFunction('_runtimePlaceholderHint');
+  if (hint) return hint(value, description);
+  return { value, description, hintOnly: true };
+}
+
+function _workflowRuntimeContextSpec(spec = {}) {
+  const contextSpec = (typeof importedRuntimeContextSpec === 'function' && importedRuntimeContextSpec)
+    || _workflowGlobalFunction('_runtimeContextSpec');
+  return contextSpec ? contextSpec(spec) : spec;
+}
 
 const WORKFLOW_TOKEN_RE = /{{\s*([a-z][a-z0-9_]*)\s*}}/g;
 const WORKFLOW_INPUT_STATE_KEY = 'workflow_input_state_v1';
 const _workflowRunQueueByTab = new Map();
 let workflowCatalogItems = (
-  typeof window !== 'undefined' && Array.isArray(window.__workflowCatalogItems)
-) ? window.__workflowCatalogItems.slice() : [];
+  typeof globalThis !== 'undefined' && Array.isArray(globalThis.__workflowCatalogItems)
+) ? globalThis.__workflowCatalogItems.slice() : [];
 let workflowCatalogLoadPromise = null;
 let _workflowEditorWorkflow = null;
 
@@ -167,24 +283,36 @@ function inferWorkflowInputsFromSteps(steps) {
 function runWorkflowCommands(commands) {
   const runnable = (commands || []).map((cmd) => String(cmd || '').trim()).filter(Boolean);
   if (!runnable.length) return;
-  const targetTabId = typeof getActiveTabId === 'function' ? getActiveTabId() : activeTabId;
+  const targetTabId = _workflowActiveTabId();
   if (!targetTabId) return;
+  const welcomeOwnsTab = (typeof importedWelcomeOwnsTab === 'function' && importedWelcomeOwnsTab)
+    || _workflowGlobalFunction('welcomeOwnsTab');
   if (typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(targetTabId)) {
-    if (typeof cancelWelcome === 'function') cancelWelcome(targetTabId);
-    if (typeof clearTab === 'function') clearTab(targetTabId);
-    if (typeof setTabStatus === 'function') setTabStatus(targetTabId, 'idle');
+    const cancelWelcome = (typeof importedCancelWelcome === 'function' && importedCancelWelcome)
+      || _workflowGlobalFunction('cancelWelcome');
+    const clearTab = (typeof importedClearTab === 'function' && importedClearTab)
+      || _workflowGlobalFunction('clearTab');
+    const setTabStatus = (typeof importedSetTabStatus === 'function' && importedSetTabStatus)
+      || _workflowGlobalFunction('setTabStatus');
+    if (cancelWelcome) cancelWelcome(targetTabId);
+    if (clearTab) clearTab(targetTabId);
+    if (setTabStatus) setTabStatus(targetTabId, 'idle');
   }
-  _closeMajorOverlays();
+  _workflowCloseMajorOverlays();
   _workflowRunQueueByTab.set(targetTabId, {
     commands: runnable.slice(),
     nextIndex: 1,
     total: runnable.length,
   });
-  if (typeof activateTab === 'function') activateTab(targetTabId);
-  if (typeof appendLine === 'function' && runnable.length > 1) {
-    appendLine(`[workflow] Running ${runnable.length} steps sequentially in this tab.`, 'notice', targetTabId);
+  const activateTab = (typeof importedActivateTab === 'function' && importedActivateTab)
+    || _workflowGlobalFunction('activateTab');
+  if (activateTab) activateTab(targetTabId);
+  if (runnable.length > 1) {
+    _workflowAppendLine(`[workflow] Running ${runnable.length} steps sequentially in this tab.`, 'notice', targetTabId);
   }
-  if (typeof submitComposerCommand === 'function') {
+  const submitComposerCommand = (typeof importedSubmitComposerCommand === 'function' && importedSubmitComposerCommand)
+    || _workflowGlobalFunction('submitComposerCommand');
+  if (submitComposerCommand) {
     submitComposerCommand(runnable[0], {
       dismissKeyboard: true,
       focusAfterSubmit: true,
@@ -198,17 +326,17 @@ function _runNextWorkflowQueueStep(tabId) {
   const nextCommand = queue.commands[queue.nextIndex];
   if (!nextCommand) {
     _workflowRunQueueByTab.delete(tabId);
-    if (typeof appendLine === 'function') {
-      appendLine('[workflow] Completed all queued steps.', 'exit-ok', tabId);
-    }
+    _workflowAppendLine('[workflow] Completed all queued steps.', 'exit-ok', tabId);
     return;
   }
   queue.nextIndex += 1;
-  if (typeof appendLine === 'function') {
-    appendLine(`[workflow] Continuing with step ${queue.nextIndex}/${queue.total}.`, 'notice', tabId);
-  }
-  if (typeof activateTab === 'function') activateTab(tabId, { focusComposer: false });
-  if (typeof submitComposerCommand === 'function') {
+  _workflowAppendLine(`[workflow] Continuing with step ${queue.nextIndex}/${queue.total}.`, 'notice', tabId);
+  const activateTab = (typeof importedActivateTab === 'function' && importedActivateTab)
+    || _workflowGlobalFunction('activateTab');
+  if (activateTab) activateTab(tabId, { focusComposer: false });
+  const submitComposerCommand = (typeof importedSubmitComposerCommand === 'function' && importedSubmitComposerCommand)
+    || _workflowGlobalFunction('submitComposerCommand');
+  if (submitComposerCommand) {
     submitComposerCommand(nextCommand, {
       dismissKeyboard: false,
       focusAfterSubmit: false,
@@ -219,7 +347,9 @@ function _runNextWorkflowQueueStep(tabId) {
 function _scheduleNextWorkflowQueueStep(tabId) {
   const waitForFlush = () => {
     if (!_workflowRunQueueByTab.has(tabId)) return;
-    if (typeof hasPendingOutputBatch === 'function' && hasPendingOutputBatch(tabId)) {
+    const hasPendingOutputBatch = (typeof importedHasPendingOutputBatch === 'function' && importedHasPendingOutputBatch)
+      || _workflowGlobalFunction('hasPendingOutputBatch');
+    if (hasPendingOutputBatch && hasPendingOutputBatch(tabId)) {
       setTimeout(waitForFlush, 20);
       return;
     }
@@ -228,16 +358,16 @@ function _scheduleNextWorkflowQueueStep(tabId) {
   setTimeout(waitForFlush, 0);
 }
 
-if (typeof onUiEvent === 'function') {
-  onUiEvent('app:tab-status-changed', (e) => {
+const workflowOnUiEvent = (typeof importedOnUiEvent === 'function' && importedOnUiEvent)
+  || _workflowGlobalFunction('onUiEvent');
+if (typeof workflowOnUiEvent === 'function') {
+  workflowOnUiEvent('app:tab-status-changed', (e) => {
     const tabId = e?.detail?.id;
     const status = e?.detail?.status;
     if (!tabId || !_workflowRunQueueByTab.has(tabId) || status === 'running') return;
     if (status === 'killed') {
       _workflowRunQueueByTab.delete(tabId);
-      if (typeof appendLine === 'function') {
-        appendLine('[workflow] Queue stopped because the current step was killed.', 'denied', tabId);
-      }
+      _workflowAppendLine('[workflow] Queue stopped because the current step was killed.', 'denied', tabId);
       return;
     }
     _scheduleNextWorkflowQueueStep(tabId);
@@ -347,11 +477,11 @@ function renderWorkflowInputCard(card, workflow) {
     hint.textContent = rendered.ready
       ? 'Rendered commands are live. Click a chip to load it, use ▶ to run one step, or Run all to execute the full workflow here in sequence.'
       : 'Fill the required fields to render runnable commands.';
-    if (typeof window.wireFaqCommandChips === 'function') window.wireFaqCommandChips(card);
+    _workflowWireFaqCommandChips(card);
     wireWorkflowStepRunButtons(card);
   };
 
-  bindPressable(runAllBtn, {
+  _workflowBindPressable(runAllBtn, {
     onActivate: () => {
       const rendered = buildRenderedWorkflow(workflow, values);
       if (!rendered.ready) return;
@@ -549,7 +679,7 @@ async function saveWorkflowEditor() {
     const url = editing
       ? `/session/workflows/${encodeURIComponent(_workflowEditorWorkflow.id)}`
       : '/session/workflows';
-    const resp = await apiFetch(url, {
+    const resp = await _workflowApiFetch(url, {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -558,7 +688,9 @@ async function saveWorkflowEditor() {
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
     closeWorkflowEditor();
     await reloadWorkflowCatalog();
-    if (typeof showToast === 'function') showToast(editing ? 'Workflow updated' : 'Workflow saved');
+    const showToast = (typeof importedShowToast === 'function' && importedShowToast)
+      || _workflowGlobalFunction('showToast');
+    if (showToast) showToast(editing ? 'Workflow updated' : 'Workflow saved');
   } catch (err) {
     setWorkflowEditorMessage(err.message || 'Failed to save workflow.', true);
   } finally {
@@ -569,7 +701,9 @@ async function saveWorkflowEditor() {
 async function deleteUserWorkflow(workflow) {
   if (!workflow || workflow.source !== 'user' || !workflow.id) return;
   let confirmed = true;
-  if (typeof showConfirm === 'function') {
+  const showConfirm = (typeof importedShowConfirm === 'function' && importedShowConfirm)
+    || _workflowGlobalFunction('showConfirm');
+  if (showConfirm) {
     const choice = await showConfirm({
       body: `Delete workflow "${workflow.title}"?`,
       tone: 'danger',
@@ -582,29 +716,40 @@ async function deleteUserWorkflow(workflow) {
   }
   if (!confirmed) return;
   try {
-    const resp = await apiFetch(`/session/workflows/${encodeURIComponent(workflow.id)}`, { method: 'DELETE' });
+    const resp = await _workflowApiFetch(`/session/workflows/${encodeURIComponent(workflow.id)}`, { method: 'DELETE' });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.error || `HTTP ${resp.status}`);
     }
     await reloadWorkflowCatalog();
-    if (typeof showToast === 'function') showToast('Workflow deleted');
+    const showToast = (typeof importedShowToast === 'function' && importedShowToast)
+      || _workflowGlobalFunction('showToast');
+    if (showToast) showToast('Workflow deleted');
   } catch (err) {
-    if (typeof showToast === 'function') showToast(err.message || 'Failed to delete workflow', 'error');
+    const showToast = (typeof importedShowToast === 'function' && importedShowToast)
+      || _workflowGlobalFunction('showToast');
+    if (showToast) showToast(err.message || 'Failed to delete workflow', 'error');
   }
 }
 
 function isMobileWorkflowSheetMode() {
-  return !!(
-    typeof useMobileTerminalViewportMode === 'function'
-    && useMobileTerminalViewportMode()
-  );
+  const useMobile = (typeof importedUseMobileTerminalViewportMode === 'function' && importedUseMobileTerminalViewportMode)
+    || _workflowGlobalFunction('useMobileTerminalViewportMode');
+  return !!(useMobile && useMobile());
 }
 
 function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
   const list = Array.isArray(items) ? items : [];
+  const workflowsOverlay = document.getElementById('workflows-overlay');
+  if (
+    workflowsOverlay?.dataset?.workflowScoped === '1'
+    && workflowsOverlay.classList.contains('open')
+    && list.length > 1
+  ) {
+    return;
+  }
   workflowCatalogItems = list.slice();
-  if (typeof window !== 'undefined') window.__workflowCatalogItems = workflowCatalogItems.slice();
+  if (typeof globalThis !== 'undefined') globalThis.__workflowCatalogItems = list.slice();
   const body = document.querySelector('.workflows-body');
   if (!body) return;
   body.innerHTML = '';
@@ -753,10 +898,12 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
     body.appendChild(card);
   });
 
-  if (typeof window.wireFaqCommandChips === 'function') window.wireFaqCommandChips(body);
+  _workflowWireFaqCommandChips(body);
   wireWorkflowStepRunButtons(body);
 
-  if (emitCatalogEvent && typeof emitUiEvent === 'function') {
+  const emitUiEvent = (typeof importedEmitUiEvent === 'function' && importedEmitUiEvent)
+    || _workflowGlobalFunction('emitUiEvent');
+  if (emitCatalogEvent && emitUiEvent) {
     emitUiEvent('app:workflows-rendered', {
       items: list.slice(),
     });
@@ -765,7 +912,7 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
 
 async function reloadWorkflowCatalog() {
   const request = (async () => {
-    const resp = await apiFetch('/workflows');
+    const resp = await _workflowApiFetch('/workflows');
     if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     renderWorkflowItems(data.items || []);
@@ -786,23 +933,27 @@ function ensureWorkflowCatalogLoaded() {
 
 function activateWorkflowStepRun(cmd) {
   if (!cmd) return;
-  _closeMajorOverlays();
-  if (typeof submitComposerCommand === 'function') {
+  _workflowCloseMajorOverlays();
+  const submitComposerCommand = (typeof importedSubmitComposerCommand === 'function' && importedSubmitComposerCommand)
+    || _workflowGlobalFunction('submitComposerCommand');
+  if (submitComposerCommand) {
     submitComposerCommand(cmd, { dismissKeyboard: true });
   }
 }
 
 function wireWorkflowStepRunButtons(root) {
-  if (!root || typeof bindPressable !== 'function') return;
+  if (!root) return;
   root.querySelectorAll('.workflow-step-run[data-workflow-step-cmd]').forEach(btn => {
-    bindPressable(btn, {
+    _workflowBindPressable(btn, {
       onActivate: () => activateWorkflowStepRun(btn.dataset.workflowStepCmd || ''),
     });
   });
 }
 
 function _workflowCommandTokens(cmd) {
-  if (typeof _workspaceCommandTokens === 'function') return _workspaceCommandTokens(cmd);
+  const workspaceCommandTokens = (typeof importedWorkspaceCommandTokens === 'function' && importedWorkspaceCommandTokens)
+    || _workflowGlobalFunction('_workspaceCommandTokens');
+  if (workspaceCommandTokens) return workspaceCommandTokens(cmd);
   const tokens = [];
   const re = /"[^"]*"|'[^']*'|\S+/g;
   let match = re.exec(String(cmd || '').trim());
@@ -817,27 +968,35 @@ function _workflowCommandTokens(cmd) {
   return tokens;
 }
 
-function _workflowCliAppend(text, cls = '', tabId = activeTabId) {
-  if (typeof appendLine === 'function') appendLine(text, cls, tabId);
+function _workflowCliAppend(text, cls = '', tabId = _workflowActiveTabId()) {
+  _workflowAppendLine(text, cls, tabId);
 }
 
 function _workflowCliSetStatus(status) {
-  if (typeof setStatus === 'function') setStatus(status);
+  const setStatus = (typeof importedSetStatus === 'function' && importedSetStatus)
+    || _workflowGlobalFunction('setStatus');
+  if (setStatus) setStatus(status);
 }
 
 function _workflowCliRecord(cmd) {
-  if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(cmd);
+  const record = (typeof importedRecordSuccessfulLocalCommand === 'function' && importedRecordSuccessfulLocalCommand)
+    || _workflowGlobalFunction('_recordSuccessfulLocalCommand');
+  if (record) record(cmd);
 }
 
 function _workflowCliPersist(cmd, lines, status = 'ok') {
-  if (typeof _persistClientSideRun === 'function') _persistClientSideRun(cmd, lines, status);
+  const persist = (typeof importedPersistClientSideRun === 'function' && importedPersistClientSideRun)
+    || _workflowGlobalFunction('_persistClientSideRun');
+  if (persist) persist(cmd, lines, status);
 }
 
-function _workflowCliFinish(cmd, lines, status = 'ok', tabId = activeTabId, { record = false } = {}) {
+function _workflowCliFinish(cmd, lines, status = 'ok', tabId = _workflowActiveTabId(), { record = false } = {}) {
   if (record && status !== 'fail') _workflowCliRecord(cmd);
   _workflowCliPersist(cmd, lines, status);
-  if (typeof _finalizeClientSideCommandStatus === 'function') {
-    _finalizeClientSideCommandStatus(tabId, status);
+  const finalize = (typeof importedFinalizeClientSideCommandStatus === 'function' && importedFinalizeClientSideCommandStatus)
+    || _workflowGlobalFunction('_finalizeClientSideCommandStatus');
+  if (finalize) {
+    finalize(tabId, status);
   } else {
     _workflowCliSetStatus(status);
   }
@@ -947,12 +1106,14 @@ function _workflowPromptForInputs(workflow, values, missing, tabId) {
     const label = input.label || input.id;
     const hint = input.placeholder ? ` (${input.placeholder})` : '';
     _workflowCliAppend(`[workflow] ${label}${hint}:`, 'notice', tabId);
-    if (typeof _setPendingTerminalConfirm !== 'function') {
+    const setPendingTerminalConfirm = (typeof importedSetPendingTerminalConfirm === 'function' && importedSetPendingTerminalConfirm)
+      || _workflowGlobalFunction('_setPendingTerminalConfirm');
+    if (!setPendingTerminalConfirm) {
       _workflowCliAppend(`[workflow] missing --${input.id.replace(/_/g, '-')}`, 'exit-fail', tabId);
       _workflowCliSetStatus('fail');
       return;
     }
-    _setPendingTerminalConfirm({
+    setPendingTerminalConfirm({
       kind: 'text',
       tabId,
       onAnswer: async (answer) => {
@@ -974,13 +1135,15 @@ function _workflowPromptForInputs(workflow, values, missing, tabId) {
   askNext();
 }
 
-async function handleWorkflowTerminalCommand(cmd, tabId = activeTabId) {
+async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()) {
   const lines = [];
   const append = (text, cls = '') => {
     lines.push({ text, cls });
     _workflowCliAppend(text, cls, tabId);
   };
-  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+  const appendCommandEcho = (typeof importedAppendCommandEcho === 'function' && importedAppendCommandEcho)
+    || _workflowGlobalFunction('appendCommandEcho');
+  if (appendCommandEcho) appendCommandEcho(cmd, tabId);
   if (!workflowCatalogItems.length) {
     try { await reloadWorkflowCatalog(); }
     catch (err) {
@@ -1054,11 +1217,11 @@ async function handleWorkflowTerminalCommand(cmd, tabId = activeTabId) {
 
 function _workflowRuntimeHintFor(workflow) {
   const value = workflowCliName(workflow);
-  return _runtimeHint(value, workflow.title || value, value);
+  return _workflowRuntimeHint(value, workflow.title || value, value);
 }
 
 function _workflowInputHint(input) {
-  const item = _runtimePlaceholderHint(
+  const item = _workflowRuntimePlaceholderHint(
     `<${input.id}>`,
     input.label || input.id,
   );
@@ -1076,9 +1239,9 @@ function _runtimeWorkflowContext() {
     show: workflowHints,
     run: workflowHints,
     __positional__: [
-      _runtimeHint('list', 'List workflows'),
-      _runtimeHint('show', 'Show workflow steps', 'show '),
-      _runtimeHint('run', 'Run a workflow', 'run '),
+      _workflowRuntimeHint('list', 'List workflows'),
+      _workflowRuntimeHint('show', 'Show workflow steps', 'show '),
+      _workflowRuntimeHint('run', 'Run a workflow', 'run '),
     ],
   };
   const sequenceArgHints = {};
@@ -1094,11 +1257,11 @@ function _runtimeWorkflowContext() {
         expectsValue.push(flag);
         argHints[flag] = [_workflowInputHint(input)];
       }
-      workflowFlags.push(_runtimeHint(flag, input.label || input.id, `${flag} `));
+      workflowFlags.push(_workflowRuntimeHint(flag, input.label || input.id, `${flag} `));
     });
     sequenceArgHints[`run ${workflowName}`] = workflowFlags;
   });
-  return _runtimeContextSpec({ flags, expectsValue, argHints, sequenceArgHints });
+  return _workflowRuntimeContextSpec({ flags, expectsValue, argHints, sequenceArgHints });
 }
 
 document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(btn => {
@@ -1119,12 +1282,26 @@ document.getElementById('workflow-editor-overlay')?.addEventListener('click', (e
 });
 
 if (typeof window !== 'undefined') {
-  window.renderWorkflowItems = renderWorkflowItems;
-  window.reloadWorkflowCatalog = reloadWorkflowCatalog;
-  window.ensureWorkflowCatalogLoaded = ensureWorkflowCatalogLoaded;
-  window.handleWorkflowTerminalCommand = handleWorkflowTerminalCommand;
-  window._runtimeWorkflowContext = _runtimeWorkflowContext;
-  window.openWorkflowEditor = openWorkflowEditor;
-  window.closeWorkflowEditor = closeWorkflowEditor;
   if (workflowCatalogItems.length) renderWorkflowItems(workflowCatalogItems, { emitCatalogEvent: false });
+  if (typeof importedSetWorkflowHandlers === 'function') {
+    importedSetWorkflowHandlers({
+    renderWorkflowItems,
+    reloadWorkflowCatalog,
+    ensureWorkflowCatalogLoaded,
+    handleWorkflowTerminalCommand,
+    _runtimeWorkflowContext,
+    openWorkflowEditor,
+    closeWorkflowEditor,
+    });
+  }
 }
+
+export {
+  renderWorkflowItems,
+  reloadWorkflowCatalog,
+  ensureWorkflowCatalogLoaded,
+  handleWorkflowTerminalCommand,
+  _runtimeWorkflowContext,
+  openWorkflowEditor,
+  closeWorkflowEditor,
+};

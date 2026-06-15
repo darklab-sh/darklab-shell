@@ -146,7 +146,7 @@ function loadStatusMonitor({
   window.matchMedia = vi.fn(() => ({ matches: mobile }))
   if (openHistoryWithFilters) window.openHistoryWithFilters = openHistoryWithFilters
   if (restoreHistoryRun) window.restoreHistoryRun = restoreHistoryRun
-  return fromDomScripts(
+  const loaded = fromDomScripts(
     [
       'app/static/js/features/status-monitor/status_monitor_core.js',
       'app/static/js/features/status-monitor/status_monitor_data.js',
@@ -175,10 +175,36 @@ function loadStatusMonitor({
       apiFetch,
       activateTab,
       showToast,
-      openStatusMonitor: window.openStatusMonitor,
-      closeStatusMonitor: window.closeStatusMonitor,
+      openStatusMonitor: exportedOpenStatusMonitor,
+      closeStatusMonitor: exportedCloseStatusMonitor,
+      refreshStatusMonitor: exportedRefreshStatusMonitor,
+      __constellationTestHelpers: exportedConstellationTestHelpers,
     }`,
+    `window.apiFetch = apiFetch;
+     window.showToast = showToast;
+     window.getTabs = getTabs;
+     window.activateTab = activateTab;
+     if (typeof pauseBackgroundRunStreamsForStatusMonitor === 'function') {
+       window.pauseBackgroundRunStreamsForStatusMonitor = pauseBackgroundRunStreamsForStatusMonitor;
+     }
+     if (typeof resumeBackgroundRunStreamsAfterStatusMonitor === 'function') {
+       window.resumeBackgroundRunStreamsAfterStatusMonitor = resumeBackgroundRunStreamsAfterStatusMonitor;
+     }
+     if (typeof attachActiveRunFromMonitor === 'function') {
+       window.attachActiveRunFromMonitor = attachActiveRunFromMonitor;
+     }
+     if (typeof attachInteractivePtyCommand === 'function') {
+       window.attachInteractivePtyCommand = attachInteractivePtyCommand;
+     }
+     if (typeof killActiveRunFromMonitor === 'function') {
+       window.killActiveRunFromMonitor = killActiveRunFromMonitor;
+     }
+     if (typeof bindMobileSheet === 'function') {
+       window.bindMobileSheet = bindMobileSheet;
+     }`,
   )
+  window.__constellationTestHelpers = loaded.__constellationTestHelpers
+  return loaded
 }
 
 describe('Status Monitor', () => {
@@ -225,7 +251,7 @@ describe('Status Monitor', () => {
   })
 
   it('renders active-run CPU and memory telemetry when available', async () => {
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [
         {
           run_id: 'run-telemetry',
@@ -264,7 +290,7 @@ describe('Status Monitor', () => {
   })
 
   it('renders unavailable telemetry chips when backend stats are absent', async () => {
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [
         {
           run_id: 'run-no-telemetry',
@@ -284,7 +310,7 @@ describe('Status Monitor', () => {
   })
 
   it('labels active runs owned by another live browser as monitor-only', async () => {
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [
         {
           run_id: 'run-other-client',
@@ -415,7 +441,7 @@ describe('Status Monitor', () => {
     const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const tabs = [{ id: 'tab-2', label: 'sleep 60', runId: 'run-other-client', attachMode: 'attached' }]
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       attachActiveRunFromMonitor,
       killActiveRunFromMonitor,
       tabs,
@@ -598,7 +624,7 @@ describe('Status Monitor', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -616,7 +642,7 @@ describe('Status Monitor', () => {
     await openStatusMonitor({ source: 'test' })
     expect(document.querySelectorAll('.status-monitor-item')).toHaveLength(1)
 
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
 
     expect(document.querySelectorAll('.status-monitor-item')).toHaveLength(0)
     expect(document.querySelector('.status-monitor-empty')?.textContent).toBe('No active runs.')
@@ -625,12 +651,12 @@ describe('Status Monitor', () => {
   })
 
   it('does not reload history insights on every active-run refresh', async () => {
-    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[], []] })
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[], []] })
 
     await openStatusMonitor({ source: 'test' })
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
     closeStatusMonitor()
@@ -655,7 +681,7 @@ describe('Status Monitor', () => {
       max_day_count: 2,
       activity: [{ date: '2026-01-01', count: 2, succeeded: 1, failed: 0, incomplete: 1 }],
     }
-    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor, apiFetch } = loadStatusMonitor({
       runs: [
         [{
           run_id: 'run-transition',
@@ -671,7 +697,7 @@ describe('Status Monitor', () => {
     await openStatusMonitor({ source: 'test' })
     const initialSignature = document.querySelector('.status-monitor-showcase-grid')?.dataset.visualSignature
 
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
 
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(2)
     expect(document.querySelector('.status-monitor-showcase-grid')?.dataset.visualSignature).not.toBe(initialSignature)
@@ -683,7 +709,7 @@ describe('Status Monitor', () => {
     // Insights-refresh trigger is locked to active-run count >0 → 0 only.
     // Starting a new run should not retrigger the load — the new run is
     // visible in the active runs panel and the pulse strip live.
-    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor, apiFetch } = loadStatusMonitor({
       runs: [
         [],
         [{
@@ -698,7 +724,7 @@ describe('Status Monitor', () => {
     await openStatusMonitor({ source: 'test' })
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
     closeStatusMonitor()
@@ -850,7 +876,7 @@ describe('Status Monitor', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -899,7 +925,7 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-pulse-line')).not.toBeNull()
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     const firstCpuSignature = strip?.dataset.pulseSignature
     expect(firstCpuSignature).toBe('1:8')
     expect(strip?.dataset.pulseCpuSamples).toBe('40')
@@ -910,13 +936,13 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-pulse-track')).not.toBeNull()
 
     vi.setSystemTime(new Date('2026-01-01T00:00:02Z'))
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(strip?.dataset.pulseSignature).toBe(firstCpuSignature)
     expect(strip?.dataset.pulseCpuSamples).toBe('40,44')
     expect(document.querySelector('.status-monitor-summary')?.textContent).toContain('44% avg CPU')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:03Z'))
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(strip?.dataset.pulseSignature).toBe('1:10')
     expect(strip?.dataset.pulseCpuSamples).toBe('40,44,51')
     expect(strip?.dataset.pulseLoad).toBe('busy')
@@ -964,7 +990,7 @@ describe('Status Monitor', () => {
   })
 
   it('opens as a status dashboard when there are no active runs', async () => {
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ runs: [] })
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({ runs: [] })
 
     await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
@@ -1056,7 +1082,7 @@ describe('Status Monitor', () => {
     const runsSection = document.querySelector('.status-monitor-runs-section')
     const visualGrid = document.querySelector('.status-monitor-showcase-grid')
     const eventRow = document.querySelector('.status-monitor-event-row')
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(document.querySelector('.status-monitor-pulse-strip')).toBe(pulseStrip)
     expect(document.querySelector('.status-monitor-runs-section')).toBe(runsSection)
     expect(document.querySelector('.status-monitor-showcase-grid')).toBe(visualGrid)
@@ -1107,7 +1133,7 @@ describe('Status Monitor', () => {
   })
 
   it('keeps dashboard fallbacks visible when status data routes fail', async () => {
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [],
       routeErrors: {
         status: { error: 'status route down' },
@@ -1417,7 +1443,7 @@ describe('Status Monitor', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+    const { openStatusMonitor, closeStatusMonitor, refreshStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -1464,13 +1490,13 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 100%')
     expect(document.querySelector('.status-monitor-meter-cpu')?.style.getPropertyValue('--meter-percent')).toBe('100%')
     expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:02Z'))
-    await window.refreshStatusMonitor()
+    await refreshStatusMonitor()
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 100%')
     expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 12 KB')
 

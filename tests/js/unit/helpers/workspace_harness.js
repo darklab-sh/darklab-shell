@@ -1,24 +1,25 @@
 import { vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
+import { stripEsmExports } from './extract.js'
 
-const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/search_core.js'), 'utf8')
-const SEARCH_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search.js'), 'utf8')
-const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/workspace_core.js'), 'utf8')
-const ENTITY_METADATA_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
-const VIEWER_FORMATS_SRC = readFileSync(
+const SEARCH_CORE_SRC = stripEsmExports(readFileSync(resolve(process.cwd(), 'app/static/js/core/search_core.js'), 'utf8'))
+const SEARCH_SRC = stripEsmExports(readFileSync(resolve(process.cwd(), 'app/static/js/search.js'), 'utf8'))
+const CORE_SRC = stripEsmExports(readFileSync(resolve(process.cwd(), 'app/static/js/core/workspace_core.js'), 'utf8'))
+const ENTITY_METADATA_SRC = stripEsmExports(readFileSync(resolve(process.cwd(), 'app/static/js/ui/ui_entity_metadata.js'), 'utf8'))
+const VIEWER_FORMATS_SRC = stripEsmExports(readFileSync(
   resolve(process.cwd(), 'app/static/js/features/workspace/workspace_viewer_formats.js'),
   'utf8',
-)
-const SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace.js'), 'utf8')
-const AUTOCOMPLETE_CACHE_SRC = readFileSync(
+))
+const SRC = stripEsmExports(readFileSync(resolve(process.cwd(), 'app/static/js/workspace.js'), 'utf8'))
+const AUTOCOMPLETE_CACHE_SRC = stripEsmExports(readFileSync(
   resolve(process.cwd(), 'app/static/js/features/workspace/workspace_autocomplete_cache.js'),
   'utf8',
-)
-const DRAG_DROP_SRC = readFileSync(
+))
+const DRAG_DROP_SRC = stripEsmExports(readFileSync(
   resolve(process.cwd(), 'app/static/js/features/workspace/workspace_drag_drop.js'),
   'utf8',
-)
+))
 
 export function responseJson(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -80,6 +81,7 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
   testWindow.addEventListener = vi.fn()
   testWindow.removeEventListener = vi.fn()
   testWindow.dispatchEvent = vi.fn()
+  testWindow.apiFetch = apiFetch
   const globals = {
     document,
     window: testWindow,
@@ -172,6 +174,12 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     anchor.remove()
   }
   Object.assign(globals, overrides)
+  globals.window.apiFetch = apiFetch
+  globals.window.showConfirm = globals.showConfirm
+  globals.window.applyMobileTextInputDefaults = globals.applyMobileTextInputDefaults
+  globals.window.bindPressable = globals.bindPressable
+  globals.window.hideWorkspaceOverlay = globals.hideWorkspaceOverlay
+  globals.window.workspaceFileList = globals.workspaceFileList
   const names = Object.keys(globals)
   const values = Object.values(globals)
   const returnExpr = `

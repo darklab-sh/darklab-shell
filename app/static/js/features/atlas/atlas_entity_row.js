@@ -166,7 +166,14 @@ function renderProjectEntityRow({
   return row;
 }
 
-window.DarklabAtlasEntityRow = {
+const DarklabAtlasEntityRow = {
+  renderAtlasEntityRow,
+  renderProjectEntityRow,
+};
+
+
+export {
+  DarklabAtlasEntityRow,
   renderAtlasEntityRow,
   renderProjectEntityRow,
 };

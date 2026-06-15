@@ -24,6 +24,12 @@ function dispatchScopeStorage(key, newValue) {
   window.dispatchEvent(event)
 }
 
+function expectScopedSurfacesReloaded(surfaces) {
+  Object.entries(surfaces).forEach(([name, refresh]) => {
+    expect(refresh, name).toHaveBeenCalledTimes(1)
+  })
+}
+
 async function loadTeamScopeHarness({
   apiFetch = defaultApiFetch(),
   sessionId = 'tok_team_scope',
@@ -40,6 +46,10 @@ async function loadTeamScopeHarness({
     invalidateOptionsSecrets: vi.fn(() => Promise.resolve()),
     ...surfaces,
   }
+  window.refreshActiveProjectContext = surfaceSpies.refreshActiveProjectContext
+  window.refreshStatusMonitor = surfaceSpies.refreshStatusMonitor
+  window.refreshActiveRuns = surfaceSpies.refreshActiveRuns
+  window.invalidateOptionsSecrets = surfaceSpies.invalidateOptionsSecrets
   const harness = await loadAppFns({
     apiFetch,
     sessionId,
@@ -48,11 +58,10 @@ async function loadTeamScopeHarness({
     loadRecentValues: surfaceSpies.loadRecentValues,
     refreshWorkspaceFileCache: surfaceSpies.refreshWorkspaceFileCache,
     refreshActiveRuns: surfaceSpies.refreshActiveRuns,
+    refreshActiveProjectContext: surfaceSpies.refreshActiveProjectContext,
+    refreshStatusMonitor: surfaceSpies.refreshStatusMonitor,
+    invalidateOptionsSecrets: surfaceSpies.invalidateOptionsSecrets,
   })
-  window.refreshActiveProjectContext = surfaceSpies.refreshActiveProjectContext
-  window.refreshStatusMonitor = surfaceSpies.refreshStatusMonitor
-  window.refreshActiveRuns = surfaceSpies.refreshActiveRuns
-  window.invalidateOptionsSecrets = surfaceSpies.invalidateOptionsSecrets
   return { ...harness, surfaces: surfaceSpies }
 }
 
@@ -72,15 +81,15 @@ describe('team scope selector', () => {
         member: { role: 'owner' },
       }],
     })
-    const { storage } = await loadTeamScopeHarness({
+    const { storage, DarklabTeamScope } = await loadTeamScopeHarness({
       apiFetch,
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_stale_1' },
     })
 
-    await window.DarklabTeamScope.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
 
-    expect(window.DarklabTeamScope.getActiveTeamId()).toBe('')
+    expect(DarklabTeamScope.getActiveTeamId()).toBe('')
     expect(storage.getItem(`active_team_id:${sessionId}`)).toBeNull()
     expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
     expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Personal')
@@ -97,21 +106,21 @@ describe('team scope selector', () => {
         member: { role: 'viewer', capabilities: ['view_team'] },
       }],
     })
-    await loadTeamScopeHarness({
+    const { DarklabTeamScope } = await loadTeamScopeHarness({
       apiFetch,
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_live_1' },
     })
 
-    await window.DarklabTeamScope.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
 
-    expect(window.DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({
+    expect(DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({
       id: 'team_live_1',
       capabilities: ['view_team'],
     }))
-    expect(window.DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
-    expect(window.DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
-    expect(window.teamScopeDeniedMessage('run commands in team scope'))
+    expect(DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
+    expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
+    expect(DarklabTeamScope.deniedMessage('run commands in team scope'))
       .toBe("View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.")
   })
 
@@ -125,13 +134,13 @@ describe('team scope selector', () => {
         member: { role: 'operator' },
       }],
     })
-    await loadTeamScopeHarness({
+    const { DarklabTeamScope } = await loadTeamScopeHarness({
       apiFetch,
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_live_1' },
     })
 
-    window.openTeamScopeSelector()
+    DarklabTeamScope.open()
 
     await vi.waitFor(() => {
       expect(document.querySelector('[data-team-scope-option="team_live_1"]')?.textContent).toContain('Live team')
@@ -150,15 +159,15 @@ describe('team scope selector', () => {
     const apiFetch = defaultApiFetch({
       teamResponse: apiResponse({}, { ok: false, status: 401, statusText: 'Unauthorized' }),
     })
-    const { logClientError, storage } = await loadTeamScopeHarness({
+    const { DarklabTeamScope, logClientError, storage } = await loadTeamScopeHarness({
       apiFetch,
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_revoked_1' },
     })
 
-    await window.DarklabTeamScope.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
 
-    expect(window.DarklabTeamScope.getActiveTeamId()).toBe('')
+    expect(DarklabTeamScope.getActiveTeamId()).toBe('')
     expect(storage.getItem(`active_team_id:${sessionId}`)).toBeNull()
     expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
     expect(document.getElementById('team-scope-trigger').classList.contains('is-error')).toBe(false)
@@ -174,13 +183,13 @@ describe('team scope selector', () => {
         { ok: false, status: 500, statusText: 'Internal Server Error' },
       ),
     })
-    await loadTeamScopeHarness({
+    const { DarklabTeamScope } = await loadTeamScopeHarness({
       apiFetch,
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_cached_1' },
     })
 
-    window.openTeamScopeSelector()
+    DarklabTeamScope.open()
 
     await vi.waitFor(() => {
       expect(document.getElementById('team-scope-status').textContent).toBe('Could not load teams.')
@@ -201,23 +210,15 @@ describe('team scope selector', () => {
         member: { role: 'operator' },
       }],
     })
-    const { surfaces } = await loadTeamScopeHarness({ apiFetch, sessionId })
-    await window.DarklabTeamScope.refreshTeamScopes()
+    const { DarklabTeamScope, surfaces } = await loadTeamScopeHarness({ apiFetch, sessionId })
+    await DarklabTeamScope.refreshTeamScopes()
     Object.values(surfaces).forEach((refresh) => refresh.mockClear())
 
     dispatchScopeStorage(`active_team_id:${sessionId}`, 'team_live_1')
 
-    expect(window.DarklabTeamScope.getActiveTeamId()).toBe('team_live_1')
+    expect(DarklabTeamScope.getActiveTeamId()).toBe('team_live_1')
     expect(document.getElementById('team-scope-label').textContent).toBe('Live team')
-    ;[
-      surfaces.reloadSessionHistory,
-      surfaces.loadRecentValues,
-      surfaces.refreshWorkspaceFileCache,
-      surfaces.refreshActiveRuns,
-      surfaces.refreshActiveProjectContext,
-      surfaces.refreshStatusMonitor,
-      surfaces.invalidateOptionsSecrets,
-    ].forEach((refresh) => expect(refresh).toHaveBeenCalledTimes(1))
+    expectScopedSurfacesReloaded(surfaces)
   })
 
   it('reloads scoped surfaces when selecting Personal from the scope selector', async () => {
@@ -230,29 +231,21 @@ describe('team scope selector', () => {
         member: { role: 'operator' },
       }],
     })
-    const { storage, surfaces } = await loadTeamScopeHarness({
+    const { DarklabTeamScope, storage, surfaces } = await loadTeamScopeHarness({
       apiFetch,
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_live_1' },
     })
-    await window.DarklabTeamScope.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
 
     Object.values(surfaces).forEach((refresh) => refresh.mockClear())
-    window.openTeamScopeSelector()
+    DarklabTeamScope.open()
     document.querySelector('[data-team-scope-option="personal"]').click()
 
-    expect(window.DarklabTeamScope.getActiveTeamId()).toBe('')
+    expect(DarklabTeamScope.getActiveTeamId()).toBe('')
     expect(storage.getItem(`active_team_id:${sessionId}`)).toBeNull()
     expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
     expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Personal')
-    ;[
-      surfaces.reloadSessionHistory,
-      surfaces.loadRecentValues,
-      surfaces.refreshWorkspaceFileCache,
-      surfaces.refreshActiveRuns,
-      surfaces.refreshActiveProjectContext,
-      surfaces.refreshStatusMonitor,
-      surfaces.invalidateOptionsSecrets,
-    ].forEach((refresh) => expect(refresh).toHaveBeenCalledTimes(1))
+    expectScopedSurfacesReloaded(surfaces)
   })
 })

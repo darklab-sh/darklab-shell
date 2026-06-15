@@ -1,4 +1,144 @@
 // History run restore and source-line highlight helpers.
+import { getTab as importedGetTab, getTabs as importedGetTabs } from '../../core/state.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from '../../runtime_bridge.js';
+import {
+  appendLine as importedAppendLine,
+  hasPendingOutputBatch as importedHasPendingOutputBatch,
+  renderCommandOutcomeSummary as importedRenderCommandOutcomeSummary,
+} from '../../output.js';
+import {
+  clearTab as importedClearTab,
+  createTab as importedCreateTab,
+  getOutput as importedGetOutput,
+  setTabStatus as importedSetTabStatus,
+} from '../../tabs.js';
+import {
+  _historyExitClass as importedHistoryExitClass,
+  _historyExitLabel as importedHistoryExitLabel,
+} from './history_rows.js';
+import { setHistoryRestoreHandlers as importedSetHistoryRestoreHandlers } from './history_restore_bridge.js';
+
+const HISTORY_RESTORE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyRestoreGlobalFunction(name) {
+  const fn = HISTORY_RESTORE_GLOBAL && HISTORY_RESTORE_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _historyRestoreTabs() {
+  const getTabsFn = _historyRestoreGlobalFunction('getTabs')
+    || (typeof importedGetTabs !== 'undefined' && importedGetTabs);
+  if (typeof getTabsFn === 'function') return getTabsFn();
+  const stateTabs = HISTORY_RESTORE_GLOBAL.tabs;
+  return Array.isArray(stateTabs) ? stateTabs : [];
+}
+
+function _historyRestoreGetTab(tabId) {
+  const getTabFn = _historyRestoreGlobalFunction('getTab')
+    || (typeof importedGetTab !== 'undefined' && importedGetTab);
+  return typeof getTabFn === 'function' ? getTabFn(tabId) : null;
+}
+
+function _historyRestoreGetOutput(tabId) {
+  const getOutputForTab = _historyRestoreGlobalFunction('getOutput')
+    || (typeof importedGetOutput !== 'undefined' && importedGetOutput);
+  return typeof getOutputForTab === 'function' ? getOutputForTab(tabId) : null;
+}
+
+function _historyRestoreCreateTab(label) {
+  const create = _historyRestoreGlobalFunction('createTab')
+    || (typeof importedCreateTab !== 'undefined' && importedCreateTab);
+  return typeof create === 'function' ? create(label) : null;
+}
+
+function _historyRestoreClearTab(tabId) {
+  const clear = _historyRestoreGlobalFunction('clearTab')
+    || (typeof importedClearTab !== 'undefined' && importedClearTab);
+  if (typeof clear === 'function') clear(tabId);
+}
+
+function _historyRestoreAppendLine(text, cls, tabId, metadata = null) {
+  const append = _historyRestoreGlobalFunction('appendLine')
+    || (typeof importedAppendLine !== 'undefined' && importedAppendLine);
+  if (typeof append === 'function') append(text, cls, tabId, metadata);
+}
+
+function _historyRestoreSetTabStatus(tabId, status) {
+  const setStatus = _historyRestoreGlobalFunction('setTabStatus')
+    || (typeof importedSetTabStatus !== 'undefined' && importedSetTabStatus);
+  if (typeof setStatus === 'function') setStatus(tabId, status);
+}
+
+function _historyRestoreApiFetch(url, options) {
+  const api = (
+    typeof importedRuntimeApiFetch === 'function'
+    && typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+  )
+    ? importedRuntimeApiFetch
+    : _historyRestoreGlobalFunction('apiFetch');
+  if (typeof api === 'function') return options === undefined ? api(url) : api(url, options);
+  return options === undefined ? fetch(url) : fetch(url, options);
+}
+
+function _historyRestoreAppendCommandEcho(tabId, command) {
+  const append = _historyRestoreGlobalFunction('_appendHistoryCommandEcho');
+  if (typeof append === 'function') {
+    append(tabId, command);
+    return;
+  }
+  _historyRestoreAppendLine(command, 'prompt-echo', tabId);
+}
+
+function _historyRestoreOutputLineMetadata(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const metadata = {};
+  if (Array.isArray(entry.signals) && entry.signals.length) metadata.signals = entry.signals;
+  if (typeof entry.kind === 'string' && entry.kind) metadata.kind = entry.kind;
+  if (typeof entry.role === 'string' && entry.role) metadata.role = entry.role;
+  if (Number.isInteger(entry.line_index)) metadata.line_index = entry.line_index;
+  if (Number.isInteger(entry.line_number)) metadata.line_number = entry.line_number;
+  if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;
+  if (typeof entry.target === 'string' && entry.target) metadata.target = entry.target;
+  return Object.keys(metadata).length ? metadata : null;
+}
+
+function _historyRestoreAppendOutputLine(entry, tabId) {
+  const append = _historyRestoreGlobalFunction('_appendHistoryOutputLine');
+  if (typeof append === 'function') {
+    append(entry, tabId);
+    return;
+  }
+  if (entry && typeof entry === 'object') {
+    const text = String(entry.text || '');
+    const cls = String(entry.cls || '');
+    const metadata = _historyRestoreOutputLineMetadata(entry);
+    _historyRestoreAppendLine(text, cls, tabId, metadata);
+    return;
+  }
+  _historyRestoreAppendLine(String(entry || ''), '', tabId);
+}
+
+function _historyRestoreExitLabel(exitCode) {
+  const label = (typeof importedHistoryExitLabel !== 'undefined' && importedHistoryExitLabel)
+    || _historyRestoreGlobalFunction('_historyExitLabel');
+  return typeof label === 'function' ? label(exitCode) : `exit ${exitCode ?? 'unknown'}`;
+}
+
+function _historyRestoreExitClass(exitCode) {
+  const cls = (typeof importedHistoryExitClass !== 'undefined' && importedHistoryExitClass)
+    || _historyRestoreGlobalFunction('_historyExitClass');
+  return typeof cls === 'function' ? cls(exitCode) : '';
+}
+
+function _historyRestoreRenderCommandOutcomeSummary(tabId, outcome) {
+  const render = _historyRestoreGlobalFunction('renderCommandOutcomeSummary')
+    || (typeof importedRenderCommandOutcomeSummary !== 'undefined' && importedRenderCommandOutcomeSummary);
+  if (typeof render === 'function') render(tabId, outcome);
+}
 
 function _historyRunIdentity(run) {
   return String(run?.id || run?.run_id || '').trim();
@@ -7,7 +147,7 @@ function _historyRunIdentity(run) {
 function _tabForHistoryRun(run) {
   const runId = _historyRunIdentity(run);
   if (!runId) return null;
-  return tabs.find(t => (
+  return _historyRestoreTabs().find(t => (
     t && (String(t.historyRunId || '') === runId || String(t.runId || '') === runId)
   )) || null;
 }
@@ -29,7 +169,7 @@ function _scrollHistoryHighlightIntoView(out, line) {
 }
 
 function _highlightRestoredHistoryLine(tabId, { lineNumber = null, lineIndex = null } = {}) {
-  const out = typeof getOutput === 'function' ? getOutput(tabId) : null;
+  const out = _historyRestoreGetOutput(tabId);
   if (!out) return false;
   const cssEscape = value => (
     typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function'
@@ -48,7 +188,7 @@ function _highlightRestoredHistoryLine(tabId, { lineNumber = null, lineIndex = n
     node.classList.remove('history-source-highlight');
   });
   line.classList.add('history-source-highlight');
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  const tab = _historyRestoreGetTab(tabId);
   if (tab) {
     tab.followOutput = false;
   }
@@ -59,7 +199,9 @@ function _highlightRestoredHistoryLine(tabId, { lineNumber = null, lineIndex = n
 }
 
 function _historyHasPendingOutput(tabId) {
-  return typeof hasPendingOutputBatch === 'function' && hasPendingOutputBatch(tabId);
+  const hasPending = _historyRestoreGlobalFunction('hasPendingOutputBatch')
+    || (typeof importedHasPendingOutputBatch !== 'undefined' && importedHasPendingOutputBatch);
+  return typeof hasPending === 'function' && hasPending(tabId);
 }
 
 function _scheduleRestoredHistoryLineHighlight(tabId, options) {
@@ -86,7 +228,7 @@ function _scheduleRestoredHistoryLineHighlight(tabId, options) {
 }
 
 function _suppressHistoryRestoreStatusPeek(tabId) {
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  const tab = _historyRestoreGetTab(tabId);
   if (!tab) return;
   tab.suppressStatusMonitorPeekHold = true;
   const setTimer = typeof window !== 'undefined' && typeof window.setTimeout === 'function'
@@ -94,7 +236,7 @@ function _suppressHistoryRestoreStatusPeek(tabId) {
     : (typeof setTimeout === 'function' ? setTimeout : null);
   if (!setTimer) return;
   setTimer(() => {
-    const live = typeof getTab === 'function' ? getTab(tabId) : null;
+    const live = _historyRestoreGetTab(tabId);
     if (live) delete live.suppressStatusMonitorPeekHold;
   }, 0);
 }
@@ -106,20 +248,20 @@ function restoreHistoryRunIntoTab(run, {
   highlightLineIndex = null,
 } = {}) {
   if (!run || !run.id) return Promise.reject(new Error('missing run id'));
-  const existing = targetTabId ? getTab(targetTabId) : _tabForHistoryRun(run);
+  const existing = targetTabId ? _historyRestoreGetTab(targetTabId) : _tabForHistoryRun(run);
   const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
   const restoreUrl = run.full_output_available
     ? `/history/${run.id}?json`
     : `/history/${run.id}?json&preview=1`;
 
-  return apiFetch(restoreUrl)
+  return _historyRestoreApiFetch(restoreUrl)
     .then(r => r.json())
     .then(fullRun => {
       const previewNotice = fullRun.preview_notice || null;
-      const tabId = targetTabId || (canUpgradeExisting ? existing.id : createTab(fullRun.command));
+      const tabId = targetTabId || (canUpgradeExisting ? existing.id : _historyRestoreCreateTab(fullRun.command));
       if (!tabId) throw new Error('failed to create restore tab');
-      if (typeof clearTab === 'function') clearTab(tabId);
-      const t = getTab(tabId);
+      _historyRestoreClearTab(tabId);
+      const t = _historyRestoreGetTab(tabId);
       if (t) {
         t.command = fullRun.command;
         t.runId = null;
@@ -131,24 +273,22 @@ function restoreHistoryRunIntoTab(run, {
         t.reconnectedRun = false;
         t.commandOutcomeSummary = fullRun.command_outcome_summary || fullRun.output_outcome_summary || null;
       }
-      _appendHistoryCommandEcho(tabId, fullRun.command);
+      _historyRestoreAppendCommandEcho(tabId, fullRun.command);
       const outputLines = Array.isArray(fullRun.output_entries) ? fullRun.output_entries : (fullRun.output || []);
-      outputLines.forEach(line => _appendHistoryOutputLine(line, tabId));
-      if (previewNotice) appendLine(previewNotice, 'notice', tabId);
-      appendLine(
-        `[history — ${_historyExitLabel(fullRun.exit_code)}]`,
-        _historyExitClass(fullRun.exit_code),
+      outputLines.forEach(line => _historyRestoreAppendOutputLine(line, tabId));
+      if (previewNotice) _historyRestoreAppendLine(previewNotice, 'notice', tabId);
+      _historyRestoreAppendLine(
+        `[history — ${_historyRestoreExitLabel(fullRun.exit_code)}]`,
+        _historyRestoreExitClass(fullRun.exit_code),
         tabId
       );
-      if (typeof renderCommandOutcomeSummary === 'function') {
-        renderCommandOutcomeSummary(tabId, t && t.commandOutcomeSummary);
-      }
+      _historyRestoreRenderCommandOutcomeSummary(tabId, t && t.commandOutcomeSummary);
       _suppressHistoryRestoreStatusPeek(tabId);
-      if (typeof setTabStatus === 'function') {
-        setTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');
-      }
-      if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
-      if (hidePanelOnSuccess) hideHistoryPanel();
+      _historyRestoreSetTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');
+      const hideKill = _historyRestoreGlobalFunction('hideTabKillBtn');
+      if (hideKill) hideKill(tabId);
+      const hidePanel = _historyRestoreGlobalFunction('hideHistoryPanel');
+      if (hidePanelOnSuccess && hidePanel) hidePanel();
       if (highlightLineNumber || Number.isInteger(highlightLineIndex)) {
         _scheduleRestoredHistoryLineHighlight(tabId, {
           lineNumber: highlightLineNumber,
@@ -169,16 +309,21 @@ function restoreHistoryRun(runOrId, options = {}) {
   });
 }
 
-if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _historyRunIdentity,
-    _tabForHistoryRun,
-    _scrollHistoryHighlightIntoView,
-    _highlightRestoredHistoryLine,
-    _historyHasPendingOutput,
-    _scheduleRestoredHistoryLineHighlight,
-    _suppressHistoryRestoreStatusPeek,
-    restoreHistoryRunIntoTab,
+if (typeof importedSetHistoryRestoreHandlers === 'function') {
+  importedSetHistoryRestoreHandlers({
     restoreHistoryRun,
+    restoreHistoryRunIntoTab,
   });
 }
+
+export {
+  _highlightRestoredHistoryLine,
+  _historyHasPendingOutput,
+  _historyRunIdentity,
+  _scheduleRestoredHistoryLineHighlight,
+  _scrollHistoryHighlightIntoView,
+  _suppressHistoryRestoreStatusPeek,
+  _tabForHistoryRun,
+  restoreHistoryRun,
+  restoreHistoryRunIntoTab,
+};

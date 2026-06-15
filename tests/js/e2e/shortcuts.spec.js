@@ -577,10 +577,14 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
   })
 
-  test('Alt+, opens the options panel from the composer', async ({ page }) => {
+  test('Alt+, opens the options panel from the composer and Alt+Tab cycles modal tabs', async ({ page }) => {
     await dispatchMacOptionKey(page, '#cmd', { key: '≤', code: 'Comma', altKey: true })
     await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')
+    await page.locator('#options-tab-preferences').click()
+    await expect(page.locator('#options-tab-preferences')).toHaveAttribute('aria-selected', 'true')
+    await dispatchMacOptionKey(page, '#options-modal', { key: 'Tab', code: 'Tab', altKey: true })
+    await expect(page.locator('#options-tab-secrets')).toHaveAttribute('aria-selected', 'true')
   })
 
   test('Alt+Shift+T opens the theme selector from the composer', async ({ page }) => {
@@ -614,14 +618,28 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(commands).not.toHaveClass(/\bopen\b/)
   })
 
-  test('Alt+P toggles the Projects modal from the composer', async ({ page }) => {
+  test('Alt+P toggles Projects and Alt+Tab cycles Atlas modal tabs', async ({ page }) => {
     const projects = page.locator('#project-workspace-overlay')
     await expect(projects).not.toHaveClass(/\bopen\b/)
     await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
     await expect(projects).toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')
-    await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
+    await page.keyboard.press('Escape')
     await expect(projects).not.toHaveClass(/\bopen\b/)
+    await page.locator('#cmd').focus()
+    await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
+    await expect(projects).toHaveClass(/\bopen\b/)
+    await projects.click({ position: { x: 4, y: 4 } })
+    await expect(projects).not.toHaveClass(/\bopen\b/)
+
+    const atlas = page.locator('#atlas-overlay')
+    await page.locator('#cmd').focus()
+    await dispatchMacOptionKey(page, '#cmd', { key: 'å', code: 'KeyA', altKey: true })
+    await expect(atlas).toHaveClass(/\bopen\b/)
+    await expect(page.locator('[data-atlas-tab="findings"]')).toHaveClass(/\bis-active\b/)
+    await dispatchMacOptionKey(page, '#atlas-surface', { key: 'Tab', code: 'Tab', altKey: true })
+    await expect(page.locator('[data-atlas-tab="ip"]')).toHaveClass(/\bis-active\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
   })
 
   test('Alt+M toggles the Status Monitor from the composer', async ({ page }) => {
@@ -651,6 +669,12 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
     await expect(page.locator('#workspace-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/\bopen\b/)
     await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
     await expect(page.locator('#workspace-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')

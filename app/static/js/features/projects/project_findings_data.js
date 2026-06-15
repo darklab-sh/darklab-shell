@@ -1,3 +1,10 @@
+let exportedBoardColumnLimit = null;
+let exportedBoardWorkflowStates = null;
+let exportedBoardCardFromFinding = null;
+let exportedBoardColumnsFromFindings = null;
+let exportedBoardWorkflowState = null;
+let exportedDarklabProjectFindingsData = null;
+
 (function projectFindingsDataModule(global) {
   'use strict';
 
@@ -602,7 +609,7 @@
     };
   }
 
-  global.DarklabProjectFindingsData = {
+  const DarklabProjectFindingsData = {
     BOARD_COLUMN_LIMIT,
     BOARD_WORKFLOW_STATES,
     boardCardFromFinding,
@@ -610,4 +617,18 @@
     boardWorkflowState,
     createProjectFindingsDataController,
   };
+  exportedBoardColumnLimit = BOARD_COLUMN_LIMIT;
+  exportedBoardWorkflowStates = BOARD_WORKFLOW_STATES;
+  exportedBoardCardFromFinding = boardCardFromFinding;
+  exportedBoardColumnsFromFindings = boardColumnsFromFindings;
+  exportedBoardWorkflowState = boardWorkflowState;
+  exportedDarklabProjectFindingsData = DarklabProjectFindingsData;
 })(globalThis);
+
+export {
+  exportedBoardColumnLimit as BOARD_COLUMN_LIMIT,
+  exportedBoardWorkflowStates as BOARD_WORKFLOW_STATES,
+  exportedDarklabProjectFindingsData as DarklabProjectFindingsData,
+  exportedBoardCardFromFinding as boardCardFromFinding,
+  exportedBoardColumnsFromFindings as boardColumnsFromFindings,
+  exportedBoardWorkflowState as boardWorkflowState,};

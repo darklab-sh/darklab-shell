@@ -1,3 +1,6 @@
+import { workspaceFileList as importedWorkspaceFileList } from '../../core/dom.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+
 let _workspaceDragPath = '';
 let _workspaceDragKind = '';
 
@@ -5,16 +8,26 @@ function _workspaceDragApi() {
   return typeof window !== 'undefined' ? window : globalThis;
 }
 
-function _workspaceDragSourceFromEvent(event) {
+function _workspaceDragFileListRef() {
   const api = _workspaceDragApi();
-  const list = api.workspaceFileList || (typeof workspaceFileList !== 'undefined' ? workspaceFileList : null);
+  return api.workspaceFileList
+    || (typeof importedWorkspaceFileList !== 'undefined' && importedWorkspaceFileList)
+    || null;
+}
+
+function _workspaceDragShowConfirm() {
+  return (typeof importedShowConfirm !== 'undefined' && importedShowConfirm)
+    || (typeof _workspaceDragApi().showConfirm === 'function' ? _workspaceDragApi().showConfirm : null);
+}
+
+function _workspaceDragSourceFromEvent(event) {
+  const list = _workspaceDragFileListRef();
   const row = event.target && event.target.closest ? event.target.closest('.workspace-file-row[draggable="true"]') : null;
   return row && list && list.contains(row) ? row : null;
 }
 
 function _workspaceDropTargetFromEvent(event) {
-  const api = _workspaceDragApi();
-  const list = api.workspaceFileList || (typeof workspaceFileList !== 'undefined' ? workspaceFileList : null);
+  const list = _workspaceDragFileListRef();
   const row = event.target && event.target.closest ? event.target.closest('[data-workspace-drop-target="folder"]') : null;
   return row && list && list.contains(row) ? row : null;
 }
@@ -31,6 +44,7 @@ function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
 
 async function _handleWorkspaceDropMove(event) {
   const api = _workspaceDragApi();
+  const state = api.DarklabWorkspaceState || {};
   if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) return;
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
@@ -40,8 +54,9 @@ async function _handleWorkspaceDropMove(event) {
   const source = _workspaceDragPath;
   const kind = _workspaceDragKind === 'folder' ? 'folder' : 'file';
   if (!source) return;
-  const confirmed = typeof showConfirm === 'function'
-    ? await showConfirm({
+  const confirmMove = _workspaceDragShowConfirm();
+  const confirmed = typeof confirmMove === 'function'
+    ? await confirmMove({
         body: {
           text: `Move ${kind} ${source}?`,
           note: destination ? `Destination folder: ${destination}` : 'Destination folder: Files',
@@ -54,13 +69,19 @@ async function _handleWorkspaceDropMove(event) {
     : 'move';
   if (confirmed !== 'move') return;
   try {
-    await api.moveWorkspacePath(source, destination);
+    const movePath = typeof state.movePath === 'function'
+      ? state.movePath
+      : api.moveWorkspacePath;
+    if (typeof movePath === 'function') await movePath(source, destination);
   } catch (err) {
-    api._showWorkspaceToast(api._workspaceErrorMessage(err, 'Unable to move item'), 'error');
+    const message = typeof state.errorMessage === 'function'
+      ? state.errorMessage(err, 'Unable to move item')
+      : 'Unable to move item';
+    if (typeof api._showWorkspaceToast === 'function') api._showWorkspaceToast(message, 'error');
   }
 }
 
-const _workspaceDragFileList = _workspaceDragApi().workspaceFileList || (typeof workspaceFileList !== 'undefined' ? workspaceFileList : null);
+const _workspaceDragFileList = _workspaceDragFileListRef();
 
 _workspaceDragFileList?.addEventListener('dragstart', event => {
   const api = _workspaceDragApi();
@@ -108,10 +129,11 @@ _workspaceDragFileList?.addEventListener('drop', event => {
 });
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _workspaceDragSourceFromEvent,
-    _workspaceDropTargetFromEvent,
-    _workspaceCanDropOnFolder,
-    _handleWorkspaceDropMove,
-  });
 }
+
+export {
+  _handleWorkspaceDropMove,
+  _workspaceCanDropOnFolder,
+  _workspaceDropTargetFromEvent,
+  _workspaceDragSourceFromEvent,
+};

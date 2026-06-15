@@ -1,5 +1,51 @@
+import { DarklabHistoryCore as importedHistoryCore } from '../../core/history_core.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import { _historyCanManageHistory as importedHistoryCanManageHistory } from './history_mutations.js';
+import { activeTeamScopeCan as importedActiveTeamScopeCan } from '../team_scope.js';
+import { openEntityMetadataEditor as importedOpenEntityMetadataEditor } from '../projects/project_context_bridge.js';
+
+const HISTORY_ROWS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyRowsGlobalFunction(name) {
+  const fn = HISTORY_ROWS_GLOBAL?.[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _historyRowsCore() {
+  return (typeof importedHistoryCore !== 'undefined' && importedHistoryCore)
+    || null;
+}
+
+function _historyRowsShowToast(message, tone = 'success') {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || _historyRowsGlobalFunction('showToast');
+  if (typeof toast === 'function') toast(message, tone);
+}
+
+function _historyRowsActiveTeamScopeCan(capability) {
+  const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+    || null;
+  return typeof can === 'function' ? can(capability) : true;
+}
+
+function _historyRowsCanManageHistory() {
+  const canManage = (typeof importedHistoryCanManageHistory !== 'undefined' && importedHistoryCanManageHistory)
+    || _historyRowsGlobalFunction('_historyCanManageHistory');
+  return typeof canManage === 'function' ? canManage() : _historyRowsActiveTeamScopeCan('manage_history');
+}
+
+function _historyRowsUseMobileTerminalViewportMode() {
+  const useMobile = (
+    typeof importedUseMobileTerminalViewportMode !== 'undefined'
+    && importedUseMobileTerminalViewportMode
+  )
+    || null;
+  return typeof useMobile === 'function' ? useMobile() : false;
+}
+
 function _historyRelativeTime(startedAt, now = new Date()) {
-  return _historyCore().relativeTime(startedAt, now);
+  return _historyRowsCore().relativeTime(startedAt, now);
 }
 
 function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
@@ -50,23 +96,23 @@ function _appendHistoryMetadataBadges(parent, entity) {
 }
 
 function _historyExitCodeNumber(exitCode) {
-  return _historyCore().exitCodeNumber(exitCode);
+  return _historyRowsCore().exitCodeNumber(exitCode);
 }
 
 function _historyIsGracefulTerminationExitCode(exitCode) {
-  return _historyCore().isGracefulTerminationExitCode(exitCode);
+  return _historyRowsCore().isGracefulTerminationExitCode(exitCode);
 }
 
 function _historyIsFailedExitCode(exitCode) {
-  return _historyCore().isFailedExitCode(exitCode);
+  return _historyRowsCore().isFailedExitCode(exitCode);
 }
 
 function _historyExitLabel(exitCode) {
-  return _historyCore().exitLabel(exitCode);
+  return _historyRowsCore().exitLabel(exitCode);
 }
 
 function _historyExitClass(exitCode) {
-  return _historyCore().exitClass(exitCode);
+  return _historyRowsCore().exitClass(exitCode);
 }
 
 function _historyCountLabel(count, singular, plural) {
@@ -75,21 +121,19 @@ function _historyCountLabel(count, singular, plural) {
 }
 
 function _historyElapsedSeconds(run) {
-  return _historyCore().elapsedSeconds(run);
+  return _historyRowsCore().elapsedSeconds(run);
 }
 
 function _historyElapsedLabel(run) {
-  return _historyCore().elapsedLabel(run);
+  return _historyRowsCore().elapsedLabel(run);
 }
 
 function _historyCanEditMetadata() {
-  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
-  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+  return _historyRowsCanManageHistory();
 }
 
 function _historyCanDeleteItems() {
-  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
-  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+  return _historyRowsCanManageHistory();
 }
 
 function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
@@ -266,7 +310,7 @@ function _createHistoryEntry(run, isStarred, options = {}) {
 
   const actions = document.createElement('div');
   actions.className = 'history-actions';
-  const isMobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const isMobile = _historyRowsUseMobileTerminalViewportMode();
 
   const copyCommandBtn = document.createElement('button');
   copyCommandBtn.className = 'history-action-btn btn btn-secondary btn-compact';
@@ -385,42 +429,44 @@ function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
   if (action === 'compare') return true;
   if (action === 'edit-metadata') return true;
-  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const mobileMode = _historyRowsUseMobileTerminalViewportMode();
   if (!mobileMode) return false;
   return action === 'permalink';
 }
 
 function _historyEditEntityMetadata(entityType, entity) {
-  const editor = typeof globalThis !== 'undefined' ? globalThis.openEntityMetadataEditor : null;
+  const editor = typeof importedOpenEntityMetadataEditor === 'function' ? importedOpenEntityMetadataEditor : null;
   if (typeof editor !== 'function') {
-    showToast('Metadata editor is not available', 'error');
+    _historyRowsShowToast('Metadata editor is not available', 'error');
     return;
   }
   editor(entityType, entity, {
     onSaved: async () => {
-      refreshHistoryPanel();
-      showToast('Metadata saved');
+      const refreshHistoryPanel = _historyRowsGlobalFunction('refreshHistoryPanel');
+      if (refreshHistoryPanel) refreshHistoryPanel();
+      _historyRowsShowToast('Metadata saved');
     },
   });
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    _historyRelativeTime,
-    _historyMetaKindBadge,
-    _historyEntityLabelValues,
-    _historyEntityNoteBody,
-    _appendHistoryMetadataBadges,
-    _historyExitCodeNumber,
-    _historyIsGracefulTerminationExitCode,
-    _historyIsFailedExitCode,
-    _historyExitLabel,
-    _historyExitClass,
-    _historyElapsedSeconds,
-    _historyElapsedLabel,
-    _createHistoryEntry,
-    _createSnapshotHistoryEntry,
-    _historyActionKeepsPanelOpen,
-    _historyEditEntityMetadata,
-  });
 }
+
+export {
+  _appendHistoryMetadataBadges,
+  _createHistoryEntry,
+  _createSnapshotHistoryEntry,
+  _historyActionKeepsPanelOpen,
+  _historyEditEntityMetadata,
+  _historyElapsedLabel,
+  _historyElapsedSeconds,
+  _historyEntityLabelValues,
+  _historyEntityNoteBody,
+  _historyExitClass,
+  _historyExitCodeNumber,
+  _historyExitLabel,
+  _historyIsFailedExitCode,
+  _historyIsGracefulTerminationExitCode,
+  _historyMetaKindBadge,
+  _historyRelativeTime,
+};

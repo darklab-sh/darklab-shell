@@ -20,10 +20,44 @@
 // The module sets `body.atlas-mobile-ready` once it has wired itself up;
 // atlas-mobile.css keys off that class so the dedicated mobile surface owns
 // the small-screen path while desktop keeps the two-pane layout.
+import { copyTextToClipboard as importedCopyTextToClipboard, showToast as importedShowToast } from '../../core/utils.js';
+import { closeActionSheet as importedCloseActionSheet, openActionSheet as importedOpenActionSheet } from '../../ui/ui_action_sheet.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import { enhanceAppSelects as importedEnhanceAppSelects, syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
+import { bindTabStripEdgeListener as importedBindTabStripEdgeListener, syncActiveTabStripScroll as importedSyncActiveTabStripScroll } from '../../ui/ui_tab_strip_edges.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import {
+  DarklabTeamScope as importedTeamScope,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { DarklabAtlasEntityRow as importedAtlasEntityRow } from './atlas_entity_row.js';
+import { DarklabAtlasOverlay as importedAtlasOverlay } from './atlas_overlay.js';
+import {
+  getActiveProjectContext as importedGetActiveProjectContext,
+  openEntityMetadataEditor as importedOpenEntityMetadataEditor,
+} from '../projects/project_context_bridge.js';
+import { setAtlasMobileHandlers as importedSetAtlasMobileHandlers } from './atlas_mobile_bridge.js';
+
+let exportedDarklabAtlasMobile = null;
 
 (function initAtlasMobile(global) {
-  const controller = global.DarklabAtlasOverlay;
-  const entityRowApi = global.DarklabAtlasEntityRow || {};
+  const controller = (typeof importedAtlasOverlay !== 'undefined' && importedAtlasOverlay) || null;
+  const entityRowApi = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow) || {};
+  const bindDisclosure = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure) || null;
+  const bindTabStripEdgeListener = (typeof importedBindTabStripEdgeListener !== 'undefined' && importedBindTabStripEdgeListener) || null;
+  const closeActionSheet = (typeof importedCloseActionSheet !== 'undefined' && importedCloseActionSheet) || null;
+  const copyTextToClipboard = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard) || null;
+  const enhanceAppSelects = (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects) || null;
+  const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
+  const openActionSheet = (typeof importedOpenActionSheet !== 'undefined' && importedOpenActionSheet) || null;
+  const showToast = (typeof importedShowToast !== 'undefined' && importedShowToast) || null;
+  const syncActiveTabStripScroll = (typeof importedSyncActiveTabStripScroll !== 'undefined' && importedSyncActiveTabStripScroll) || null;
+  const syncAppSelect = (typeof importedSyncAppSelect !== 'undefined' && importedSyncAppSelect) || null;
+  const teamScope = (typeof importedTeamScope !== 'undefined' && importedTeamScope)
+    || {
+      deniedMessage: (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+        || null,
+    };
   if (!controller || typeof controller.registerMobileRenderer !== 'function') {
     // Atlas overlay didn't initialize (likely a non-Atlas page). Nothing
     // to do; the mobile module is dormant.
@@ -146,7 +180,7 @@
       count.textContent = `(${tabCountFor(tab, state)})`;
       button.append(label, count);
       button.addEventListener('click', () => {
-        if (typeof global.closeActionSheet === 'function') global.closeActionSheet({ restoreFocus: false });
+        if (typeof closeActionSheet === 'function') closeActionSheet({ restoreFocus: false });
         if (String(tab.id) !== String(state.activeTab)) {
           controller.setActiveAtlasTab(tab.id);
         }
@@ -154,8 +188,8 @@
       });
       tabsHost.appendChild(button);
     });
-    if (typeof global.syncActiveTabStripScroll === 'function') {
-      global.syncActiveTabStripScroll(tabsHost, tabStripEdgeOpts);
+    if (typeof syncActiveTabStripScroll === 'function') {
+      syncActiveTabStripScroll(tabsHost, tabStripEdgeOpts);
     }
   }
 
@@ -202,8 +236,8 @@
   }
 
   function triageDeniedReason(action = 'triage Atlas rows') {
-    return typeof global.teamScopeDeniedMessage === 'function'
-      ? global.teamScopeDeniedMessage(action)
+    return teamScope && typeof teamScope.deniedMessage === 'function'
+      ? teamScope.deniedMessage(action)
       : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
   }
 
@@ -410,8 +444,8 @@
     orphanChipHost = chipHost;
 
     toolsHost.append(row, filterRow, chipHost);
-    if (typeof global.bindDisclosure === 'function') {
-      view.filtersDisclosure = global.bindDisclosure(filterToggle, {
+    if (typeof bindDisclosure === 'function') {
+      view.filtersDisclosure = bindDisclosure(filterToggle, {
         panel,
         openClass: 'open',
         hiddenClass: 'is-hidden',
@@ -422,8 +456,8 @@
       });
       panel.hidden = true;
     }
-    if (typeof global.enhanceAppSelects === 'function') {
-      global.enhanceAppSelects(panel);
+    if (typeof enhanceAppSelects === 'function') {
+      enhanceAppSelects(panel);
     }
     toolsBuilt = true;
   }
@@ -440,11 +474,11 @@
     }
     if (mobileOrphanFilter && mobileOrphanFilter.value !== state.orphanFilter) {
       mobileOrphanFilter.value = state.orphanFilter || 'hide';
-      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileOrphanFilter);
+      if (typeof syncAppSelect === 'function') syncAppSelect(mobileOrphanFilter);
     }
     if (mobileSuppressionFilter && mobileSuppressionFilter.value !== state.suppressionFilter) {
       mobileSuppressionFilter.value = state.suppressionFilter || 'hide';
-      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileSuppressionFilter);
+      if (typeof syncAppSelect === 'function') syncAppSelect(mobileSuppressionFilter);
     }
     if (mobileRunFilterSearch && mobileRunFilterSearch.value !== state.runOptionsQuery) {
       mobileRunFilterSearch.value = state.runOptionsQuery || '';
@@ -475,7 +509,7 @@
       }
       mobileRunFilterSelect.value = state.runId || '';
       mobileRunFilterSelect.disabled = !!state.runOptionsLoading;
-      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileRunFilterSelect);
+      if (typeof syncAppSelect === 'function') syncAppSelect(mobileRunFilterSelect);
     }
     if (mobileFindingStatusFilter) {
       const findingsActive = controller.currentTab().id === 'findings';
@@ -484,7 +518,7 @@
       if (enhancedWrap?.classList?.contains('app-select')) enhancedWrap.classList.toggle('u-hidden', !findingsActive);
       if (mobileFindingStatusFilter.value !== state.findingStatus) {
         mobileFindingStatusFilter.value = state.findingStatus || '';
-        if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileFindingStatusFilter);
+        if (typeof syncAppSelect === 'function') syncAppSelect(mobileFindingStatusFilter);
       }
     }
     if (mobileSavedViewSelect) {
@@ -506,7 +540,7 @@
       const deleteBtn = filtersPanel?.querySelector?.('.atlas-mobile-saved-view-delete');
       if (updateBtn) updateBtn.disabled = !selectedId || !!controller.state.savedViewsLoading;
       if (deleteBtn) deleteBtn.disabled = !selectedId || !!controller.state.savedViewsLoading;
-      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileSavedViewSelect);
+      if (typeof syncAppSelect === 'function') syncAppSelect(mobileSavedViewSelect);
     }
     renderOrphanChip(state);
     if (toolsOverflowBtn) toolsOverflowBtn.disabled = !!state.loading;
@@ -546,15 +580,15 @@
   function copyText(value, label = 'Copied') {
     const text = String(value || '').trim();
     if (!text) return;
-    const copier = typeof global.copyTextToClipboard === 'function'
-      ? global.copyTextToClipboard(text)
+    const copier = typeof copyTextToClipboard === 'function'
+      ? copyTextToClipboard(text)
       : navigator.clipboard?.writeText?.(text);
     Promise.resolve(copier)
       .then(() => {
-        if (typeof global.showToast === 'function') global.showToast(label, 'success');
+        if (typeof showToast === 'function') showToast(label, 'success');
       })
       .catch(() => {
-        if (typeof global.showToast === 'function') global.showToast('Copy failed', 'error');
+        if (typeof showToast === 'function') showToast('Copy failed', 'error');
       });
   }
 
@@ -566,8 +600,8 @@
   }
 
   function openMetadataEditorForEntity(entity) {
-    if (typeof global.openEntityMetadataEditor !== 'function') return;
-    global.openEntityMetadataEditor('atlas_entity', entity, {
+    if (typeof importedOpenEntityMetadataEditor !== 'function') return;
+    importedOpenEntityMetadataEditor('atlas_entity', entity, {
       onSaved: () => controller.refreshAtlas(),
     });
   }
@@ -578,7 +612,7 @@
   }
 
   function openListOverflowSheet(returnFocus) {
-    if (typeof global.openActionSheet !== 'function') return;
+    if (typeof openActionSheet !== 'function') return;
     const tab = controller.currentTab();
     const items = [];
     if (tab.id !== 'findings') {
@@ -597,7 +631,7 @@
     items.push({ divider: true });
     items.push({ label: 'Refresh Atlas', action: () => controller.refreshAtlas() });
     view.lastActionSheetTab = tab.id;
-    global.openActionSheet({
+    openActionSheet({
       title: 'Atlas actions',
       items,
       returnFocus,
@@ -606,8 +640,8 @@
   }
 
   function entityActionItems(entity) {
-    const activeProject = typeof global.getActiveProjectContext === 'function'
-      ? global.getActiveProjectContext()
+    const activeProject = typeof importedGetActiveProjectContext === 'function'
+      ? importedGetActiveProjectContext()
       : null;
     const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
     const items = [
@@ -706,9 +740,9 @@
   }
 
   function openEntityActionSheet(entity, returnFocus, title = 'Atlas entity actions') {
-    if (!entity || typeof global.openActionSheet !== 'function') return;
+    if (!entity || typeof openActionSheet !== 'function') return;
     view.lastActionSheetTab = controller.currentTab().id;
-    global.openActionSheet({
+    openActionSheet({
       title,
       items: entityActionItems(entity),
       returnFocus,
@@ -717,9 +751,9 @@
   }
 
   function openFindingActionSheet(finding, returnFocus, title = 'Atlas finding actions') {
-    if (!finding || typeof global.openActionSheet !== 'function') return;
+    if (!finding || typeof openActionSheet !== 'function') return;
     view.lastActionSheetTab = controller.currentTab().id;
-    global.openActionSheet({
+    openActionSheet({
       title,
       items: findingActionItems(finding),
       returnFocus,
@@ -830,7 +864,7 @@
     summary.textContent = `${selectedCount.toLocaleString()} selected`;
     bulkBar.append(del, summary);
 
-    if (typeof global.enhanceAppSelects === 'function') global.enhanceAppSelects(bulkBar);
+    if (typeof enhanceAppSelects === 'function') enhanceAppSelects(bulkBar);
   }
 
   function renderEntityRow(entity, state) {
@@ -901,9 +935,9 @@
     if (triage) {
       const verificationStatus = String(triage.verification_status || finding.verification_status || 'not_started');
       if (verificationStatus && verificationStatus !== 'not_started') {
-        const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(verificationStatus)
+        const label = findingTriageEditor?.verificationStatusLabel?.(verificationStatus)
           || verificationStatus.replace(/_/g, ' ');
-        const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(verificationStatus) || 'muted';
+        const tone = findingTriageEditor?.verificationStatusTone?.(verificationStatus) || 'muted';
         badges.appendChild(controller.badge(label, tone));
       }
       if (triage.has_remediation) badges.appendChild(controller.badge('remediation', 'muted'));
@@ -1107,8 +1141,8 @@
       entityBody.replaceChildren(rowMessage('Select an entity to see details.'));
       return;
     }
-    const activeProject = typeof global.getActiveProjectContext === 'function'
-      ? global.getActiveProjectContext()
+    const activeProject = typeof importedGetActiveProjectContext === 'function'
+      ? importedGetActiveProjectContext()
       : null;
     if (controller.detailApi && typeof controller.detailApi.renderDetail === 'function') {
       controller.detailApi.renderDetail(entityBody, state.detail, {
@@ -1143,8 +1177,8 @@
     entityFooter.replaceChildren();
     if (!state.detail || state.detailLoading) return;
     const entity = state.detail.entity || {};
-    const activeProject = typeof global.getActiveProjectContext === 'function'
-      ? global.getActiveProjectContext()
+    const activeProject = typeof importedGetActiveProjectContext === 'function'
+      ? importedGetActiveProjectContext()
       : null;
     const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
     const links = Array.isArray(entity.project_links) ? entity.project_links : [];
@@ -1288,8 +1322,8 @@
         select.classList.add('atlas-mobile-footer-select');
         select.dataset.portalMenu = 'true';
         findingFooter.appendChild(select);
-        if (typeof global.enhanceAppSelects === 'function') {
-          global.enhanceAppSelects(findingFooter);
+        if (typeof enhanceAppSelects === 'function') {
+          enhanceAppSelects(findingFooter);
         }
       }
     }
@@ -1365,8 +1399,8 @@
       state.requestedView = '';
       state.requestedViewStarted = 0;
       setView('list');
-      if (typeof global.showToast === 'function') {
-        global.showToast('Entity not found in Atlas — showing list', 'warning');
+      if (typeof showToast === 'function') {
+        showToast('Entity not found in Atlas — showing list', 'warning');
       }
     }
   }
@@ -1382,7 +1416,7 @@
       document.body.classList.add('atlas-mobile-ready');
     }
     if (view.lastActionSheetTab && view.lastActionSheetTab !== controller.currentTab().id) {
-      if (typeof global.closeActionSheet === 'function') global.closeActionSheet({ restoreFocus: false });
+      if (typeof closeActionSheet === 'function') closeActionSheet({ restoreFocus: false });
       view.lastActionSheetTab = '';
     }
 
@@ -1403,8 +1437,8 @@
   }
 
   // Scroll-edge sync on the mobile tab strip.
-  if (typeof global.bindTabStripEdgeListener === 'function') {
-    global.bindTabStripEdgeListener(tabsHost, tabStripEdgeOpts);
+  if (typeof bindTabStripEdgeListener === 'function') {
+    bindTabStripEdgeListener(tabsHost, tabStripEdgeOpts);
   }
   bindRowLongPress();
 
@@ -1421,7 +1455,7 @@
 
   controller.registerMobileRenderer(renderMobile);
 
-  global.DarklabAtlasMobile = {
+  const DarklabAtlasMobile = {
     setView,
     currentView: () => view.name,
     resetTransientState: () => {
@@ -1429,7 +1463,17 @@
       view.filtersDisclosure?.close?.();
       view.filtersOpen = false;
       if (filtersPanel) filtersPanel.hidden = true;
-      if (typeof global.closeActionSheet === 'function') global.closeActionSheet({ restoreFocus: false });
+      if (typeof closeActionSheet === 'function') closeActionSheet({ restoreFocus: false });
     },
   };
+  if (typeof importedSetAtlasMobileHandlers === 'function') {
+    importedSetAtlasMobileHandlers({
+      resetTransientState: DarklabAtlasMobile.resetTransientState,
+    });
+  }
+  exportedDarklabAtlasMobile = DarklabAtlasMobile;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export {
+  exportedDarklabAtlasMobile as DarklabAtlasMobile,
+};

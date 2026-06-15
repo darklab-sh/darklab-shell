@@ -1,5 +1,10 @@
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './extract.js'
+import { bindFocusTrap } from '../../../../app/static/js/ui/ui_focus_trap.js'
+
+const BASE_MATCH_MEDIA = window.matchMedia
+const BASE_VISUAL_VIEWPORT = window.visualViewport
+const BASE_MAX_TOUCH_POINTS = navigator.maxTouchPoints
 
 // This harness recreates the browser-global environment expected by the classic
 // script bundle so app.js can be tested without loading the full page.
@@ -53,6 +58,7 @@ export async function loadAppFns({
   cycleHistoryRunOverlayTab: cycleHistoryRunOverlayTabOverride = vi.fn(() => false),
   openTourModal: openTourModalOverride = vi.fn(() => true),
   activeTabId = 'tab-1',
+  welcomeDone = false,
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
   acContextRegistry: acContextRegistryOverride = {},
@@ -74,6 +80,9 @@ export async function loadAppFns({
   loadRecentValues: loadRecentValuesOverride = undefined,
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   refreshActiveRuns: refreshActiveRunsOverride = undefined,
+  refreshActiveProjectContext: refreshActiveProjectContextOverride = undefined,
+  refreshStatusMonitor: refreshStatusMonitorOverride = undefined,
+  invalidateOptionsSecrets: invalidateOptionsSecretsOverride = undefined,
   seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
   setTimeout: setTimeoutOverride = (fn) => {
     fn()
@@ -91,6 +100,46 @@ export async function loadAppFns({
   appConfig = { workspace_enabled: true },
   sessionId = 'session-old',
 } = {}) {
+  delete document.activeElement
+  document.body.removeAttribute('data-theme')
+  document.body.removeAttribute('data-theme-scheme')
+  ;[
+    'activateOptionsTab',
+    'cycleOptionsTab',
+    'applyLineNumberPreference',
+    'applyProjectAutoLinkExternalRunsPreference',
+    'applyProjectAutoLinkRunEntitiesPreference',
+    'applyCommandOutcomeSummariesPreference',
+    'applyCompareViewModePreference',
+    'applyCompareContextPreference',
+    'applyPromptUsernamePreference',
+    'setComposerPromptMode',
+    'syncShellPrompt',
+    'applyShareRedactionDefaultPreference',
+    'applyWelcomeIntroPreference',
+    'getPreference',
+    'getProjectAutoLinkExternalRunsPreference',
+    'getProjectAutoLinkRunEntitiesPreference',
+    'getCommandOutcomeSummariesPreference',
+    'getPromptUsernamePreference',
+    'getCompareViewModePreference',
+    'getCompareContextPreference',
+    'getWelcomeIntroPreference',
+    'getShareRedactionDefaultPreference',
+    'syncOptionsControls',
+    'DarklabTeamScope',
+  ].forEach((name) => {
+    try { delete window[name] } catch (_) {}
+    try { delete globalThis[name] } catch (_) {}
+  })
+  if (!mobileViewport) {
+    if (BASE_MATCH_MEDIA === undefined) delete window.matchMedia
+    else window.matchMedia = BASE_MATCH_MEDIA
+    if (BASE_VISUAL_VIEWPORT === undefined) delete window.visualViewport
+    else Object.defineProperty(window, 'visualViewport', { configurable: true, value: BASE_VISUAL_VIEWPORT })
+    if (BASE_MAX_TOUCH_POINTS === undefined) delete window.navigator.maxTouchPoints
+    else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: BASE_MAX_TOUCH_POINTS })
+  }
   document.body.className = ''
   document.body.innerHTML = `
     <header><h1></h1></header>
@@ -527,6 +576,7 @@ export async function loadAppFns({
   const originalVisualViewport = window.visualViewport
   const originalScrollTo = window.scrollTo
   const originalMaxTouchPoints = navigator.maxTouchPoints
+  const originalDocumentActiveElement = Object.getOwnPropertyDescriptor(document, 'activeElement')
   window.scrollTo = vi.fn()
   if (mobileViewport) {
     const matchMediaMock = vi.fn((query) => {
@@ -567,6 +617,22 @@ export async function loadAppFns({
 
   if (themeRegistry !== null) window.ThemeRegistry = themeRegistry
   else delete window.ThemeRegistry
+  window.APP_CONFIG = appConfig
+  window.DarklabConfig = {
+    getAppConfig: () => appConfig,
+    setAppConfig: (config) => {
+      if (config === appConfig) {
+        window.APP_CONFIG = appConfig
+        return appConfig
+      }
+      Object.keys(appConfig).forEach((key) => {
+        delete appConfig[key]
+      })
+      Object.assign(appConfig, config && typeof config === 'object' && !Array.isArray(config) ? config : {})
+      window.APP_CONFIG = appConfig
+      return appConfig
+    },
+  }
 
   class FakeAnsiUp {
     constructor() {
@@ -578,27 +644,51 @@ export async function loadAppFns({
     }
   }
 
+  const setAutocompleteCatalog = vi.fn((data = {}) => {
+    const suggestions = Array.isArray(data.suggestions) ? data.suggestions : []
+    const contextRegistry = data.contexts && typeof data.contexts === 'object' && !Array.isArray(data.contexts)
+      ? data.contexts
+      : {}
+    window.acSuggestions = suggestions
+    window.acContextRegistry = contextRegistry
+    if (window.APP_STATE_API && typeof window.APP_STATE_API.getState === 'function') {
+      const state = window.APP_STATE_API.getState()
+      state.acSuggestions = suggestions
+      state.acContextRegistry = contextRegistry
+    }
+  })
+
   const fns = fromDomScripts(
     [
       'app/static/js/core/output_core.js',
+      'app/static/js/runtime_bridge.js',
+      'app/static/js/output_bridge.js',
       'app/static/js/output.js',
       'app/static/js/core/app_preferences_core.js',
-      'app/static/js/core/state.js',
       'app/static/js/features/team_scope.js',
+      'app/static/js/features/theme/theme.js',
+      'app/static/js/features/terminal/composer_prompt_bridge.js',
+      'app/static/js/features/preferences/preferences.js',
+      'app/static/js/features/preferences/session_token_bridge.js',
+      'app/static/js/features/preferences/secrets_bridge.js',
+      'app/static/js/features/tabs/share_redaction_bridge.js',
+      'app/static/js/ui/overlay_actions_bridge.js',
+      'app/static/js/features/mobile/mobile_shell_layout_bridge.js',
+      'app/static/js/features/history/history_panel_bridge.js',
       'app/static/js/app.js',
       'app/static/js/features/mobile/mobile_shell_layout.js',
       'app/static/js/features/tabs/tab_session_state.js',
-      'app/static/js/features/preferences/preferences.js',
       'app/static/js/features/preferences/secrets_panel.js',
       'app/static/js/features/preferences/teams_panel.js',
       'app/static/js/features/preferences/session_token_controls.js',
       'app/static/js/ui/ui_helpers.js',
+      'app/static/js/features/command-registry/command_registry_bridge.js',
       'app/static/js/features/command-registry/faq_helpers.js',
       'app/static/js/features/command-registry/command_registry.js',
-      'app/static/js/features/theme/theme.js',
       'app/static/js/features/terminal/composer_editing.js',
       'app/static/js/features/terminal/local_commands.js',
       'app/static/js/features/terminal/mobile_composer_keyboard.js',
+      'app/static/js/features/workflows/workflows_bridge.js',
       'app/static/js/features/autocomplete/runtime_context.js',
       'app/static/js/features/tour/tour_cli.js',
       'app/static/js/features/workflows/workflows.js',
@@ -620,12 +710,17 @@ export async function loadAppFns({
       cancelConfirm: vi.fn(),
       ThemeRegistry: themeRegistry,
       SESSION_ID: sessionId,
+      getSessionId: () => sessionId,
       updateSessionId: updateSessionIdOverride,
       copyTextToClipboard: copyTextToClipboardOverride,
       reloadSessionHistory: reloadSessionHistoryOverride,
-      ...(loadRecentValuesOverride ? { loadRecentValues: loadRecentValuesOverride } : {}),
-      ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
+      loadRecentValues: loadRecentValuesOverride || vi.fn(() => Promise.resolve(null)),
+      flushRecentValues: vi.fn(() => Promise.resolve(null)),
+      refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride || vi.fn(() => Promise.resolve(null)),
       ...(refreshActiveRunsOverride ? { refreshActiveRuns: refreshActiveRunsOverride } : {}),
+      ...(refreshActiveProjectContextOverride ? { refreshActiveProjectContext: refreshActiveProjectContextOverride } : {}),
+      ...(refreshStatusMonitorOverride ? { refreshStatusMonitor: refreshStatusMonitorOverride } : {}),
+      ...(invalidateOptionsSecretsOverride ? { invalidateOptionsSecrets: invalidateOptionsSecretsOverride } : {}),
       _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
       hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
       cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
@@ -655,6 +750,9 @@ export async function loadAppFns({
       runSearch,
       clearSearch,
       refreshHistoryPanel: () => {},
+      refocusComposerAfterAction: vi.fn(() => {
+        if (!document.body.classList.contains('mobile-terminal-mode')) cmdInput.focus()
+      }),
       navigateSearch,
       searchCaseSensitive: false,
       searchRegexMode: false,
@@ -665,6 +763,7 @@ export async function loadAppFns({
       acHide: acHideOverride,
       acSuggestions: acSuggestionsOverride,
       acContextRegistry: acContextRegistryOverride,
+      setAutocompleteCatalog,
       getAutocompleteMatches: getAutocompleteMatchesOverride,
       acFiltered: acFilteredOverride,
       acIndex: acIndexOverride,
@@ -718,8 +817,10 @@ export async function loadAppFns({
       cycleHistoryRunOverlayTab: cycleHistoryRunOverlayTabOverride,
       openTourModal: openTourModalOverride,
       bindOutsideClickClose: bindOutsideClickCloseOverride,
+      bindFocusTrap,
       interruptPromptLine: interruptPromptLineOverride,
       _welcomeActive: welcomeActive,
+      _welcomeDone: welcomeDone,
       welcomeOwnsTab: welcomeOwnsTabOverride,
       shellPromptWrap: shellPromptWrapEl,
       shellPromptText: document.getElementById('shell-prompt-text'),
@@ -775,6 +876,7 @@ export async function loadAppFns({
     persistTabSessionStateNow,
     schedulePersistTabSessionState,
     restoreTabSessionState,
+    setTabSessionRestoreInProgress,
     _getTabSessionStateKey: () => TAB_SESSION_STATE_KEY,
     confirmHistAction,
     executeHistAction,
@@ -792,15 +894,24 @@ export async function loadAppFns({
     getCompareContextPreference,
     getOptionsModalLastTabPreference,
     getTourSeenVersionPreference,
+    getPreference,
     recordTourOpened,
+    applyLineNumberPreference,
     applyRunNotifyPreference,
+    applyShareRedactionDefaultPreference,
+    applyWelcomeIntroPreference,
+    applyProjectAutoLinkExternalRunsPreference,
+    applyProjectAutoLinkRunEntitiesPreference,
     applyCommandOutcomeSummariesPreference,
+    applyCompareViewModePreference,
+    applyCompareContextPreference,
     applyProjectAutoLinkExternalRunsPreference,
     applyProjectAutoLinkRunEntitiesPreference,
     applyHudClockPreference,
     applyCompareViewModePreference,
     applyCompareContextPreference,
     applyPromptUsernamePreference,
+    DarklabTeamScope,
     openTeamScopeSelector,
     activateOptionsTab,
     cycleOptionsTab,
@@ -810,6 +921,12 @@ export async function loadAppFns({
     openSecretEditor,
     deleteOptionsSecret,
     handleSecretCommand,
+    refreshOptionsTeams: exportedRefreshOptionsTeams,
+    _savedThemeName,
+    _resolveThemeEntry,
+    applyThemeSelection,
+    renderThemeSelectionOptions,
+    syncThemeSelectionControls,
     handleThemeCommand,
     handleConfigCommand,
     handleTourCommand,
@@ -824,22 +941,176 @@ export async function loadAppFns({
     openOptions,
     openThemeSelector,
     openFaq,
+    activateFaqCommandChip,
     openCommandRegistry,
     getComposerState,
     setComposerState,
     setComposerPromptMode,
     resetComposerState,
     syncShellPrompt,
-    _getAcIndex: () => acIndex,
+    _getAcIndex: () => (typeof getAutocompleteState === 'function' ? getAutocompleteState().index : acIndex),
     _getWelcomeBootPending: () => _welcomeBootPending,
     _getTabSessionRestoreInProgress: () => _tabSessionRestoreInProgress,
   }`,
-    `setTabs(tabs); setActiveTabId(activeTabId);
+    `APP_STATE_API.setTabs(tabs); APP_STATE_API.setActiveTabId(activeTabId);
+     APP_STATE_API.getState().sessionVariables = sessionVariables;
+     window.getTabs = getTabs;
+     window.setTabs = setTabs;
+     window.getTab = getTab;
+     window.getActiveTab = getActiveTab;
+     window.getActiveTabId = getActiveTabId;
+     window.setActiveTabId = setActiveTabId;
+     window.setWelcomeState = setWelcomeState;
+     window.appendCommandEcho = appendCommandEcho;
+     window.setStatus = setStatus;
+     window._recordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
+     window.apiFetch = apiFetch;
+     window.logClientError = logClientError;
+     window.SESSION_ID = SESSION_ID;
+     window.getSessionId = getSessionId;
+     window.__darklabRuntimeHandlers = {
+       ...(window.__darklabRuntimeHandlers || {}),
+       apiFetch: __darklabExtractGlobals.apiFetch,
+       getSessionId: __darklabExtractGlobals.getSessionId,
+       logClientError: __darklabExtractGlobals.logClientError,
+       openStatusMonitor: typeof __darklabExtractGlobals.openStatusMonitor === 'function'
+         ? __darklabExtractGlobals.openStatusMonitor
+         : null,
+       refreshStatusMonitor: typeof __darklabExtractGlobals.refreshStatusMonitor === 'function'
+         ? __darklabExtractGlobals.refreshStatusMonitor
+         : null,
+     };
+     window.showConfirm = showConfirm;
+     window.showToast = showToast;
+     if (typeof bindOutsideClickClose === 'function') window.bindOutsideClickClose = bindOutsideClickClose;
+     if (typeof bindFocusTrap === 'function') window.bindFocusTrap = bindFocusTrap;
+     window.updateSessionId = updateSessionId;
+     window.copyTextToClipboard = copyTextToClipboard;
+     window.reloadSessionHistory = reloadSessionHistory;
+     window.createTab = createTab;
+     window.activateTab = activateTab;
+     window.cancelWelcome = cancelWelcome;
+     window.getOutput = getOutput;
+     window.isActiveTabRunning = () => false;
+     window.openStatusMonitor = __darklabExtractGlobals.openStatusMonitor;
+     window.closeStatusMonitor = __darklabExtractGlobals.closeStatusMonitor;
+     window.isStatusMonitorOpen = __darklabExtractGlobals.isStatusMonitorOpen;
+     window.openProjectWorkspace = __darklabExtractGlobals.openProjectWorkspace;
+     window.closeProjectWorkspace = __darklabExtractGlobals.closeProjectWorkspace;
+     window.isProjectWorkspaceOpen = __darklabExtractGlobals.isProjectWorkspaceOpen;
+     window.cycleProjectWorkspaceTab = __darklabExtractGlobals.cycleProjectWorkspaceTab;
+     if (typeof openAtlas === 'function') window.openAtlas = openAtlas;
+     if (typeof isAtlasOverlayOpen === 'function') window.isAtlasOverlayOpen = isAtlasOverlayOpen;
+     if (typeof cycleAtlasTab === 'function') window.cycleAtlasTab = cycleAtlasTab;
+     window.openCommandRegistry = openCommandRegistry;
+     window.openThemeSelector = openThemeSelector;
+     window.openWorkflows = openWorkflows;
+     window.openSchedulesModal = __darklabExtractGlobals.openSchedulesModal;
+     window.closeSchedulesModal = __darklabExtractGlobals.closeSchedulesModal;
+     window.isSchedulesOverlayOpen = __darklabExtractGlobals.isSchedulesOverlayOpen;
+     window.openWatchersModal = __darklabExtractGlobals.openWatchersModal;
+     window.closeWatchersModal = __darklabExtractGlobals.closeWatchersModal;
+     window.isWatchersOverlayOpen = __darklabExtractGlobals.isWatchersOverlayOpen;
+     if (typeof openFindingsBoard === 'function') window.openFindingsBoard = openFindingsBoard;
+     window.openWorkspace = __darklabExtractGlobals.openWorkspace;
+     window.closeWorkspace = __darklabExtractGlobals.closeWorkspace;
+     window.isWorkspaceOverlayOpen = __darklabExtractGlobals.isWorkspaceOverlayOpen;
+     window.openFaq = openFaq;
+     window.openOptions = openOptions;
+     if (typeof getComposerInputs === 'function') window.getComposerInputs = getComposerInputs;
+     if (typeof getVisibleComposerInput === 'function') window.getVisibleComposerInput = getVisibleComposerInput;
+     if (typeof getActiveComposerInput === 'function') window.getActiveComposerInput = getActiveComposerInput;
+     if (typeof getComposerValue === 'function') window.getComposerValue = getComposerValue;
+     if (typeof setComposerValue === 'function') window.setComposerValue = setComposerValue;
+     window.submitVisibleComposerCommand = submitVisibleComposerCommand;
+     window.faqBody = faqBody;
+     window.commandRegistryOverlay = commandRegistryOverlay;
+     window.commandRegistryBody = commandRegistryBody;
+     window.commandRegistrySearch = commandRegistrySearch;
+     window.commandRegistryCategories = commandRegistryCategories;
+     window.commandRegistrySubtitle = commandRegistrySubtitle;
+     window.commandCatalogOverlay = commandCatalogOverlay;
+     window.commandCatalogBody = commandCatalogBody;
+     window._closeMajorOverlays = _closeMajorOverlays;
+     window.acShow = acShow;
+     window.acHide = acHide;
+     window.setAutocompleteCatalog = __darklabExtractGlobals.setAutocompleteCatalog;
+     window.getAutocompleteMatches = getAutocompleteMatches;
+     if (typeof limitAutocompleteMatchesForDisplay === 'function') window.limitAutocompleteMatchesForDisplay = limitAutocompleteMatchesForDisplay;
+     window.openTourModal = openTourModal;
+     window.loadRecentValues = loadRecentValues;
+     window.flushRecentValues = flushRecentValues;
+     window.hydrateCmdHistory = hydrateCmdHistory;
+     window.refreshWorkspaceFileCache = refreshWorkspaceFileCache;
+     window.refreshWorkspaceFiles = refreshWorkspaceFileCache;
+     window.getWorkspaceAutocompleteFileHints = getWorkspaceAutocompleteFileHints;
+     window.getWorkspaceAutocompleteDirectoryHints = getWorkspaceAutocompleteDirectoryHints;
+     if (typeof getWorkspaceDirectoryEntries === 'function') window.getWorkspaceDirectoryEntries = getWorkspaceDirectoryEntries;
+     window._workspaceCwd = _workspaceCwd;
+     if (typeof refreshActiveProjectContext === 'function') window.refreshActiveProjectContext = refreshActiveProjectContext;
+     if (typeof refreshActiveRuns === 'function') window.refreshActiveRuns = refreshActiveRuns;
+     if (typeof refreshStatusMonitor === 'function') window.refreshStatusMonitor = refreshStatusMonitor;
+     window._seedLocalStorageStarsToServer = _seedLocalStorageStarsToServer;
      if (typeof bindMobileSheet === 'function') window.bindMobileSheet = bindMobileSheet;`,
   )
 
   await Promise.resolve()
   await Promise.resolve()
+
+  Object.assign(window, {
+    openStatusMonitor: openStatusMonitorOverride,
+    closeStatusMonitor: closeStatusMonitorOverride,
+    isStatusMonitorOpen: isStatusMonitorOpenOverride,
+    openProjectWorkspace: openProjectWorkspaceOverride,
+    closeProjectWorkspace: closeProjectWorkspaceOverride,
+    isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride,
+    cycleProjectWorkspaceTab: cycleProjectWorkspaceTabOverride,
+    openSchedulesModal: openSchedulesModalOverride,
+    closeSchedulesModal: closeSchedulesModalOverride,
+    isSchedulesOverlayOpen: isSchedulesOverlayOpenOverride,
+    openWatchersModal: openWatchersModalOverride,
+    closeWatchersModal: closeWatchersModalOverride,
+    isWatchersOverlayOpen: isWatchersOverlayOpenOverride,
+    openWorkspace: openWorkspaceOverride,
+    closeWorkspace: closeWorkspaceOverride,
+    isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride,
+  })
+
+  if (typeof fns.activateFaqCommandChip === 'function') {
+    window.activateFaqCommandChip = fns.activateFaqCommandChip
+  }
+
+  Object.assign(window, {
+    activateOptionsTab: fns.activateOptionsTab,
+    cycleOptionsTab: fns.cycleOptionsTab,
+    applyLineNumberPreference: fns.applyLineNumberPreference,
+    applyProjectAutoLinkExternalRunsPreference: fns.applyProjectAutoLinkExternalRunsPreference,
+    applyProjectAutoLinkRunEntitiesPreference: fns.applyProjectAutoLinkRunEntitiesPreference,
+    applyCommandOutcomeSummariesPreference: fns.applyCommandOutcomeSummariesPreference,
+    applyCompareViewModePreference: fns.applyCompareViewModePreference,
+    applyCompareContextPreference: fns.applyCompareContextPreference,
+    applyPromptUsernamePreference: fns.applyPromptUsernamePreference,
+    setComposerPromptMode: fns.setComposerPromptMode,
+    syncShellPrompt: fns.syncShellPrompt,
+    applyShareRedactionDefaultPreference: fns.applyShareRedactionDefaultPreference,
+    applyWelcomeIntroPreference: fns.applyWelcomeIntroPreference,
+    getPreference: fns.getPreference,
+    getProjectAutoLinkExternalRunsPreference: fns.getProjectAutoLinkExternalRunsPreference,
+    getProjectAutoLinkRunEntitiesPreference: fns.getProjectAutoLinkRunEntitiesPreference,
+    getCommandOutcomeSummariesPreference: fns.getCommandOutcomeSummariesPreference,
+    getPromptUsernamePreference: fns.getPromptUsernamePreference,
+    getCompareViewModePreference: fns.getCompareViewModePreference,
+    getCompareContextPreference: fns.getCompareContextPreference,
+    getWelcomeIntroPreference: fns.getWelcomeIntroPreference,
+    getShareRedactionDefaultPreference: fns.getShareRedactionDefaultPreference,
+    syncOptionsControls: fns.syncOptionsControls,
+    refreshOptionsTeams: fns.refreshOptionsTeams,
+    _savedThemeName: fns._savedThemeName,
+    _resolveThemeEntry: fns._resolveThemeEntry,
+    applyThemeSelection: fns.applyThemeSelection,
+    renderThemeSelectionOptions: fns.renderThemeSelectionOptions,
+    syncThemeSelectionControls: fns.syncThemeSelectionControls,
+  })
 
   return {
     ...fns,
@@ -890,6 +1161,11 @@ export async function loadAppFns({
     setTabs,
     setActiveTabId,
     restoreViewport: () => {
+      if (originalDocumentActiveElement) {
+        Object.defineProperty(document, 'activeElement', originalDocumentActiveElement)
+      } else {
+        delete document.activeElement
+      }
       if (originalMatchMedia === undefined) delete window.matchMedia
       else
         Object.defineProperty(window, 'matchMedia', {

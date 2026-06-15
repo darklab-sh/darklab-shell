@@ -1,6 +1,6 @@
 // Status Monitor endpoint loading and dashboard data aggregation.
 
-window.DarklabStatusMonitorData = (() => {
+const DarklabStatusMonitorData = (() => {
   function _safeObject(data) {
     return data && typeof data === 'object' ? data : {};
   }
@@ -99,3 +99,6 @@ window.DarklabStatusMonitorData = (() => {
 
   return { create };
 })();
+
+
+export { DarklabStatusMonitorData };

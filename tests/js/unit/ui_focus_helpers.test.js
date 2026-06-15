@@ -2,14 +2,15 @@ import { vi, describe, it, beforeEach, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
 // focusElement + blurActiveElement live inside ui_helpers.js's IIFE, which
 // needs state.js's getAppState() at load time. Bundle both and install the
 // IIFE into window per test so there is no cross-test global leakage.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/core/state.js'), 'utf8')
-const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_helpers.js'), 'utf8')
+const STATE_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/core/state.js'), 'utf8'))
+const UI_HELPERS_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_helpers.js'), 'utf8'))
 
 function loadHelpers() {
   delete window.focusElement

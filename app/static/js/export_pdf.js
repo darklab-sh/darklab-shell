@@ -1,6 +1,12 @@
 // ── Shared PDF export helpers ─────────────────────────────────────────────────
 // Single source of truth for terminal PDF export. Both save-from-tab (tabs.js)
 // and save-from-permalink (permalink.html) funnel through here.
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
+
+const ExportHtmlUtils = typeof window !== 'undefined' ? window.ExportHtmlUtils : null;
+
+let ExportPdfUtils = null;
+
 (function () {
   const PDF_FONT_SPECS = [
     { filename: 'JetBrainsMono-400.ttf', family: 'JetBrains Mono', style: 'normal' },
@@ -21,9 +27,8 @@
         }
       }
     }
-    const configUrls = typeof window !== 'undefined'
-      && window.APP_CONFIG
-      && window.APP_CONFIG.lazy_asset_urls;
+    const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    const configUrls = appConfig && appConfig.lazy_asset_urls;
     if (configUrls && typeof configUrls[name] === 'string' && configUrls[name]) {
       return configUrls[name];
     }
@@ -68,9 +73,9 @@
   }
 
   function themeColors() {
-    const themeVars = window.ExportHtmlUtils
-      && typeof window.ExportHtmlUtils.getThemeExportVars === 'function'
-      ? window.ExportHtmlUtils.getThemeExportVars()
+    const themeVars = ExportHtmlUtils
+      && typeof ExportHtmlUtils.getThemeExportVars === 'function'
+      ? ExportHtmlUtils.getThemeExportVars()
       : null;
     const cs = getComputedStyle(document.documentElement);
     const v = (name) => {
@@ -129,7 +134,7 @@
   }
 
   function buildPdfLineSegments({ text, cls, kind, role, colors, ansiToHtml }) {
-    const exportHtmlUtils = window.ExportHtmlUtils || null;
+    const exportHtmlUtils = ExportHtmlUtils || null;
     const lineEvent = exportHtmlUtils && typeof exportHtmlUtils.lineEventFromWire === 'function'
       ? exportHtmlUtils.lineEventFromWire({ text, cls, kind, role })
       : { text: String(text || ''), kind: String(kind || (cls === 'notice' ? 'notice' : 'info')), role: String(role || (['prompt-echo', 'denied', 'exit-ok', 'exit-fail'].includes(cls) ? cls : 'body')) };
@@ -280,9 +285,9 @@
     const embeddedFontsReady = await ensurePdfFonts(doc).catch(() => false);
     const monoFontFamily = embeddedFontsReady ? 'JetBrains Mono' : 'courier';
     const colors = themeColors();
-    const headerModel = window.ExportHtmlUtils
-      && typeof window.ExportHtmlUtils.buildExportHeaderModel === 'function'
-      ? window.ExportHtmlUtils.buildExportHeaderModel({ appName, metaLine, runMeta })
+    const headerModel = ExportHtmlUtils
+      && typeof ExportHtmlUtils.buildExportHeaderModel === 'function'
+      ? ExportHtmlUtils.buildExportHeaderModel({ appName, metaLine, runMeta })
       : {
           appName: String(appName || ''),
           metaLine: metaLine ? String(metaLine) : '',
@@ -402,8 +407,8 @@
     const prefixColW = longestPrefix ? doc.getTextWidth(longestPrefix) + 10 : 0;
 
     let y = headerH + outputBoxPadTop + fontSize;
-    const summary = window.ExportHtmlUtils && typeof window.ExportHtmlUtils.buildExportLineSummary === 'function'
-      ? window.ExportHtmlUtils.buildExportLineSummary(rawLines)
+    const summary = ExportHtmlUtils && typeof ExportHtmlUtils.buildExportLineSummary === 'function'
+      ? ExportHtmlUtils.buildExportLineSummary(rawLines)
       : null;
     if (summary) {
       const summaryParts = [];
@@ -460,10 +465,25 @@
     return doc;
   }
 
-  window.ExportPdfUtils = {
+  ExportPdfUtils = {
     loadJsPdf,
     parseCssColor,
     themeColors,
     buildTerminalExportPdf,
   };
 })();
+
+const {
+  buildTerminalExportPdf,
+  loadJsPdf,
+  parseCssColor,
+  themeColors,
+} = ExportPdfUtils;
+
+export {
+  ExportPdfUtils,
+  buildTerminalExportPdf,
+  loadJsPdf,
+  parseCssColor,
+  themeColors,
+};

@@ -19,7 +19,7 @@ import {
   writeFileSync,
 } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, relative, resolve } from 'path';
+import { basename, dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { build as esbuild } from 'esbuild';
 
@@ -97,6 +97,19 @@ function hashedStaticAssetBasename(source, content) {
     .replace(/^-+|-+$/g, '')
     || 'asset';
   return `${prefix}-${safeStem}.${sha256(content).slice(0, 12)}.${extension}`;
+}
+
+function hashedBundleBasename(name, extension, content) {
+  return `${name}.${sha256(content).slice(0, 12)}.${extension}`;
+}
+
+function hashedEsmChunkBasename(outputPath, content) {
+  const stem = basename(outputPath).replace(/\.js$/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'chunk';
+  return `static-${stem}.${sha256(content).slice(0, 12)}.js`;
 }
 
 function outputExtension(type) {
@@ -218,6 +231,16 @@ function sourceHashMap(sources) {
   return hashes;
 }
 
+function appLazyEsmSources() {
+  return (Array.isArray(config.lazy) ? config.lazy : [])
+    .filter((source) => source.startsWith('/static/js/'))
+    .sort();
+}
+
+function isAppLazyEsmSource(source) {
+  return appLazyEsmSources().includes(source);
+}
+
 function configuredStandaloneSources() {
   const sources = new Set([
     ...((Array.isArray(config.lazy) ? config.lazy : [])),
@@ -283,6 +306,182 @@ async function buildEsmBundle(bundle) {
   };
 }
 
+function outputKeyForFile(file) {
+  return relative(ESBUILD_WORKING_DIR, file).split('\\').join('/');
+}
+
+function outputKeyToFile(outputKey) {
+  return resolve(ESBUILD_WORKING_DIR, outputKey);
+}
+
+function relativeImportSpecifier(fromOutputKey, toOutputKey) {
+  let specifier = relative(dirname(outputKeyToFile(fromOutputKey)), outputKeyToFile(toOutputKey))
+    .split('\\')
+    .join('/');
+  if (!specifier.startsWith('.')) specifier = `./${specifier}`;
+  return specifier;
+}
+
+function replaceAllLiteralImports(text, replacements) {
+  let output = text;
+  for (const [fromSpecifier, toSpecifier] of replacements) {
+    output = output
+      .replaceAll(`"${fromSpecifier}"`, `"${toSpecifier}"`)
+      .replaceAll(`'${fromSpecifier}'`, `'${toSpecifier}'`);
+  }
+  return output;
+}
+
+function collectReachableOutputs(outputKey, outputs, seen = new Set()) {
+  if (seen.has(outputKey)) return seen;
+  seen.add(outputKey);
+  const output = outputs[outputKey];
+  for (const importRecord of output?.imports || []) {
+    if (outputs[importRecord.path]) collectReachableOutputs(importRecord.path, outputs, seen);
+  }
+  return seen;
+}
+
+function collectReachableInputSources(outputKey, outputs) {
+  const sources = new Set();
+  for (const reachedOutputKey of collectReachableOutputs(outputKey, outputs)) {
+    const inputs = outputs[reachedOutputKey]?.inputs || {};
+    Object.keys(inputs).forEach((input) => {
+      sources.add(fileToAppSource(resolve(ESBUILD_WORKING_DIR, input)));
+    });
+  }
+  return Array.from(sources).sort();
+}
+
+async function buildAppEsmGraph(shellBundle, lazySources) {
+  const entrySources = [...shellBundle.entries, ...lazySources];
+  const entryPoints = entrySources.map((source) => assertSourceExists(source));
+  let result;
+  try {
+    result = await esbuild({
+      entryPoints,
+      bundle: true,
+      write: false,
+      format: 'esm',
+      splitting: true,
+      outdir: outDir,
+      outbase: resolve(ROOT, 'app/static/js'),
+      entryNames: '[dir]/[name]',
+      chunkNames: 'chunks/[name]-[hash]',
+      target: 'es2022',
+      charset: 'utf8',
+      platform: 'browser',
+      minify: false,
+      sourcemap: false,
+      legalComments: 'none',
+      metafile: true,
+      absWorkingDir: ESBUILD_WORKING_DIR,
+      logLevel: 'silent',
+    });
+  } catch (err) {
+    console.error('[assets] app ESM graph failed', {
+      bundle: shellBundle.name,
+      lazy_count: lazySources.length,
+      out_dir: relative(ROOT, outDir),
+      check_only: checkOnly,
+      message: err && err.message ? err.message : String(err),
+    });
+    throw err;
+  }
+  const outputs = result.metafile?.outputs || {};
+  const outputFilesByKey = new Map(result.outputFiles.map((file) => [
+    outputKeyForFile(file.path),
+    file,
+  ]));
+  const entryOutputBySource = new Map();
+  for (const [outputKey, output] of Object.entries(outputs)) {
+    if (!output.entryPoint) continue;
+    entryOutputBySource.set(fileToAppSource(resolve(ESBUILD_WORKING_DIR, output.entryPoint)), outputKey);
+  }
+  for (const source of entrySources) {
+    if (!entryOutputBySource.has(source)) {
+      throw new Error(`App ESM graph did not produce an entry output for ${source}`);
+    }
+  }
+
+  const finalBasenameByOutputKey = new Map();
+  for (const outputKey of Object.keys(outputs).sort()) {
+    const file = outputFilesByKey.get(outputKey);
+    if (!file) throw new Error(`App ESM graph missing output file for ${outputKey}`);
+    const source = Array.from(entryOutputBySource.entries())
+      .find(([, entryOutputKey]) => entryOutputKey === outputKey)?.[0] || '';
+    const content = `${file.text.replace(/\s*$/, '')}\n`;
+    if (source === shellBundle.entries[0]) {
+      finalBasenameByOutputKey.set(outputKey, hashedBundleBasename(shellBundle.name, 'js', content));
+    } else if (source) {
+      finalBasenameByOutputKey.set(outputKey, hashedStaticAssetBasename(source, content));
+    } else {
+      finalBasenameByOutputKey.set(outputKey, hashedEsmChunkBasename(outputKey, content));
+    }
+  }
+
+  const builtFiles = [];
+  for (const outputKey of Object.keys(outputs).sort()) {
+    const file = outputFilesByKey.get(outputKey);
+    const importReplacements = new Map();
+    for (const importRecord of outputs[outputKey]?.imports || []) {
+      const finalImportBasename = finalBasenameByOutputKey.get(importRecord.path);
+      if (!finalImportBasename) continue;
+      importReplacements.set(
+        relativeImportSpecifier(outputKey, importRecord.path),
+        `./${finalImportBasename}`,
+      );
+    }
+    const content = `${replaceAllLiteralImports(
+      file.text.replace(/\s*$/, ''),
+      importReplacements,
+    )}\n`;
+    const finalBasename = finalBasenameByOutputKey.get(outputKey);
+    builtFiles.push({
+      outputKey,
+      filename: finalBasename,
+      content,
+      hash: sha256(content),
+    });
+  }
+
+  const shellOutputKey = entryOutputBySource.get(shellBundle.entries[0]);
+  const shellSources = collectReachableInputSources(shellOutputKey, outputs);
+  const lazyEntries = Object.fromEntries(lazySources.map((source) => {
+    const outputKey = entryOutputBySource.get(source);
+    const builtFile = builtFiles.find((file) => file.outputKey === outputKey);
+    const inputSources = collectReachableInputSources(outputKey, outputs);
+    console.info('[assets] standalone ESM asset built', {
+      source,
+      output: `/static/build/${builtFile.filename}`,
+      input_count: inputSources.length,
+      bytes: Buffer.byteLength(builtFile.content, 'utf8'),
+      check_only: checkOnly,
+    });
+    if (process.env.DARKLAB_ASSET_BUILD_DEBUG === '1') {
+      console.debug('[assets] standalone ESM asset branch', {
+        source,
+        should_bundle_standalone_esm: true,
+        source_hash: sourceHashMap([source])[source] || '',
+      });
+    }
+    return [source, {
+      path: `/static/build/${builtFile.filename}`,
+      hash: builtFile.hash,
+    }];
+  }));
+  return {
+    shell: {
+      path: `/static/build/${finalBasenameByOutputKey.get(shellOutputKey)}`,
+      hash: builtFiles.find((file) => file.outputKey === shellOutputKey).hash,
+      sources: shellSources,
+      sourceHashes: sourceHashMap(shellSources),
+    },
+    lazyEntries,
+    files: builtFiles,
+  };
+}
+
 function assertOrderChecks(bundlesByName) {
   const rawChecks = config.order_checks || {};
   if (!rawChecks || typeof rawChecks !== 'object' || Array.isArray(rawChecks)) {
@@ -341,8 +540,18 @@ rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
 const builtBundleRecords = [];
+const shellEsmBundle = bundles.find((bundle) => bundle.name === 'shell-bootstrap' && bundle.type === 'esm');
+if (!shellEsmBundle) {
+  throw new Error('assets.config.json must define the shell-bootstrap ESM bundle');
+}
+const appEsmGraph = await buildAppEsmGraph(shellEsmBundle, appLazyEsmSources());
+for (const file of appEsmGraph.files) {
+  writeFileSync(resolve(outDir, file.filename), file.content);
+}
+Object.assign(staticAssetEntries, appEsmGraph.lazyEntries);
 
 for (const source of configuredStandaloneSources()) {
+  if (isAppLazyEsmSource(source)) continue;
   const file = assertSourceExists(source);
   const content = readFileSync(file);
   const filename = hashedStaticAssetBasename(source, content);
@@ -359,6 +568,22 @@ for (const bundle of bundles) {
   let manifestSources = bundle.sources;
   const parts = [];
   if (bundle.type === 'esm') {
+    if (bundle.name === shellEsmBundle.name) {
+      buildEntries[bundle.name] = {
+        type: bundle.type,
+        path: appEsmGraph.shell.path,
+        hash: appEsmGraph.shell.hash,
+        entries: bundle.entries,
+        sources: appEsmGraph.shell.sources,
+        source_hashes: appEsmGraph.shell.sourceHashes,
+      };
+      builtBundleRecords.push({
+        name: bundle.name,
+        sources: appEsmGraph.shell.sources,
+      });
+      assertLazySourcesStayOutOfEsmBundle(bundle.name, appEsmGraph.shell.sources);
+      continue;
+    }
     const builtEsm = await buildEsmBundle(bundle);
     output = builtEsm.output;
     sourceHashes = builtEsm.sourceHashes;

@@ -1,8 +1,57 @@
+import {
+  acDropdown,
+  cmdInput,
+  commandRegistryOverlay,
+  faqOverlay,
+  hamburgerBtn,
+  headerTitle,
+  histRow,
+  historyPanel,
+  mobileComposerHost,
+  mobileComposerRow,
+  mobileHeaderActions,
+  mobileMenu,
+  mobileShell,
+  mobileShellChrome,
+  mobileShellOverlays,
+  mobileShellTranscript,
+  optionsOverlay,
+  permalinkToast,
+  runBtn,
+  runTimer,
+  searchBar,
+  shellInputRow,
+  shellPromptWrap,
+  status,
+  tabPanels,
+  terminalBar,
+  terminalWrap,
+  themeOverlay,
+  workflowsOverlay,
+  workspaceEditorOverlay,
+  workspaceOverlay,
+  workspaceViewerOverlay,
+} from '../../core/dom.js';
+import {
+  blurVisibleComposerInputIfMobile,
+  getMobileKeyboardOffsetBaseline,
+  getMobileViewportClosedHeight,
+  getVisibleComposerInput,
+  hideHistoryPanel,
+  isHistoryPanelOpen,
+  setVisibilityState,
+  syncMobileComposerKeyboardState,
+} from '../../ui/ui_helpers.js';
+import { setMobileShellLayoutHandlers as importedSetMobileShellLayoutHandlers } from './mobile_shell_layout_bridge.js';
+
+const MOBILE_SHELL_LAYOUT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
 function useMobileTerminalViewportMode() {
   // Mobile mode depends on both width and input modality. A narrow desktop
   // browser window should not automatically switch into the mobile shell.
   if (typeof window === 'undefined') return false;
-  const touchPoints = typeof navigator !== 'undefined' ? (navigator.maxTouchPoints || 0) : 0;
+  const nav = window.navigator || (typeof navigator !== 'undefined' ? navigator : null);
+  const touchPoints = nav ? (nav.maxTouchPoints || 0) : 0;
   const hasTouch = touchPoints > 0
     || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
   if (!hasTouch) return false;
@@ -274,17 +323,17 @@ function syncMobileViewportState() {
   else document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
-  if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
+  if (activeMobileMode) MOBILE_SHELL_LAYOUT_GLOBAL.syncMobileViewportHeight?.({ keyboardOpen });
   if (activeMobileMode && keyboardOpen) {
-    queueMobileOutputTailRefresh({ keyboardOpen: true, delays: [0] });
+    MOBILE_SHELL_LAYOUT_GLOBAL.queueMobileOutputTailRefresh?.({ keyboardOpen: true, delays: [0] });
   } else if (activeMobileMode && wasMobileKeyboardOpen) {
-    queueMobileOutputTailRefresh({ keyboardOpen: false });
+    MOBILE_SHELL_LAYOUT_GLOBAL.queueMobileOutputTailRefresh?.({ keyboardOpen: false });
   }
   if (activeMobileMode && keyboardOpen) {
-    hideMobileMenu();
+    MOBILE_SHELL_LAYOUT_GLOBAL.hideMobileMenu?.();
     if (isHistoryPanelOpen()) hideHistoryPanel();
     // Hide autocomplete only when the mobile keyboard becomes active.
-    if (!wasMobileKeyboardOpen && typeof acHide === 'function') acHide();
+    if (!wasMobileKeyboardOpen) MOBILE_SHELL_LAYOUT_GLOBAL.acHide?.();
   }
 }
 
@@ -299,20 +348,30 @@ function dismissMobileKeyboardAfterSubmit() {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    useMobileTerminalViewportMode,
-    syncMobileShellChromeLayout,
-    syncMobileShellTranscriptLayout,
-    syncMobileShellOverlayLayout,
-    _bindMobileComposerInteractions,
-    _mobileUiLayoutRefs,
-    _uiOverlayRefs,
-    syncMobileShellLayout,
-    syncMobileComposerLayout,
-    isChromeIOS,
+  if (typeof importedSetMobileShellLayoutHandlers === 'function') {
+    importedSetMobileShellLayoutHandlers({
+    dismissMobileKeyboardAfterSubmit,
     getMobileKeyboardOffset,
     isMobileKeyboardOpen,
     syncMobileViewportState,
-    dismissMobileKeyboardAfterSubmit,
-  });
+    useMobileTerminalViewportMode,
+    });
+  }
 }
+
+export {
+  _bindMobileComposerInteractions,
+  _mobileUiLayoutRefs,
+  _uiOverlayRefs,
+  dismissMobileKeyboardAfterSubmit,
+  getMobileKeyboardOffset,
+  isChromeIOS,
+  isMobileKeyboardOpen,
+  syncMobileComposerLayout,
+  syncMobileShellChromeLayout,
+  syncMobileShellLayout,
+  syncMobileShellOverlayLayout,
+  syncMobileShellTranscriptLayout,
+  syncMobileViewportState,
+  useMobileTerminalViewportMode,
+};

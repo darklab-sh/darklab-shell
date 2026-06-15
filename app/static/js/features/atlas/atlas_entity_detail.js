@@ -688,7 +688,7 @@ const _darklabGlobal = window;
     return wrap;
   }
 
-  window.DarklabAtlasDetail = {
+  const DarklabAtlasDetail = {
     renderDetail,
     renderFindingDetail,
     reviewStateSelect,
@@ -697,3 +697,15 @@ const _darklabGlobal = window;
     text,
     node,
   };
+
+
+export {
+  DarklabAtlasDetail,
+  formatCount,
+  formatDate,
+  node,
+  renderDetail,
+  renderFindingDetail,
+  reviewStateSelect,
+  text,
+};

@@ -32,9 +32,15 @@ function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
     rememberRecentValuesFromCommand,
     _readRecentValues,
     _getAutocompleteSharedPrefix: autocompleteCore.sharedPrefix,
-    _setAcIndex: (value) => { acIndex = value; },
-    _setAcFiltered: (value) => { acFiltered = value; },
-    _getAcFiltered: () => acFiltered,
+    _setAcIndex: (value) => {
+      acIndex = value;
+      if (typeof setAutocompleteState === 'function') setAutocompleteState({ index: value });
+    },
+    _setAcFiltered: (value) => {
+      acFiltered = value;
+      if (typeof setAutocompleteState === 'function') setAutocompleteState({ filtered: value });
+    },
+    _getAcFiltered: () => (typeof getAutocompleteState === 'function' ? getAutocompleteState().filtered : acFiltered),
   }`,
   )
 }
@@ -377,7 +383,7 @@ describe('autocomplete helpers', () => {
           input.selectionEnd = end == null ? start : end
           if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
             acSuppressInputOnce = false
-            acHide()
+            document.getElementById('ac').style.display = 'none'
           }
         },
         acSuggestions: [],
@@ -1423,7 +1429,10 @@ describe('autocomplete helpers', () => {
       loadRecentValues,
       rememberRecentValuesFromCommand,
       _readRecentValues,
-      _setContextRegistry: (value) => { acContextRegistry = value; },
+      _setContextRegistry: (value) => {
+        acContextRegistry = value;
+        if (typeof APP_STATE_API !== 'undefined') APP_STATE_API.getState().acContextRegistry = value;
+      },
     }`,
     )
 

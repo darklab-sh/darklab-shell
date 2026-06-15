@@ -1,9 +1,46 @@
 // First-class findings triage board modal.
 // Reuses the shared project findings board adapter so list and board surfaces
 // keep the same review-state grouping rules.
+import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
+import { apiFetch as importedApiFetch } from '../../session.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncModalOverlayState as importedSyncModalOverlayState,
+} from '../../ui/ui_helpers.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from '../history/history_restore.js';
+import { DarklabProjectFindingsData as importedProjectFindingsData } from '../projects/project_findings_data.js';
+import {
+  DarklabTeamScope as importedTeamScope,
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from './finding_triage_editor.js';
+
+let exportedOpenFindingsBoard = null;
+let exportedCloseFindingsBoard = null;
+let exportedIsFindingsBoardOpen = null;
 
 (function findingsBoardModalModule(global) {
   'use strict';
+  const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
+  const emitUiEvent = (typeof importedEmitUiEvent !== 'undefined' && importedEmitUiEvent) || null;
+  const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
+  const projectFindingsData = (typeof importedProjectFindingsData !== 'undefined' && importedProjectFindingsData) || {};
+  const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
+  const restoreHistoryRunIntoTab = (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab) || null;
+  const syncModalOverlayState = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState) || null;
+  const teamScope = (typeof importedTeamScope !== 'undefined' && importedTeamScope)
+    || {
+      activeTeamScopeCan: (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+        || null,
+      deniedMessage: (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+        || null,
+    };
 
   const overlay = document.getElementById('findings-board-overlay');
   const modal = document.getElementById('findings-board-modal');
@@ -48,22 +85,22 @@
   };
 
   function api() {
-    return typeof apiFetch === 'function' ? apiFetch : global.apiFetch;
+    return importedApiFetch;
   }
 
   function boardApi() {
-    return global.DarklabProjectFindingsData || {};
+    return projectFindingsData || {};
   }
 
   function canTriageFindings() {
-    return typeof global.activeTeamScopeCan === 'function'
-      ? global.activeTeamScopeCan('triage_findings')
+    return teamScope && typeof teamScope.activeTeamScopeCan === 'function'
+      ? teamScope.activeTeamScopeCan('triage_findings')
       : true;
   }
 
   function triageDeniedMessage() {
-    return typeof global.teamScopeDeniedMessage === 'function'
-      ? global.teamScopeDeniedMessage('triage team findings')
+    return teamScope && typeof teamScope.deniedMessage === 'function'
+      ? teamScope.deniedMessage('triage team findings')
       : "View-only team members can't triage team findings. Switch to Personal or ask for operator access.";
   }
 
@@ -91,9 +128,9 @@
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
-    if (refocus && typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({ defer: true });
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
+    if (refocus && typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ defer: true });
     }
   }
 
@@ -103,7 +140,7 @@
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
     state.open = true;
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
     refreshBtn?.focus?.({ preventScroll: true });
   }
 
@@ -253,8 +290,8 @@
     const chips = [];
     const status = String(triage.verification_status || finding.verification_status || 'not_started');
     if (status && status !== 'not_started') {
-      const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
-      const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+      const label = findingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+      const tone = findingTriageEditor?.verificationStatusTone?.(status) || 'muted';
       chips.push(boardBadge(label, tone));
     }
     if (triage.has_remediation) chips.push(boardBadge('remediation', 'muted'));
@@ -486,7 +523,7 @@
       state.hasMore = false;
       state.columnTotals = null;
       showMessage(err && err.message ? err.message : 'Could not load findings.', 'error');
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load findings board', err);
+      if (typeof importedLogClientError === 'function') importedLogClientError('failed to load findings board', err);
     } finally {
       setBusy(false);
       render();
@@ -538,8 +575,8 @@
         throw new Error('Finding was no longer available in this project.');
       }
       showMessage('');
-      if (typeof global.emitUiEvent === 'function') {
-        global.emitUiEvent('app:project-workspace-mutated', {
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-workspace-mutated', {
           reason: 'finding-review-updated',
           project_id: state.projectId,
           finding_id: findingId,
@@ -549,7 +586,7 @@
     } catch (err) {
       setFindingReviewState(findingId, previousReviewState || 'new');
       showMessage(err && err.message ? err.message : 'Could not update finding review state.', 'error');
-      if (typeof global.logClientError === 'function') global.logClientError('failed to update findings board review state', err);
+      if (typeof importedLogClientError === 'function') importedLogClientError('failed to update findings board review state', err);
       render();
     }
   }
@@ -559,22 +596,22 @@
       showMessage('Finding is missing its details.', 'error');
       return;
     }
-    if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+    if (!findingTriageEditor || typeof findingTriageEditor.open !== 'function') {
       showMessage('Finding triage editor is not available.', 'error');
       return;
     }
     showMessage('');
-    await global.DarklabFindingTriageEditor.open(finding, {
+    await findingTriageEditor.open(finding, {
       canEdit: canTriageFindings(),
       onSaved: async (triage) => {
-        const compact = typeof global.DarklabFindingTriageEditor.compactTriage === 'function'
-          ? global.DarklabFindingTriageEditor.compactTriage(triage)
+        const compact = typeof findingTriageEditor.compactTriage === 'function'
+          ? findingTriageEditor.compactTriage(triage)
           : triage;
         updateFindingTriage(findingId, compact);
         render();
         showMessage('Finding triage saved.');
-        if (typeof global.emitUiEvent === 'function') {
-          global.emitUiEvent('app:project-workspace-mutated', {
+        if (typeof emitUiEvent === 'function') {
+          emitUiEvent('app:project-workspace-mutated', {
             reason: 'finding-triage-updated',
             project_id: state.projectId,
             finding_id: findingId,
@@ -586,8 +623,8 @@
 
   async function openFindingsBoard(options = {}) {
     if (!overlay || !bodyEl) return false;
-    if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
-    if (typeof global.blurVisibleComposerInputIfMobile === 'function') global.blurVisibleComposerInputIfMobile();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     state.endpoint = endpointFromOptions(options);
     state.findings = [];
     state.total = 0;
@@ -598,8 +635,8 @@
     return true;
   }
 
-  if (overlay && typeof global.bindDismissible === 'function') {
-    global.bindDismissible(overlay, {
+  if (overlay && typeof bindDismissible === 'function') {
+    bindDismissible(overlay, {
       level: 'modal',
       isOpen,
       onClose: closeFindingsBoard,
@@ -631,9 +668,9 @@
     if (action.dataset.findingsBoardAction === 'open-run') {
       event.preventDefault();
       let opened = false;
-      if (typeof global.restoreHistoryRunIntoTab === 'function') {
+      if (typeof restoreHistoryRunIntoTab === 'function') {
         const lineIndex = Number(action.dataset.lineIndex || '');
-        void global.restoreHistoryRunIntoTab({
+        void restoreHistoryRunIntoTab({
           id: action.dataset.runId || '',
           command: action.dataset.runCommand || '',
           full_output_available: true,
@@ -699,7 +736,13 @@
     void persistReviewState(findingId, reviewState, previous);
   });
 
-  global.openFindingsBoard = openFindingsBoard;
-  global.closeFindingsBoard = closeFindingsBoard;
-  global.isFindingsBoardOpen = isOpen;
+  exportedOpenFindingsBoard = openFindingsBoard;
+  exportedCloseFindingsBoard = closeFindingsBoard;
+  exportedIsFindingsBoardOpen = isOpen;
 })(globalThis);
+
+export {
+  exportedOpenFindingsBoard as openFindingsBoard,
+  exportedCloseFindingsBoard as closeFindingsBoard,
+  exportedIsFindingsBoardOpen as isFindingsBoardOpen,
+};

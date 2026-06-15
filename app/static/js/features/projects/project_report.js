@@ -1,5 +1,13 @@
 // Project engagement report controller.
 // Loaded before shell_chrome.js; shell chrome supplies Projects state and shared UI helpers.
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import { enhanceAppSelects as importedEnhanceAppSelects } from '../../ui/ui_helpers.js';
+
+let exportedDarklabProjectReport = null;
 
 (function initProjectReport(global) {
   if (typeof document === 'undefined') return;
@@ -62,14 +70,14 @@
     ];
 
     function canMutateProjects() {
-      return typeof global.activeTeamScopeCan === 'function'
-        ? global.activeTeamScopeCan('mutate_projects')
-        : true;
+      const can = typeof importedActiveTeamScopeCan === 'function' ? importedActiveTeamScopeCan : null;
+      return typeof can === 'function' ? can('mutate_projects') : true;
     }
 
     function deniedMessage() {
-      return typeof global.teamScopeDeniedMessage === 'function'
-        ? global.teamScopeDeniedMessage('change team projects')
+      const denied = typeof importedTeamScopeDeniedMessage === 'function' ? importedTeamScopeDeniedMessage : null;
+      return typeof denied === 'function'
+        ? denied('change team projects')
         : "View-only team members can't change team projects. Switch to Personal or ask for operator access.";
     }
 
@@ -799,7 +807,7 @@
     async function confirmReloadSavedDraft() {
       const confirmFn = typeof ctx.showConfirm === 'function'
         ? ctx.showConfirm
-        : (typeof global.showConfirm === 'function' ? global.showConfirm : null);
+        : (typeof importedShowConfirm === 'function' ? importedShowConfirm : null);
       if (confirmFn) {
         const choice = await confirmFn({
           body: {
@@ -1323,7 +1331,8 @@
       renderPreview(st, previewHost);
       shell.append(editor, previewHost);
       container.appendChild(shell);
-      if (typeof global.enhanceAppSelects === 'function') global.enhanceAppSelects(container);
+      const enhanceSelects = typeof importedEnhanceAppSelects === 'function' ? importedEnhanceAppSelects : null;
+      if (typeof enhanceSelects === 'function') enhanceSelects(container);
     }
 
     function renderMobileReportTab(projectId, summary) {
@@ -1442,7 +1451,11 @@
     };
   }
 
-  global.DarklabProjectReport = {
+  const DarklabProjectReport = {
     createProjectReportController,
   };
+  exportedDarklabProjectReport = DarklabProjectReport;
 })(globalThis);
+
+export {
+  exportedDarklabProjectReport as DarklabProjectReport,};

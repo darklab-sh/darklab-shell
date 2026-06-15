@@ -74,5 +74,6 @@ import './features/runner/runner_persistence.js';
 import './runner.js';
 import './controller.js';
 import './features/terminal/composer_controller.js';
+import './e2e_test_hooks.js';
 import './shell_chrome.js';
 import './mobile_chrome.js';

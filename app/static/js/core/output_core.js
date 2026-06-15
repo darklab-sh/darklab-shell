@@ -1,6 +1,8 @@
 // ── Output pure helpers ──────────────────────────────────────────────────
 // Loaded before output.js. DOM writes and batching stay in output.js; prompt
 // label, prefix, and signal-count transforms live here.
+import { DarklabRunOutputModel as importedRunOutputModel } from './run_output_model.js';
+
 var DarklabOutputCore = (function (global) {
   const OUTPUT_SIGNAL_SCOPES = Object.freeze(['findings', 'warnings', 'errors', 'summaries']);
   const OUTPUT_SIGNAL_SUMMARY_CLASSES = Object.freeze([
@@ -151,7 +153,8 @@ var DarklabOutputCore = (function (global) {
   }
 
   function _outcomeLines(lines) {
-    const model = window.DarklabRunOutputModel || null;
+    const model = (typeof importedRunOutputModel !== 'undefined' && importedRunOutputModel)
+      || null;
     return (Array.isArray(lines) ? lines : [])
       .filter(line => line && typeof line === 'object')
       .filter(line => {
@@ -409,7 +412,8 @@ var DarklabOutputCore = (function (global) {
   }
 
   function lineRole(rawLine) {
-    const model = window.DarklabRunOutputModel || null;
+    const model = (typeof importedRunOutputModel !== 'undefined' && importedRunOutputModel)
+      || null;
     if (model && typeof model.fromWireLineEvent === 'function') {
       return String(model.fromWireLineEvent(rawLine || {}).role || 'body');
     }
@@ -487,6 +491,8 @@ var DarklabOutputCore = (function (global) {
     stripPromptLabelFromEchoText,
     workspaceDisplayPath,
   });
-  global.DarklabOutputCore = api;
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { OUTPUT_COMMAND_OUTCOME_SUMMARY_CLASSES, OUTPUT_SIGNAL_SCOPES, buildCommandOutcomeSummary, buildPromptLabel, buildPromptLabelFromParts, countableSignalScopes, emptySignalCounts, formatOutputPrefix, isBuiltinCommandRoot, isSignalCountableLine, isSignalSummaryClassName, isSyntheticSummaryClassName, lineHasClass, normalizeCommandOutcomeSummary, normalizeEntities, normalizeSignals, normalizeWorkspaceCwd, promptIdentityFromParts, promptIdentityPrefix, stripPromptLabelFromEchoText, workspaceDisplayPath } = DarklabOutputCore;
+export { DarklabOutputCore };

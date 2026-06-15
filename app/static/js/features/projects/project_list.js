@@ -1,6 +1,8 @@
 // Project list controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+let exportedDarklabProjectList = null;
+
 (function projectListModule(global) {
   'use strict';
 
@@ -269,7 +271,11 @@
     };
   }
 
-  global.DarklabProjectList = {
+  const DarklabProjectList = {
     createProjectListController,
   };
+  exportedDarklabProjectList = DarklabProjectList;
 })(globalThis);
+
+export {
+  exportedDarklabProjectList as DarklabProjectList,};

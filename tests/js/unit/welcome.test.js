@@ -50,6 +50,18 @@ function loadWelcomeFns({
     throw new Error(`Unexpected url: ${url}`)
   })
   const mountShellPrompt = vi.fn()
+  const appConfig = {
+    motd: '',
+    welcome_char_ms: 0,
+    welcome_jitter_ms: 0,
+    welcome_post_cmd_ms: 0,
+    welcome_inter_block_ms: 0,
+    welcome_sample_count: 5,
+    welcome_hint_interval_ms: 0,
+    welcome_hint_rotations: 0,
+    welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
+    ...config,
+  }
 
   return {
     ...fromDomScripts(
@@ -58,29 +70,7 @@ function loadWelcomeFns({
         document,
         apiFetch,
         activeTabId: 'tab-1',
-        _welcomeActive: false,
-        _welcomeDone: false,
-        _welcomeTabId: null,
-        _welcomeBanner: null,
-        _welcomeLiveLine: null,
-        _welcomeHintNode: null,
-        _welcomeStatusNodes: [],
-        _welcomePlan: null,
-        _welcomeNextBlockIndex: 0,
-        _welcomeSettleRequested: false,
-        _welcomeBootPending: true,
-        APP_CONFIG: {
-          motd: '',
-          welcome_char_ms: 0,
-          welcome_jitter_ms: 0,
-          welcome_post_cmd_ms: 0,
-          welcome_inter_block_ms: 0,
-          welcome_sample_count: 5,
-          welcome_hint_interval_ms: 0,
-          welcome_hint_rotations: 0,
-          welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
-          ...config,
-        },
+        APP_CONFIG: appConfig,
         getOutput: () => out,
         cmdInput,
         appendLine,
@@ -117,6 +107,24 @@ function loadWelcomeFns({
       _isWelcomeDone: () => _welcomeDone,
       _sampleWelcomeBlocks,
     }`,
+      `APP_STATE_API.setActiveTabId(activeTabId);
+      window.APP_CONFIG = APP_CONFIG;
+      window.DarklabConfig = { getAppConfig: () => APP_CONFIG };
+      window.apiFetch = apiFetch;
+      window.getOutput = getOutput;
+      window.cmdInput = cmdInput;
+      window.appendLine = appendLine;
+      window.mountShellPrompt = mountShellPrompt;
+      window.unmountShellPrompt = unmountShellPrompt;
+      window.renderMotd = renderMotd;
+      window.logClientError = logClientError;
+      window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;
+      window.getWelcomeIntroPreference = getWelcomeIntroPreference;
+      window.getTourSeenVersionPreference = getTourSeenVersionPreference;
+      window.openTourModal = openTourModal;
+      window.refocusComposerAfterAction = refocusComposerAfterAction;
+      window.setComposerValue = setComposerValue;
+      window.requestAnimationFrame = requestAnimationFrame;`,
     ),
     apiFetch,
     out,

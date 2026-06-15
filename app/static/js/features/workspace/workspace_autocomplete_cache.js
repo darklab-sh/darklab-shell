@@ -7,27 +7,38 @@ function _workspaceState() {
 }
 
 async function refreshWorkspaceFileCache() {
-  const api = _workspaceApi();
   const state = _workspaceState();
-  const fetcher = typeof api.apiFetch === 'function'
-    ? api.apiFetch
-    : (typeof apiFetch === 'function' ? apiFetch : null);
-  if (typeof api.isWorkspaceEnabled !== 'function' || !api.isWorkspaceEnabled() || !fetcher) return state.files || [];
+  const fetcher = typeof state.apiFetch === 'function'
+    ? state.apiFetch
+    : typeof _workspaceApi().apiFetch === 'function'
+      ? _workspaceApi().apiFetch
+      : null;
+  const isEnabled = typeof state.isEnabled === 'function'
+    ? state.isEnabled
+    : typeof _workspaceApi().isWorkspaceEnabled === 'function'
+      ? _workspaceApi().isWorkspaceEnabled
+      : null;
+  if (!isEnabled || !isEnabled() || !fetcher) return state.files || [];
   try {
     const resp = await fetcher('/workspace/files');
-    const data = await api._workspaceJson(resp);
-    const nextOwner = typeof api._workspaceOwnerFromPayload === 'function' ? api._workspaceOwnerFromPayload(data) : {};
-    const previousScopeKey = typeof api._workspaceActiveScopeKeyFromOwner === 'function'
-      ? api._workspaceActiveScopeKeyFromOwner(state.owner)
+    const data = typeof state.parseJson === 'function'
+      ? await state.parseJson(resp)
+      : await resp.json();
+    const nextOwner = typeof state.ownerFromPayload === 'function' ? state.ownerFromPayload(data) : {};
+    const scopeKey = typeof state.activeScopeKeyFromOwner === 'function'
+      ? state.activeScopeKeyFromOwner
+      : null;
+    const previousScopeKey = scopeKey
+      ? scopeKey(state.owner)
       : 'personal';
-    const nextScopeKey = typeof api._workspaceActiveScopeKeyFromOwner === 'function'
-      ? api._workspaceActiveScopeKeyFromOwner(nextOwner)
+    const nextScopeKey = scopeKey
+      ? scopeKey(nextOwner)
       : previousScopeKey;
-    if (previousScopeKey !== nextScopeKey && typeof api._workspaceResetForScopeChange === 'function') {
-      api._workspaceResetForScopeChange();
+    if (previousScopeKey !== nextScopeKey && typeof state.resetForScopeChange === 'function') {
+      state.resetForScopeChange();
     }
-    if (typeof api.renderWorkspaceFiles === 'function') {
-      api.renderWorkspaceFiles(data);
+    if (typeof state.renderFiles === 'function') {
+      state.renderFiles(data);
     } else {
       state.loaded = true;
       state.dirs = Array.isArray(data.directories) ? data.directories : [];
@@ -40,15 +51,17 @@ async function refreshWorkspaceFileCache() {
 }
 
 function getWorkspaceAutocompleteFileHints() {
-  const api = _workspaceApi();
   const state = _workspaceState();
   const files = Array.isArray(state.files) ? state.files : [];
   if (!state.loaded || !files.length) return [];
+  const formatBytes = typeof state.formatBytes === 'function'
+    ? state.formatBytes
+    : value => `${Number(value) || 0} B`;
   return files.map(file => {
     const path = String(file.path || '').trim();
     return {
       value: path,
-      description: `${state.owner && state.owner.scope === 'team' ? 'team' : 'personal'} file · ${api._formatWorkspaceBytes(file.size)}`,
+      description: `${state.owner && state.owner.scope === 'team' ? 'team' : 'personal'} file · ${formatBytes(file.size)}`,
     };
   }).filter(item => item.value);
 }
@@ -67,14 +80,16 @@ function getWorkspaceAutocompleteDirectoryHints() {
 }
 
 function getWorkspaceDirectoryEntries(path = '') {
-  return _workspaceApi()._workspaceDirectEntries(path);
+  const state = _workspaceState();
+  return typeof state.getDirectoryEntries === 'function' ? state.getDirectoryEntries(path) : [];
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    refreshWorkspaceFileCache,
-    getWorkspaceAutocompleteFileHints,
-    getWorkspaceAutocompleteDirectoryHints,
-    getWorkspaceDirectoryEntries,
-  });
 }
+
+export {
+  getWorkspaceAutocompleteDirectoryHints,
+  getWorkspaceAutocompleteFileHints,
+  getWorkspaceDirectoryEntries,
+  refreshWorkspaceFileCache,
+};

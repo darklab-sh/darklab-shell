@@ -252,20 +252,21 @@ function showToast(msg, tone = 'success', action = null) {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    escapeHtml,
-    escapeRegex,
-    normalizeRedactionRules,
-    applyRedactionRules,
-    redactLineEntries,
-    omitRawOnlyLineEntries,
-    renderMotd,
-    copyTextToClipboard,
-    downloadUrlAsAttachment,
-    shareUrl,
-    showToast,
-  });
   if (typeof window.downloadBlobAsAttachment !== 'function') {
-    window.downloadBlobAsAttachment = downloadBlobAsAttachment;
   }
 }
+
+export {
+  applyRedactionRules,
+  copyTextToClipboard,
+  downloadBlobAsAttachment,
+  downloadUrlAsAttachment,
+  escapeHtml,
+  escapeRegex,
+  normalizeRedactionRules,
+  omitRawOnlyLineEntries,
+  redactLineEntries,
+  renderMotd,
+  shareUrl,
+  showToast,
+};

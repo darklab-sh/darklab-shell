@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,697
-- docs/inventory meta-tests: 37
+- behavior tests: 3,710
+- docs/inventory meta-tests: 42
 - `pytest`: 2088 (2051 behavior + 37 meta)
-- `vitest`: 1383
-- `playwright`: 263
-- total: 3,734
+- `vitest`: 1399
+- `playwright`: 265
+- total: 3,752
 
 This document is organized in two parts:
 
@@ -122,7 +122,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 Playwright notes:
 
 - `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
-- `npm run test:e2e:source` runs a fast source-mode Playwright slice against boot resilience and share/permalink flows. It is included in `npm test` so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
+- `npm run test:e2e:source` runs a fast source-mode Playwright slice against boot resilience, share/permalink flows, and the high-risk lazy shell surfaces. It is included in `npm test` so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
@@ -2418,6 +2418,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `keeps macOS double-space substitution out of the command composer` | Verifies that macOS double-space period substitution is normalized back to literal spaces before the composer state updates. |
 | `settles welcome immediately when Enter is pressed during welcome playback` | Verifies that settles welcome immediately when Enter is pressed during welcome playback. |
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
+| `lets blank Enter append a prompt after the welcome intro is done` | Verifies that blank Enter uses the normal prompt-newline path once the welcome intro has finished, even while welcome hint rotation is still active. |
 | `does not let welcome playback steal Space from schedules form fields` | Verifies that the global welcome keyboard handler leaves Schedules modal form input alone while the modal is open. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
 | `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
@@ -2757,11 +2758,23 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
 | `lazy-loads the project workspace controller cluster in order` | Verifies that the Projects workspace controllers load in manifest order only when the workspace opens. |
 | `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
-| `logs lazy module load failures with safe asset context` | Verifies failed lazy module imports send a client log with asset name, type, sanitized asset path, and expected-global state. |
+| `logs lazy module load and export-contract failures with safe asset context` | Verifies failed lazy module imports and missing lazy module exports send client logs with asset name, type, sanitized asset path, and export-contract details. |
 | `logs invalid lazy asset config without including the raw JSON body` | Verifies malformed lazy asset JSON logs a warning once while falling back to built-in lazy asset paths. |
-| `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens. |
-| `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens. |
-| `lazy-loads workflow controllers while keeping the catalog cache eager` | Verifies that workflow catalog data can render the rail eagerly while terminal workflow commands lazy-load the heavier workflow controller. |
+| `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens and return a loaded Options API object. |
+| `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens and returns a loaded registry API object. |
+| `lazy-loads workflow controllers while keeping the catalog cache eager` | Verifies that workflow catalog data can render the rail eagerly while terminal workflow commands lazy-load the heavier workflow controller and return a loaded workflow API object. |
+
+#### `core_esm_exports.test.js`
+
+| Test | Description |
+| --- | --- |
+| `exports representative core helpers as ESM APIs` | Verifies representative core helpers expose direct ESM imports. |
+| `exports representative owner APIs without requiring browser-global mirrors` | Verifies representative owner modules expose callable ESM APIs without relying on browser-global mirrors. |
+| `keeps mutable app state behind the explicit state API` | Verifies tab, composer, autocomplete, and welcome state mutations go through exported getter/setter helpers instead of assigning to read-only ESM value imports. |
+| `loads session-scoped lazy data through imported runtime fetch without a global mirror` | Verifies session-scoped lazy fetches can load through the imported runtime bridge when no legacy `window.apiFetch` mirror exists. |
+| `returns loaded lazy module API objects through the runtime loader contract` | Verifies the lazy asset loader resolves configured module entries and returns the API object the runtime expects. |
+| `logs a bounded error when a lazy module API contract is missing` | Verifies missing lazy module exports reject with safe client-error context instead of leaking raw asset config. |
+| `exports UI and feature helper primitives as direct imports` | Verifies representative UI and feature helpers expose direct ESM imports. |
 
 #### `diag_audit.test.js`
 
@@ -2776,7 +2789,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
-| `exposes ExportPdfUtils on window with the expected API` | Verifies the IIFE exposes `buildTerminalExportPdf`, `parseCssColor`, and `themeColors` on `window.ExportPdfUtils`. |
+| `exposes ExportPdfUtils as an ESM-compatible module API` | Verifies the module exposes `buildTerminalExportPdf`, `parseCssColor`, and `themeColors` through the `ExportPdfUtils` API. |
 | `returns a jsPDF doc instance` | Verifies `buildTerminalExportPdf` returns a jsPDF document object when given valid inputs. |
 | `returns a doc when rawLines is empty` | Verifies `buildTerminalExportPdf` handles an empty `rawLines` array without throwing. |
 | `renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing` | Verifies all supported line class variants render without errors using a canvas-capable document mock. |
@@ -2795,6 +2808,16 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `loads, saves, and compacts remediation and verification details` | Verifies the shared finding triage editor loads existing details, saves remediation and verification fields, updates the compact finding payload, and closes after save. |
 | `keeps view-only triage read-only and rejects oversized text before saving` | Verifies the shared finding triage editor disables edits for view-only team members and rejects oversized free-text fields before sending a save request. |
 | `syncs the enhanced verification select across reopened findings and view-only mode` | Verifies the shared finding triage editor keeps the app-native verification select label and disabled state in sync when reopening for another finding. |
+
+#### `frontend_inventory.test.js`
+
+| Test | Description |
+| --- | --- |
+| `classifies intentional bootstrap and vendor globals from the allowlist` | Verifies the frontend inventory report marks bootstrap globals such as `APP_CONFIG` / `PermData` and classic vendor globals such as `AnsiUp` with their allowlisted purposes. |
+| `keeps lazy loader placeholders separate from generic compatibility exports` | Verifies lazy-loader placeholder globals are reported separately from ordinary compatibility exports. |
+| `passes check mode while reporting global purpose totals` | Verifies `--check` still passes with resolved app reads, reports purpose totals for publishes and reads, and fails if a new tracked `window.*` publish/read lacks an allowlist entry. |
+| `pins compatibility-boundary budgets so global debt cannot grow silently` | Verifies module bridge, test-hook, lazy-placeholder, and allowlist purpose counts stay explicit when compatibility boundaries change. |
+| `fails check mode when an allowlist entry no longer matches a boundary` | Verifies `--check` fails when a frontend globals allowlist entry no longer matches any current publish/read boundary. |
 
 #### `grep_output_suggestions.test.js`
 
@@ -3006,6 +3029,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders notice lines with textContent (not HTML)` | Verifies that renders notice lines with textContent (not HTML). |
 | `renders typed notice events with textContent and legacy CSS class` | Verifies that typed notice events render safely while keeping the legacy notice class. |
 | `renders typed prompt roles like legacy prompt-echo lines` | Verifies that typed prompt-role events render with the same prompt prefix and raw-line compatibility as legacy prompt echoes. |
+| `keeps the live prompt after blank prompt echoes without the legacy prompt global` | Verifies blank prompt echoes insert before the live prompt when source-mode ESM uses the imported prompt binding instead of the old window mirror. |
 | `round trips wire event input through fromWireLineEvent before rendering` | Verifies that wire-shaped line events are decoded through the shared browser model before rendering. |
 | `renders non-plain classes through ansi_to_html` | Verifies that renders non-plain classes through ansi_to_html. |
 | `isolates ANSI parser state between tabs` | Verifies that unterminated ANSI color or style state in one tab does not affect output rendered in another tab. |
@@ -3416,8 +3440,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `storage event for an unrelated key does not change SESSION_ID` | Verifies that `storage` events for keys other than `session_token` have no effect on `SESSION_ID`. |
 | `storage event calls reloadSessionHistory when available to refresh passive tab UI` | Verifies that storage event calls reloadSessionHistory when available to refresh passive tab UI. |
 | `storage event calls loadSessionPreferences when available` | Verifies that passive-tab `session_token` changes trigger `loadSessionPreferences()` so session-scoped options refresh without a reload. |
-| `storage event calls _updateOptionsSessionTokenStatus when available` | Verifies that storage event calls _updateOptionsSessionTokenStatus when available. |
-| `storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent` | Checks that storage event does not throw when reloadSessionHistory and  updateOptionsSessionTokenStatus are absent. |
+| `storage event calls the registered session-token status updater when available` | Verifies that passive-tab `session_token` changes trigger the registered session-token status updater without relying on a browser global. |
+| `storage event does not throw when reloadSessionHistory and session-token status updater are absent` | Checks that passive-tab `session_token` changes remain harmless when the optional history and session-token status hooks are absent. |
 
 #### `shell_chrome.test.js`
 
@@ -3461,6 +3485,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `loads the source-mode shell graph and keeps cross-module bridges live` | Verifies that the native shell ES module entry imports successfully and preserves tab output, theme preference, and FAQ autocomplete bridge behavior. |
+| `keeps bundle-mode lazy entries on shared chunks instead of re-running shell modules` | Verifies that committed bundle-mode Atlas, History Run Details, and Workflows lazy entries import shared build chunks with the shell bootstrap instead of inlining eager shell bridge/listener setup again, and that Atlas desktop/mobile entries share the mobile bridge chunk. |
 
 #### `state.test.js`
 
@@ -3576,7 +3601,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows the running command temporarily without overwriting a user rename` | Verifies that user-renamed tabs show the active command only while it is running. |
 | `permalinkTab shows a toast when there is no output to share` | Verifies that permalinkTab shows a toast when there is no output to share. |
 | `permalinkTab blocks view-only team members before creating a snapshot` | Verifies that view-only team scope blocks share snapshot creation before the `/share` request. |
-| `permalinkTab shows a failure toast when the share request rejects` | Verifies that permalinkTab shows a failure toast when the share request rejects. |
+| `permalinkTab treats a rejected share response as a failure instead of copying an undefined URL` | Verifies that permalinkTab treats a rejected share response as a failure instead of copying an undefined URL. |
 | `permalinkTab falls back to execCommand when clipboard writeText rejects` | Verifies that permalinkTab falls back to execCommand when clipboard writeText rejects. |
 | `permalinkTab can bypass redaction when the confirmation chooses raw sharing` | Verifies that permalinkTab can create a raw snapshot when the confirmation chooses raw sharing. |
 | `permalinkTab cancels sharing when the redaction confirmation is dismissed` | Verifies that permalinkTab stops before snapshot creation when the redaction confirmation is dismissed. |
@@ -3628,6 +3653,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows invite statuses and only offers revoke for active invites` | Verifies that active, used, expired, and revoked invite rows render distinct statuses and only active invites expose the revoke action. |
 | `copies a newly created invite code even after the detail pane refreshes` | Verifies that newly created one-time invite codes remain copyable from the Teams panel even if the rendered copy button loses its transient code attribute. |
 | `lets the Teams tab switch back to Personal scope` | Verifies that the Options Teams panel can move from an active team scope back to Personal without opening the separate scope selector. |
+| `preserves in-progress create form values when teams refresh` | Verifies that an open Teams create form keeps typed values when a background team-list refresh repaints the panel. |
 | `shows owner team activity with filters and safe details` | Verifies that owner-visible Team Activity renders rows, collapsed safe details, and filtered requests from the Options Teams panel. |
 | `keeps Team Activity hidden from non-governance roles` | Verifies that viewer-capability payloads do not expose the Team Activity subtab or trigger activity fetches. |
 | `logs failed Team Activity loads with safe client context` | Verifies Team Activity and Team Recent activity failures send safe client-error logs with only action and team id context. |
@@ -4232,16 +4258,23 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `? opens after word-jump shortcuts and deleting the prompt` | Verifies the shortcuts overlay still opens after Option-word navigation and prompt deletion resync the composer state. |
 | `overlay and shortcuts built-in share the same source` | Verifies the `shortcuts` command output and the overlay payload list the same keys. |
 | `Alt+H toggles the history drawer from the composer` | Pressing Alt+H with the composer focused opens the history drawer and pressing it again closes it — without leaking `˙` into the prompt. |
-| `Alt+, opens the options panel from the composer` | Pressing Alt+, with the composer focused opens the options modal without leaking `≤`. |
+| `Alt+, opens the options panel from the composer and Alt+Tab cycles modal tabs` | Pressing Alt+, with the composer focused opens the options modal without leaking `≤`, and Alt+Tab cycles modal tabs. |
 | `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
 | `Alt+C toggles the Commands modal from the composer` | Alt+C opens and closes the Commands modal without leaking `ç` into the prompt. |
-| `Alt+P toggles the Projects modal from the composer` | Alt+P opens and closes the Projects modal without leaking `π` into the prompt. |
+| `Alt+P toggles Projects and Alt+Tab cycles Atlas modal tabs` | Alt+P opens and closes the Projects modal without leaking `π` into the prompt, and Alt+Tab cycles Atlas modal tabs. |
 | `Alt+M toggles the Status Monitor from the composer` | Alt+M opens and closes the status monitor without leaking `µ` into the prompt. |
 | `Alt+Shift modal shortcuts move focus off the composer and keep Escape scoped to the modal` | Alt+Shift+F opens and closes Files, while Alt+Shift+S and Alt+Shift+W move focus into Schedules and Watchers so typing and Escape stay scoped to the modal. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
+
+#### `source-lazy-smoke.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls. |
+| `does not publish Playwright-only hooks when webdriver is unavailable` | Verifies a normal browser context does not receive Playwright-only helper globals. |
 
 #### `tabs.spec.js`
 

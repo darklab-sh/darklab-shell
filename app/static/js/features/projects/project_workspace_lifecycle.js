@@ -1,6 +1,8 @@
 // Project workspace loading and selection lifecycle.
 // Loaded before shell_chrome.js; shell chrome supplies state accessors and render hooks.
 
+let exportedDarklabProjectWorkspaceLifecycle = null;
+
 (function projectWorkspaceLifecycleModule(global) {
   'use strict';
 
@@ -175,7 +177,11 @@
     };
   }
 
-  global.DarklabProjectWorkspaceLifecycle = {
+  const DarklabProjectWorkspaceLifecycle = {
     createProjectWorkspaceLifecycleController,
   };
+  exportedDarklabProjectWorkspaceLifecycle = DarklabProjectWorkspaceLifecycle;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceLifecycle as DarklabProjectWorkspaceLifecycle,};

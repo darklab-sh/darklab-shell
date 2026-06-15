@@ -1,4 +1,23 @@
 // FAQ and allowed-command helpers kept eager so boot-time FAQ rendering stays small.
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { faqBody as importedFaqBody } from '../../core/dom.js';
+import { getAutocompleteState as importedGetAutocompleteState, setAutocompleteState as importedSetAutocompleteState } from '../../core/state.js';
+import { acHide as importedAcHide, acShow as importedAcShow } from '../../autocomplete.js';
+import {
+  getAutocompleteMatches as importedGetAutocompleteMatches,
+  limitAutocompleteMatchesForDisplay as importedLimitAutocompleteMatchesForDisplay,
+} from '../autocomplete/suggestions.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+import {
+  getVisibleComposerInput as importedGetVisibleComposerInput,
+  isFaqOverlayOpen as importedIsFaqOverlayOpen,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+} from '../../ui/ui_helpers.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import { openCommandRegistry as importedOpenCommandRegistry } from './command_registry_bridge.js';
 
 var allowedCommandsFaqData = null;
 let faqHandleRegistry = [];
@@ -12,6 +31,146 @@ const FAQ_CATEGORY_ORDER = [
   'Other',
 ];
 const FAQ_CATEGORY_OTHER = 'Other';
+const FAQ_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _faqGlobalFunction(name) {
+  if (FAQ_GLOBAL && typeof FAQ_GLOBAL[name] === 'function') return FAQ_GLOBAL[name];
+  if (typeof globalThis !== 'undefined' && typeof globalThis[name] === 'function') return globalThis[name];
+  return null;
+}
+
+function _faqBody() {
+  if (typeof importedFaqBody !== 'undefined' && importedFaqBody) return importedFaqBody;
+  return FAQ_GLOBAL.faqBody || null;
+}
+
+function _faqAppConfig() {
+  if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
+  return FAQ_GLOBAL.APP_CONFIG || {};
+}
+
+function _faqGetAutocompleteState() {
+  const getter = typeof importedGetAutocompleteState === 'function'
+    ? importedGetAutocompleteState
+    : _faqGlobalFunction('getAutocompleteState');
+  return getter ? getter() : {};
+}
+
+function _faqSetAutocompleteState(next) {
+  const setter = typeof importedSetAutocompleteState === 'function'
+    ? importedSetAutocompleteState
+    : _faqGlobalFunction('setAutocompleteState');
+  if (setter) setter(next);
+}
+
+function _faqAcHide() {
+  const hide = _faqGlobalFunction('acHide')
+    || (typeof importedAcHide === 'function' ? importedAcHide : null);
+  if (hide) hide();
+}
+
+function _faqAcShow(items) {
+  const show = _faqGlobalFunction('acShow')
+    || (typeof importedAcShow === 'function' ? importedAcShow : null);
+  if (show) show(items);
+}
+
+function _faqIsActiveTabRunning() {
+  const isRunning = _faqGlobalFunction('isActiveTabRunning');
+  return !!(isRunning && isRunning());
+}
+
+function _faqGetVisibleComposerInput() {
+  const getInput = _faqGlobalFunction('getVisibleComposerInput')
+    || (typeof importedGetVisibleComposerInput === 'function' ? importedGetVisibleComposerInput : null);
+  return getInput ? getInput() : null;
+}
+
+function _faqGetAutocompleteMatches(value, cursor) {
+  const getMatches = _faqGlobalFunction('getAutocompleteMatches')
+    || (typeof importedGetAutocompleteMatches === 'function' ? importedGetAutocompleteMatches : null);
+  return getMatches ? getMatches(value, cursor) : [];
+}
+
+function _faqLimitAutocompleteMatchesForDisplay(matches, limit) {
+  const limitMatches = _faqGlobalFunction('limitAutocompleteMatchesForDisplay')
+    || (typeof importedLimitAutocompleteMatchesForDisplay === 'function'
+      ? importedLimitAutocompleteMatchesForDisplay
+      : null);
+  return limitMatches ? limitMatches(matches, limit) : matches.slice(0, limit);
+}
+
+function _faqSetComposerValue(value, start, end, options) {
+  const setValue = _faqGlobalFunction('setComposerValue')
+    || (typeof importedSetComposerValue === 'function' ? importedSetComposerValue : null);
+  if (setValue) setValue(value, start, end, options);
+}
+
+function _faqRefocusComposerAfterAction(options) {
+  const refocus = _faqGlobalFunction('refocusComposerAfterAction')
+    || (typeof importedRefocusComposerAfterAction === 'function' ? importedRefocusComposerAfterAction : null);
+  if (refocus) refocus(options);
+}
+
+function _faqUseMobileTerminalViewportMode() {
+  const useMobile = typeof importedUseMobileTerminalViewportMode === 'function'
+    ? importedUseMobileTerminalViewportMode
+    : _faqGlobalFunction('useMobileTerminalViewportMode');
+  return !!(useMobile && useMobile());
+}
+
+function _faqIsOverlayOpen() {
+  const isOpen = typeof importedIsFaqOverlayOpen === 'function'
+    ? importedIsFaqOverlayOpen
+    : _faqGlobalFunction('isFaqOverlayOpen');
+  return !!(isOpen && isOpen());
+}
+
+function _faqOpenTourModal(options) {
+  const open = _faqGlobalFunction('openTourModal');
+  return open ? open(options) : false;
+}
+
+function _faqBindDisclosure(trigger, options) {
+  const bind = typeof importedBindDisclosure === 'function'
+    ? importedBindDisclosure
+    : _faqGlobalFunction('bindDisclosure');
+  return bind ? bind(trigger, options) : null;
+}
+
+function _faqBindPressable(el, options) {
+  const bind = typeof importedBindPressable === 'function'
+    ? importedBindPressable
+    : _faqGlobalFunction('bindPressable');
+  return bind ? bind(el, options) : null;
+}
+
+function _readFaqAutocompleteState() {
+  const apiState = _faqGetAutocompleteState();
+  const globalState = typeof globalThis !== 'undefined' ? globalThis : {};
+  return {
+    filtered: Array.isArray(apiState.filtered)
+      ? apiState.filtered
+      : (Array.isArray(globalState.acFiltered) ? globalState.acFiltered : []),
+    index: Number.isFinite(Number(apiState.index))
+      ? Number(apiState.index)
+      : (Number.isFinite(Number(globalState.acIndex)) ? Number(globalState.acIndex) : -1),
+  };
+}
+
+function _writeFaqAutocompleteState(next = {}) {
+  _faqSetAutocompleteState(next);
+  const globalState = typeof globalThis !== 'undefined' ? globalThis : null;
+  if (globalState && typeof importedSetAutocompleteState !== 'function' && !_faqGlobalFunction('setAutocompleteState')) {
+    if (Object.prototype.hasOwnProperty.call(next, 'filtered')) {
+      globalState.acFiltered = Array.isArray(next.filtered) ? next.filtered : [];
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'index')) {
+      globalState.acIndex = Number.isFinite(Number(next.index)) ? Number(next.index) : -1;
+    }
+  }
+  return _readFaqAutocompleteState();
+}
 
 function faqSlug(value) {
   return String(value || '')
@@ -51,7 +210,8 @@ function clearFaqHash() {
 }
 
 function applyFaqHashTarget() {
-  if (!faqBody) return false;
+  const body = _faqBody();
+  if (!body) return false;
   const target = getFaqHashTarget();
   if (!target) return false;
   if (target.kind === 'question') {
@@ -62,7 +222,7 @@ function applyFaqHashTarget() {
     return true;
   }
   if (target.kind === 'section') {
-    const section = [...faqBody.querySelectorAll('[data-faq-section]')]
+    const section = [...body.querySelectorAll('[data-faq-section]')]
       .find(el => el.dataset.faqSection === target.slug);
     if (!section) return false;
     if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
@@ -141,43 +301,52 @@ function getAllowedCommandsFaqData() {
 }
 
 function openAutocompleteForVisibleComposer() {
-  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
-    if (typeof acHide === 'function') acHide();
+  if (_faqIsActiveTabRunning()) {
+    _faqAcHide();
     return false;
   }
-  const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+  const input = _faqGetVisibleComposerInput();
   if (!input || typeof input.value !== 'string') return false;
   const value = input.value;
   const cursor = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
-  if (!value.trim() || typeof getAutocompleteMatches !== 'function') return false;
-  const matches = getAutocompleteMatches(value, cursor);
-  acFiltered = typeof limitAutocompleteMatchesForDisplay === 'function'
-    ? limitAutocompleteMatchesForDisplay(matches, 12)
-    : matches.slice(0, 12);
-  acIndex = -1;
-  if (!acFiltered.length) {
-    if (typeof acHide === 'function') acHide();
+  if (!value.trim()) return false;
+  const matches = _faqGetAutocompleteMatches(value, cursor);
+  const nextFiltered = _faqLimitAutocompleteMatchesForDisplay(matches, 12);
+  _writeFaqAutocompleteState({ filtered: nextFiltered, index: -1 });
+  if (!nextFiltered.length) {
+    _faqAcHide();
     return false;
   }
-  if (typeof acShow === 'function') acShow(acFiltered);
+  _faqAcShow(nextFiltered);
   return true;
 }
 
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
-  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
-    if (typeof acHide === 'function') acHide();
+  if (_faqIsActiveTabRunning()) {
+    _faqAcHide();
     return;
   }
   const next = `${cmd} `;
-  setComposerValue(next, next.length, next.length, { dispatch: false });
-  _closeMajorOverlays();
-  refocusComposerAfterAction({ defer: true });
+  _faqSetComposerValue(next, next.length, next.length, { dispatch: false });
+  const fallbackInput = (_faqUseMobileTerminalViewportMode() && typeof document !== 'undefined')
+    ? document.getElementById('mobile-cmd')
+    : _faqGetVisibleComposerInput();
+  const targetInput = fallbackInput || _faqGetVisibleComposerInput();
+  if (targetInput && targetInput.value !== next) {
+    targetInput.value = next;
+    if (typeof targetInput.setSelectionRange === 'function') {
+      targetInput.setSelectionRange(next.length, next.length);
+    }
+  }
+  const closeMajorOverlays = (typeof importedCloseMajorOverlays === 'function' && importedCloseMajorOverlays)
+    || _faqGlobalFunction('_closeMajorOverlays');
+  if (closeMajorOverlays) closeMajorOverlays();
+  _faqRefocusComposerAfterAction({ defer: true });
   setTimeout(() => {
     openAutocompleteForVisibleComposer();
   }, 0);
 }
-if (typeof globalThis !== 'undefined') globalThis.activateFaqCommandChip = activateFaqCommandChip;
 
 function wireCommandRegistryOpenButtons(root = document) {
   if (!root) return;
@@ -185,12 +354,15 @@ function wireCommandRegistryOpenButtons(root = document) {
     if (btn.dataset.commandRegistryOpenWired === '1') return;
     btn.dataset.commandRegistryOpenWired = '1';
     btn.addEventListener('click', () => {
-      if (typeof window.openCommandRegistry === 'function') window.openCommandRegistry();
+      const openRegistry = typeof importedOpenCommandRegistry === 'function'
+        ? importedOpenCommandRegistry
+        : _faqGlobalFunction('openCommandRegistry');
+      if (openRegistry) openRegistry();
     });
   });
 }
 
-function wireFaqCommandChips(root = faqBody) {
+function wireFaqCommandChips(root = _faqBody()) {
   if (!root) return;
   root.querySelectorAll('.faq-chip[data-faq-command]').forEach(chip => {
     if (chip.dataset.faqWired === '1') return;
@@ -207,14 +379,16 @@ function wireFaqCommandChips(root = faqBody) {
 }
 
 function shouldShowVisualTourFaqLink() {
-  if (!(APP_CONFIG && APP_CONFIG.tour_enabled === true)) return false;
-  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return false;
-  const chapters = Array.isArray(APP_CONFIG.tour_chapters) ? APP_CONFIG.tour_chapters : [];
+  const config = _faqAppConfig();
+  if (!(config && config.tour_enabled === true)) return false;
+  if (_faqUseMobileTerminalViewportMode()) return false;
+  const chapters = Array.isArray(config.tour_chapters) ? config.tour_chapters : [];
   return chapters.some(chapter => chapter && typeof chapter === 'object');
 }
 
 function appendVisualTourFaqLink() {
-  if (!faqBody || !shouldShowVisualTourFaqLink()) return null;
+  const bodyEl = _faqBody();
+  if (!bodyEl || !shouldShowVisualTourFaqLink()) return null;
   const item = document.createElement('div');
   item.className = 'faq-tour-entry';
 
@@ -232,26 +406,29 @@ function appendVisualTourFaqLink() {
   button.textContent = 'Open visual tour';
   button.setAttribute('aria-label', 'Open the visual tour');
   const activate = () => {
-    if (typeof openTourModal === 'function') {
-      const opened = openTourModal({ source: 'faq' });
-      if (opened && typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) {
-        clearFaqHash();
-        hideFaqOverlay();
-      }
+    const opened = _faqOpenTourModal({ source: 'faq' });
+    if (opened && _faqIsOverlayOpen()) {
+      clearFaqHash();
+      const hideFaq = _faqGlobalFunction('hideFaqOverlay');
+      if (hideFaq) hideFaq();
     }
   };
-  if (typeof bindPressable === 'function') {
-    bindPressable(button, {
+  if (_faqBindPressable(button, {
       refocusComposer: false,
       clearPressStyle: true,
       onActivate: activate,
-    });
-  } else {
+    })) {
+    body.append(copy, button);
+    item.append(title, body);
+    bodyEl.prepend(item);
+    return item;
+  }
+  {
     button.addEventListener('click', activate);
   }
   body.append(copy, button);
   item.append(title, body);
-  faqBody.prepend(item);
+  bodyEl.prepend(item);
   return item;
 }
 
@@ -286,8 +463,9 @@ function renderAllowedCommandsFaq(data) {
 function renderFaqItems(items) {
   // FAQ content is backend-driven so operators can extend it, but chips and
   // special UI sections are still wired client-side after the HTML is inserted.
-  if (!faqBody) return;
-  faqBody.innerHTML = '';
+  const body = _faqBody();
+  if (!body) return;
+  body.innerHTML = '';
   const faqHandles = [];
   const grouped = new Map(FAQ_CATEGORY_ORDER.map(category => [category, []]));
   (items || []).forEach(item => {
@@ -338,12 +516,12 @@ function renderFaqItems(items) {
 
       q.setAttribute('role', 'button');
       q.setAttribute('tabindex', '0');
-      const handle = bindDisclosure(q, {
+      const handle = _faqBindDisclosure(q, {
         panel: div,
         openClass: 'faq-open',
         clearPressStyle: true,
         onToggle: (open) => {
-          if (open && typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) {
+          if (open && _faqIsOverlayOpen()) {
             replaceFaqHash('faq', questionSlug);
           }
         },
@@ -354,7 +532,7 @@ function renderFaqItems(items) {
       div.appendChild(a);
       section.appendChild(div);
     });
-    faqBody.appendChild(section);
+    body.appendChild(section);
   });
 
   faqHandleRegistry = faqHandles;
@@ -363,30 +541,18 @@ function renderFaqItems(items) {
 
   appendVisualTourFaqLink();
   renderAllowedCommandsFaq(allowedCommandsFaqData);
-  renderFaqLimits(APP_CONFIG);
-  wireFaqCommandChips(faqBody);
+  renderFaqLimits(_faqAppConfig());
+  wireFaqCommandChips(body);
 }
 
-if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    applyFaqHashTarget,
-    clearFaqHash,
-    renderFaqLimits,
-    setAllowedCommandsFaqData,
-    getAllowedCommandsFaqData,
-    renderAllowedCommandsFaq,
-    renderFaqItems,
-    wireFaqCommandChips,
-    wireCommandRegistryOpenButtons,
-    openAutocompleteForVisibleComposer,
-    activateFaqCommandChip,
-  });
-  Object.defineProperty(window, 'allowedCommandsFaqData', {
-    configurable: true,
-    enumerable: false,
-    get: () => allowedCommandsFaqData,
-    set: value => {
-      allowedCommandsFaqData = value;
-    },
-  });
-}
+export {
+  activateFaqCommandChip,
+  applyFaqHashTarget,
+  clearFaqHash,
+  openAutocompleteForVisibleComposer,
+  renderAllowedCommandsFaq,
+  renderFaqItems,
+  renderFaqLimits,
+  setAllowedCommandsFaqData,
+  wireFaqCommandChips,
+};

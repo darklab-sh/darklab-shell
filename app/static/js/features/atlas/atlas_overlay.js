@@ -1,10 +1,83 @@
 // Session Entity Atlas overlay controller.
+import { downloadBlobAsAttachment as importedDownloadBlobAsAttachment, showToast as importedShowToast } from '../../core/utils.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
+  portalDropdownMenu as importedPortalDropdownMenu,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncAppSelect as importedSyncAppSelect,
+  syncModalOverlayState as importedSyncModalOverlayState,
+  unportalDropdownMenu as importedUnportalDropdownMenu,
+} from '../../ui/ui_helpers.js';
+import { DarklabEntityMetadata as importedEntityMetadata } from '../../ui/ui_entity_metadata.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from '../../ui/ui_outside_click.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
+import { apiFetch as importedApiFetch, logClientError as importedLogClientError } from '../../session.js';
+import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
+import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_details.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import {
+  DarklabTeamScope as importedTeamScope,
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { DarklabAtlasDetail as importedAtlasDetail } from './atlas_entity_detail.js';
+import { DarklabAtlasEntityRow as importedAtlasEntityRow } from './atlas_entity_row.js';
+import { DarklabAtlasTabs as importedAtlasTabs } from './atlas_tabs.js';
+import { resetAtlasMobileTransientState as importedResetAtlasMobileTransientState } from './atlas_mobile_bridge.js';
+import {
+  getActiveProjectContext as importedGetActiveProjectContext,
+  openProjectAutoPromoteRuleFromAtlas as importedOpenProjectAutoPromoteRuleFromAtlas,
+  refreshActiveProjectContext as importedRefreshActiveProjectContext,
+} from '../projects/project_context_bridge.js';
+
+import { setAtlasHandlers as importedSetAtlasHandlers } from './atlas_bridge.js';
+
+let exportedDarklabAtlasOverlay = null;
+let exportedOpenAtlas = null;
+let exportedCloseAtlas = null;
+let exportedIsAtlasOverlayOpen = null;
+let exportedRefreshAtlasOverlay = null;
+let exportedCycleAtlasTab = null;
 
 (function initAtlasOverlay(global) {
-  const tabsApi = global.DarklabAtlasTabs || {};
-  const detailApi = global.DarklabAtlasDetail || {};
-  const entityRowApi = global.DarklabAtlasEntityRow || {};
-  const metadataApi = global.DarklabEntityMetadata || {};
+  const tabsApi = (typeof importedAtlasTabs !== 'undefined' && importedAtlasTabs) || {};
+  const fallbackAtlasTabs = [
+    { id: 'findings', type: '', label: 'Findings' },
+    { id: 'ip', type: 'ip', label: 'Hosts/IPs' },
+    { id: 'domain', type: 'domain', label: 'Domains' },
+    { id: 'hash', type: 'hash', label: 'Hashes' },
+    { id: 'cve', type: 'cve', label: 'CVEs' },
+    { id: 'url', type: 'url', label: 'URLs' },
+  ];
+  const detailApi = (typeof importedAtlasDetail !== 'undefined' && importedAtlasDetail) || {};
+  const entityRowApi = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow) || {};
+  const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
+  const metadataApi = (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
+  const teamScope = (typeof importedTeamScope !== 'undefined' && importedTeamScope)
+    || {
+      activeTeamScopeCan: (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+        || null,
+      deniedMessage: (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+        || null,
+    };
+  const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
+  const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
+  const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
+  const downloadBlobAsAttachment = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment) || null;
+  const markInteractionSurfaceReady = (typeof importedMarkInteractionSurfaceReady !== 'undefined' && importedMarkInteractionSurfaceReady) || null;
+  const portalDropdownMenu = (typeof importedPortalDropdownMenu !== 'undefined' && importedPortalDropdownMenu) || null;
+  const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
+  const showConfirm = (typeof importedShowConfirm !== 'undefined' && importedShowConfirm) || null;
+  const showToast = (typeof importedShowToast !== 'undefined' && importedShowToast) || null;
+  const syncAppSelect = (typeof importedSyncAppSelect !== 'undefined' && importedSyncAppSelect) || null;
+  const syncModalOverlayState = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState) || null;
+  const unportalDropdownMenu = (typeof importedUnportalDropdownMenu !== 'undefined' && importedUnportalDropdownMenu) || null;
 
   const overlay = document.getElementById('atlas-overlay');
   const surface = document.getElementById('atlas-surface');
@@ -164,8 +237,7 @@
   };
 
   function api() {
-    if (typeof global.apiFetch === 'function') return global.apiFetch;
-    if (typeof apiFetch === 'function') return apiFetch;
+    if (typeof importedApiFetch === 'function') return importedApiFetch;
     return fetch;
   }
 
@@ -202,18 +274,18 @@
   }
 
   function showToastSafe(message, tone = 'info') {
-    if (typeof global.showToast === 'function') global.showToast(message, tone);
+    if (typeof showToast === 'function') showToast(message, tone);
   }
 
   function activeTeamScopeCan(capability) {
-    return typeof global.activeTeamScopeCan === 'function'
-      ? global.activeTeamScopeCan(capability)
+    return teamScope && typeof teamScope.activeTeamScopeCan === 'function'
+      ? teamScope.activeTeamScopeCan(capability)
       : true;
   }
 
   function teamScopeDeniedMessage(action) {
-    return typeof global.teamScopeDeniedMessage === 'function'
-      ? global.teamScopeDeniedMessage(action)
+    return teamScope && typeof teamScope.deniedMessage === 'function'
+      ? teamScope.deniedMessage(action)
       : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
   }
 
@@ -244,7 +316,7 @@
 
   function logImportClientError(message, err) {
     if (err && err.atlasHandledClientHttpError) return;
-    if (typeof global.logClientError === 'function') global.logClientError(message, err);
+    if (typeof importedLogClientError === 'function') importedLogClientError(message, err);
   }
 
   let intelRefreshOverlay = null;
@@ -310,9 +382,9 @@
       project_id: String(projectId || ''),
       changed_at: Date.now(),
     };
-    if (typeof global.emitUiEvent === 'function') {
-      global.emitUiEvent('app:project-workspace-changed', payload);
-      global.emitUiEvent('app:project-workspace-mutated', payload);
+    if (typeof importedEmitUiEvent === 'function') {
+      importedEmitUiEvent('app:project-workspace-changed', payload);
+      importedEmitUiEvent('app:project-workspace-mutated', payload);
     }
     try {
       if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.setItem === 'function') {
@@ -363,7 +435,7 @@
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
   }
 
   function hide({ refocus = true } = {}) {
@@ -375,15 +447,15 @@
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
-    if (refocus && typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({ defer: true });
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
+    if (refocus && typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ defer: true });
     }
   }
 
   async function openAtlas(options = {}) {
-    if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
-    if (typeof global.blurVisibleComposerInputIfMobile === 'function') global.blurVisibleComposerInputIfMobile();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     if (options && options.tab) state.activeTab = tabsApi.tabById?.(options.tab)?.id || state.activeTab;
     state.projectId = String(options && options.projectId || '');
     state.projectName = String(options && options.projectName || '').trim();
@@ -411,19 +483,17 @@
     state.detailOffsets = { runs: 0, findings: 0 };
     resetSelection({ selectMode: false, render: false });
     state.detail = null;
-    if (global.DarklabAtlasMobile && typeof global.DarklabAtlasMobile.resetTransientState === 'function') {
-      global.DarklabAtlasMobile.resetTransientState();
-    }
+    if (typeof importedResetAtlasMobileTransientState === 'function') importedResetAtlasMobileTransientState();
     show();
-    if (typeof global.markInteractionSurfaceReady === 'function') {
-      global.markInteractionSurfaceReady('atlas', overlay, surface);
+    if (typeof markInteractionSurfaceReady === 'function') {
+      markInteractionSurfaceReady('atlas', overlay, surface);
     }
     render();
     loadSavedViews().catch((err) => {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas saved views', err);
+      logImportClientError('failed to load atlas saved views', err);
     });
     loadRunOptions().catch((err) => {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+      logImportClientError('failed to load atlas run filters', err);
     });
     await refreshAtlas({ resetOffset: true });
   }
@@ -435,7 +505,18 @@
   }
 
   function currentTab() {
-    return tabsApi.tabById ? tabsApi.tabById(state.activeTab) : { id: 'findings', type: '', label: 'Findings' };
+    if (tabsApi.tabById) return tabsApi.tabById(state.activeTab);
+    const tabs = Array.isArray(tabsApi.tabs) && tabsApi.tabs.length ? tabsApi.tabs : fallbackAtlasTabs;
+    return tabs.find(tab => String(tab.id || '') === String(state.activeTab || '')) || tabs[0];
+  }
+
+  function visibleActiveTab() {
+    const activeTabId = tabsHost
+      ?.querySelector('[data-atlas-tab].is-active, [data-atlas-tab][aria-selected="true"]')
+      ?.dataset
+      ?.atlasTab;
+    if (activeTabId && tabsApi.tabById) return tabsApi.tabById(activeTabId);
+    return currentTab();
   }
 
   function activeSelectionSet(tab = currentTab()) {
@@ -513,7 +594,7 @@
         tabsHost?.querySelector(`[data-atlas-tab="${selectorValue(nextTab)}"]`)?.focus({ preventScroll: true });
       }, 0);
     }
-    refreshAtlas({ resetOffset: true });
+    refreshAtlas({ resetOffset: true, force: true });
     return true;
   }
 
@@ -614,8 +695,8 @@
 
   function syncSelectDisplay(select) {
     if (!select) return;
-    if (typeof global.syncAppSelect === 'function') {
-      global.syncAppSelect(select);
+    if (typeof syncAppSelect === 'function') {
+      syncAppSelect(select);
     }
   }
 
@@ -763,9 +844,10 @@
   }
 
   function currentSavedViewState(name = '') {
+    const tab = visibleActiveTab();
     return {
       name: String(name || '').trim(),
-      tab: currentTab().id || 'findings',
+      tab: tab.id || 'findings',
       filters: {
         query: String(state.query || '').trim(),
         orphan_filter: String(state.orphanFilter || 'hide'),
@@ -838,9 +920,9 @@
   }
 
   async function promptSavedViewName(defaultName = '', title = 'Save Atlas view') {
-    if (typeof global.showConfirm !== 'function') return '';
+    if (typeof showConfirm !== 'function') return '';
     const { content, input } = savedViewNameContent(defaultName);
-    const choice = await global.showConfirm({
+    const choice = await showConfirm({
       title,
       body: {
         text: title,
@@ -870,7 +952,7 @@
       if (state.selectedSavedViewId && !selectedSavedView()) state.selectedSavedViewId = '';
       return state.savedViews;
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas saved views', err);
+      logImportClientError('failed to load atlas saved views', err);
       showToastSafe('Failed to load saved Atlas views', 'error');
       return state.savedViews;
     } finally {
@@ -905,7 +987,7 @@
       if (selected && selected.command && !state.runLabel) state.runLabel = selected.command;
       return state.runOptions;
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+      logImportClientError('failed to load atlas run filters', err);
       return state.runOptions;
     } finally {
       state.runOptionsLoading = false;
@@ -935,7 +1017,7 @@
       updateSavedViewsFromResponse(data);
       showToastSafe('Atlas view saved', 'success');
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to save atlas view', err);
+      logImportClientError('failed to save atlas view', err);
       showToastSafe('Failed to save Atlas view', 'error');
     }
   }
@@ -956,16 +1038,16 @@
       updateSavedViewsFromResponse(data);
       showToastSafe('Atlas view updated', 'success');
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas view', err);
+      logImportClientError('failed to update atlas view', err);
       showToastSafe('Failed to update Atlas view', 'error');
     }
   }
 
   async function deleteCurrentSavedView() {
     const current = selectedSavedView();
-    if (!current || typeof global.showConfirm !== 'function') return;
+    if (!current || typeof showConfirm !== 'function') return;
     try {
-      const choice = await global.showConfirm({
+      const choice = await showConfirm({
         body: { text: `Delete "${current.name}"?`, note: 'This only removes the saved view. Atlas data is unchanged.' },
         tone: 'warning',
         actions: [
@@ -982,7 +1064,7 @@
       updateSavedViewsFromResponse(data);
       showToastSafe('Atlas view deleted', 'success');
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas view', err);
+      logImportClientError('failed to delete atlas view', err);
       showToastSafe('Failed to delete Atlas view', 'error');
     }
   }
@@ -991,16 +1073,16 @@
     if (!exportWrap || !exportMenuBtn) return;
     exportWrap.classList.toggle('open', !!open);
     exportMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open && exportMenu && typeof global.portalDropdownMenu === 'function') {
+    if (open && exportMenu && typeof portalDropdownMenu === 'function') {
       exportWrap.dataset.portalMenu = 'true';
-      global.portalDropdownMenu(exportWrap, exportMenuBtn, exportMenu);
-    } else if (!open && exportMenu && typeof global.unportalDropdownMenu === 'function') {
-      global.unportalDropdownMenu(exportMenu);
+      portalDropdownMenu(exportWrap, exportMenuBtn, exportMenu);
+    } else if (!open && exportMenu && typeof unportalDropdownMenu === 'function') {
+      unportalDropdownMenu(exportMenu);
     }
   }
 
   function currentAutoPromoteRuleDraft() {
-    const tab = currentTab();
+    const tab = visibleActiveTab();
     const targetKind = String(tab && tab.type || 'any') || 'any';
     const query = String(state.query || '').trim();
     const projectId = String(state.projectId || '').trim();
@@ -1024,14 +1106,15 @@
   }
 
   async function createRuleFromCurrentView() {
-    if (typeof global.openProjectAutoPromoteRuleFromAtlas !== 'function') {
+    if (typeof importedOpenProjectAutoPromoteRuleFromAtlas !== 'function') {
       showToastSafe('Projects are not ready yet', 'error');
       return;
     }
     try {
-      await global.openProjectAutoPromoteRuleFromAtlas(currentAutoPromoteRuleDraft());
+      const opened = await importedOpenProjectAutoPromoteRuleFromAtlas(currentAutoPromoteRuleDraft());
+      if (opened) closeAtlas({ refocus: false });
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to create auto-promote rule from atlas view', err);
+      logImportClientError('failed to create auto-promote rule from atlas view', err);
       showToastSafe(err && err.message ? err.message : 'Failed to create rule from Atlas view', 'error');
     }
   }
@@ -1071,13 +1154,13 @@
       resetImportFlow();
       if (importFileInput) importFileInput.value = '';
       if (importNameInput) importNameInput.value = '';
-      if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+      if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
       return;
     }
     if (importNameInput && !importNameInput.value) importNameInput.value = selectedImportFormatLabel();
     syncImportFileAcceptHint();
     renderImportPreview();
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
     window.setTimeout(() => {
       const focusTarget = importFormatSelect || importModal;
       focusTarget?.focus?.({ preventScroll: true });
@@ -1360,6 +1443,8 @@
     }
     const filters = view.filters && typeof view.filters === 'object' ? view.filters : {};
     state.selectedSavedViewId = String(view.id || '');
+    const savedTab = tabsApi.tabById?.(String(view.tab || ''));
+    state.activeTab = filters.finding_status ? 'findings' : (savedTab?.id || state.activeTab);
     state.query = String(filters.query || '').trim();
     state.orphanFilter = String(filters.orphan_filter || 'hide') || 'hide';
     state.suppressionFilter = String(filters.suppression_filter || 'hide') || 'hide';
@@ -1382,9 +1467,9 @@
     state.addActiveProjectOnSelect = false;
     render();
     loadRunOptions({ force: true }).catch((err) => {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+      logImportClientError('failed to load atlas run filters', err);
     });
-    refreshAtlas({ resetOffset: true });
+    refreshAtlas({ resetOffset: true, force: true });
   }
 
   function findingStatusLabel(value) {
@@ -1585,8 +1670,8 @@
     if (!triage) return result;
     const status = String(triage.verification_status || finding.verification_status || 'not_started');
     if (status && status !== 'not_started') {
-      const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
-      const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+      const label = findingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+      const tone = findingTriageEditor?.verificationStatusTone?.(status) || 'muted';
       result.push(badge(label, tone));
     }
     if (triage.has_remediation) result.push(badge('remediation', 'muted'));
@@ -1645,8 +1730,8 @@
       });
       return;
     }
-    const activeProject = typeof global.getActiveProjectContext === 'function'
-      ? global.getActiveProjectContext()
+    const activeProject = typeof importedGetActiveProjectContext === 'function'
+      ? importedGetActiveProjectContext()
       : null;
     detailApi.renderDetail?.(detailHost, state.detail, {
       activeProject,
@@ -1678,6 +1763,9 @@
   function registerMobileRenderer(fn) {
     if (typeof fn !== 'function') return;
     if (!mobileRenderers.includes(fn)) mobileRenderers.push(fn);
+    try { fn(state, atlasController); } catch (err) {
+      logImportClientError('atlas mobile render failed', err);
+    }
   }
 
   function render() {
@@ -1692,7 +1780,7 @@
     renderDetail();
     for (const fn of mobileRenderers) {
       try { fn(state, atlasController); } catch (err) {
-        if (typeof global.logClientError === 'function') global.logClientError('atlas mobile render failed', err);
+        logImportClientError('atlas mobile render failed', err);
       }
     }
     renderIntelRefreshOverlay();
@@ -1721,6 +1809,7 @@
     state.selectedSavedViewId = '';
     state.selectedId = '';
     state.selectedFindingId = '';
+    state.offset = 0;
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
@@ -1733,7 +1822,7 @@
     if (runFilterSearch) runFilterSearch.value = '';
     render();
     loadRunOptions({ query: '', force: true }).catch((err) => {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+      logImportClientError('failed to load atlas run filters', err);
     });
     refreshAtlas({ resetOffset: true });
   }
@@ -1795,8 +1884,8 @@
     runFilterChip.appendChild(chip);
   }
 
-  async function refreshAtlas({ resetOffset = false } = {}) {
-    if (!overlay || !isOpen()) return;
+  async function refreshAtlas({ resetOffset = false, force = false } = {}) {
+    if (!overlay || (!force && !isOpen())) return;
     if (resetOffset) state.offset = 0;
     const requestId = state.refreshSeq + 1;
     state.refreshSeq = requestId;
@@ -1806,8 +1895,8 @@
     const requestedTab = currentTab();
     const isStale = () => (
       requestId !== state.refreshSeq
-      || !isOpen()
-      || currentTab().id !== requestedTab.id
+      || (!force && !isOpen())
+      || (!force && currentTab().id !== requestedTab.id)
     );
     state.loading = true;
     render();
@@ -1941,7 +2030,7 @@
       }
     } catch (err) {
       if (isAbortError(err)) return;
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load /atlas', err);
+      logImportClientError('failed to load /atlas', err);
       showToastSafe('Failed to load Atlas', 'error');
     } finally {
       if (atlasLoadController === controller) atlasLoadController = null;
@@ -1979,13 +2068,13 @@
     const findingId = String(finding && finding.id || state.selectedFindingId || '');
     const current = state.findings.find(item => String(item.id || '') === findingId) || finding;
     if (!current || !findingId) return;
-    if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+    if (!findingTriageEditor || typeof findingTriageEditor.open !== 'function') {
       throw new Error('Finding triage editor is not available.');
     }
-    await global.DarklabFindingTriageEditor.open(current, {
+    await findingTriageEditor.open(current, {
       canEdit: canTriageAtlasRows(),
       onSaved: async (triage) => {
-        const compact = global.DarklabFindingTriageEditor.compactTriage(triage);
+        const compact = findingTriageEditor.compactTriage(triage);
         state.findings = state.findings.map(item => (
           String(item && item.id || '') === findingId
             ? { ...item, triage: compact, verification_status: compact.verification_status }
@@ -2015,14 +2104,14 @@
       showToastSafe('Finding updated', 'success');
       await refreshAtlas();
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas finding', err);
+      logImportClientError('failed to update atlas finding', err);
       showToastSafe(err && err.message ? err.message : 'Failed to update finding', 'error');
     }
   }
 
   function openFindingsBoardFromAtlas() {
-    if (typeof global.openFindingsBoard !== 'function') return;
-    void global.openFindingsBoard({
+    if (typeof importedOpenFindingsBoard !== 'function') return;
+    void importedOpenFindingsBoard({
       source: 'atlas',
       query: state.query,
       projectId: state.projectId,
@@ -2060,7 +2149,7 @@
       state.selectedFindingIds.clear();
       await refreshAtlas();
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to bulk update atlas findings', err);
+      logImportClientError('failed to bulk update atlas findings', err);
       showToastSafe(err && err.message ? err.message : 'Failed to update findings', 'error');
     }
   }
@@ -2087,7 +2176,7 @@
       showToastSafe(suppressed ? 'Atlas row suppressed' : 'Atlas row restored', 'success');
       await refreshAtlas();
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas suppression', err);
+      logImportClientError('failed to update atlas suppression', err);
       showToastSafe(err && err.message ? err.message : 'Failed to update Atlas row', 'error');
     }
   }
@@ -2126,7 +2215,7 @@
       );
       await refreshAtlas({ resetOffset: suppressed && state.suppressionFilter === 'hide' });
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to bulk update atlas suppression', err);
+      logImportClientError('failed to bulk update atlas suppression', err);
       showToastSafe('Failed to update selected Atlas rows', 'error');
     } finally {
       setBulkBusy(false);
@@ -2165,14 +2254,14 @@
     const isFindings = tab.id === 'findings';
     const selected = activeSelectionSet(tab);
     const ids = [...selected];
-    if (!ids.length || typeof global.showConfirm !== 'function') return;
+    if (!ids.length || typeof showConfirm !== 'function') return;
     setBulkBusy(true);
     const noun = bulkDeleteNoun(tab, ids.length);
     const note = isFindings
       ? 'This removes the selected findings and cannot be undone.'
       : 'This removes the selected entities and any findings attached to them. This cannot be undone.';
     try {
-      const choice = await global.showConfirm({
+      const choice = await showConfirm({
         body: {
           text: `Delete ${ids.length.toLocaleString()} Atlas ${noun}?`,
           note,
@@ -2202,7 +2291,7 @@
       state.detail = null;
       await refreshAtlas({ resetOffset: state.offset >= state.total - ids.length });
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to bulk delete atlas rows', err);
+      logImportClientError('failed to bulk delete atlas rows', err);
       showToastSafe(err.message || 'Failed to delete selected Atlas rows', 'error');
     } finally {
       setBulkBusy(false);
@@ -2249,7 +2338,7 @@
       if (isAbortError(err)) return;
       if (String(state.selectedId || '') !== String(entityId || '')) return;
       state.detail = null;
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas entity', err);
+      logImportClientError('failed to load atlas entity', err);
       showToastSafe('Failed to load entity', 'error');
     } finally {
       if (detailLoadController === controller) detailLoadController = null;
@@ -2288,7 +2377,7 @@
       }
       await loadDetail(entityId);
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to refresh atlas intel', err);
+      logImportClientError('failed to refresh atlas intel', err);
       showToastSafe('Failed to refresh intel', 'error');
     } finally {
       state.intelRefreshing = false;
@@ -2355,7 +2444,7 @@
 
   async function confirmDeleteEntity() {
     const entityId = String(state.selectedId || '');
-    if (!entityId || typeof global.showConfirm !== 'function') return;
+    if (!entityId || typeof showConfirm !== 'function') return;
     if (!canDeleteAtlasRows()) {
       showAtlasPermissionDenied('delete Atlas rows');
       return;
@@ -2370,7 +2459,7 @@
       const note = attachedFindings
         ? `This also removes ${attachedFindings.toLocaleString()} ${attachedFindings === 1 ? 'finding' : 'findings'} attached to this entity.`
         : 'This cannot be undone.';
-      const choice = await global.showConfirm({
+      const choice = await showConfirm({
         body: { text: 'Delete this Atlas entity?', note },
         content,
         tone: 'danger',
@@ -2395,14 +2484,14 @@
       state.detail = null;
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas entity', err);
+      logImportClientError('failed to delete atlas entity', err);
       showToastSafe(err.message || 'Failed to delete Atlas entity', 'error');
     }
   }
 
   async function confirmDeleteFinding(finding) {
     const findingId = String(finding?.id || state.selectedFindingId || '');
-    if (!findingId || typeof global.showConfirm !== 'function') return;
+    if (!findingId || typeof showConfirm !== 'function') return;
     if (!canDeleteAtlasRows()) {
       showAtlasPermissionDenied('delete Atlas rows');
       return;
@@ -2413,7 +2502,7 @@
       const preview = (await previewResp.json()).preview || {};
       const checkboxId = `atlas-delete-cleanup-${Date.now()}`;
       const content = deleteCleanupContent(preview, checkboxId);
-      const choice = await global.showConfirm({
+      const choice = await showConfirm({
         body: { text: 'Delete this Atlas finding?', note: 'This cannot be undone.' },
         content,
         tone: 'danger',
@@ -2438,20 +2527,20 @@
       state.selectedFindingIds.delete(findingId);
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas finding', err);
+      logImportClientError('failed to delete atlas finding', err);
       showToastSafe(err.message || 'Failed to delete Atlas finding', 'error');
     }
   }
 
   function openSourceRun(run) {
     const runId = String(run && (run.id || run.run_id) || '');
-    if (!runId || typeof global.openHistoryRunDetails !== 'function') return;
-    global.openHistoryRunDetails({ ...run, id: runId });
+    if (!runId || typeof importedOpenHistoryRunDetails !== 'function') return;
+    importedOpenHistoryRunDetails({ ...run, id: runId });
   }
 
   async function confirmCleanRunAtlas(run) {
     const runId = String(run && (run.id || run.run_id) || '');
-    if (!runId || typeof global.showConfirm !== 'function') return;
+    if (!runId || typeof showConfirm !== 'function') return;
     try {
       const previewResp = await api()(`/atlas/runs/${encodeURIComponent(runId)}/cleanup-preview`, { cache: 'no-store' });
       if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
@@ -2486,7 +2575,7 @@
         keptNote.textContent = 'Rows that still have other sources will stay in Atlas.';
         content.appendChild(keptNote);
       }
-      const choice = await global.showConfirm({
+      const choice = await showConfirm({
         body: {
           text: 'Clean this run from Atlas?',
           note: 'The run transcript stays in History. Atlas source links from this run will be removed.',
@@ -2516,7 +2605,7 @@
       await refreshAtlas({ resetOffset: false });
       if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to clean atlas run sources', err);
+      logImportClientError('failed to clean atlas run sources', err);
       showToastSafe('Failed to clean Atlas for run', 'error');
     }
   }
@@ -2543,7 +2632,7 @@
       showToastSafe('Switch to an entity tab before exporting', 'error');
       return;
     }
-    if (typeof global.downloadBlobAsAttachment !== 'function') {
+    if (typeof downloadBlobAsAttachment !== 'function') {
       showToastSafe('Downloads are not available', 'error');
       return;
     }
@@ -2561,17 +2650,17 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = await resp.blob();
       const filename = filenameFromDisposition(resp.headers?.get?.('content-disposition')) || exportDownloadName(format);
-      global.downloadBlobAsAttachment(blob, filename);
+      downloadBlobAsAttachment(blob, filename);
       showToastSafe(`Atlas ${format.toUpperCase()} export started`, 'success');
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to export atlas entities', err);
+      logImportClientError('failed to export atlas entities', err);
       showToastSafe('Failed to export Atlas entities', 'error');
     }
   }
 
   async function addToActiveProject() {
-    const activeProject = typeof global.getActiveProjectContext === 'function'
-      ? global.getActiveProjectContext()
+    const activeProject = typeof importedGetActiveProjectContext === 'function'
+      ? importedGetActiveProjectContext()
       : null;
     const projectId = activeProject && activeProject.id ? String(activeProject.id) : '';
     if (!projectId || !state.selectedId) {
@@ -2587,12 +2676,12 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       showToastSafe('Added to active project', 'success');
       broadcastProjectWorkspaceChange('atlas_entity_linked', projectId);
-      if (typeof global.refreshActiveProjectContext === 'function') {
-        await global.refreshActiveProjectContext().catch(() => null);
+      if (typeof importedRefreshActiveProjectContext === 'function') {
+        await importedRefreshActiveProjectContext().catch(() => null);
       }
       await refreshAtlas();
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to link atlas entity', err);
+      logImportClientError('failed to link atlas entity', err);
       showToastSafe('Failed to add entity to project', 'error');
     }
   }
@@ -2610,7 +2699,7 @@
       broadcastProjectWorkspaceChange('atlas_entity_unlinked', projectId);
       await refreshAtlas();
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to unlink atlas entity', err);
+      logImportClientError('failed to unlink atlas entity', err);
       showToastSafe('Failed to remove project link', 'error');
     }
   }
@@ -2626,7 +2715,7 @@
       showToastSafe('Metadata saved', 'success');
       await refreshAtlas();
     } catch (err) {
-      if (typeof global.logClientError === 'function') global.logClientError('failed to save atlas metadata', err);
+      logImportClientError('failed to save atlas metadata', err);
       showToastSafe('Failed to save metadata', 'error');
     }
   }
@@ -2783,8 +2872,8 @@
     ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
       importOverlay?.addEventListener(eventName, event => event.stopPropagation(), true);
     });
-    if (typeof global.bindOutsideClickClose === 'function' && exportWrap) {
-      global.bindOutsideClickClose(exportWrap, {
+    if (typeof bindOutsideClickClose === 'function' && exportWrap) {
+      bindOutsideClickClose(exportWrap, {
         triggers: exportMenuBtn,
         isOpen: () => exportWrap.classList.contains('open'),
         onClose: () => {
@@ -2792,8 +2881,8 @@
         },
       });
     }
-    if (typeof global.bindDismissible === 'function' && overlay) {
-      global.bindDismissible(overlay, {
+    if (typeof bindDismissible === 'function' && overlay) {
+      bindDismissible(overlay, {
         level: 'panel',
         isOpen,
         onClose: () => closeAtlas(),
@@ -2801,8 +2890,8 @@
         closeOnBackdrop: true,
       });
     }
-    if (typeof global.bindDismissible === 'function' && importOverlay) {
-      global.bindDismissible(importOverlay, {
+    if (typeof bindDismissible === 'function' && importOverlay) {
+      bindDismissible(importOverlay, {
         level: 'modal',
         isOpen: () => state.importFlow.open,
         onClose: () => closeImportModal(),
@@ -2810,11 +2899,11 @@
         closeOnBackdrop: true,
       });
     }
-    if (typeof global.bindMobileSheet === 'function' && surface) {
-      global.bindMobileSheet(surface, { onClose: () => closeAtlas() });
+    if (typeof bindMobileSheet === 'function' && surface) {
+      bindMobileSheet(surface, { onClose: () => closeAtlas() });
     }
-    if (typeof global.bindMobileSheet === 'function' && importModal) {
-      global.bindMobileSheet(importModal, { onClose: () => closeImportModal() });
+    if (typeof bindMobileSheet === 'function' && importModal) {
+      bindMobileSheet(importModal, { onClose: () => closeImportModal() });
     }
   }
 
@@ -2877,10 +2966,29 @@
     registerMobileRenderer,
   };
 
-  global.DarklabAtlasOverlay = atlasController;
-  global.openAtlas = openAtlas;
-  global.closeAtlas = closeAtlas;
-  global.isAtlasOverlayOpen = isOpen;
-  global.refreshAtlasOverlay = refreshAtlas;
-  global.cycleAtlasTab = cycleAtlasTab;
+  exportedDarklabAtlasOverlay = atlasController;
+  exportedOpenAtlas = openAtlas;
+  exportedCloseAtlas = closeAtlas;
+  exportedIsAtlasOverlayOpen = isOpen;
+  exportedRefreshAtlasOverlay = refreshAtlas;
+  exportedCycleAtlasTab = cycleAtlasTab;
+  if (typeof importedSetAtlasHandlers === 'function') {
+    importedSetAtlasHandlers({
+      DarklabAtlasOverlay: atlasController,
+      openAtlas,
+      closeAtlas,
+      isAtlasOverlayOpen: isOpen,
+      refreshAtlasOverlay: refreshAtlas,
+      cycleAtlasTab,
+    });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export {
+  exportedDarklabAtlasOverlay as DarklabAtlasOverlay,
+  exportedCloseAtlas as closeAtlas,
+  exportedCycleAtlasTab as cycleAtlasTab,
+  exportedIsAtlasOverlayOpen as isAtlasOverlayOpen,
+  exportedOpenAtlas as openAtlas,
+  exportedRefreshAtlasOverlay as refreshAtlasOverlay,
+};

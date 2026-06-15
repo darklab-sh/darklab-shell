@@ -1,6 +1,8 @@
 // Project workspace renderer.
 // Loaded before shell_chrome.js; shell chrome supplies project state and tab renderers.
 
+let exportedDarklabProjectWorkspaceRenderer = null;
+
 (function projectWorkspaceRendererModule(global) {
   'use strict';
 
@@ -146,7 +148,11 @@
     };
   }
 
-  global.DarklabProjectWorkspaceRenderer = {
+  const DarklabProjectWorkspaceRenderer = {
     createProjectWorkspaceRendererController,
   };
+  exportedDarklabProjectWorkspaceRenderer = DarklabProjectWorkspaceRenderer;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceRenderer as DarklabProjectWorkspaceRenderer,};

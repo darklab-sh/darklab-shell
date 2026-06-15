@@ -9,7 +9,7 @@
     "test:unit": "vitest run --config .tooling/vitest.config.js",
     "test:unit:watch": "vitest --config .tooling/vitest.config.js",
     "test:e2e": "bash scripts/run_playwright.sh",
-    "test:e2e:source": "bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/boot-resilience.spec.js tests/js/e2e/share.spec.js",
+    "test:e2e:source": "bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/boot-resilience.spec.js tests/js/e2e/share.spec.js tests/js/e2e/source-lazy-smoke.spec.js",
     "test:e2e:ui": "bash scripts/run_playwright.sh --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",

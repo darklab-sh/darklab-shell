@@ -2,17 +2,17 @@ import { vi, describe, it, beforeEach, afterEach, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
+import { bindFocusTrap } from '../../../app/static/js/ui/ui_focus_trap.js'
 
-// ui_confirm.js composes on top of ui_pressable.js and ui_dismissible.js
-// (both are IIFEs that install helpers on window). Each test reloads all
-// three sources so the dismissible registry and the primitive's open
-// state both start clean.
+// ui_confirm.js composes on top of ui_pressable.js and ui_dismissible.js.
+// Each test reloads all three sources in one stripped scope so the dismissible
+// registry and the primitive's open state both start clean.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'), 'utf8')
-const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'), 'utf8')
-const UI_FOCUS_TRAP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'), 'utf8')
-const UI_CONFIRM_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_confirm.js'), 'utf8')
+const UI_PRESSABLE_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'), 'utf8'))
+const UI_DISMISSIBLE_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'), 'utf8'))
+const UI_CONFIRM_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_confirm.js'), 'utf8'))
 
 function mountHost() {
   document.body.innerHTML = `
@@ -26,7 +26,7 @@ function mountHost() {
   `
 }
 
-function loadHelpers() {
+function loadHelpers({ enhanceAppSelects = null } = {}) {
   delete window.bindPressable
   delete window.bindDismissible
   delete window.bindFocusTrap
@@ -51,11 +51,15 @@ function loadHelpers() {
   }
   window.refocusComposerAfterAction = vi.fn()
   window.bindMobileSheet = vi.fn()
-  new Function(UI_PRESSABLE_SRC)()
-  new Function(UI_DISMISSIBLE_SRC)()
-  new Function(UI_FOCUS_TRAP_SRC)()
-  new Function(UI_CONFIRM_SRC)()
-  return window
+  window.bindFocusTrap = bindFocusTrap
+  if (enhanceAppSelects) window.enhanceAppSelects = enhanceAppSelects
+  const helpers = new Function(
+    `${UI_PRESSABLE_SRC}\n${UI_DISMISSIBLE_SRC}\nwindow.bindDismissible = DarklabDismissible.bindDismissible;\nwindow.closeTopmostDismissible = DarklabDismissible.closeTopmostDismissible;\n${UI_CONFIRM_SRC}\nreturn { showConfirm, cancelConfirm, isConfirmOpen, closeTopmostDismissible: DarklabDismissible.closeTopmostDismissible };`,
+  )()
+  return {
+    ...window,
+    ...helpers,
+  }
 }
 
 const KILL_ACTIONS = [
@@ -412,10 +416,11 @@ describe('showConfirm', () => {
       const select = document.createElement('select')
       select.className = 'form-select'
       select.appendChild(new Option('One', 'one'))
-      g.enhanceAppSelects = vi.fn()
+      const enhanceAppSelects = vi.fn()
+      g = loadHelpers({ enhanceAppSelects })
       const promise = g.showConfirm({ content: select, actions: KILL_ACTIONS })
       const slot = document.querySelector('[data-confirm-content]')
-      expect(g.enhanceAppSelects).toHaveBeenCalledWith(slot)
+      expect(enhanceAppSelects).toHaveBeenCalledWith(slot)
       g.cancelConfirm()
       await promise
     })
@@ -424,7 +429,7 @@ describe('showConfirm', () => {
       const select = document.createElement('select')
       select.className = 'form-select'
       select.appendChild(new Option('One', 'one'))
-      g.enhanceAppSelects = vi.fn((root) => {
+      const enhanceAppSelects = vi.fn((root) => {
         const nativeSelect = root.querySelector('select.form-select')
         nativeSelect.classList.add('app-select-native')
         const wrap = document.createElement('div')
@@ -435,6 +440,7 @@ describe('showConfirm', () => {
         wrap.appendChild(trigger)
         nativeSelect.insertAdjacentElement('afterend', wrap)
       })
+      g = loadHelpers({ enhanceAppSelects })
 
       const promise = g.showConfirm({
         content: select,
