@@ -6100,13 +6100,19 @@ class TestProjectRoutes:
 
     def test_dynamic_unknown_routes_use_baseline_http_rate_limit(self, monkeypatch):
         client = get_client()
-        remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+        remote_addr = f"2001:db8::{uuid.uuid4().hex[:16]}"
         probe_path = f"/nuclei-probe-{uuid.uuid4().hex}"
         monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_minute", 1)
         monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_second", 1)
 
-        first = client.get(probe_path, environ_base={"REMOTE_ADDR": remote_addr})
-        second = client.get(probe_path, environ_base={"REMOTE_ADDR": remote_addr})
+        first = client.get(
+            probe_path,
+            environ_base={"REMOTE_ADDR": remote_addr},
+        )
+        second = client.get(
+            probe_path,
+            environ_base={"REMOTE_ADDR": remote_addr},
+        )
 
         assert first.status_code == 404
         assert second.status_code == 429
@@ -6114,11 +6120,14 @@ class TestProjectRoutes:
 
     def test_default_baseline_http_rate_limit_allows_page_load_burst(self):
         client = get_client()
-        remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+        remote_addr = f"2001:db8::{uuid.uuid4().hex[:16]}"
         probe_prefix = f"/bootstrap-probe-{uuid.uuid4().hex}"
 
         responses = [
-            client.get(f"{probe_prefix}-{idx}", environ_base={"REMOTE_ADDR": remote_addr})
+            client.get(
+                f"{probe_prefix}-{idx}",
+                environ_base={"REMOTE_ADDR": remote_addr},
+            )
             for idx in range(60)
         ]
 
@@ -6126,12 +6135,18 @@ class TestProjectRoutes:
 
     def test_static_assets_skip_baseline_http_rate_limit(self, monkeypatch):
         client = get_client()
-        remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
+        remote_addr = f"2001:db8::{uuid.uuid4().hex[:16]}"
         monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_minute", 1)
         monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_second", 1)
 
-        first = client.get("/static/js/app.js", environ_base={"REMOTE_ADDR": remote_addr})
-        second = client.get("/static/js/app.js", environ_base={"REMOTE_ADDR": remote_addr})
+        first = client.get(
+            "/static/js/app.js",
+            environ_base={"REMOTE_ADDR": remote_addr},
+        )
+        second = client.get(
+            "/static/js/app.js",
+            environ_base={"REMOTE_ADDR": remote_addr},
+        )
 
         assert first.status_code == 200
         assert second.status_code == 200

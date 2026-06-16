@@ -256,13 +256,16 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
 
   const foldButton = overlay.getByRole('button', { name: /Show 2 unchanged line/ }).first()
   await expect(foldButton).toBeVisible()
-  const lazyResponse = page.waitForResponse((response) => {
+  const lineResponses = Promise.all(['a', 'b'].map(side => page.waitForResponse((response) => {
     const url = new URL(response.url())
     return url.pathname === '/history/compare/lines'
+      && url.searchParams.get('side') === side
       && (!projectId || url.searchParams.get('project_id') === projectId)
-  })
+  })))
   await foldButton.click()
-  expect((await lazyResponse).ok()).toBe(true)
+  for (const response of await lineResponses) {
+    expect(response.ok()).toBe(true)
+  }
   await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.commonFoldedText)
 
   const expander = overlay.locator('.history-compare-line-expander').first()

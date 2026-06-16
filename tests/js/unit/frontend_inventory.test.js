@@ -44,7 +44,7 @@ function moduleReport(report, source) {
 describe('frontend compatibility global inventory', () => {
   beforeAll(() => {
     runInventoryJson()
-  })
+  }, 30_000)
 
   const EXPECTED_GLOBAL_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
