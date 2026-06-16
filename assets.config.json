@@ -90,6 +90,7 @@
     "/static/js/features/atlas/atlas_mobile_bridge.js",
     "/static/js/features/findings/findings_board_modal.js",
     "/static/js/features/projects/project_activity.js",
+    "/static/js/features/projects/project_monitoring.js",
     "/static/js/features/projects/project_artifacts.js",
     "/static/js/features/projects/project_details.js",
     "/static/js/features/projects/project_list.js",

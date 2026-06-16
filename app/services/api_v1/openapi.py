@@ -6,10 +6,19 @@ from copy import deepcopy
 
 from config import APP_VERSION
 from services.scheduler.models import CADENCE_PRESETS
-from services.watchers.models import DIFF_KINDS, WATCHER_OPTION_DEFAULTS, WATCHER_STATES
+from services.watchers.models import (
+    DIFF_KINDS,
+    WATCHER_ACK_STATES,
+    WATCHER_FIRE_KINDS,
+    WATCHER_OPTION_DEFAULTS,
+    WATCHER_POLICY_SIGNAL_CLASSES,
+    WATCHER_STATES,
+)
 
 CADENCE_PRESET_ENUM = list(CADENCE_PRESETS)
 WATCHER_DIFF_KIND_ENUM = sorted(DIFF_KINDS)
+WATCHER_FIRE_KIND_ENUM = sorted(WATCHER_FIRE_KINDS)
+WATCHER_ACK_STATE_ENUM = sorted(WATCHER_ACK_STATES)
 WATCHER_OPTION_KEYS = tuple(WATCHER_OPTION_DEFAULTS)
 WATCHER_STATE_ENUM = sorted(WATCHER_STATES)
 
@@ -1054,6 +1063,27 @@ OPENAPI_SPEC: dict = {
                     for key in WATCHER_OPTION_KEYS
                 },
             },
+            "WatcherPolicy": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ignore_line_patterns": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 120},
+                        "maxItems": 20,
+                    },
+                    "alert_after_repeated_changes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
+                    "alert_signal_classes": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": sorted(WATCHER_POLICY_SIGNAL_CLASSES)},
+                        "uniqueItems": True,
+                    },
+                },
+            },
             "WatcherDiffSummary": {
                 "type": "object",
                 "additionalProperties": True,
@@ -1065,6 +1095,7 @@ OPENAPI_SPEC: dict = {
                 "required": [
                     "id",
                     "team_id",
+                    "project_id",
                     "label",
                     "command_text",
                     "schedule_id",
@@ -1075,6 +1106,7 @@ OPENAPI_SPEC: dict = {
                     "state_reason",
                     "last_error",
                     "options",
+                    "policy",
                     "consecutive_no_change",
                     "consecutive_changed",
                     "consecutive_failures",
@@ -1084,6 +1116,7 @@ OPENAPI_SPEC: dict = {
                 "properties": {
                     "id": {"type": "string"},
                     "team_id": {"type": "string"},
+                    "project_id": {"type": "string"},
                     "label": {"type": "string"},
                     "command_text": {"type": "string"},
                     "schedule_id": {"type": "string"},
@@ -1094,6 +1127,7 @@ OPENAPI_SPEC: dict = {
                     "state_reason": {"type": "string"},
                     "last_error": {"type": "string"},
                     "options": _ref("WatcherOptions"),
+                    "policy": _ref("WatcherPolicy"),
                     "consecutive_no_change": {"type": "integer"},
                     "consecutive_changed": {"type": "integer"},
                     "consecutive_failures": {"type": "integer"},
@@ -1130,8 +1164,10 @@ OPENAPI_SPEC: dict = {
                     "timezone": {"type": "string"},
                     "timezone_name": {"type": "string"},
                     "label": {"type": "string"},
+                    "project_id": {"type": "string"},
                     "enabled": {"type": "boolean"},
                     "options": _ref("WatcherOptions"),
+                    "policy": _ref("WatcherPolicy"),
                     "workspace_cwd": {"type": "string"},
                 },
             },
@@ -1145,12 +1181,14 @@ OPENAPI_SPEC: dict = {
                     "timezone": {"type": "string"},
                     "timezone_name": {"type": "string"},
                     "label": {"type": "string"},
+                    "project_id": {"type": "string"},
                     "enabled": {"type": "boolean"},
                     "state": {"type": "string", "enum": ["ok", "active", "resume", "paused"]},
                     "pause": {"type": "boolean"},
                     "resume": {"type": "boolean"},
                     "reason": {"type": "string"},
                     "options": _ref("WatcherOptions"),
+                    "policy": _ref("WatcherPolicy"),
                     "workspace_cwd": {"type": "string"},
                 },
             },
@@ -1167,6 +1205,12 @@ OPENAPI_SPEC: dict = {
                     "truncated",
                     "notification_event_ids",
                     "state_at_fire",
+                    "state_reason",
+                    "fire_kind",
+                    "ack_state",
+                    "ack_note",
+                    "ack_by",
+                    "ack_at",
                     "created",
                 ],
                 "properties": {
@@ -1180,6 +1224,12 @@ OPENAPI_SPEC: dict = {
                     "truncated": {"type": "boolean"},
                     "notification_event_ids": {"type": "array", "items": {"type": "string"}},
                     "state_at_fire": {"type": "string", "enum": WATCHER_STATE_ENUM},
+                    "state_reason": {"type": "string"},
+                    "fire_kind": {"type": "string", "enum": WATCHER_FIRE_KIND_ENUM},
+                    "ack_state": {"type": "string", "enum": WATCHER_ACK_STATE_ENUM},
+                    "ack_note": {"type": "string"},
+                    "ack_by": {"type": "string"},
+                    "ack_at": {"type": "string"},
                     "created": {"type": "string", "nullable": True},
                 },
             },

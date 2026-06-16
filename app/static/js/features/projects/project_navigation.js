@@ -107,6 +107,7 @@ let exportedDarklabProjectNavigation = null;
           : null,
         { id: 'packages', label: 'Packages', count: clamp(counts.packages) },
         { id: 'report', label: 'Report' },
+        { id: 'monitoring', label: 'Monitoring' },
         { id: 'activity', label: 'Activity' },
       ].filter(Boolean);
     }
@@ -173,6 +174,7 @@ let exportedDarklabProjectNavigation = null;
           : null,
         { id: 'packages', label: 'Packages', count: tabCounts.packages },
         { id: 'report', label: 'Report' },
+        { id: 'monitoring', label: 'Monitoring' },
         { id: 'activity', label: 'Activity' },
       ].filter(Boolean);
       tabItems.forEach(({ id, label, count }) => {

@@ -165,9 +165,10 @@ function _outputMountShellPrompt(tabId, force = false) {
 function createAnsiUpRenderer() {
   // ANSI rendering is optional. If the vendored parser fails to load, fall back
   // to escaped plain text rather than breaking transcript rendering entirely.
-  if (typeof AnsiUp === 'function') {
+  const AnsiUpCtor = typeof globalThis.AnsiUp === 'function' ? globalThis.AnsiUp : null;
+  if (AnsiUpCtor) {
     try {
-      const instance = new AnsiUp();
+      const instance = new AnsiUpCtor();
       if (instance && typeof instance.ansi_to_html === 'function') {
         instance.use_classes = false;
       return instance;

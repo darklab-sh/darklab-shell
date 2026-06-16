@@ -350,6 +350,7 @@ MIGRATION = Migration(
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
             team_id TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL DEFAULT '',
             label TEXT NOT NULL DEFAULT '',
             command_text TEXT NOT NULL,
             schedule_id TEXT NOT NULL UNIQUE,
@@ -360,6 +361,7 @@ MIGRATION = Migration(
             state_reason TEXT NOT NULL DEFAULT '',
             last_error TEXT NOT NULL DEFAULT '',
             options_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            policy_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             consecutive_no_change BIGINT NOT NULL DEFAULT 0,
             consecutive_changed BIGINT NOT NULL DEFAULT 0,
             consecutive_failures BIGINT NOT NULL DEFAULT 0,
@@ -380,9 +382,26 @@ MIGRATION = Migration(
             truncated BOOLEAN NOT NULL DEFAULT FALSE,
             notification_event_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             state_at_fire TEXT NOT NULL DEFAULT '',
+            state_reason TEXT NOT NULL DEFAULT '',
+            fire_kind TEXT NOT NULL DEFAULT 'unclassified',
+            ack_state TEXT NOT NULL DEFAULT 'new',
+            ack_note TEXT NOT NULL DEFAULT '',
+            ack_by TEXT NOT NULL DEFAULT '',
+            ack_at TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
             UNIQUE (watcher_id, run_id),
-            CHECK (diff_kind IN ('signal', 'textual', 'none'))
+            CHECK (diff_kind IN ('signal', 'textual', 'none')),
+            CHECK (
+                fire_kind IN (
+                    'changed',
+                    'recovered',
+                    'failed',
+                    'no_change',
+                    'baseline_created',
+                    'baseline_accepted',
+                    'paused',
+                    'unclassified')),
+            CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))
         )
         """,
         """
@@ -831,6 +850,10 @@ MIGRATION = Migration(
         """
         CREATE INDEX IF NOT EXISTS idx_watchers_team_updated
         ON watchers (team_id, updated DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_watchers_project_updated
+        ON watchers (project_id, updated DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_watchers_schedule ON watchers (schedule_id)",
         "CREATE INDEX IF NOT EXISTS idx_watchers_baseline ON watchers (baseline_run_id)",

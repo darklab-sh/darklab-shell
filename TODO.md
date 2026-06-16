@@ -19,7 +19,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
-  - [Diff-aware scheduled monitoring dashboards](#diff-aware-scheduled-monitoring-dashboards)
   - [Attack-surface delta digest notifications](#attack-surface-delta-digest-notifications)
   - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Architecture](#architecture)
@@ -32,7 +31,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No known Open TODOs are currently tracked.
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -141,12 +140,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Tune artifact embedding/listing once provenance and report-created run links are available; screenshot galleries and richer binary handling can stay later work.
   - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
   - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
-
-### Diff-aware scheduled monitoring dashboards
-- Combine schedules, Watchers, run comparison, and tool-aware diff parsing into a project-level monitoring view.
-- Let an operator schedule a command, choose a baseline, and review each later run as a timeline of changes instead of reading every transcript from scratch.
-- Surface high-signal deltas such as new or closed ports, new or disappeared subdomains, HTTP status/title changes, and TLS certificate changes.
-- Keep the dashboard tied to Projects, Atlas entities, findings, and notifications so monitoring results become part of the normal engagement workflow.
 
 ### Attack-surface delta digest notifications
 - Send scheduled project summaries such as "since last week: 3 new subdomains, 2 new open ports, 1 certificate expiring soon" through the existing notification channels.

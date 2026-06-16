@@ -178,6 +178,8 @@ let exportedDarklabProjectWorkspaceEvents = null;
 
     async function handleChange(event) {
       if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
+      const monitoringController = ctx.monitoringController?.();
+      if (monitoringController && monitoringController.handleChange(event)) return;
       const reportController = ctx.reportController?.();
       if (reportController && reportController.handleChange(event)) return;
       const packagesController = ctx.packagesController?.();
@@ -525,6 +527,12 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.target.closest?.('[data-project-activity-action]')
         && activityController
         && await activityController.handleClick(event)
+      ) return;
+      const monitoringController = ctx.monitoringController?.();
+      if (
+        event.target.closest?.('[data-project-monitoring-action]')
+        && monitoringController
+        && await monitoringController.handleClick(event)
       ) return;
       const reportController = ctx.reportController?.();
       if (reportController && await reportController.handleClick(event)) return;

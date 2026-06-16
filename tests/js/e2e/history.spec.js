@@ -229,10 +229,15 @@ async function selectVisibleHistoryRuns(page, commands) {
 async function forceComparePaneOverflow(page) {
   await page.locator('.history-compare-pane').evaluateAll((panes) => {
     panes.forEach((pane) => {
+      pane.style.height = '90px'
       pane.style.maxHeight = '90px'
       pane.style.overflowY = 'auto'
     })
   })
+  await page.waitForFunction(() => (
+    [...document.querySelectorAll('.history-compare-pane')]
+      .every((pane) => pane.scrollHeight > pane.clientHeight)
+  ))
 }
 
 async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}) {
@@ -248,11 +253,15 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   await forceComparePaneOverflow(page)
   const leftPane = overlay.locator('.history-compare-pane[data-side="a"]')
   const rightPane = overlay.locator('.history-compare-pane[data-side="b"]')
-  await leftPane.evaluate((node) => {
-    node.scrollTop = 48
-    node.dispatchEvent(new Event('scroll'))
+  const expectedScrollTop = await leftPane.evaluate((node) => new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      node.scrollTop = 48
+      node.dispatchEvent(new Event('scroll', { bubbles: true }))
+      resolve(node.scrollTop)
+    })
   })
-  await expect.poll(() => rightPane.evaluate((node) => node.scrollTop)).toBe(48)
+  )
+  await expect.poll(() => rightPane.evaluate((node) => node.scrollTop)).toBe(expectedScrollTop)
 
   const foldButton = overlay.getByRole('button', { name: /Show 2 unchanged line/ }).first()
   await expect(foldButton).toBeVisible()

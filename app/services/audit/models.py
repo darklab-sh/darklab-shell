@@ -92,6 +92,7 @@ class AuditEventType(str, Enum):
     WATCHER_DELETE = "watcher.delete"
     WATCHER_ACCEPT_BASELINE = "watcher.accept_baseline"
     WATCHER_RUN_NOW = "watcher.run_now"
+    WATCHER_ACK = "watcher.ack"
     SESSION_TOKEN_GENERATE = "session_token.generate"
     SESSION_TOKEN_REVOKE = "session_token.revoke"
     SESSION_MIGRATE = "session.migrate"
@@ -100,6 +101,7 @@ class AuditEventType(str, Enum):
 
 COMMON_DETAIL_KEYS = frozenset({
     "action",
+    "ack_state",
     "artifact_count",
     "artifact_total",
     "archive_bytes",
@@ -122,6 +124,7 @@ COMMON_DETAIL_KEYS = frozenset({
     "entity_type",
     "file_id",
     "file_count",
+    "fire_id",
     "file_path",
     "include_artifacts",
     "is_new_secret",
@@ -183,6 +186,7 @@ COMMON_DETAIL_KEYS = frozenset({
     "fired_at",
     "last_error",
     "next_run_at",
+    "note_chars",
     "watcher_id",
     "destination_session_hash",
     "destination_session_label",
@@ -377,6 +381,9 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     AuditEventType.WATCHER_RUN_NOW.value: _spec(
         AuditEventType.WATCHER_RUN_NOW, AuditTargetType.WATCHER, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.WATCHER_ACK.value: _spec(
+        AuditEventType.WATCHER_ACK, AuditTargetType.WATCHER, RecordingMode.BEST_EFFORT
     ),
     AuditEventType.SESSION_TOKEN_GENERATE.value: _spec(
         AuditEventType.SESSION_TOKEN_GENERATE, AuditTargetType.SESSION_TOKEN, RecordingMode.BEST_EFFORT

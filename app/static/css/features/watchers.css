@@ -155,6 +155,7 @@
 .watchers-form,
 .watchers-fires,
 .watchers-options,
+.watchers-policy,
 .watchers-diff {
   display: flex;
   flex-direction: column;
@@ -268,6 +269,12 @@
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
+}
+
+.watchers-policy-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .watchers-preview,

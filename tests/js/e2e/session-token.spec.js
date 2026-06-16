@@ -186,8 +186,12 @@ test.describe('session-token lifecycle', () => {
     const token = await issueSessionToken(page)
     await runCommand(page, `session-token set ${token}`)
     await expect.poll(async () => currentSessionId(page)).toBe(token)
+    await ensureAutocompleteReady(page, { timeout: 30_000 })
 
     await runCommand(page, 'ping -c 1 darklab.sh')
+    await page.evaluate(async () => {
+      if (typeof flushRecentValues === 'function') await flushRecentValues()
+    })
     await expect.poll(async () => page.evaluate(async () => {
       const resp = await apiFetch('/session/recent-values')
       const data = await resp.json()

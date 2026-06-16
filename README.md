@@ -46,6 +46,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
   - Active projects can auto-link completed runs and the Atlas entities those runs produce. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
   - Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, evidence packages, and readable report exports.
   - Project views hide suppressed Atlas noise by default and expose paged finding review in list or board form, artifact review, cached entity intel context, metadata editing, project-scoped Atlas exports, and target/finding provenance context.
+  - The Monitoring tab shows project-linked watcher checks with status totals, grouped monitor cards, severity and top-signal summaries, filters, current triage state, Run Details and Compare links, and safe missing-run states when older baseline or current runs have been deleted.
   - Evidence packages preserve selected project evidence through operator-configured presets, provenance-aware manifests, import hints, raw transcript pages, cleaner manifest line indexes, polled archive builds, safe audit correlation, raw artifacts, or redacted text/JSON artifact derivatives.
   - The Activity tab shows safe project audit rows with filters, paging, collapsed details, and mobile rows, so project users can review what changed without opening operator diagnostics. Metadata edit sheets also show a small Recent activity panel for the item you're editing, with a jump into the filtered Activity tab.
   - The Report tab turns selected project material into a narrative engagement report with explicit draft saves, section ordering, paged included-evidence controls for large projects, HTML preview, markdown/HTML archive export, safe audit correlation for job-backed exports, and browser Print/PDF.
@@ -61,7 +62,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Run notifications** — optional browser desktop notifications fire on run completion, using command-root-only titles and exit/elapsed summaries without sending anything outside the browser
 - **Outbound notifications** — durable `tok_` sessions and active teams can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, terminal `notify` management, retries, delivery audit rows, and audit-log entries for channel config changes that do not store secret values
 - **Scheduled runs** — durable `tok_` sessions can save recurring commands in the active personal or team scope with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
-- **Watchers** — durable `tok_` sessions can turn a command or completed run in the active personal or team scope into a recurring change monitor, capture the first successful run as the baseline when needed, review the latest diff and fire audit from the browser, pause/resume checks, and accept the latest run as the new baseline when a change is expected
+- **Watchers** — durable `tok_` sessions can turn a command or completed run in the active personal or team scope into a recurring change monitor, capture the first successful run as the baseline when needed, link checks to Projects, review latest diffs and fire timelines from the Watchers modal or Project Monitoring tab, tune noise with per-watcher policies, triage expected or resolved fires without changing the baseline, pause/resume checks, and accept the latest run as the new baseline when a change is expected
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior, command outcome summaries, and default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` (with `--json` for a machine-readable entry), `commands search <term>`, and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, subcommands, and per-tool knowledge guidance (notes, gotchas, safe defaults, and artifact behavior) from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, manage team scope, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
@@ -436,7 +437,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── .markdownlint-cli2.jsonc    # markdownlint-cli2 config — Markdown lint rules used by npm run lint:md
 ├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
 ├── .tooling/                   # Developer/test/lint tool configuration; app runtime config lives under app/conf/
-│   ├── eslint.config.js        # ESLint config — indentation, quotes, and semicolon rules for JS tooling/test files
+│   ├── eslint.config.js        # ESLint config — browser globals plus JS tooling/test style rules
 │   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
 │   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
 │   ├── playwright.capture.mobile.config.js  # Playwright config for the mobile UI screenshot capture pipeline
@@ -538,7 +539,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0028_finding_triage_details.py # Postgres finding remediation and verification table
 │   │   │   ├── v0029_project_reports.py # Postgres Project report draft table
 │   │   │   ├── v0030_audit_events.py # Postgres audit event table and indexes
-│   │   │   └── v0031_run_output_summary_status.py # Postgres run-output summary backfill status markers
+│   │   │   ├── v0031_run_output_summary_status.py # Postgres run-output summary backfill status markers
+│   │   │   ├── v0032_watcher_monitoring_phase0.py # Postgres watcher monitoring project-link and fire-triage fields
+│   │   │   └── v0033_watcher_monitoring_policy.py # Postgres watcher monitoring policy controls
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -626,7 +629,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
 │   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
 │   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
-│   │   │   └── models.py       # Shared diff result dataclass and diff-kind constants
+│   │   │   ├── models.py       # Shared diff result dataclass and diff-kind constants
+│   │   │   └── rollups.py      # Watcher-fire severity and top-signal rollups for dashboards and digests
 │   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
@@ -697,6 +701,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
+│   │   │   ├── monitoring.py   # Project Monitoring tab payload, watcher status cards, and fire timeline helpers
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
@@ -905,6 +910,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_mobile_compare.js # Project mobile run comparison sheet
 │   │       │   │   ├── project_mobile_detail.js # Project mobile detail tab bodies, rows, and action sheets
 │   │       │   │   ├── project_mobile_shell.js # Project mobile view state, create form, and project list composition
+│   │       │   │   ├── project_monitoring.js # Lazy-loaded Project Monitoring filters, grouped cards, policy chips, timeline, run actions, and triage controls
 │   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
 │   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
 │   │       │   │   ├── project_packages.js # Lazy-loaded evidence package rows, manifest preview, wizard, and download helpers
@@ -960,7 +966,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── tour/
 │   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
 │   │       │   ├── watchers/
-│   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, diff summary, cadence preview, fire audit, and run handoffs
+│   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
 │   │       │   │   ├── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
 │   │       │   │   └── workflows_bridge.js # Workflows ESM bridge for lazy workflow panels
@@ -1138,6 +1144,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
 │   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
 │   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
+│   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
 │   │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
 │   │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
 │   │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage

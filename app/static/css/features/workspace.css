@@ -187,8 +187,8 @@
 }
 
 .workspace-metadata-chip.is-note {
-  border-color: color-mix(in srgb, var(--yellow) 44%, var(--border));
-  color: color-mix(in srgb, var(--yellow) 76%, var(--text));
+  border-color: color-mix(in srgb, var(--amber) 44%, var(--border));
+  color: color-mix(in srgb, var(--amber) 76%, var(--text));
 }
 
 .workspace-empty {

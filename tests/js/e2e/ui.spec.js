@@ -10,6 +10,7 @@ import {
   waitForHistoryRuns,
   browserSessionId,
   seedExternalHistoryRuns,
+  seedProjectMonitoringFixture,
 } from './helpers.js'
 
 const PROJECT_LINK_RUN_COMMAND = 'dig projects.playwright.example +short'
@@ -846,6 +847,43 @@ test.describe('project workspace modal', () => {
     await row.locator('.project-activity-details-toggle').click()
     await expect(row.locator('.project-activity-detail-list')).toContainText('source')
     await expect(row.locator('.project-activity-detail-list')).toContainText('manual')
+  })
+
+  test('opens Project Monitoring through the real Projects tab', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Monitoring ${Date.now()}`)
+    const fixture = seedProjectMonitoringFixture(testInfo, {
+      sessionId: await browserSessionId(page),
+      projectId,
+    })
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+
+    const monitoringResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${projectId}/monitoring`
+    })
+    await switchProjectTab(page, 'monitoring')
+    expect((await monitoringResponse).ok()).toBe(true)
+
+    const root = page.locator(`[data-project-monitoring-root="${projectId}"]`)
+    await expect(root).toBeVisible({ timeout: 15_000 })
+    await expect(root.locator('.project-monitoring-count.is-changed')).toContainText('2')
+    await expect(root).toContainText('Ports Browser Watch')
+    await expect(root).toContainText('Deleted Current Watch')
+    await expect(root).toContainText('New open port 443/tcp https')
+
+    const availableFire = root.locator(`[data-project-monitoring-fire-id="${fixture.changedFireId}"]`).first()
+    await expect(availableFire.locator('[data-project-monitoring-action="details"]').first()).toBeEnabled()
+    await expect(availableFire.locator('[data-project-monitoring-action="compare"]').first()).toBeEnabled()
+
+    const missingCurrentFire = root.locator(`[data-project-monitoring-fire-id="${fixture.deletedFireId}"]`).first()
+    await expect(missingCurrentFire).toContainText('Deleted Current Watch')
+    await expect(missingCurrentFire.locator('[data-project-monitoring-action="details"]').first()).toBeDisabled()
+    await expect(missingCurrentFire.locator('[data-project-monitoring-action="compare"]').first()).toBeDisabled()
   })
 
   test('creates an active project, manages targets, and edits linked run metadata', async ({ page }, testInfo) => {

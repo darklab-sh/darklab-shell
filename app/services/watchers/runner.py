@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 
+from core.helpers import get_log_session_id
 from services.scheduler.models import Schedule
 from services.watchers import service as watcher_service
 from services.watchers.models import WATCHER_STATE_FIRING
@@ -43,7 +44,7 @@ def handle_fire(conn, schedule: Schedule, *, fired_at: str, launch_run: LaunchRu
         "schedule_id": schedule.id,
         "run_id": run_id,
         "baseline_run_id": watcher.baseline_run_id,
-        "session": watcher.session_token,
+        "session": get_log_session_id(watcher.session_token),
         "fired_at": fired_at,
     })
     return run_id

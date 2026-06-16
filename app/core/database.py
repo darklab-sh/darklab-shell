@@ -517,6 +517,7 @@ def _create_watcher_schema(conn):
             id                      TEXT PRIMARY KEY,
             session_token           TEXT NOT NULL,
             team_id                 TEXT NOT NULL DEFAULT '',
+            project_id              TEXT NOT NULL DEFAULT '',
             label                   TEXT NOT NULL DEFAULT '',
             command_text            TEXT NOT NULL,
             schedule_id             TEXT NOT NULL UNIQUE,
@@ -527,6 +528,7 @@ def _create_watcher_schema(conn):
             state_reason            TEXT NOT NULL DEFAULT '',
             last_error              TEXT NOT NULL DEFAULT '',
             options_json            {_json_column_sql("{}")},
+            policy_json             {_json_column_sql("{}")},
             consecutive_no_change   INTEGER NOT NULL DEFAULT 0,
             consecutive_changed     INTEGER NOT NULL DEFAULT 0,
             consecutive_failures    INTEGER NOT NULL DEFAULT 0,
@@ -547,9 +549,20 @@ def _create_watcher_schema(conn):
             truncated                   INTEGER NOT NULL DEFAULT 0,
             notification_event_ids_json {_json_column_sql("[]")},
             state_at_fire               TEXT NOT NULL DEFAULT '',
+            state_reason                TEXT NOT NULL DEFAULT '',
+            fire_kind                   TEXT NOT NULL DEFAULT 'unclassified',
+            ack_state                   TEXT NOT NULL DEFAULT 'new',
+            ack_note                    TEXT NOT NULL DEFAULT '',
+            ack_by                      TEXT NOT NULL DEFAULT '',
+            ack_at                      TEXT NOT NULL DEFAULT '',
             created                     TEXT NOT NULL,
             UNIQUE (watcher_id, run_id),
-            CHECK (diff_kind IN ('signal', 'textual', 'none'))
+            CHECK (diff_kind IN ('signal', 'textual', 'none')),
+            CHECK (fire_kind IN (
+                'changed', 'recovered', 'failed', 'no_change',
+                'baseline_created', 'baseline_accepted', 'paused', 'unclassified'
+            )),
+            CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))
         )
     """)
 
@@ -1045,6 +1058,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watchers_team_updated "
         "ON watchers (team_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchers_project_updated "
+        "ON watchers (project_id, updated DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watchers_schedule "
@@ -2061,12 +2078,95 @@ def _migrate_schema(conn):
         "ALTER TABLE schedules ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE schedule_fires ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE watchers ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watchers ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
+        f"ALTER TABLE watchers ADD COLUMN policy_json {_json_column_sql('{}')}",
         "ALTER TABLE watcher_fires ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN state_reason TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN fire_kind TEXT NOT NULL DEFAULT 'unclassified'",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_state TEXT NOT NULL DEFAULT 'new'",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_note TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_by TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_at TEXT NOT NULL DEFAULT ''",
     ):
         try:
             conn.execute(stmt)
         except SQLiteOperationalError:
             pass
+    try:
+        result = conn.execute(
+            """
+            UPDATE watcher_fires
+            SET state_reason = CASE
+                    WHEN json_extract(diff_summary_json, '$.baseline_created') = 1 THEN 'baseline_created'
+                    WHEN state_at_fire = 'changed' THEN 'diff_detected'
+                    WHEN state_at_fire = 'error' THEN 'run_failed'
+                    WHEN state_at_fire = 'paused' THEN 'paused'
+                    WHEN state_at_fire = 'ok' THEN 'no_change'
+                    ELSE ''
+                END,
+                fire_kind = CASE
+                    WHEN json_extract(diff_summary_json, '$.baseline_created') = 1 THEN 'baseline_created'
+                    WHEN state_at_fire = 'changed' THEN 'changed'
+                    WHEN state_at_fire = 'error' THEN 'failed'
+                    WHEN state_at_fire = 'paused' THEN 'paused'
+                    WHEN state_at_fire = 'ok' THEN 'no_change'
+                    ELSE 'unclassified'
+                END
+            WHERE fire_kind = 'unclassified'
+            """
+        )
+        log.debug("WATCHER_MONITORING_FIRE_BACKFILL_COMPLETED", extra={
+            "database_backend": "sqlite",
+            "affected_rows": int(getattr(result, "rowcount", 0) or 0),
+        })
+    except SQLiteOperationalError as exc:
+        log.warning("WATCHER_MONITORING_FIRE_BACKFILL_FAILED", extra={
+            "database_backend": "sqlite",
+            "error": str(exc),
+        })
+    try:
+        result = conn.execute(
+            """
+            UPDATE watchers
+            SET project_id = (
+                SELECT MIN(p.id)
+                FROM project_links pl
+                JOIN projects p ON p.id = pl.project_id
+                WHERE pl.entity_type = 'run'
+                  AND pl.entity_id = watchers.baseline_run_id
+                  AND (
+                    (watchers.team_id != '' AND p.team_id = watchers.team_id)
+                    OR ((watchers.team_id IS NULL OR watchers.team_id = '')
+                        AND (p.team_id IS NULL OR p.team_id = '')
+                        AND p.session_id = watchers.session_token)
+                  )
+            )
+            WHERE (project_id IS NULL OR project_id = '')
+              AND baseline_run_id != ''
+              AND (
+                SELECT COUNT(DISTINCT p.id)
+                FROM project_links pl
+                JOIN projects p ON p.id = pl.project_id
+                WHERE pl.entity_type = 'run'
+                  AND pl.entity_id = watchers.baseline_run_id
+                  AND (
+                    (watchers.team_id != '' AND p.team_id = watchers.team_id)
+                    OR ((watchers.team_id IS NULL OR watchers.team_id = '')
+                        AND (p.team_id IS NULL OR p.team_id = '')
+                        AND p.session_id = watchers.session_token)
+                  )
+              ) = 1
+            """
+        )
+        log.debug("WATCHER_PROJECT_INFERENCE_BACKFILL_COMPLETED", extra={
+            "database_backend": "sqlite",
+            "affected_rows": int(getattr(result, "rowcount", 0) or 0),
+        })
+    except SQLiteOperationalError as exc:
+        log.warning("WATCHER_PROJECT_INFERENCE_BACKFILL_FAILED", extra={
+            "database_backend": "sqlite",
+            "error": str(exc),
+        })
 
     _drop_legacy_project_entity_tables(conn)
     try:

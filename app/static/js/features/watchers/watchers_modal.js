@@ -193,6 +193,7 @@ function _watcherDraftFromWatcher(watcher = null, baselineRun = null) {
   ).trim();
   const command = String(watcher?.command_text || baselineRun?.command || '').trim();
   const baselineMode = baselineId ? 'existing_run' : 'first_run';
+  const policy = watcher?.policy && typeof watcher.policy === 'object' ? watcher.policy : {};
   return {
     id: watcher?.id || '',
     label: String(watcher?.label || '').trim(),
@@ -205,6 +206,35 @@ function _watcherDraftFromWatcher(watcher = null, baselineRun = null) {
     enabled: watcher ? watcher.state !== 'paused' && schedule.enabled !== false : true,
     suppress_removals: !!watcher?.options?.suppress_removals,
     notify_metadata_changes: !!watcher?.options?.notify_metadata_changes,
+    ignore_line_patterns: Array.isArray(policy.ignore_line_patterns) ? policy.ignore_line_patterns.join('\n') : '',
+    alert_after_repeated_changes: Math.max(1, Number(policy.alert_after_repeated_changes || 1) || 1),
+    alert_signal_classes: Array.isArray(policy.alert_signal_classes)
+      ? policy.alert_signal_classes.map(item => String(item || '').trim()).filter(Boolean)
+      : [],
+  };
+}
+
+function _normalizeWatcherPolicyDraft(data = {}) {
+  const rawPolicy = data.policy && typeof data.policy === 'object' ? data.policy : {};
+  const rawPatterns = data.ignore_line_patterns ?? rawPolicy.ignore_line_patterns ?? [];
+  const patternItems = Array.isArray(rawPatterns) ? rawPatterns : String(rawPatterns || '').split(/\r?\n/);
+  const patterns = [];
+  patternItems.forEach((item) => {
+    const value = String(item || '').trim();
+    if (value && !patterns.includes(value)) patterns.push(value);
+  });
+  const repeated = Math.min(10, Math.max(1, Number(
+    data.alert_after_repeated_changes ?? rawPolicy.alert_after_repeated_changes ?? 1,
+  ) || 1));
+  const rawClasses = data.alert_signal_classes ?? rawPolicy.alert_signal_classes ?? [];
+  const classes = (Array.isArray(rawClasses) ? rawClasses : [rawClasses])
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index);
+  return {
+    ignore_line_patterns: patterns,
+    alert_after_repeated_changes: repeated,
+    alert_signal_classes: classes,
   };
 }
 
@@ -387,6 +417,7 @@ function _focusWatchersModal() {
 function _normalizeWatcherComparable(data = {}) {
   const preset = String(data.cadence_preset || '').trim();
   const options = data.options && typeof data.options === 'object' ? data.options : {};
+  const policy = _normalizeWatcherPolicyDraft(data);
   return {
     label: String(data.label || '').trim(),
     baseline_run_id: String(data.baseline_run_id || '').trim(),
@@ -398,6 +429,9 @@ function _normalizeWatcherComparable(data = {}) {
     enabled: data.enabled !== false,
     suppress_removals: !!(data.suppress_removals ?? options.suppress_removals),
     notify_metadata_changes: !!(data.notify_metadata_changes ?? options.notify_metadata_changes),
+    ignore_line_patterns: policy.ignore_line_patterns,
+    alert_after_repeated_changes: policy.alert_after_repeated_changes,
+    alert_signal_classes: policy.alert_signal_classes,
   };
 }
 
@@ -432,6 +466,9 @@ function _watcherNewDraftHasMeaningfulInput(draft) {
     || data.enabled === false
     || data.suppress_removals
     || data.notify_metadata_changes
+    || data.ignore_line_patterns.length
+    || data.alert_after_repeated_changes !== 1
+    || data.alert_signal_classes.length
   );
 }
 
@@ -817,6 +854,46 @@ function _renderWatcherForm(parent, watcher) {
   });
   form.appendChild(options);
 
+  const policy = document.createElement('div');
+  policy.className = 'watchers-policy';
+  const repeatedInput = _watcherInput(String(draft.alert_after_repeated_changes || 1), {
+    id: 'watchers-repeated-input',
+    min: '1',
+    max: '10',
+    type: 'number',
+  });
+  const patternsInput = document.createElement('textarea');
+  patternsInput.id = 'watchers-ignore-patterns-input';
+  patternsInput.className = 'form-control watchers-command-input';
+  patternsInput.rows = 3;
+  patternsInput.spellcheck = false;
+  patternsInput.placeholder = 'One line pattern per row';
+  patternsInput.value = draft.ignore_line_patterns || '';
+  const signalControls = document.createElement('div');
+  signalControls.className = 'watchers-policy-signals';
+  [
+    ['findings', 'Findings'],
+    ['entities', 'Entities'],
+    ['ports', 'Ports'],
+  ].forEach(([value, label]) => {
+    const row = document.createElement('label');
+    row.className = 'watchers-check-row';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.watcherSignalClass = value;
+    input.checked = (draft.alert_signal_classes || []).includes(value);
+    const text = document.createElement('span');
+    text.textContent = label;
+    row.append(input, text);
+    signalControls.appendChild(row);
+  });
+  policy.append(
+    _watcherFormField('Repeated changes', repeatedInput),
+    _watcherFormField('Ignore lines', patternsInput),
+    _watcherFormField('Alert signals', signalControls),
+  );
+  form.appendChild(policy);
+
   _renderWatcherPreview(form);
 
   const actions = document.createElement('div');
@@ -879,6 +956,12 @@ function _collectWatcherDraft(form = document.getElementById('watchers-form')) {
       suppress_removals: !!root.querySelector?.('#watchers-suppress-removals-input')?.checked,
       notify_metadata_changes: !!root.querySelector?.('#watchers-metadata-input')?.checked,
     },
+    policy: _normalizeWatcherPolicyDraft({
+      ignore_line_patterns: String(root.querySelector?.('#watchers-ignore-patterns-input')?.value || ''),
+      alert_after_repeated_changes: Number(root.querySelector?.('#watchers-repeated-input')?.value || 1),
+      alert_signal_classes: [...(root.querySelectorAll?.('[data-watcher-signal-class]:checked') || [])]
+        .map(input => input.dataset.watcherSignalClass),
+    }),
   };
 }
 
@@ -896,6 +979,9 @@ function _syncWatcherDraftFromForm() {
     enabled: data.enabled,
     suppress_removals: !!data.options.suppress_removals,
     notify_metadata_changes: !!data.options.notify_metadata_changes,
+    ignore_line_patterns: data.policy.ignore_line_patterns.join('\n'),
+    alert_after_repeated_changes: data.policy.alert_after_repeated_changes,
+    alert_signal_classes: data.policy.alert_signal_classes,
   };
 }
 

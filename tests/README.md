@@ -18,16 +18,16 @@ The suites are layered on purpose:
 
 Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
 
-Project workspace behavior follows the same split: pytest owns project routes, schema, migration, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
+Project workspace behavior follows the same split: pytest owns project routes, schema, migration, monitoring payloads, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, monitoring tab rendering, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
 
 Current totals:
 
-- behavior tests: 3,710
+- behavior tests: 3,756
 - docs/inventory meta-tests: 42
-- `pytest`: 2088 (2051 behavior + 37 meta)
-- `vitest`: 1399
-- `playwright`: 265
-- total: 3,752
+- `pytest`: 2120 (2083 behavior + 37 meta)
+- `vitest`: 1412
+- `playwright`: 266
+- total: 3,798
 
 This document is organized in two parts:
 
@@ -527,6 +527,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
 | `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
 | `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_watcher_monitoring_incremental_migration_adds_enum_constraints` | Verifies the incremental watcher-monitoring Postgres migration normalizes legacy watcher-fire enum values and adds fire-kind and acknowledgement-state CHECK constraints. |
 | `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
@@ -558,13 +559,24 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSchedulerFoundation.test_scheduler_retention_guard_skips_until_interval_elapses` | Verifies scheduler retention pruning is guarded to run at most once per interval. |
 | `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
 | `TestWatchersFoundation.test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists` | Verifies watcher creation inserts the watcher row and owned schedule row together while normal schedule lists hide watcher-owned cadence. |
+| `TestWatchersFoundation.test_watcher_project_membership_infers_single_same_scope_run_link` | Verifies watcher Project membership is inferred only from a single same-scope baseline run link and rejects cross-scope Project assignments. |
+| `TestWatchersFoundation.test_deleting_project_clears_watcher_membership` | Verifies deleting a Project clears watcher Project membership instead of leaving a stale reference. |
+| `TestWatchersFoundation.test_project_monitoring_payload_counts_project_watchers_and_missing_run_refs` | Verifies Project Monitoring payloads count scoped watcher states, expose derived groups/filter metadata, and keep fire rows visible when baseline runs are missing. |
+| `TestWatchersFoundation.test_project_monitoring_payload_keeps_deleted_current_run_visible` | Verifies Project Monitoring keeps deleted-current-run fires visible while disabling current-run actions and preserving available baseline links. |
+| `TestWatchersFoundation.test_project_monitoring_triage_state_uses_unbounded_unresolved_fire` | Verifies Project Monitoring keeps the current triage state tied to the latest unresolved fire even when that fire is older than the visible fire limit. |
+| `TestWatchersFoundation.test_project_monitoring_summary_uses_unbounded_unresolved_fires` | Verifies Project Monitoring summary severity and top changes include unresolved fires that are older than the visible timeline window. |
+| `TestWatchersFoundation.test_watcher_fire_rollup_maps_classifier_summaries_to_severity_defaults` | Verifies watcher-fire rollups map classifier summaries to the default Monitoring severity, counts, truncation, and run-link fields. |
+| `TestWatchersFoundation.test_watcher_fire_rollup_bounds_top_signals` | Verifies watcher-fire rollups cap top-signal output while preserving the highest-severity signal first. |
+| `TestWatchersFoundation.test_sqlite_watcher_monitoring_backfill_infers_projects_and_fire_state` | Verifies SQLite monitoring migrations backfill watcher Project membership and watcher-fire kind/state fields for legacy rows. |
 | `TestWatchersFoundation.test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically` | Verifies deleting a watcher removes its state, owned schedule, and fire audit rows together. |
 | `TestWatchersFoundation.test_watcher_create_requires_durable_token_valid_options_and_quota` | Verifies watcher creation requires durable tokens, strict option booleans, known option keys, and the per-session watcher cap. |
 | `TestWatchersFoundation.test_watchers_with_same_command_keep_separate_schedules_and_state` | Verifies duplicate command watchers keep separate schedules, baselines, and state counters. |
 | `TestWatchersFoundation.test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run` | Verifies duplicate watcher-fire records for the same watcher and run reuse the existing audit row. |
+| `TestWatchersFoundation.test_accept_baseline_requires_completed_owned_watcher_fire` | Verifies accepting a baseline rejects missing, unrelated, unfinished, and cross-scope runs before promoting a completed watcher fire. |
 | `TestWatchersFoundation.test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule` | Verifies watcher edit, pause, resume, and accept-baseline actions keep the watcher row and owned schedule aligned. |
 | `TestWatchersFoundation.test_watcher_schedule_fire_launches_run_and_records_pending_fire` | Verifies watcher-owned schedules launch through scheduler dispatch, mark the watcher as firing, and record a pending watcher fire. |
 | `TestWatchersFoundation.test_watcher_full_cycle_captures_first_run_detects_change_notifies_and_accepts_baseline` | Verifies a watcher can capture the first successful run as its baseline, fire again with a detected change, queue a notification, and promote the changed run as the new baseline. |
+| `TestWatchersFoundation.test_watcher_notification_policy_gates_repeated_and_signal_class_alerts` | Verifies repeated-change and signal-class watcher policies suppress or allow notifications without hiding dashboard fire state. |
 | `TestWatchersFoundation.test_watcher_textual_diff_reports_entity_delta` | Verifies textual watcher diffs report added, removed, and unchanged structured entities when line metadata is available. |
 | `TestWatchersFoundation.test_watcher_finalize_changed_diff_updates_state_and_queues_notification` | Verifies completed watcher runs with a textual diff move to changed state and queue a watcher-changed notification. |
 | `TestWatchersFoundation.test_watcher_finalize_no_change_recovers_only_after_changed_state` | Verifies no-change watcher fires stay quiet from ok state and emit recovered only after a prior changed state. |
@@ -1406,6 +1418,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the Phase 6 backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
 | `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_postgres_watcher_monitoring_migration_backfills_legacy_rows` | Verifies the Postgres watcher-monitoring migration backfills legacy watcher Project ids and watcher-fire state/kind rows. |
 | `test_team_mode_routes_use_postgres_scope_paths` | Verifies Postgres-backed team creation, invite redemption, recovery rotation, team-scoped API history/run reads, outsider denial, and personal/team Project slug isolation. |
 | `test_configured_postgres_app_startup_smoke_uses_real_pool` | Starts the configured app in a subprocess against a real Postgres pool and verifies startup, token generation, token lookup, and History access. |
 | `test_history_commands_route_reads_from_postgres` | Verifies the history commands route can read distinct recent commands through the Postgres compatibility query path. |
@@ -1573,6 +1586,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses, removes all channel-owned vault secrets, and records a config-change audit row without secret values. |
 | `TestProjectRoutes.test_project_package_and_link_routes_record_audit_events` | Verifies project link/unlink and package create/delete routes record bounded audit events. |
 | `TestProjectRoutes.test_project_activity_route_lists_personal_safe_events_and_filters` | Verifies personal Project Activity returns scoped, filtered, user-safe audit rows without leaking matching team rows. |
+| `TestProjectRoutes.test_project_monitoring_route_returns_scoped_watchers_and_missing_run_state` | Verifies the Project Monitoring route returns scoped watcher cards and marks missing baseline runs without breaking timeline rows. |
+| `TestProjectRoutes.test_project_monitoring_route_keeps_deleted_current_run_state` | Verifies the Project Monitoring route keeps deleted-current-run fires visible while marking only current-run actions unavailable. |
+| `TestProjectRoutes.test_project_monitoring_route_scopes_target_filter_options` | Verifies Project Monitoring target filters ignore suppressed and foreign linked Atlas entities while keeping visible current-owner targets. |
+| `TestProjectRoutes.test_project_monitoring_fire_ack_route_updates_fire_and_audits_metadata` | Verifies the Project Monitoring fire triage route updates acknowledgement state and notes while auditing safe metadata only. |
+| `TestProjectRoutes.test_project_monitoring_team_routes_enforce_view_and_triage_capabilities` | Verifies team Project Monitoring read and triage routes enforce view, membership, and triage capabilities while keeping audit details safe. |
 | `TestProjectRoutes.test_project_activity_route_allows_team_viewer_for_team_project_only` | Verifies team viewers can read safe Project Activity for their team project but cannot read foreign project activity. |
 | `TestProjectRoutes.test_project_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed project-delete audit failures roll back the project deletion. |
 | `TestProjectRoutes.test_package_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed package-delete audit failures roll back the package deletion. |
@@ -2140,6 +2158,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestWatchersRoutes.test_archiving_team_pauses_team_schedules_and_watchers` | Verifies archiving a team pauses its standalone schedules, watchers, and watcher-owned schedules without moving them to personal scope. |
 | `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs, rejects unfinished current-session baselines, and allows first-run baseline creation. |
 | `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire, clears changed-state counters, and records the baseline-acceptance audit row. |
+| `TestWatchersRoutes.test_watcher_accept_baseline_rejects_unrelated_missing_and_cross_scope_runs` | Verifies the accept-baseline route rejects missing, unrelated, unfinished, and cross-scope run ids without changing the current baseline. |
 | `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates fire and automation audit rows only for the selected watcher even when another watcher has the same command. |
 | `TestWatchBuiltin.test_watch_builtin_create_list_info_and_state_changes` | Verifies the terminal watch command creates, lists, inspects, pauses, resumes, deletes current-session watchers and owned schedules, and records bounded automation audit rows. |
 | `TestWatchBuiltin.test_watch_builtin_validates_baseline_and_command_policy` | Verifies the terminal watch command rejects missing, unfinished, and disallowed-command baselines before persistence, and creates pending first-run watchers. |
@@ -2343,7 +2362,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | Test | Description |
 | --- | --- |
 | `test_findings_classifier_uses_structured_finding_fingerprints` | Verifies watcher diffs prefer structured finding fingerprints when both runs have persisted findings. |
-| `test_textual_classifier_is_fallback_and_honors_suppress_removals` | Verifies the textual fallback handles plain output diffs and can suppress removal-only changes. |
+| `test_textual_classifier_is_fallback_and_honors_suppress_removals` | Verifies the textual fallback handles plain output diffs, suppresses removal-only changes, and ignores configured line patterns. |
 | `test_ports_classifier_reports_added_changed_and_removed_ports` | Verifies nmap-shaped output reports added, removed, and changed port/service signals. |
 | `test_hosts_classifier_reports_added_hosts_for_subdomain_lists` | Verifies host-list commands report newly discovered hosts. |
 | `test_tls_classifier_reports_certificate_field_changes` | Verifies openssl s_client output reports changed certificate fields. |
@@ -2702,6 +2721,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
 | `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
 | `native select elements compose the form-select primitive` | Regression guard: fails if app source adds native select markup or JS-created selects without the shared `.form-select` primitive. |
+| `uses the amber token instead of undefined yellow in source styles` | Regression guard: fails if app source uses the undefined `var(--yellow)` token instead of the defined amber caution token. |
 | `notification rows use badge primitives for passive metadata` | Regression guard: fails if the Notifications options panel stops using shared badge primitives or re-adds a duplicate tab-click refresh handler. |
 
 #### `button_primitives_allowlist.test.js`
@@ -3143,6 +3163,23 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `ignores stale Project Activity responses that resolve out of order` | Verifies newer Project Activity requests keep their rows when an older request finishes later. |
 | `applies filters and clears them without preloading the full audit history` | Verifies Project Activity filter buttons send bounded query parameters and keep pagination offset-based. |
 | `renders empty and mobile activity states with collapsed details` | Verifies the empty/retention note and mobile stacked activity rows render with details collapsed. |
+
+#### `project_monitoring.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders project monitoring counts monitors and disables missing-run comparisons` | Verifies the Project Monitoring tab renders dashboard counts, grouped monitor cards, filters, watcher policy chips, severity/top-signal rollups, timeline rows, and disables unavailable actions when baseline or current runs are missing. |
+| `renders monitor timing and baseline run metadata on cards` | Verifies monitor cards show next run, last run, last change, and current baseline metadata from the Monitoring payload. |
+| `changed-since filters exclude monitors without fire timestamps` | Verifies the changed-window filter removes never-run monitor cards while still filtering timeline events by their own fire timestamps. |
+| `maps dashboard status filters onto equivalent timeline fire kinds` | Verifies a quiet status filter keeps quiet monitor cards and no-change timeline events aligned. |
+| `renders monitoring metadata pills with badge primitives and semantic tones` | Verifies Project Monitoring status, severity, acknowledgement, fire-kind, and policy labels compose the shared badge primitive with semantic tone classes. |
+| `renders triage controls once and only for actionable timeline fires` | Verifies Project Monitoring keeps monitor-card latest fires read-only, renders a single timeline triage widget for changed fires, omits triage controls for no-change fires, and marks the timeline with the shared `.nice-scroll` primitive. |
+| `renders primitive-safe fallback action buttons without the shared button factory` | Verifies Project Monitoring fallback action buttons still compose the shared `.btn` role primitives when the shell button factory is unavailable. |
+| `opens run details and compares available monitoring runs from action buttons` | Verifies Project Monitoring action buttons open Run Details and launch the shared comparison flow for available current/baseline runs. |
+| `confirms before accepting a watcher baseline from monitoring` | Verifies Accept baseline routes through the shared confirmation primitive, cancels without posting, and posts only after the operator confirms. |
+| `runs pause resume and run-now watcher actions from monitoring cards` | Verifies Project Monitoring pause, resume, and run-now actions send the expected watcher requests and surface action failures safely. |
+| `resets monitoring filters and retries after load errors` | Verifies Project Monitoring reset and retry controls clear filter/error state and reload dashboard data after a failed request. |
+| `updates monitoring fire triage state with the row note` | Verifies Project Monitoring triage actions send the selected acknowledgement state and row note through the project-scoped fire update route. |
 
 #### `project_report.test.js`
 
@@ -4356,6 +4393,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
 | `records project actions in the diagnostics audit viewer` | Verifies that a live project-link action appears in `/diag/audit` with the filtered row, detail JSON, and export links. |
 | `opens Project Activity and filters project-link rows` | Verifies that the Projects modal Activity tab opens in a live browser, filters project-link rows, and shows collapsed safe details. |
+| `opens Project Monitoring through the real Projects tab` | Verifies that the Projects modal Monitoring tab opens in a live browser, loads seeded watcher fires, shows top signals, and disables missing-current-run actions. |
 | `creates an active project, manages targets, and edits linked run metadata` | Verifies that the Projects modal can create and activate a project, persist project labels/notes, add/edit/delete targets, link the last run, and save linked-run metadata in a live browser. |
 | `creates, previews, applies, and shows an Atlas auto-promote rule` | Verifies that the Projects modal can preview, create, refresh, apply, and display an Atlas auto-promote rule and its promoted entity in a live browser. |
 | `refreshes an open project when a run stream auto-promotes an Atlas entity` | Verifies that a live command stream can auto-promote a matching Atlas entity and refresh an already-open Projects modal without a page reload. |

@@ -685,6 +685,7 @@ let exportedDarklabProjectMobileDetail = null;
       else if (ctx.projectWorkspaceTab() === 'packages') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobilePackagesTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'report') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileReportTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'activity') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileActivityTab(projectId, summary));
+      else if (ctx.projectWorkspaceTab() === 'monitoring') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileMonitoringTab(projectId, summary));
     }
 
     function renderDetail() {

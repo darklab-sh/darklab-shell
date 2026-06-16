@@ -99,6 +99,7 @@ let importedProjectList;
 let importedProjectMobileCompare;
 let importedProjectMobileDetail;
 let importedProjectMobileShell;
+let importedProjectMonitoring;
 let importedProjectNavigation;
 let importedProjectNestedSheets;
 let importedProjectPackages;
@@ -1755,6 +1756,8 @@ let importedProjectWorkspaceShell;
 
   let projectActivityController = null;
   let projectActivityControllerPromise = null;
+  let projectMonitoringController = null;
+  let projectMonitoringControllerPromise = null;
 
   function _projectActivityController() {
     if (projectActivityController) return projectActivityController;
@@ -1792,6 +1795,46 @@ let importedProjectWorkspaceShell;
         projectActivityControllerPromise = null;
       });
     return projectActivityControllerPromise;
+  }
+
+  function _projectMonitoringController() {
+    if (projectMonitoringController) return projectMonitoringController;
+    const projectMonitoring = _projectModule('DarklabProjectMonitoring', importedProjectMonitoring);
+    const factory = projectMonitoring && projectMonitoring.createProjectMonitoringController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectMonitoring is unavailable');
+    projectMonitoringController = factory({
+      projectWorkspaceRequest: _projectWorkspaceRequest,
+      projectResponseError: _projectResponseError,
+      formatDate: _formatProjectDate,
+      makeProjectButton: _makeProjectButton,
+      emptyProjectPanel: _emptyProjectPanel,
+      showConfirm: _shellFn('showConfirm', importedShowConfirm),
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      logClientError: _shellLogClientError,
+      mobileView: () => _projectMobileShellController().currentView(),
+    });
+    return projectMonitoringController;
+  }
+
+  function _projectMonitoringControllerIfReady() {
+    return projectMonitoringController || null;
+  }
+
+  function _loadProjectMonitoringController() {
+    if (projectMonitoringController) return Promise.resolve(projectMonitoringController);
+    if (projectMonitoringControllerPromise) return projectMonitoringControllerPromise;
+    const loader = global.loadProjectMonitoring;
+    projectMonitoringControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
+      .then((namespace) => {
+        if (namespace) importedProjectMonitoring = namespace;
+        return _projectMonitoringController();
+      })
+      .finally(() => {
+        projectMonitoringControllerPromise = null;
+      });
+    return projectMonitoringControllerPromise;
   }
 
   function _projectReportController() {
@@ -2229,6 +2272,7 @@ let importedProjectWorkspaceShell;
       renderProjectList: _renderProjectList,
       renderProjectMobile: _renderProjectMobile,
       renderProjectActivity: _renderProjectActivity,
+      renderProjectMonitoring: _renderProjectMonitoring,
       renderProjectPackages: _renderProjectPackages,
       renderProjectPackageWizardModal: _renderProjectPackageWizardModal,
       renderProjectReport: _renderProjectReport,
@@ -2507,6 +2551,7 @@ let importedProjectWorkspaceShell;
       renderProjectMobilePackagesTab: _renderProjectMobilePackagesTab,
       renderProjectMobileReportTab: _renderProjectMobileReportTab,
       renderProjectMobileActivityTab: _renderProjectMobileActivityTab,
+      renderProjectMobileMonitoringTab: _renderProjectMobileMonitoringTab,
       setProjectMobileView: _setProjectMobileView,
       loadProjectFindings: _loadProjectFindings,
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
@@ -2585,6 +2630,7 @@ let importedProjectWorkspaceShell;
       invalidateProjectRuns: _invalidateProjectRuns,
       invalidateProjectEntities: (projectId = '') => _projectEntitiesController().invalidate(projectId),
       invalidateProjectArtifacts: (projectId = '') => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectMonitoring: (projectId = '') => _projectMonitoringControllerIfReady()?.invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,
       syncProjectNotesForm: _syncProjectNotesForm,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
@@ -2653,6 +2699,7 @@ let importedProjectWorkspaceShell;
       previewProjectArtifact: _previewProjectArtifact,
       reportController: _projectReportControllerIfReady,
       activityController: _projectActivityControllerIfReady,
+      monitoringController: _projectMonitoringControllerIfReady,
       projectArtifactItems: _projectArtifactItems,
       projectArtifactPagination: _projectArtifactPagination,
       projectDisplayName: _projectDisplayName,
@@ -3659,6 +3706,24 @@ let importedProjectWorkspaceShell;
       });
   }
 
+  function _renderProjectMonitoring(container, projectId, summary) {
+    if (projectMonitoringController) {
+      projectMonitoringController.renderMonitoring(container, projectId, summary);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading project monitoring...'));
+    _loadProjectMonitoringController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'monitoring') return;
+        controller.renderMonitoring(container, projectId, summary);
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load project monitoring', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load project monitoring.'));
+      });
+  }
+
   function _openProjectObject(projectId, { tab = '', targetType = '', targetId = '' } = {}) {
     const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
     const normalizedTab = String(tab || '').trim();
@@ -3754,6 +3819,22 @@ let importedProjectWorkspaceShell;
       .catch((err) => {
         _shellLogClientError('failed to load mobile project activity', err);
         if (panel.isConnected) panel.replaceChildren('Could not load project activity.');
+      });
+    return panel;
+  }
+
+  function _renderProjectMobileMonitoringTab(projectId, summary) {
+    if (projectMonitoringController) return projectMonitoringController.renderMobileMonitoringTab(projectId, summary);
+    const panel = _emptyProjectPanel('Loading project monitoring...');
+    _loadProjectMonitoringController()
+      .then(() => {
+        if (projectWorkspaceState.tab() === 'monitoring' && _projectMobileShellController().currentView() === 'detail') {
+          _renderProjectMobileDetail();
+        }
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load mobile project monitoring', err);
+        if (panel.isConnected) panel.replaceChildren('Could not load project monitoring.');
       });
     return panel;
   }

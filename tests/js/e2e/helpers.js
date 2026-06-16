@@ -114,6 +114,155 @@ print(json.dumps(created))
   return JSON.parse(result.stdout)
 }
 
+export function seedProjectMonitoringFixture(testInfo, { sessionId, projectId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id = sys.argv[1:4]
+suffix = uuid.uuid4().hex[:16]
+baseline_run_id = "run_mon_base_" + suffix
+current_run_id = "run_mon_current_" + suffix
+deleted_run_id = "run_mon_deleted_" + suffix
+changed_watcher_id = "wtr_mon_changed_" + suffix
+deleted_watcher_id = "wtr_mon_deleted_" + suffix
+changed_fire_id = "wtf_mon_changed_" + suffix
+deleted_fire_id = "wtf_mon_deleted_" + suffix
+now = "2026-06-15T12:00:00+00:00"
+
+def output_preview(command, lines):
+    return json.dumps([
+        {"text": "$ " + command, "cls": "prompt-echo", "line_index": 0},
+        *[
+            {"text": text, "cls": "", "line_index": index + 1}
+            for index, text in enumerate(lines)
+        ],
+        {"text": "[process exited with code 0]", "cls": "exit-ok", "line_index": len(lines) + 1},
+    ])
+
+def insert_run(conn, run_id, command, lines, started):
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, ?, 0, 0)",
+        (run_id, session_id, command, started, started, output_preview(command, lines), len(lines) + 2),
+    )
+
+def insert_schedule(conn, schedule_id, watcher_id, command, cadence, enabled):
+    conn.execute(
+        "INSERT INTO schedules "
+        "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, timezone, "
+        "enabled, next_run_at, label, created, updated) "
+        "VALUES (?, ?, 'watcher', ?, 'command', ?, '0 * * * *', ?, 'UTC', ?, ?, ?, ?, ?)",
+        (schedule_id, session_id, watcher_id, command, cadence, enabled, "2026-06-15T13:00:00+00:00", command, now, now),
+    )
+
+def insert_watcher(conn, watcher_id, schedule_id, label, command, baseline_run_id, last_run_id, summary, cadence):
+    conn.execute(
+        "INSERT INTO watchers "
+        "(id, session_token, project_id, label, command_text, schedule_id, baseline_run_id, last_run_id, "
+        "last_diff_summary_json, state, state_reason, options_json, policy_json, consecutive_changed, created, updated) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'changed', 'diff_detected', ?, ?, 1, ?, ?)",
+        (
+            watcher_id,
+            session_id,
+            project_id,
+            label,
+            command,
+            schedule_id,
+            baseline_run_id,
+            last_run_id,
+            json.dumps(summary),
+            json.dumps({"suppress_removals": False, "notify_metadata_changes": False}),
+            json.dumps({"ignore_line_patterns": [], "alert_after_repeated_changes": 1, "alert_signal_classes": []}),
+            now,
+            now,
+        ),
+    )
+
+def insert_fire(conn, fire_id, watcher_id, run_id, baseline_run_id, summary, created):
+    conn.execute(
+        "INSERT INTO watcher_fires "
+        "(id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind, truncated, "
+        "notification_event_ids_json, state_at_fire, state_reason, fire_kind, ack_state, created) "
+        "VALUES (?, ?, ?, ?, ?, 'signal', 0, '[]', 'changed', 'diff_detected', 'changed', 'new', ?)",
+        (fire_id, watcher_id, baseline_run_id, run_id, json.dumps(summary), created),
+    )
+
+changed_summary = {
+    "classifier": "ports",
+    "added_port_count": 1,
+    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+}
+deleted_summary = {
+    "classifier": "ports",
+    "changed_port_count": 1,
+    "changed_ports": [{
+        "before": {"key": "443/tcp", "state": "closed", "service": "https"},
+        "after": {"key": "443/tcp", "state": "open", "service": "https"},
+    }],
+}
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    insert_run(conn, baseline_run_id, "nmap -sV darklab.sh --baseline", ["80/tcp open http"], "2026-06-15T11:00:00+00:00")
+    insert_run(conn, current_run_id, "nmap -sV darklab.sh", ["80/tcp open http", "443/tcp open https"], now)
+    insert_schedule(conn, "sch_" + changed_watcher_id, changed_watcher_id, "nmap -sV darklab.sh", "hourly", 1)
+    insert_schedule(conn, "sch_" + deleted_watcher_id, deleted_watcher_id, "nmap -sV deleted.darklab.sh", "daily", 1)
+    insert_watcher(
+        conn,
+        changed_watcher_id,
+        "sch_" + changed_watcher_id,
+        "Ports Browser Watch",
+        "nmap -sV darklab.sh",
+        baseline_run_id,
+        current_run_id,
+        changed_summary,
+        "hourly",
+    )
+    insert_watcher(
+        conn,
+        deleted_watcher_id,
+        "sch_" + deleted_watcher_id,
+        "Deleted Current Watch",
+        "nmap -sV deleted.darklab.sh",
+        baseline_run_id,
+        deleted_run_id,
+        deleted_summary,
+        "daily",
+    )
+    insert_fire(conn, changed_fire_id, changed_watcher_id, current_run_id, baseline_run_id, changed_summary, now)
+    insert_fire(conn, deleted_fire_id, deleted_watcher_id, deleted_run_id, baseline_run_id, deleted_summary, "2026-06-15T11:55:00+00:00")
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "baselineRunId": baseline_run_id,
+    "currentRunId": current_run_id,
+    "deletedRunId": deleted_run_id,
+    "changedWatcherId": changed_watcher_id,
+    "deletedWatcherId": deleted_watcher_id,
+    "changedFireId": changed_fire_id,
+    "deletedFireId": deleted_fire_id,
+}))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, projectId],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed project monitoring fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 /**
  * Return a per-test-run deterministic test-network address for specs that
  * explicitly exercise per-IP behavior.

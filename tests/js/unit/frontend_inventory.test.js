@@ -49,16 +49,16 @@ describe('frontend compatibility global inventory', () => {
   const EXPECTED_GLOBAL_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
       intentional_bootstrap: 2,
-      lazy_placeholder: 67,
+      lazy_placeholder: 68,
       module_api_bridge: 25,
       test_hook: 3,
       compatibility_export: 0,
     }),
     window_property_read_purposes: Object.freeze({
       intentional_bootstrap: 1,
-      lazy_placeholder: 8,
+      lazy_placeholder: 12,
       module_api_bridge: 2,
-      vendor_global: 5,
+      vendor_global: 6,
       compatibility_read: 0,
     }),
     foreign_bare_read_purposes: Object.freeze({

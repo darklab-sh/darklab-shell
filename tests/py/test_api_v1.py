@@ -2250,8 +2250,9 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     token = _token(client)
     other_token = _token(client)
     baseline_run_id = _seed_run(token, command="nmap -sV darklab.sh", output="22/tcp open ssh")
+    launched_run_id = "run_api_watcher_" + uuid.uuid4().hex[:8]
     monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
-    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_watcher")
+    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: launched_run_id)
 
     create = client.post(
         "/api/v1/watchers",
@@ -2262,6 +2263,11 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
             "label": "API Watcher",
             "timezone": "UTC",
             "options": {"suppress_removals": True, "notify_metadata_changes": False},
+            "policy": {
+                "ignore_line_patterns": ["timing jitter"],
+                "alert_after_repeated_changes": 2,
+                "alert_signal_classes": ["ports"],
+            },
         },
     )
     watcher = json.loads(create.data)["watcher"]
@@ -2271,6 +2277,8 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert watcher["baseline_run_id"] == baseline_run_id
     assert watcher["state"] == "ok"
     assert watcher["options"]["suppress_removals"] is True
+    assert watcher["policy"]["alert_after_repeated_changes"] == 2
+    assert watcher["policy"]["alert_signal_classes"] == ["ports"]
     assert watcher["schedule"]["owner_kind"] == "watcher"
     assert "session_token" not in watcher
 
@@ -2303,11 +2311,17 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     )["watcher"]
     fired = json.loads(client.post(f"/api/v1/watchers/{watcher['id']}/run-now", headers=_headers(token)).data)
     fires = json.loads(client.get(f"/api/v1/watchers/{watcher['id']}/fires", headers=_headers(token)).data)
+    _seed_run(
+        token,
+        run_id=launched_run_id,
+        command="nmap -sV darklab.sh",
+        output="22/tcp open ssh\n443/tcp open https",
+    )
     accepted = json.loads(
         client.post(
             f"/api/v1/watchers/{watcher['id']}/accept-baseline",
             headers=_headers(token),
-            json={"run_id": "run_api_watcher"},
+            json={"run_id": launched_run_id},
         ).data
     )["watcher"]
     deleted = json.loads(client.delete(f"/api/v1/watchers/{watcher['id']}", headers=_headers(token)).data)
@@ -2330,10 +2344,10 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert resumed["state"] == "ok"
     assert resumed["schedule"]["enabled"] is True
     assert fired["status"] == "fired"
-    assert fired["watcher"]["last_run_id"] == "run_api_watcher"
+    assert fired["watcher"]["last_run_id"] == launched_run_id
     assert fires["total"] == 1
-    assert fires["fires"][0]["run_id"] == "run_api_watcher"
-    assert accepted["baseline_run_id"] == "run_api_watcher"
+    assert fires["fires"][0]["run_id"] == launched_run_id
+    assert accepted["baseline_run_id"] == launched_run_id
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
     audit_rows = _audit_event_rows(target_id=watcher["id"])
@@ -2349,8 +2363,8 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
     assert audit_rows[0]["details"]["baseline_run_id"] == baseline_run_id
     assert audit_rows[1]["details"]["reason"] == "operator check"
-    assert audit_rows[3]["details"]["run_id"] == "run_api_watcher"
-    assert audit_rows[4]["details"]["baseline_run_id"] == "run_api_watcher"
+    assert audit_rows[3]["details"]["run_id"] == launched_run_id
+    assert audit_rows[4]["details"]["baseline_run_id"] == launched_run_id
     assert audit_rows[5]["details"]["deleted_count"] == 1
     assert "nmap -sV darklab.sh" not in json.dumps(audit_rows)
 
@@ -3313,6 +3327,7 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "WatcherFirePage",
         "WatcherOptions",
         "WatcherPage",
+        "WatcherPolicy",
         "WatcherResponse",
         "WatcherRunNowResponse",
         "WatcherUpdateRequest",

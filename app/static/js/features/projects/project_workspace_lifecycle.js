@@ -149,6 +149,7 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
         ctx.invalidateProjectRuns?.();
         ctx.invalidateProjectEntities?.();
         ctx.invalidateProjectArtifacts?.();
+        ctx.invalidateProjectMonitoring?.();
         ensureSelectedProject();
         if (ctx.workspaceTab?.() !== 'details') {
           await ensureProjectSummary();

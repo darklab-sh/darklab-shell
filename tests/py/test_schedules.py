@@ -827,6 +827,56 @@ class TestWatchersRoutes:
         assert [row["event_type"] for row in audit_rows] == ["watcher.create", "watcher.accept_baseline"]
         assert audit_rows[1]["details"]["baseline_run_id"] == "run_accept_latest"
 
+    def test_watcher_accept_baseline_rejects_unrelated_missing_and_cross_scope_runs(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_watcher_accept_rejects"
+        other = "tok_watcher_accept_foreign"
+        _register_token(token)
+        _register_token(other)
+        _insert_completed_run(token, "run_accept_base")
+        _insert_completed_run(token, "run_accept_fire")
+        _insert_completed_run(token, "run_accept_unrelated")
+        _insert_completed_run(token, "run_accept_unfinished", finished=None)
+        _insert_completed_run(other, "run_accept_foreign")
+        created = client.post(
+            "/watchers",
+            headers={"X-Session-ID": token},
+            json={"baseline_run_id": "run_accept_base", "cadence_preset": "hourly"},
+        )
+        assert created.status_code == 201
+        watcher_id = created.get_json()["watcher"]["id"]
+        with db_connect() as conn:
+            watcher = watcher_service.get_watcher(watcher_id, conn=conn)
+            assert watcher is not None
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_accept_fire", state_at_fire="changed")
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_accept_unfinished")
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_accept_foreign")
+            conn.commit()
+
+        for rejected_run_id in ("missing", "run_accept_unrelated", "run_accept_unfinished", "run_accept_foreign"):
+            rejected = client.post(
+                f"/watchers/{watcher_id}/accept-baseline",
+                headers={"X-Session-ID": token},
+                json={"run_id": rejected_run_id},
+            )
+            assert rejected.status_code == 400
+            assert rejected.get_json()["error"] == "invalid_watcher"
+            assert rejected.get_json()["message"] == "baseline run must be a completed run from this watcher"
+
+        with db_connect() as conn:
+            refreshed = watcher_service.get_watcher(watcher_id, conn=conn)
+        assert refreshed is not None
+        assert refreshed.baseline_run_id == "run_accept_base"
+        accepted = client.post(
+            f"/watchers/{watcher_id}/accept-baseline",
+            headers={"X-Session-ID": token},
+            json={"run_id": "run_accept_fire"},
+        )
+        assert accepted.status_code == 200
+        assert accepted.get_json()["watcher"]["baseline_run_id"] == "run_accept_fire"
+
     def test_watcher_run_now_keeps_same_command_fire_audits_separate(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch
 
@@ -991,6 +1041,7 @@ class TestWatchBuiltin:
             "baseline_run_id": baseline_run_id,
             "state_at_fire": "firing",
         }
+        _insert_completed_run(token, f"run_fire_{watcher_id[-8:]}")
 
         accepted, _ = execute_builtin_command(f"watch accept {watcher_id}", token)
 

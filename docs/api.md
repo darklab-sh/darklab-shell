@@ -129,9 +129,9 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fire a scheduled command immediately and return the updated schedule row. |
 | `GET` | `/api/v1/schedules/<schedule_id>/fires` | Read paged fire audit rows for a scheduled command. |
 | `GET` | `/api/v1/watchers` | Change-detection watcher page for the token's active personal/team scope. |
-| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, and optional command override. |
+| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, optional command override, optional Project membership, and watcher noise policy. |
 | `GET` | `/api/v1/watchers/<watcher_id>` | One change-detection watcher. |
-| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update a watcher's command, cadence, timezone, label, options, or pause/resume state. |
+| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update a watcher's command, cadence, timezone, label, Project membership, options, policy, or pause/resume state. |
 | `DELETE` | `/api/v1/watchers/<watcher_id>` | Delete a watcher and its owned schedule. |
 | `POST` | `/api/v1/watchers/<watcher_id>/run-now` | Fire a watcher immediately and return the updated watcher row. |
 | `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promote the latest fire, or the supplied `run_id`, to the new watcher baseline. |
@@ -339,7 +339,7 @@ Schedule list and fire-audit routes use the normal `limit`, `offset`, and `has_m
 
 ## Watchers
 
-Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. Direct API callers can add `X-Team-ID` or `team_id` to work inside a team scope they belong to; otherwise watchers use personal scope. A watcher can start from a completed baseline run in the same scope, or it can capture its first successful fire as the baseline. Each watcher owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares later completed fires against the current baseline.
+Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. Direct API callers can add `X-Team-ID` or `team_id` to work inside a team scope they belong to; otherwise watchers use personal scope. A watcher can start from a completed baseline run in the same scope, or it can capture its first successful fire as the baseline. Each watcher owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares later completed fires against the current baseline. API responses include the watcher's `project_id`, `options`, `policy`, current state counters, and owned schedule preview fields; fire responses include `fire_kind`, `state_reason`, `ack_state`, `ack_note`, `ack_by`, and `ack_at`.
 
 ```bash
 darklab watch create --first-run --every hourly -- nmap -sV darklab.sh
@@ -356,7 +356,9 @@ darklab watch accept wtr_123 --run-id run_456
 darklab watch delete wtr_123
 ```
 
-If `watch create` starts from an existing baseline and does not include a command after `--`, the API inherits the command from the baseline run. `--first-run` requires a command because there is no completed run to inherit from yet. `--suppress-removals` ignores removal-only diffs, and `--notify-metadata-changes` treats metadata-only changes as alert-worthy. Watcher list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab watch list` and `darklab watch fires` default to 50 rows and cap at 100.
+If `watch create` starts from an existing baseline and does not include a command after `--`, the API inherits the command from the baseline run. `--first-run` requires a command because there is no completed run to inherit from yet. `--suppress-removals` ignores removal-only diffs, and `--notify-metadata-changes` treats metadata-only changes as diff-worthy. JSON create/update calls also accept `project_id` and `policy`. `project_id` must belong to the same personal/team scope; when it is omitted, the watcher can infer a Project from a baseline run that has exactly one same-scope Project link. `policy.ignore_line_patterns` accepts up to 20 strings of 120 characters or less, `policy.alert_after_repeated_changes` accepts an integer from 1 to 10, and `policy.alert_signal_classes` accepts `findings`, `entities`, and `ports`.
+
+Policy controls gate notification fan-out, not dashboard visibility. A repeated-change threshold above 1 or a signal-class filter can suppress `watcher_changed` delivery while the watcher still records the changed fire and Project Monitoring still shows the current dashboard state. Watcher list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab watch list` and `darklab watch fires` default to 50 rows and cap at 100.
 
 Watcher notifications use `watcher_changed`, `watcher_error`, and `watcher_recovered`. See [docs/watchers.md](watchers.md) for the diff model, baseline lifecycle, and scheduler interaction.
 

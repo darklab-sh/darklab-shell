@@ -397,14 +397,14 @@ let exportedDarklabAtlasMobile = null;
       clearTimeout(runSearchTimer);
       runSearchTimer = setTimeout(() => {
         Promise.resolve(controller.loadRunOptions?.({ query: controller.state.runOptionsQuery, force: true }))
-          .then(() => render(controller.state));
+          .then(() => renderMobile(controller.state));
       }, 180);
     });
     runSearch.addEventListener('focus', () => {
       Promise.resolve(controller.loadRunOptions?.({
         query: controller.state.runOptionsQuery,
         force: !controller.state.runOptionsLoaded,
-      })).then(() => render(controller.state));
+      })).then(() => renderMobile(controller.state));
     });
     mobileRunFilterSearch = runSearch;
 

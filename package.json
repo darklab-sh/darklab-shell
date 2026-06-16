@@ -15,7 +15,7 @@
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
     "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check && npm run assets:check && npm run assets:inventory:check",
     "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ && bandit -r app/ -ll -q",
-    "lint:js": "npx eslint --no-warn-ignored --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/**/*.js",
+    "lint:js": "npx eslint --no-warn-ignored --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/",
     "lint:css": "stylelint \"app/static/css/**/*.css\" --config .tooling/stylelint.config.mjs",
     "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",
     "lint:docker": "hadolint --config .tooling/hadolint.yaml Dockerfile",
