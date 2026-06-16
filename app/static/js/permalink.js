@@ -16,7 +16,7 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
 (function () {
   var exportHtmlUtils = (typeof window !== 'undefined' && window.ExportHtmlUtils)
     || {};
-  var AnsiUpCtor = window.AnsiUp || (typeof AnsiUp !== 'undefined' ? AnsiUp : null);
+  var AnsiUpCtor = window.AnsiUp || null;
   var bindOutsideClickCloseFn = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose)
     || null;
   var copyTextToClipboardFn = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard)
@@ -280,7 +280,7 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
   }
 
   async function savePdf() {
-    var existingPdfUtils = (typeof importedExportPdfUtils !== 'undefined' && importedExportPdfUtils) || null;
+    var existingPdfUtils = window.ExportPdfUtils || null;
     if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
       alert('PDF library not loaded');
       return;

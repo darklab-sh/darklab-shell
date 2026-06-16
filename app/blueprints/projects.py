@@ -76,6 +76,11 @@ from services.projects.metadata import (
     upsert_finding_triage_details,
     upsert_entity_note,
 )
+from services.projects.monitoring import (
+    get_project_monitoring,
+    get_project_monitoring_summary,
+    update_project_monitoring_fire_ack,
+)
 from services.projects.package_archive import (
     build_evidence_package_archive,
     create_evidence_package,
@@ -145,6 +150,7 @@ from services.teams.request_scope import (
     requested_team_id,
     scope_error_payload,
 )
+from services.watchers.serialization import watcher_fire_payload
 
 log = logging.getLogger("shell")
 
@@ -659,6 +665,150 @@ def projects_activity(project_id):
     except AuditScopeError as exc:
         return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
     return jsonify(payload)
+
+
+@projects_bp.route("/projects/<project_id>/monitoring")
+def projects_monitoring(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    fire_limit = _parse_int(request.args.get("fire_limit"), 8, minimum=1, maximum=25)
+    payload = get_project_monitoring(
+        session_id,
+        project_id,
+        team_id=team_id,
+        fire_limit=fire_limit,
+    )
+    if payload is None:
+        log.debug("PROJECT_MONITORING_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "route": "project_monitoring",
+        })
+        return _project_not_found()
+    counts = payload.get("counts") or {}
+    summary = payload.get("summary") or {}
+    log.info("PROJECT_MONITORING_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "fire_limit": fire_limit,
+        "monitor_count": len(payload.get("monitors") or []),
+        "timeline_count": len(payload.get("timeline") or []),
+        "changed_count": int(counts.get("changed") or 0),
+        "failed_count": int(counts.get("failed") or 0),
+        "highest_severity": str(summary.get("highest_severity") or ""),
+    })
+    return _project_json_or_404(payload)
+
+
+@projects_bp.route("/projects/<project_id>/monitoring/summary")
+def projects_monitoring_summary(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    fire_limit = _parse_int(request.args.get("fire_limit"), 8, minimum=1, maximum=25)
+    payload = get_project_monitoring_summary(
+        session_id,
+        project_id,
+        team_id=team_id,
+        fire_limit=fire_limit,
+    )
+    if payload is None:
+        log.debug("PROJECT_MONITORING_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "route": "project_monitoring_summary",
+        })
+        return _project_not_found()
+    summary = payload.get("summary") or {}
+    log.info("PROJECT_MONITORING_SUMMARY_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "fire_limit": fire_limit,
+        "changed_count": int(summary.get("changed_monitor_count") or 0),
+        "failed_count": int(summary.get("failed_monitor_count") or 0),
+        "highest_severity": str(summary.get("highest_severity") or ""),
+        "top_change_count": len(summary.get("top_changes") or []),
+    })
+    return _project_json_or_404(payload)
+
+
+@projects_bp.route("/projects/<project_id>/monitoring/fires/<fire_id>", methods=["PATCH"])
+@limiter.limit(_project_write_limit)
+def projects_monitoring_fire_update(project_id, fire_id):
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise BadRequest("monitoring fire payload must be a JSON object")
+    ack_note = str(data.get("ack_note") or "").strip()
+    try:
+        updated = update_project_monitoring_fire_ack(
+            session_id,
+            project_id,
+            fire_id,
+            ack_state=str(data.get("ack_state") or "").strip(),
+            ack_note=ack_note,
+            ack_by=session_id,
+            team_id=team_id,
+        )
+    except ValueError as exc:
+        log.warning("PROJECT_MONITORING_FIRE_ACK_REJECTED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "fire_id": fire_id,
+            "status": 400,
+            "reason": str(exc),
+        })
+        return jsonify({"error": "invalid_monitoring_fire_update", "message": str(exc)}), 400
+    if updated is None:
+        log.debug("PROJECT_MONITORING_FIRE_ACK_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "fire_id": fire_id,
+        })
+        return _project_not_found()
+    watcher, fire = updated
+    with db_connect() as conn:
+        record_event(
+            AuditEventType.WATCHER_ACK,
+            target_id=watcher.id,
+            project_id=project_id,
+            details={
+                "watcher_id": watcher.id,
+                "project_id": project_id,
+                "fire_id": fire.id,
+                "ack_state": fire.ack_state,
+                "note_chars": len(ack_note),
+            },
+            conn=conn,
+            **_project_audit_fields(session_id, team_id),
+        )
+        conn.commit()
+    log.info("PROJECT_MONITORING_FIRE_ACK_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "watcher_id": watcher.id,
+        "fire_id": fire.id,
+        "ack_state": fire.ack_state,
+        "note_chars": len(ack_note),
+    })
+    return jsonify({"ok": True, "fire": watcher_fire_payload(fire)})
 
 
 @projects_bp.route("/projects/package-presets")

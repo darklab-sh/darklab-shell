@@ -123,11 +123,13 @@ def normalize_watcher_create_payload(
     return {
         "command_text": command,
         "baseline_run_id": str(baseline.get("id") or ""),
+        "project_id": str(data.get("project_id") or ""),
         "cron_expr": data.get("cron_expr"),
         "cadence_preset": data.get("cadence_preset"),
         "timezone_name": data.get("timezone", data.get("timezone_name")),
         "label": str(data.get("label") or ""),
         "options": data.get("options"),
+        "policy": data.get("policy"),
         "enabled": coerce_schedule_bool(data.get("enabled"), default=True),
     }
 

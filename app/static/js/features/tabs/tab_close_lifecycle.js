@@ -181,8 +181,7 @@ function _tabCloseDetachRunStreamForTab(id) {
 }
 
 function _tabCloseDetachInteractivePtyForTab(id) {
-  const detach = (typeof importedDetachInteractivePtyForTab !== 'undefined' && importedDetachInteractivePtyForTab)
-    || _tabCloseGlobalFunction('detachInteractivePtyForTab');
+  const detach = _tabCloseGlobalFunction('detachInteractivePtyForTab');
   if (typeof detach === 'function') detach(id);
 }
 

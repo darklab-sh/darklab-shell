@@ -34,10 +34,15 @@ const SCAN_DIRS = [
   join(REPO_ROOT, 'app/templates'),
 ]
 
+function isTransientInventoryFixture(path) {
+  return /__inventory_check_(?:provider|consumer)\.fixture\.js$/.test(path)
+}
+
 function walk(dir) {
   const out = []
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
+    if (isTransientInventoryFixture(full)) continue
     const st = statSync(full)
     if (st.isDirectory()) out.push(...walk(full))
     else if (/\.(css|js|html)$/.test(name)) out.push(full)
@@ -98,6 +103,20 @@ describe('button primitive regression guard', () => {
           if (!classNameRe.test(lookahead) && !classListRe.test(lookahead)) {
             hits.push(`${f.replace(REPO_ROOT + '/', '')}:${i + 1}: ${line.trim()}`)
           }
+        }
+      })
+    }
+    expect(hits).toEqual([])
+  })
+
+  it('uses the amber token instead of undefined yellow in source styles', () => {
+    const hits = []
+    for (const f of files.filter(file => /\.css$/.test(file))) {
+      const src = readFileSync(f, 'utf8')
+      const lines = src.split('\n')
+      lines.forEach((line, i) => {
+        if (line.includes('var(--yellow)')) {
+          hits.push(`${f.replace(REPO_ROOT + '/', '')}:${i + 1}: ${line.trim()}`)
         }
       })
     }

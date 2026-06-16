@@ -13,15 +13,40 @@ def applies_to(_command_text: str, _run: dict[str, Any], _conn=None) -> bool:
     return True
 
 
+def _ignored_line_patterns(options: dict[str, Any] | None) -> list[str]:
+    raw_patterns = (options or {}).get("ignore_line_patterns", [])
+    if not isinstance(raw_patterns, list):
+        return []
+    patterns: list[str] = []
+    for item in raw_patterns:
+        pattern = str(item or "").strip()
+        if pattern and pattern not in patterns:
+            patterns.append(pattern)
+    return patterns
+
+
+def _filter_ignored_entries(entries: list[dict[str, Any]], patterns: list[str]) -> tuple[list[dict[str, Any]], int]:
+    if not patterns:
+        return entries, 0
+    filtered = [
+        entry for entry in entries
+        if not any(pattern in str(entry.get("text") or "") for pattern in patterns)
+    ]
+    return filtered, len(entries) - len(filtered)
+
+
 @register_classifier("textual", applies_to=applies_to)
 def diff(
     baseline_run: dict[str, Any],
     current_run: dict[str, Any],
-    options: dict[str, bool] | None = None,
+    options: dict[str, Any] | None = None,
     _conn=None,
 ) -> DiffResult:
     left_entries, left_output = run_comparison.compare_entries_for_diff(baseline_run)
     right_entries, right_output = run_comparison.compare_entries_for_diff(current_run)
+    ignored_patterns = _ignored_line_patterns(options)
+    left_entries, ignored_left = _filter_ignored_entries(left_entries, ignored_patterns)
+    right_entries, ignored_right = _filter_ignored_entries(right_entries, ignored_patterns)
     hunk_diff = run_comparison.hunk_line_diff(
         left_entries,
         right_entries,
@@ -58,6 +83,8 @@ def diff(
         "right_output_source": str(right_output.get("source") or ""),
         "hunks_omitted": int(truncated_info.get("hunks_omitted") or 0),
         "lines_omitted": omitted_total,
+        "ignored_line_pattern_count": len(ignored_patterns),
+        "ignored_line_count": ignored_left + ignored_right,
         "suppressed_removed_line_count": removed - effective_removed,
         "entity_added_count": len(entity_delta["added"]),
         "entity_removed_count": len(entity_delta["removed"]),
@@ -69,4 +96,3 @@ def diff(
     has_entity_change = bool(entity_delta["added"] or effective_entity_removed)
     kind = DIFF_KIND_TEXTUAL if added or effective_removed or changed or has_entity_change else DIFF_KIND_NONE
     return DiffResult(summary=summary, kind=kind, truncated=is_truncated)
-

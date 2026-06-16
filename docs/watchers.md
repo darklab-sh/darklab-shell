@@ -14,12 +14,16 @@ Each watcher stores:
 - one baseline run id, or a pending first-run baseline
 - one command, usually inherited from the baseline run
 - one owned schedule row for cadence
+- optional Project membership for showing the watcher in a Project Monitoring tab
 - a state such as `ok`, `changed`, `firing`, `paused`, or `error`
+- validated noise and notification policy fields
 - bounded diff details from the last completed check
 - recent fire audit rows
 
 Watchers belong to the active personal or team scope. Anonymous browser sessions cannot create watchers because the worker needs a durable `tok_` token after the browser closes, and token revocation must still stop future personal fires. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
 Archived teams pause their team-owned watchers. Reactivating a team restores access, but archive-paused watchers stay paused until someone resumes them.
+
+Project-linked watchers appear in that Project's **Monitoring** tab. A watcher can be assigned to a Project directly, or it can infer the Project from a baseline run when that run has exactly one same-scope Project link. Ambiguous, unlinked, or cross-scope baseline links leave the watcher unassigned. Deleting a Project clears watcher membership instead of deleting the watcher.
 
 ---
 
@@ -73,11 +77,16 @@ Accepting a baseline is useful when a change is expected. For example, if a new 
 
 ## Fire audit
 
-Every watcher fire writes an audit row, even when there is no diff. Empty checks use `diff_kind='none'`, which makes it clear the watcher is still running. The browser fire audit summarizes the actual diff counts in each row, such as added/removed findings or changed ports, and each row can expand to show the bounded added, removed, and changed items stored with that fire. Rows with both a baseline and completed run also include **Compare**, which opens the run comparison view with the baseline on the left and the fire run on the right.
+Every watcher fire writes an audit row, even when there is no diff. Empty checks use `diff_kind='none'`, which makes it clear the watcher is still running. Fire rows also carry `fire_kind` and `state_reason` values such as `changed`, `recovered`, `failed`, `no_change`, `baseline_created`, `baseline_accepted`, and `paused`, so dashboards can show what happened without guessing from the watcher's current state.
+
+The browser fire audit summarizes the actual diff counts in each row, such as added/removed findings or changed ports, and each row can expand to show the bounded added, removed, and changed items stored with that fire. Rows with both a baseline and completed run also include **Compare**, which opens the run comparison view with the baseline on the left and the fire run on the right. If an old baseline or fire run has been deleted, the fire still stays visible with its stored summary and the unavailable action is disabled.
+
+Changed and failed fires can also be triaged from Project Monitoring. The acknowledgement fields are `ack_state`, `ack_note`, `ack_by`, and `ack_at`. `new`, `acknowledged`, and `needs_action` count as unresolved for the current monitor state; `expected` and `resolved` count as resolved. Acknowledging a fire does not change the baseline. Use **Accept baseline** when the new run should become the comparison point.
 
 Useful places to inspect fire history:
 
 - **Watchers** modal — recent fire rows, baseline comparisons, and run handoffs
+- Project **Monitoring** tab — project-scoped monitor groups, timeline rows, filters, triage controls, and run handoffs
 - `watch info <watcher_id>` in the terminal shell
 - `darklab watch fires <watcher_id>`
 - `/api/v1/watchers/<watcher_id>/fires`
@@ -98,12 +107,18 @@ Classifier order:
 4. **TLS certificate fields** — detects selected `openssl s_client` certificate changes.
 5. **Textual fallback** — compares bounded output lines when no structured classifier applies. It ignores progress/status-line/PTY chrome and records added, removed, and unchanged entity counts when the structured output metadata is available.
 
-Diff summaries store bounded added, removed, and changed signals. If source output or changed-signal lists are capped, the fire row carries `truncated=true`.
+Diff summaries store bounded added, removed, and changed signals. If source output or changed-signal lists are capped, the fire row carries `truncated=true`. Project Monitoring turns those summaries into severity and top-signal rollups for cards, timelines, and digest-ready summaries.
 
-Two options tune the noise level:
+Watcher options tune which changes count as diff-worthy:
 
 - `suppress_removals` keeps removal-only churn quiet.
 - `notify_metadata_changes` treats metadata-only changes as diff-worthy.
+
+Watcher notification policy tunes when changed notifications are sent:
+
+- `ignore_line_patterns` accepts up to 20 unique strings, each 120 characters or less. These patterns only apply to the textual fallback classifier, where they are matched against individual output lines before the fallback diff is built.
+- `alert_after_repeated_changes` is an integer from 1 to 10. Values above 1 keep detected changes visible in the dashboard but suppress `watcher_changed` notification fan-out until the repeated-change threshold is reached.
+- `alert_signal_classes` accepts `findings`, `entities`, and `ports`. Empty means all signal classes can notify. Findings covers structured findings, Entities covers host/DNS/textual entity changes, and Ports covers open-port plus certificate/TLS changes.
 
 The textual fallback is intentionally more sensitive than the structured classifiers. It is useful for generic commands, but tools with unstable ordering or timestamps may be noisier until they get a dedicated classifier.
 
@@ -124,7 +139,7 @@ When the run finalizes, the watcher finalization hook:
 
 Notification behavior:
 
-- a non-empty diff moves the watcher to `changed` and can send `watcher_changed`
+- a non-empty diff moves the watcher to `changed` and can send `watcher_changed` when the repeated-change threshold and signal-class filter allow it
 - an empty diff from `changed` moves the watcher back to `ok` and can send `watcher_recovered`
 - an empty diff from `ok` records the audit row but stays quiet
 - a failed watcher run moves the watcher toward `error` and can send `watcher_error`
@@ -140,9 +155,9 @@ The API uses the same JSON error envelope as the rest of `/api/v1`.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/watchers` | List watchers for the active personal/team API scope. |
-| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, and optional command override. |
+| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, optional command override, optional `project_id`, `options`, and `policy`. |
 | `GET` | `/api/v1/watchers/<watcher_id>` | Read one watcher. |
-| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update command, cadence, label, options, or pause/resume state. |
+| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update command, cadence, label, project membership, options, policy, or pause/resume state. |
 | `DELETE` | `/api/v1/watchers/<watcher_id>` | Delete one watcher and its owned schedule. |
 | `POST` | `/api/v1/watchers/<watcher_id>/run-now` | Fire one watcher immediately. |
 | `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promote the latest fire or provided `run_id` to the new baseline. |
@@ -173,7 +188,7 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 - Watchers monitor one baseline command at a time.
 - Watcher-owned schedules share the scheduler worker, missed-fire recovery, revoked-token handling, overlap policy, and cron rules used by normal schedules.
 - Team-owned watchers pause when their team is archived and stay paused after the team is reactivated until someone resumes them.
-- Threshold-based alerting, multi-command watcher graphs, and blackout calendars are not part of this feature.
+- Multi-command watcher graphs and blackout calendars are not part of this feature.
 
 ---
 

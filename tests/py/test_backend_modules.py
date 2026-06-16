@@ -3456,6 +3456,8 @@ class TestPostgresMigrations:
             "0029",
             "0030",
             "0031",
+            "0032",
+            "0033",
         ]
         for table_name in (
             "runs",
@@ -3509,6 +3511,20 @@ class TestPostgresMigrations:
         assert "suppressed_reason TEXT NOT NULL DEFAULT ''" in sql
         assert "suppressed_at TEXT NOT NULL DEFAULT ''" in sql
         assert "runs_fts" not in sql
+
+    def test_watcher_monitoring_incremental_migration_adds_enum_constraints(self):
+        from core.migrations import MIGRATIONS
+
+        migration = next(item for item in MIGRATIONS if item.version == "0032")
+        sql = "\n".join(migration.statements)
+
+        assert "watcher_fires_fire_kind_check" in sql
+        assert "watcher_fires_ack_state_check" in sql
+        assert "fire_kind NOT IN" in sql
+        assert "ack_state NOT IN" in sql
+        assert "CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))" in sql
+        assert "'baseline_created'" in sql
+        assert "'baseline_accepted'" in sql
 
     def test_sqlite_schema_matches_postgres_migration_core_shape(self):
         from core.migrations import MIGRATIONS
@@ -4721,17 +4737,28 @@ class TestWatchersFoundation:
             (token, "2026-05-20T10:00:00+00:00", ""),
         )
 
-    def _insert_run(self, conn, run_id: str, lines: list[str], *, exit_code: int = 0):
+    def _insert_run(
+        self,
+        conn,
+        run_id: str,
+        lines: list[str],
+        *,
+        session_id: str = "tok_watchers",
+        team_id: str = "",
+        exit_code: int = 0,
+        finished: str | None = "2026-05-20T10:00:01+00:00",
+    ):
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, session_id, team_id, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
-                "tok_watchers",
+                session_id,
+                team_id,
                 "nmap -sV darklab.sh",
                 "2026-05-20T10:00:00+00:00",
-                "2026-05-20T10:00:01+00:00",
+                finished,
                 exit_code,
                 json.dumps(lines),
                 len(lines),
@@ -4757,6 +4784,35 @@ class TestWatchersFoundation:
             ),
         )
 
+    def _insert_project(self, conn, project_id: str, *, session_id: str = "tok_watchers", team_id: str = ""):
+        conn.execute(
+            "INSERT INTO projects "
+            "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, '', 'active', '', ?, ?)",
+            (
+                project_id,
+                session_id,
+                team_id,
+                project_id,
+                project_id,
+                "2026-05-20T10:00:00+00:00",
+                "2026-05-20T10:00:00+00:00",
+            ),
+        )
+
+    def _link_project_run(self, conn, project_id: str, run_id: str):
+        conn.execute(
+            "INSERT INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'manual', ?)",
+            (
+                f"plink_{project_id}_{run_id}",
+                project_id,
+                run_id,
+                "2026-05-20T10:00:00+00:00",
+            ),
+        )
+
     def test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists(self, monkeypatch, tmp_path):
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
@@ -4771,6 +4827,11 @@ class TestWatchersFoundation:
                 cadence_preset="hourly",
                 label="Nmap drift",
                 options={"suppress_removals": True},
+                policy={
+                    "ignore_line_patterns": ["timing jitter"],
+                    "alert_after_repeated_changes": 2,
+                    "alert_signal_classes": ["ports"],
+                },
                 conn=conn,
             )
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
@@ -4803,6 +4864,11 @@ class TestWatchersFoundation:
         assert watcher.baseline_run_id == "run_baseline"
         assert watcher.command_text == "nmap -sV darklab.sh"
         assert watcher.options == {"suppress_removals": True, "notify_metadata_changes": False}
+        assert watcher.policy == {
+            "ignore_line_patterns": ["timing jitter"],
+            "alert_after_repeated_changes": 2,
+            "alert_signal_classes": ["ports"],
+        }
         assert schedule is not None
         assert schedule.owner_kind == "watcher"
         assert schedule.owner_id == watcher.id
@@ -4821,6 +4887,620 @@ class TestWatchersFoundation:
             "paused_watchers": 1,
             "paused_schedules": 1,
         }
+
+    def test_watcher_project_membership_infers_single_same_scope_run_link(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
+            self._insert_project(conn, "prj_personal")
+            self._insert_project(conn, "prj_team", team_id="team_watchers")
+            self._link_project_run(conn, "prj_personal", "run_baseline")
+            self._link_project_run(conn, "prj_team", "run_baseline")
+
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            team_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                team_id="team_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            with pytest.raises(watcher_service.WatcherError, match="same scope"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="nmap -sV darklab.sh",
+                    baseline_run_id="run_baseline",
+                    project_id="prj_team",
+                    cadence_preset="hourly",
+                    conn=conn,
+                )
+
+        assert watcher.project_id == "prj_personal"
+        assert team_watcher.project_id == "prj_team"
+
+    def test_deleting_project_clears_watcher_membership(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
+        from services.projects import crud as project_crud
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_personal")
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                project_id="prj_personal",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            with mock.patch.object(project_crud.log, "info") as info_log:
+                assert project_crud.delete_project("tok_watchers", "prj_personal", conn=conn) is True
+            refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
+
+        assert refreshed is not None
+        assert refreshed.project_id == ""
+        assert info_log.call_args.args == ("PROJECT_WATCHER_MEMBERSHIP_CLEARED",)
+        assert info_log.call_args.kwargs["extra"] == {
+            "project_id": "prj_personal",
+            "session": get_log_session_id("tok_watchers"),
+            "team_id": "",
+            "watcher_count": 1,
+        }
+
+    def test_project_monitoring_payload_counts_project_watchers_and_missing_run_refs(self, monkeypatch, tmp_path):
+        from services.projects import monitoring as project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_current", ["443/tcp open https"])
+            changed = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_missing",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                changed,
+                run_id="run_current",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{
+                        "key": "443/tcp",
+                        "port": "443",
+                        "proto": "tcp",
+                        "state": "open",
+                        "service": "https",
+                    }],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                changed.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id="run_current",
+                consecutive_changed=1,
+                conn=conn,
+            )
+            quiet = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="httpx https://darklab.sh",
+                project_id="prj_monitor",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                quiet,
+                run_id="run_recovered_missing",
+                diff_summary={"classifier": "textual"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="recovered",
+                fire_kind="recovered",
+            )
+            watcher_service.set_watcher_state(
+                quiet.id,
+                state="ok",
+                state_reason="no_change",
+                consecutive_no_change=3,
+                conn=conn,
+            )
+
+            conn.commit()
+            with mock.patch.object(project_monitoring.log, "debug") as debug_log, \
+                 mock.patch.object(project_monitoring.log, "warning") as warning_log:
+                payload = project_monitoring.get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=4)
+
+        assert payload is not None
+        assert payload["counts"] == {
+            "active": 0,
+            "changed": 1,
+            "failed": 0,
+            "quiet": 1,
+            "paused": 0,
+        }
+        assert [monitor["dashboard_state"] for monitor in payload["monitors"]] == ["quiet", "changed"]
+        changed_monitor = next(item for item in payload["monitors"] if item["id"] == changed.id)
+        assert changed_monitor["latest_fire"]["fire_kind"] == "changed"
+        assert changed_monitor["latest_fire"]["run_available"] is True
+        assert changed_monitor["latest_fire"]["baseline_run_available"] is False
+        assert changed_monitor["latest_fire"]["run"]["command"] == "nmap -sV darklab.sh"
+        assert changed_monitor["latest_fire"]["rollup"]["classifier"] == "ports"
+        assert changed_monitor["latest_fire"]["rollup"]["severity"] == "critical"
+        assert changed_monitor["latest_fire"]["rollup"]["top_signals"][0]["label"] == "New open port 443/tcp https"
+        assert changed_monitor["monitor_group"] == {
+            "key": "ports",
+            "label": "External perimeter/ports",
+            "command_root": "nmap",
+        }
+        quiet_monitor = next(item for item in payload["monitors"] if item["id"] == quiet.id)
+        assert quiet_monitor["monitor_group"]["key"] == "web"
+        assert payload["summary"]["changed_monitor_count"] == 1
+        assert payload["summary"]["recovered_monitor_count"] == 1
+        assert payload["summary"]["failed_monitor_count"] == 0
+        assert payload["summary"]["highest_severity"] == "critical"
+        assert payload["summary"]["top_changes"][0]["label"] == "New open port 443/tcp https"
+        assert payload["summary"]["top_changes"][0]["severity"] == "critical"
+        assert payload["summary"]["links"] == {
+            "project_monitoring": "/projects/prj_monitor/monitoring",
+            "project_monitoring_summary": "/projects/prj_monitor/monitoring/summary",
+        }
+        assert {item["value"] for item in payload["filter_options"]["groups"]} == {"ports", "web"}
+        assert {item["value"] for item in payload["filter_options"]["severities"]} == {"critical"}
+        assert warning_log.call_args.args == ("PROJECT_MONITORING_RUN_REF_MISSING",)
+        assert warning_log.call_args.kwargs["extra"]["project_id"] == "prj_monitor"
+        assert warning_log.call_args.kwargs["extra"]["missing_run_count"] == 1
+        assert warning_log.call_args.kwargs["extra"]["missing_baseline_count"] == 1
+        assert warning_log.call_args.kwargs["extra"]["affected_monitor_count"] == 2
+        built_log = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_MONITORING_PAYLOAD_BUILT",))
+        assert built_log.kwargs["extra"]["watcher_count"] == 2
+        assert built_log.kwargs["extra"]["timeline_count"] == 2
+        assert built_log.kwargs["extra"]["run_ref_requested_count"] == 3
+        assert built_log.kwargs["extra"]["run_ref_found_count"] == 1
+
+    def test_project_monitoring_payload_keeps_deleted_current_run_visible(self, monkeypatch, tmp_path):
+        from services.projects import monitoring as project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_deleted_current",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id="run_deleted_current",
+                consecutive_changed=1,
+                conn=conn,
+            )
+            conn.commit()
+
+            with mock.patch.object(project_monitoring.log, "warning") as warning_log:
+                payload = project_monitoring.get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=4)
+
+        assert payload is not None
+        monitor = payload["monitors"][0]
+        timeline_fire = payload["timeline"][0]
+        assert monitor["id"] == watcher.id
+        assert monitor["latest_fire"]["id"] == fire.id
+        assert monitor["latest_fire"]["run_available"] is False
+        assert monitor["latest_fire"]["baseline_run_available"] is True
+        assert monitor["latest_fire"]["run"] is None
+        assert monitor["latest_fire"]["baseline_run"]["id"] == "run_base"
+        assert timeline_fire["id"] == fire.id
+        assert timeline_fire["run_available"] is False
+        assert timeline_fire["baseline_run_available"] is True
+        assert payload["summary"]["top_changes"][0]["fire_id"] == fire.id
+        assert payload["summary"]["top_changes"][0]["run_available"] is False
+        assert payload["summary"]["top_changes"][0]["baseline_run_available"] is True
+        assert warning_log.call_args.args == ("PROJECT_MONITORING_RUN_REF_MISSING",)
+        assert warning_log.call_args.kwargs["extra"]["missing_run_count"] == 1
+        assert warning_log.call_args.kwargs["extra"]["missing_baseline_count"] == 0
+
+    def test_project_monitoring_triage_state_uses_unbounded_unresolved_fire(self, monkeypatch, tmp_path):
+        from services.projects.monitoring import get_project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_old_change", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_recent_same_1", ["80/tcp open http"])
+            self._insert_run(conn, "run_recent_same_2", ["80/tcp open http"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_old_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.update_watcher_fire_ack(conn, old_fire.id, ack_state="needs_action")
+            recent_one = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_recent_same_1",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="no_change",
+                fire_kind="no_change",
+            )
+            watcher_service.update_watcher_fire_ack(conn, recent_one.id, ack_state="resolved")
+            recent_two = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_recent_same_2",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="no_change",
+                fire_kind="no_change",
+            )
+            watcher_service.update_watcher_fire_ack(conn, recent_two.id, ack_state="resolved")
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:00:00+00:00", old_fire.id))
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:02:00+00:00", recent_one.id))
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:03:00+00:00", recent_two.id))
+            conn.commit()
+
+            payload = get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=2)
+
+        assert payload is not None
+        monitor = payload["monitors"][0]
+        assert [fire["id"] for fire in monitor["fires"]] == [recent_two.id, recent_one.id]
+        assert monitor["current_triage_state"] == "needs_action"
+        assert monitor["current_triage_fire"]["id"] == old_fire.id
+        assert monitor["current_triage_fire"]["run_available"] is True
+        assert monitor["current_triage_fire"]["rollup"]["severity"] == "critical"
+        assert old_fire.id not in {fire["id"] for fire in payload["timeline"]}
+
+    def test_project_monitoring_summary_uses_unbounded_unresolved_fires(self, monkeypatch, tmp_path):
+        from services.projects.monitoring import get_project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_old_change", ["80/tcp open http", "443/tcp open https"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_old_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.update_watcher_fire_ack(conn, old_fire.id, ack_state="needs_action")
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:00:00+00:00", old_fire.id),
+            )
+            for index in range(30):
+                run_id = f"run_recent_same_{index}"
+                recent_fire = watcher_service.record_watcher_fire(
+                    conn,
+                    watcher,
+                    run_id=run_id,
+                    diff_summary={"classifier": "ports"},
+                    diff_kind="none",
+                    state_at_fire="ok",
+                    state_reason="no_change",
+                    fire_kind="no_change",
+                )
+                watcher_service.update_watcher_fire_ack(conn, recent_fire.id, ack_state="resolved")
+                conn.execute(
+                    "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                    (f"2026-05-20T10:{index:02d}:00+00:00", recent_fire.id),
+                )
+            conn.commit()
+
+            payload = get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=25)
+
+        assert payload is not None
+        assert old_fire.id not in {fire["id"] for fire in payload["timeline"]}
+        assert payload["summary"]["highest_severity"] == "critical"
+        assert payload["summary"]["top_changes"][0]["fire_id"] == old_fire.id
+        assert payload["summary"]["top_changes"][0]["label"] == "New open port 443/tcp https"
+        assert payload["summary"]["top_changes"][0]["run_available"] is True
+
+    @pytest.mark.parametrize(
+        ("summary", "expected"),
+        [
+            (
+                {
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                {"severity": "critical", "added": 1, "removed": 0, "changed": 0, "signal_kind": "port_added"},
+            ),
+            (
+                {
+                    "classifier": "ports",
+                    "added_ports": [{"key": "25/tcp", "state": "closed", "service": "smtp"}],
+                },
+                {"severity": "informational", "added": 1, "removed": 0, "changed": 0, "signal_kind": "port_added"},
+            ),
+            (
+                {
+                    "classifier": "ports",
+                    "changed_port_count": 1,
+                    "changed_ports": [{
+                        "before": {"key": "443/tcp", "service": "https"},
+                        "after": {"key": "443/tcp", "service": "nginx"},
+                    }],
+                },
+                {"severity": "important", "added": 0, "removed": 0, "changed": 1, "signal_kind": "port_changed"},
+            ),
+            (
+                {
+                    "classifier": "ports",
+                    "removed_ports": [{"key": "22/tcp", "state": "open", "service": "ssh"}],
+                },
+                {"severity": "informational", "added": 0, "removed": 1, "changed": 0, "signal_kind": "port_removed"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "added_finding_count": 1,
+                    "added_findings": [{"title": "Remote code execution", "severity": "high"}],
+                },
+                {"severity": "critical", "added": 1, "removed": 0, "changed": 0, "signal_kind": "finding_added"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "added_findings": [{"title": "Weak TLS", "severity": "medium"}],
+                },
+                {"severity": "important", "added": 1, "removed": 0, "changed": 0, "signal_kind": "finding_added"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "added_findings": [{"title": "Verbose banner", "severity": "low"}],
+                },
+                {"severity": "informational", "added": 1, "removed": 0, "changed": 0, "signal_kind": "finding_added"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "removed_findings": [{"title": "Old finding", "severity": "critical"}],
+                },
+                {"severity": "informational", "added": 0, "removed": 1, "changed": 0, "signal_kind": "finding_removed"},
+            ),
+            (
+                {
+                    "classifier": "tls",
+                    "changed_tls_fields": [{"field": "issuer", "before": "Old CA", "after": "New CA"}],
+                },
+                {"severity": "critical", "added": 0, "removed": 0, "changed": 1, "signal_kind": "tls_changed"},
+            ),
+            (
+                {
+                    "classifier": "tls",
+                    "changed_tls_fields": [{"field": "subject", "before": "old", "after": "new"}],
+                },
+                {"severity": "informational", "added": 0, "removed": 0, "changed": 1, "signal_kind": "tls_changed"},
+            ),
+            (
+                {"classifier": "hosts", "added_hosts": [{"host": "new.darklab.sh"}]},
+                {"severity": "important", "added": 1, "removed": 0, "changed": 0, "signal_kind": "host_added"},
+            ),
+            (
+                {"classifier": "hosts", "removed_hosts": [{"host": "old.darklab.sh"}]},
+                {"severity": "informational", "added": 0, "removed": 1, "changed": 0, "signal_kind": "host_removed"},
+            ),
+            (
+                {"classifier": "textual", "added_line_count": 2, "entity_added_count": 1},
+                {"severity": "informational", "added": 3, "removed": 0, "changed": 0, "signal_kind": "text_added"},
+            ),
+            (
+                {"classifier": "custom", "added": ["one"], "changed_count": 2, "removed_count": 1},
+                {"severity": "informational", "added": 1, "removed": 1, "changed": 2, "signal_kind": "added"},
+            ),
+        ],
+    )
+    def test_watcher_fire_rollup_maps_classifier_summaries_to_severity_defaults(self, summary, expected):
+        from services.diff.rollups import build_fire_rollup
+
+        rollup = build_fire_rollup(
+            summary,
+            diff_kind="signal",
+            truncated=True,
+            run_id="run_current",
+            baseline_run_id="run_base",
+        )
+
+        assert rollup["severity"] == expected["severity"]
+        assert rollup["added"] == expected["added"]
+        assert rollup["removed"] == expected["removed"]
+        assert rollup["changed"] == expected["changed"]
+        assert rollup["top_signals"][0]["kind"] == expected["signal_kind"]
+        assert rollup["truncated"] is True
+        assert rollup["source_run_id"] == "run_current"
+        assert rollup["baseline_run_id"] == "run_base"
+
+    def test_watcher_fire_rollup_bounds_top_signals(self):
+        from services.diff.rollups import build_fire_rollup
+
+        rollup = build_fire_rollup(
+            {
+                "classifier": "ports",
+                "added_ports": [
+                    {"key": "80/tcp", "state": "open", "service": "http"},
+                    {"key": "443/tcp", "state": "open", "service": "https"},
+                    {"key": "8443/tcp", "state": "open", "service": "https-alt"},
+                ],
+            },
+            top_limit=2,
+        )
+
+        assert rollup["severity"] == "critical"
+        assert [signal["label"] for signal in rollup["top_signals"]] == [
+            "New open port 80/tcp http",
+            "New open port 443/tcp https",
+        ]
+
+    def test_sqlite_watcher_monitoring_backfill_infers_projects_and_fire_state(self, monkeypatch, tmp_path):
+        def insert_watcher(conn, watcher_id: str, baseline_run_id: str, *, team_id: str = "") -> None:
+            conn.execute(
+                "INSERT INTO watchers "
+                "(id, session_token, team_id, project_id, label, command_text, schedule_id, baseline_run_id, "
+                "last_diff_summary_json, state, options_json, policy_json, created, updated) "
+                "VALUES (?, ?, ?, '', ?, ?, ?, ?, '{}', 'ok', '{}', '{}', ?, ?)",
+                (
+                    watcher_id,
+                    "tok_watchers",
+                    team_id,
+                    watcher_id,
+                    "nmap -sV darklab.sh",
+                    f"sch_{watcher_id}",
+                    baseline_run_id,
+                    "2026-05-20T10:00:00+00:00",
+                    "2026-05-20T10:00:00+00:00",
+                ),
+            )
+
+        def insert_fire(conn, fire_id: str, state_at_fire: str, summary: dict[str, object]) -> None:
+            conn.execute(
+                "INSERT INTO watcher_fires "
+                "(id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind, state_at_fire, created) "
+                "VALUES (?, 'w_same', 'run_same', ?, ?, 'none', ?, ?)",
+                (
+                    fire_id,
+                    f"run_{fire_id}",
+                    json.dumps(summary),
+                    state_at_fire,
+                    "2026-05-20T10:00:00+00:00",
+                ),
+            )
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            for run_id in ("run_same", "run_ambiguous", "run_unlinked", "run_cross", "run_team"):
+                self._insert_run(conn, run_id, ["80/tcp open http"])
+            for project_id in ("prj_same", "prj_ambiguous_a", "prj_ambiguous_b", "prj_cross"):
+                self._insert_project(conn, project_id)
+            self._insert_project(conn, "prj_team", team_id="team_watchers")
+            self._link_project_run(conn, "prj_same", "run_same")
+            self._link_project_run(conn, "prj_ambiguous_a", "run_ambiguous")
+            self._link_project_run(conn, "prj_ambiguous_b", "run_ambiguous")
+            self._link_project_run(conn, "prj_cross", "run_cross")
+            self._link_project_run(conn, "prj_team", "run_team")
+            insert_watcher(conn, "w_same", "run_same")
+            insert_watcher(conn, "w_ambiguous", "run_ambiguous")
+            insert_watcher(conn, "w_unlinked", "run_unlinked")
+            insert_watcher(conn, "w_cross", "run_cross", team_id="team_watchers")
+            insert_watcher(conn, "w_team", "run_team", team_id="team_watchers")
+            insert_fire(conn, "fire_changed", "changed", {"classifier": "ports"})
+            insert_fire(conn, "fire_failed", "error", {"classifier": "textual"})
+            insert_fire(conn, "fire_no_change", "ok", {"classifier": "textual"})
+            insert_fire(conn, "fire_paused", "paused", {"classifier": "textual"})
+            insert_fire(conn, "fire_baseline", "ok", {"classifier": "baseline", "baseline_created": True})
+            conn.commit()
+
+            database._migrate_schema(conn)
+            conn.commit()
+
+            watcher_rows = conn.execute(
+                "SELECT id, project_id FROM watchers "
+                "WHERE id IN ('w_same', 'w_ambiguous', 'w_unlinked', 'w_cross', 'w_team') "
+                "ORDER BY id",
+            ).fetchall()
+            fire_rows = conn.execute(
+                "SELECT id, fire_kind, state_reason FROM watcher_fires ORDER BY id",
+            ).fetchall()
+
+        assert {row["id"]: row["project_id"] for row in watcher_rows} == {
+            "w_ambiguous": "",
+            "w_cross": "",
+            "w_same": "prj_same",
+            "w_team": "prj_team",
+            "w_unlinked": "",
+        }
+        assert {row["id"]: (row["fire_kind"], row["state_reason"]) for row in fire_rows} == {
+            "fire_baseline": ("baseline_created", "baseline_created"),
+            "fire_changed": ("changed", "diff_detected"),
+            "fire_failed": ("failed", "run_failed"),
+            "fire_no_change": ("no_change", "no_change"),
+            "fire_paused": ("paused", "paused"),
+        }
+
 
     def test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
@@ -4875,6 +5555,15 @@ class TestWatchersFoundation:
                     baseline_run_id="run_baseline",
                     cadence_preset="hourly",
                     options={"suppress_removals": "yes"},
+                    conn=conn,
+                )
+            with pytest.raises(watcher_service.WatcherError, match="unsupported watcher policy field"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="echo nope",
+                    baseline_run_id="run_baseline",
+                    cadence_preset="hourly",
+                    policy={"unknown": True},
                     conn=conn,
                 )
 
@@ -4967,8 +5656,55 @@ class TestWatchersFoundation:
         assert first.diff_kind == "signal"
         assert first.notification_event_ids == ["nte_1"]
         assert first.state_at_fire == "changed"
+        assert first.fire_kind == "changed"
+        assert first.ack_state == "new"
+
+    def test_accept_baseline_requires_completed_owned_watcher_fire(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._register_token(conn, "tok_other_watchers")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_valid", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_unrelated", ["80/tcp open http", "8443/tcp open https"])
+            self._insert_run(conn, "run_unfinished", ["80/tcp open http"], finished=None)
+            self._insert_run(
+                conn,
+                "run_foreign",
+                ["22/tcp open ssh"],
+                session_id="tok_other_watchers",
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_valid",
+                diff_summary={"classifier": "ports", "added_port_count": 1},
+                diff_kind="signal",
+                state_at_fire="changed",
+                fire_kind="changed",
+            )
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_unfinished")
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_foreign")
+
+            for rejected_run_id in ("missing", "run_unrelated", "run_unfinished", "run_foreign"):
+                with pytest.raises(watcher_service.WatcherError, match="completed run from this watcher"):
+                    watcher_service.accept_baseline(watcher.id, run_id=rejected_run_id, conn=conn)
+
+            accepted = watcher_service.accept_baseline(watcher.id, run_id="run_valid", conn=conn)
+
+        assert accepted is not None
+        assert accepted.baseline_run_id == "run_valid"
 
     def test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
 
@@ -4982,27 +5718,40 @@ class TestWatchersFoundation:
                 label="old label",
                 conn=conn,
             )
-            updated = watcher_service.update_watcher(
-                watcher.id,
-                {
-                    "label": "Home page drift",
-                    "command_text": "curl https://darklab.sh/status",
-                    "cadence_preset": "daily",
-                    "options": {"notify_metadata_changes": True},
-                },
-                conn=conn,
-            )
-            paused = watcher_service.pause_watcher(watcher.id, "operator paused", conn=conn)
-            resumed = watcher_service.resume_watcher(watcher.id, conn=conn)
-            assert resumed is not None
-            watcher_service.record_watcher_fire(conn, resumed, run_id="run_latest")
-            accepted = watcher_service.accept_baseline(watcher.id, conn=conn)
+            with mock.patch.object(watcher_service.log, "debug") as debug_log, \
+                 mock.patch.object(watcher_service.log, "info") as info_log:
+                updated = watcher_service.update_watcher(
+                    watcher.id,
+                    {
+                        "label": "Home page drift",
+                        "command_text": "curl https://darklab.sh/status",
+                        "cadence_preset": "daily",
+                        "options": {"notify_metadata_changes": True},
+                        "policy": {
+                            "ignore_line_patterns": ["Date:"],
+                            "alert_after_repeated_changes": 3,
+                            "alert_signal_classes": ["entities", "findings"],
+                        },
+                    },
+                    conn=conn,
+                )
+                paused = watcher_service.pause_watcher(watcher.id, "operator paused", conn=conn)
+                resumed = watcher_service.resume_watcher(watcher.id, conn=conn)
+                assert resumed is not None
+                self._insert_run(conn, "run_latest", ["200 OK"])
+                watcher_service.record_watcher_fire(conn, resumed, run_id="run_latest")
+                accepted = watcher_service.accept_baseline(watcher.id, conn=conn)
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
 
         assert updated is not None
         assert updated.label == "Home page drift"
         assert updated.command_text == "curl https://darklab.sh/status"
         assert updated.options == {"suppress_removals": False, "notify_metadata_changes": True}
+        assert updated.policy == {
+            "ignore_line_patterns": ["Date:"],
+            "alert_after_repeated_changes": 3,
+            "alert_signal_classes": ["entities", "findings"],
+        }
         assert paused is not None
         assert paused.state == "paused"
         assert resumed.state == "ok"
@@ -5012,10 +5761,25 @@ class TestWatchersFoundation:
         assert schedule.command_text == "curl https://darklab.sh/status"
         assert schedule.cadence_preset == "daily"
         assert schedule.enabled is True
+        prepared = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_UPDATE_PREPARED",))
+        assert prepared.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert prepared.kwargs["extra"]["next_command_changed"] is True
+        assert prepared.kwargs["extra"]["ignore_line_pattern_count"] == 1
+        updated_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_UPDATED",))
+        assert updated_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert updated_log.kwargs["extra"]["changed_fields"] == "label,command_text,options,policy,cadence_preset"
+        assert updated_log.kwargs["extra"]["policy_changed"] is True
+        assert updated_log.kwargs["extra"]["options_changed"] is True
+        assert updated_log.kwargs["extra"]["schedule_changed"] is True
+        accepted_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_BASELINE_ACCEPTED",))
+        assert accepted_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert accepted_log.kwargs["extra"]["baseline_run_id"] == "run_latest"
 
     def test_watcher_schedule_fire_launches_run_and_records_pending_fire(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
         from services.scheduler import dispatch as scheduler_dispatch
         from services.scheduler import service as schedule_service
+        from services.watchers import runner as watcher_runner
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
@@ -5031,7 +5795,8 @@ class TestWatchersFoundation:
             assert schedule is not None
             monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", lambda _schedule: "run_fire")
 
-            status = scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00")
+            with mock.patch.object(watcher_runner.log, "info") as info_log:
+                status = scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00")
             refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
             fires, total = watcher_service.list_watcher_fires(watcher.id, conn=conn)
             schedule_fires = conn.execute(
@@ -5050,6 +5815,9 @@ class TestWatchersFoundation:
         assert [(row["status"], row["run_id"], row["reason"]) for row in schedule_fires] == [
             ("fired", "run_fire", "started watcher run"),
         ]
+        fired_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_FIRED",))
+        assert fired_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert fired_log.kwargs["extra"]["run_id"] == "run_fire"
         assert schedule_refs["run_fire"]["schedule_id"] == watcher.schedule_id
         assert schedule_refs["run_fire"]["owner_kind"] == "watcher"
         assert schedule_refs["run_fire"]["owner_id"] == watcher.id
@@ -5059,6 +5827,7 @@ class TestWatchersFoundation:
         monkeypatch,
         tmp_path,
     ):
+        from core.helpers import get_log_session_id
         from services.notifications.models import TRIGGER_WATCHER_CHANGED
         from services.scheduler import dispatch as scheduler_dispatch
         from services.scheduler import service as schedule_service
@@ -5082,20 +5851,22 @@ class TestWatchersFoundation:
 
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             assert schedule is not None
-            assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00") == "fired"
-            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
-            watcher_finalize.finalize_watcher_run("run_baseline", conn=conn)
-            captured = watcher_service.get_watcher(watcher.id, conn=conn)
-            assert captured is not None
-            assert captured.baseline_run_id == "run_baseline"
-            assert captured.state == "ok"
-            assert captured.state_reason == "baseline_created"
+            with mock.patch.object(watcher_finalize.log, "debug") as debug_log, \
+                 mock.patch.object(watcher_finalize.log, "info") as info_log:
+                assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00") == "fired"
+                self._insert_run(conn, "run_baseline", ["80/tcp open http"])
+                watcher_finalize.finalize_watcher_run("run_baseline", conn=conn)
+                captured = watcher_service.get_watcher(watcher.id, conn=conn)
+                assert captured is not None
+                assert captured.baseline_run_id == "run_baseline"
+                assert captured.state == "ok"
+                assert captured.state_reason == "baseline_created"
 
-            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
-            assert schedule is not None
-            assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:10:00+00:00") == "fired"
-            self._insert_run(conn, "run_changed", ["80/tcp open http", "443/tcp open https"])
-            watcher_finalize.finalize_watcher_run("run_changed", conn=conn)
+                schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+                assert schedule is not None
+                assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:10:00+00:00") == "fired"
+                self._insert_run(conn, "run_changed", ["80/tcp open http", "443/tcp open https"])
+                watcher_finalize.finalize_watcher_run("run_changed", conn=conn)
 
             changed = watcher_service.get_watcher(watcher.id, conn=conn)
             fires, total = watcher_service.list_watcher_fires(watcher.id, conn=conn)
@@ -5103,6 +5874,7 @@ class TestWatchersFoundation:
                 "SELECT trigger, status, run_id FROM notification_events ORDER BY created ASC",
             ).fetchall()
             accepted = watcher_service.accept_baseline(watcher.id, run_id="run_changed", conn=conn)
+            accepted_fire = watcher_service.list_watcher_fires(watcher.id, conn=conn)[0][0]
 
         assert changed is not None
         assert changed.state == "changed"
@@ -5113,6 +5885,10 @@ class TestWatchersFoundation:
             ("run_changed", "signal", "changed"),
             ("run_baseline", "none", "ok"),
         ]
+        assert [(fire.run_id, fire.fire_kind, fire.state_reason) for fire in fires] == [
+            ("run_changed", "changed", "diff_detected"),
+            ("run_baseline", "baseline_created", "baseline_created"),
+        ]
         assert fires[1].diff_summary["baseline_created"] is True
         assert [(row["trigger"], row["status"], row["run_id"]) for row in events] == [
             (TRIGGER_WATCHER_CHANGED, "pending", "run_changed"),
@@ -5121,6 +5897,172 @@ class TestWatchersFoundation:
         assert accepted.baseline_run_id == "run_changed"
         assert accepted.state == "ok"
         assert accepted.consecutive_changed == 0
+        assert accepted_fire.fire_kind == "baseline_accepted"
+        assert accepted_fire.state_reason == "baseline_accepted"
+        baseline_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_BASELINE_CAPTURED",))
+        assert baseline_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert baseline_log.kwargs["extra"]["baseline_run_id"] == "run_baseline"
+        assert baseline_log.kwargs["extra"]["fire_kind"] == "baseline_created"
+        assert baseline_log.kwargs["extra"]["fire_id"]
+        policy_log = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_ALERT_POLICY_EVALUATED",))
+        assert policy_log.kwargs["extra"]["classifier"] == "ports"
+        assert policy_log.kwargs["extra"]["detected_signal_classes"] == "ports"
+        assert policy_log.kwargs["extra"]["selected_signal_classes"] == ""
+        assert policy_log.kwargs["extra"]["should_alert"] is True
+        assert policy_log.kwargs["extra"]["suppression_reason"] == "none"
+        changed_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_CHANGED",))
+        assert changed_log.kwargs["extra"]["diff_kind"] == "signal"
+        assert changed_log.kwargs["extra"]["truncated"] is False
+        assert changed_log.kwargs["extra"]["classifier"] == "ports"
+        assert changed_log.kwargs["extra"]["consecutive_changed"] == 1
+        assert changed_log.kwargs["extra"]["suppression_reason"] == "none"
+
+    def test_watcher_notification_policy_gates_repeated_and_signal_class_alerts(self, monkeypatch, tmp_path):
+        from services.notifications.models import TRIGGER_WATCHER_CHANGED
+        from services.watchers import finalize as watcher_finalize
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
+            self._insert_run(conn, "run_threshold_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_threshold_first", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_threshold_second", ["80/tcp open http", "8443/tcp open https-alt"])
+            threshold_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV threshold.darklab.sh",
+                baseline_run_id="run_threshold_base",
+                cadence_preset="hourly",
+                policy={"alert_after_repeated_changes": 2},
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(conn, threshold_watcher, run_id="run_threshold_first", state_at_fire="firing")
+            with mock.patch.object(watcher_finalize.log, "debug") as debug_log, \
+                 mock.patch.object(watcher_finalize.log, "info") as info_log:
+                watcher_finalize.finalize_watcher_run("run_threshold_first", conn=conn)
+                first_event_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
+                threshold_after_first = watcher_service.get_watcher(threshold_watcher.id, conn=conn)
+                assert threshold_after_first is not None
+                watcher_service.record_watcher_fire(
+                    conn,
+                    threshold_after_first,
+                    run_id="run_threshold_second",
+                    state_at_fire="firing",
+                )
+                watcher_finalize.finalize_watcher_run("run_threshold_second", conn=conn)
+
+                self._insert_run(conn, "run_text_base", ["https://old.darklab.sh"])
+                self._insert_run(conn, "run_text_current", ["https://old.darklab.sh", "https://new.darklab.sh"])
+                conn.execute(
+                    "UPDATE runs SET command = ?, output_preview = ? WHERE id = ?",
+                    (
+                        "curl https://darklab.sh",
+                        json.dumps([{
+                            "text": "https://old.darklab.sh",
+                            "kind": "info",
+                            "role": "body",
+                            "line_index": 0,
+                        }]),
+                        "run_text_base",
+                    ),
+                )
+                conn.execute(
+                    "UPDATE runs SET command = ?, output_preview = ? WHERE id = ?",
+                    (
+                        "curl https://darklab.sh",
+                        json.dumps([
+                            {
+                                "text": "https://old.darklab.sh",
+                                "kind": "info",
+                                "role": "body",
+                                "line_index": 0,
+                            },
+                            {
+                                "text": "https://new.darklab.sh",
+                                "kind": "info",
+                                "role": "body",
+                                "line_index": 1,
+                            },
+                        ]),
+                        "run_text_current",
+                    ),
+                )
+                text_watcher = watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="curl https://darklab.sh",
+                    baseline_run_id="run_text_base",
+                    cadence_preset="daily",
+                    policy={"alert_signal_classes": ["ports"]},
+                    conn=conn,
+                )
+                watcher_service.record_watcher_fire(conn, text_watcher, run_id="run_text_current", state_at_fire="firing")
+                watcher_finalize.finalize_watcher_run("run_text_current", conn=conn)
+
+                self._insert_run(conn, "run_ports_base", ["80/tcp open http"])
+                self._insert_run(conn, "run_ports_current", ["80/tcp open http", "443/tcp open https"])
+                port_watcher = watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="nmap -sV ports.darklab.sh",
+                    baseline_run_id="run_ports_base",
+                    cadence_preset="hourly",
+                    policy={"alert_signal_classes": ["ports"]},
+                    conn=conn,
+                )
+                watcher_service.record_watcher_fire(conn, port_watcher, run_id="run_ports_current", state_at_fire="firing")
+                watcher_finalize.finalize_watcher_run("run_ports_current", conn=conn)
+
+            final_events = conn.execute(
+                "SELECT trigger, run_id FROM notification_events ORDER BY created ASC",
+            ).fetchall()
+            threshold_fires = watcher_service.list_watcher_fires(threshold_watcher.id, conn=conn)[0]
+            text_fire = watcher_service.list_watcher_fires(text_watcher.id, conn=conn)[0][0]
+            port_fire = watcher_service.list_watcher_fires(port_watcher.id, conn=conn)[0][0]
+            refreshed_threshold = watcher_service.get_watcher(threshold_watcher.id, conn=conn)
+            refreshed_text = watcher_service.get_watcher(text_watcher.id, conn=conn)
+            refreshed_port = watcher_service.get_watcher(port_watcher.id, conn=conn)
+
+        assert first_event_count == 0
+        assert [(row["trigger"], row["run_id"]) for row in final_events] == [
+            (TRIGGER_WATCHER_CHANGED, "run_threshold_second"),
+            (TRIGGER_WATCHER_CHANGED, "run_ports_current"),
+        ]
+        fires_by_run = {fire.run_id: fire for fire in threshold_fires}
+        assert fires_by_run["run_threshold_first"].notification_event_ids == []
+        assert len(fires_by_run["run_threshold_second"].notification_event_ids) == 1
+        assert text_fire.notification_event_ids == []
+        assert len(port_fire.notification_event_ids) == 1
+        assert refreshed_threshold is not None
+        assert refreshed_threshold.state == "changed"
+        assert refreshed_threshold.consecutive_changed == 2
+        assert refreshed_threshold.last_diff_summary["classifier"] == "ports"
+        assert refreshed_text is not None
+        assert refreshed_text.state == "changed"
+        assert refreshed_text.consecutive_changed == 1
+        assert refreshed_text.last_diff_summary["classifier"] == "textual"
+        assert refreshed_port is not None
+        assert refreshed_port.state == "changed"
+        policy_reasons = [
+            call.kwargs["extra"]["suppression_reason"]
+            for call in debug_log.call_args_list
+            if call.args == ("WATCHER_ALERT_POLICY_EVALUATED",)
+        ]
+        assert policy_reasons == [
+            "threshold_not_met",
+            "none",
+            "signal_class_filtered",
+            "none",
+        ]
+        changed_logs = [
+            call.kwargs["extra"]
+            for call in info_log.call_args_list
+            if call.args == ("WATCHER_CHANGED",)
+        ]
+        assert [(item["run_id"], item["alert_suppressed"], item["notification_count"]) for item in changed_logs] == [
+            ("run_threshold_first", True, 0),
+            ("run_threshold_second", False, 1),
+            ("run_text_current", True, 0),
+            ("run_ports_current", False, 1),
+        ]
 
     def test_watcher_textual_diff_reports_entity_delta(self):
         from services.watchers.classifiers import textual
@@ -5203,6 +6145,8 @@ class TestWatchersFoundation:
         assert refreshed.last_diff_summary["added_port_count"] == 1
         assert fire.diff_kind == "signal"
         assert fire.state_at_fire == "changed"
+        assert fire.fire_kind == "changed"
+        assert fire.state_reason == "diff_detected"
         assert len(fire.notification_event_ids) == 1
         assert event_count == 1
 
@@ -5225,7 +6169,8 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             watcher_service.record_watcher_fire(conn, watcher, run_id="run_same", state_at_fire="firing")
-            watcher_finalize.finalize_watcher_run("run_same", conn=conn)
+            with mock.patch.object(watcher_finalize.log, "debug") as debug_log:
+                watcher_finalize.finalize_watcher_run("run_same", conn=conn)
             quiet_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
             conn.execute("UPDATE watchers SET state = ? WHERE id = ?", ("changed", watcher.id))
             changed = watcher_service.get_watcher(watcher.id, conn=conn)
@@ -5237,11 +6182,19 @@ class TestWatchersFoundation:
             recovered_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
 
         assert quiet_count == 0
+        quiet_log = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_NO_CHANGE_RECORDED",))
+        assert quiet_log.kwargs["extra"]["state_reason"] == "no_change"
+        assert quiet_log.kwargs["extra"]["fire_kind"] == "no_change"
+        assert quiet_log.kwargs["extra"]["consecutive_no_change"] == 1
+        assert quiet_log.kwargs["extra"]["notification_count"] == 0
         assert recovered is not None
         assert recovered.state == "ok"
         assert recovered.state_reason == "recovered"
         assert recovered.consecutive_changed == 0
         assert recovered_count == 1
+        fire = watcher_service.list_watcher_fires(recovered.id, conn=conn)[0][0]
+        assert fire.fire_kind == "recovered"
+        assert fire.state_reason == "recovered"
 
     def test_watcher_finalize_failed_run_disables_after_threshold(self, monkeypatch, tmp_path):
         from services.notifications.models import TRIGGER_WATCHER_ERROR
@@ -5278,6 +6231,8 @@ class TestWatchersFoundation:
         assert schedule is not None
         assert schedule.enabled is False
         assert fire.state_at_fire == "error"
+        assert fire.fire_kind == "failed"
+        assert fire.state_reason == "run_failed"
         assert len(fire.notification_event_ids) == 1
 
     def test_deleted_baseline_run_pauses_watcher_and_owned_schedule(self, monkeypatch, tmp_path):

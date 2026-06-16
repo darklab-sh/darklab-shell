@@ -154,7 +154,7 @@ Before merging a version branch back to `main`:
 
 **Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
-**JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports frontend globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks a compatibility-global publish path. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
+**JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports frontend globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks a compatibility-global publish path. Match the existing style of the file you are editing. ESLint checks app source, tests, tooling, and scripts, enforces syntax/global safety for browser code, and keeps the 2-space indentation, single quote, and no-semicolon rules scoped to config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
@@ -189,8 +189,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2088 pytest + 1399 Vitest + 265 Playwright = 3,752 tests**.
-That total includes 3,710 behavior tests plus 42 docs/inventory meta-tests.
+Current totals: **2120 pytest + 1412 Vitest + 266 Playwright = 3,798 tests**.
+That total includes 3,756 behavior tests plus 42 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -233,7 +233,7 @@ The checks and their scope:
 | Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
-| JS style | `eslint` | `tests/js/`, `config/`, `scripts/` | `npm run lint:js` |
+| JS style | `eslint` | `app/static/js/`, `tests/js/`, `.tooling/`, `scripts/` | `npm run lint:js` |
 | JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm run audit:js` |
 | CSS style | `stylelint` | `app/static/css/**/*.css` | `npm run lint:css` |
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |

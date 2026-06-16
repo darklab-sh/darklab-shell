@@ -2632,6 +2632,224 @@
 
 
 
+.project-monitoring-root {
+  display: grid;
+  gap: 16px;
+}
+
+
+
+.project-monitoring-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+
+
+.project-monitoring-filters {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+
+
+.project-monitoring-filter {
+  display: grid;
+  gap: 4px;
+  min-width: 132px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+
+.project-monitoring-filter .form-select {
+  width: 100%;
+}
+
+
+
+.project-monitoring-count {
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--theme-chrome-border);
+  border-radius: 8px;
+  background: var(--theme-chrome-row-bg);
+}
+
+
+
+.project-monitoring-count strong {
+  display: block;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+
+
+.project-monitoring-count span,
+.project-monitoring-meta,
+.project-monitoring-empty-line {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+
+
+.project-monitoring-section,
+.project-monitoring-timeline,
+.project-monitoring-timeline-main {
+  display: grid;
+  gap: 10px;
+}
+
+
+
+.project-monitoring-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
+}
+
+
+
+.project-monitoring-group {
+  display: grid;
+  gap: 8px;
+}
+
+
+
+.project-monitoring-group-heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+
+
+.project-monitoring-card,
+.project-monitoring-timeline-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--theme-chrome-border);
+  border-radius: 8px;
+  background: var(--theme-chrome-row-bg);
+}
+
+
+
+.project-monitoring-card-head,
+.project-monitoring-timeline-heading,
+.project-monitoring-actions,
+.project-monitoring-card-actions,
+.project-monitoring-triage-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+
+
+.project-monitoring-card-head {
+  justify-content: space-between;
+}
+
+
+
+.project-monitoring-command {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+
+
+.project-monitoring-rollup {
+  display: grid;
+  gap: 7px;
+}
+
+
+
+.project-monitoring-card-actions {
+  gap: 6px;
+}
+
+
+
+.project-monitoring-policy {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+
+
+.project-monitoring-triage {
+  display: grid;
+  gap: 8px;
+}
+
+
+
+.project-monitoring-note {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  border: 1px solid var(--theme-chrome-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px;
+}
+
+
+
+.project-monitoring-rollup-counts {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+
+
+.project-monitoring-signals {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+
+.project-monitoring-timeline-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+
+
+.project-monitoring-root.is-mobile .project-monitoring-counts,
+.project-monitoring-root.is-mobile .project-monitoring-grid,
+.project-monitoring-timeline-row.is-mobile {
+  grid-template-columns: 1fr;
+}
+
+
+
 .project-explorer-item {
   display: flex;
   align-items: flex-start;

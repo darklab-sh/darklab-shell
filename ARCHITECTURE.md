@@ -499,6 +499,9 @@ Client-visible error codes include `session_required`, `file_required`,
 | `GET` | `/projects/<project_id>` | Returns one active-scope project. |
 | `GET` | `/projects/<project_id>/summary` | Returns one project plus linked-record, package, and derived metadata counts. |
 | `GET` | `/projects/<project_id>/activity` | Returns scoped, user-safe audit activity for one active-scope project with filters and offset pagination. |
+| `GET` | `/projects/<project_id>/monitoring` | Returns scoped watcher monitor cards, status counts, filter metadata, derived groups, and fire timeline rows for one active-scope project. |
+| `GET` | `/projects/<project_id>/monitoring/summary` | Returns the digest-ready monitoring summary for one active-scope project. |
+| `PATCH` | `/projects/<project_id>/monitoring/fires/<fire_id>` | Updates one scoped monitoring fire's acknowledgement state and note. |
 | `GET` | `/projects/package-presets` | Returns the normalized evidence package preset catalog for the browser wizard. |
 | `PUT` | `/projects/<project_id>` | Updates project display metadata, status, entity-note-backed notes, and slug. |
 | `DELETE` | `/projects/<project_id>` | Deletes project metadata and project links without deleting linked source records. |
@@ -551,6 +554,18 @@ Client-visible error codes include `session_required`, `file_required`,
 | `GET` | `/entities/<entity_type>/<path:entity_id>/note` | Returns the active-scope note for a supported entity. |
 | `PUT` | `/entities/<entity_type>/<path:entity_id>/note` | Creates or replaces the one active-scope note for a supported entity. |
 | `DELETE` | `/entities/<entity_type>/<path:entity_id>/note` | Deletes the active-scope note for a supported entity. |
+
+### Project Monitoring Route Contract
+
+`services.projects.monitoring` builds the Project Monitoring payload used by the browser Monitoring tab and the lightweight summary route. It scopes rows through the same personal/team owner helpers as the rest of Projects, then selects watchers whose `project_id` matches the requested project. Ordinary user schedules are not mixed in because they do not have watcher baselines, diff state, or fire classifications.
+
+`GET /projects/<project_id>/monitoring` accepts `fire_limit`, clamped from 1 to 25 and defaulting to 8. The payload contains the project row, status `counts`, a digest-ready `summary`, `quiet_no_change_threshold`, grouped `monitors`, a chronological `timeline`, and `filter_options`. Each monitor is the normal watcher payload plus the resolved baseline/last run refs, `dashboard_state`, derived `monitor_group`, `linked_targets`, `current_triage_state`, `current_triage_fire`, recent fires, and latest fire. Dashboard state is derived from watcher state and counters: failed and changed states stay explicit, paused stays paused, quiet is a display label for `ok` watchers with enough repeated no-change fires, and active means `ok` but not quiet.
+
+Fire rows keep persisted classification visible even when old raw runs are gone. `run_available` and `baseline_run_available` flags tell the UI whether Run Details and Compare can be opened, while the bounded rollup still gives severity, classifier, counts, truncation state, source ids, and top signals. Target matching is local to the project payload: project-linked target options are matched against watcher labels, commands, and fire signals so filters can show current project targets without provider calls.
+
+The summary route, `GET /projects/<project_id>/monitoring/summary`, reuses the full payload builder and returns only `project` and `summary`. The summary includes changed, recovered, and failed monitor counts, highest severity, bounded top changes, and links back to the Monitoring payload, so digest producers can reuse the same rollup contract without coupling to the browser card layout.
+
+`PATCH /projects/<project_id>/monitoring/fires/<fire_id>` updates one scoped watcher fire's acknowledgement state and note. The lookup requires the fire to belong to a watcher in the same project and active personal/team scope. Invalid acknowledgement states return `400`; missing, stale, or out-of-scope fires return `404`. Successful updates write safe audit metadata with watcher id, project id, fire id, acknowledgement state, and note length, but not note text.
 
 ### Finding Triage Route Contract
 
@@ -1038,9 +1053,9 @@ Cron support is intentionally strict: five-field POSIX cron only, with `hourly`,
 
 ### Watchers
 
-Watchers are durable change-detection monitors owned by `tok_` session tokens. Each watcher stores the command text, baseline run id, current state, validated diff-policy options, consecutive outcome counters, and a unique link to one scheduler-owned cadence row. The paired schedule uses `owner_kind='watcher'` and `owner_id=<watcher_id>`, so normal schedule lists and the Schedules UI keep watcher cadence separate from ordinary scheduled commands.
+Watchers are durable change-detection monitors owned by `tok_` session tokens. Each watcher stores the command text, baseline run id, optional project id, current state, validated diff-policy options, notification policy controls, consecutive outcome counters, and a unique link to one scheduler-owned cadence row. The paired schedule uses `owner_kind='watcher'` and `owner_id=<watcher_id>`, so normal schedule lists and the Schedules UI keep watcher cadence separate from ordinary scheduled commands.
 
-Watcher storage is split between `watchers` for current state and `watcher_fires` for append-only audit, with personal/team ownership copied onto the watcher, its owned schedule, and its fire rows. `watcher_fires` has a unique `(watcher_id, run_id)` constraint so duplicate run-finalization paths cannot create duplicate diff records or notification fan-out. `options_json` currently accepts only `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata-only changes stay opt-in until classifier behavior is stable. If a baseline run is deleted from history, the cleanup path pauses the owned schedule, moves the watcher to `error`, sets `state_reason='baseline_deleted'`, and logs `WATCHER_BASELINE_DELETED` so operators do not keep firing against a missing baseline. Team-owned watchers pause with their team instead of moving to personal scope, and reactivating the team leaves them paused until a member resumes them.
+Watcher storage is split between `watchers` for current state and `watcher_fires` for append-only audit, with personal/team ownership copied onto the watcher, its owned schedule, and its fire rows. `watcher_fires` has a unique `(watcher_id, run_id)` constraint so duplicate run-finalization paths cannot create duplicate diff records or notification fan-out. Fire rows persist `state_reason`, `fire_kind`, acknowledgement state, acknowledgement note, actor, and timestamp so Project Monitoring can derive current triage without rewriting historical diff rows. `options_json` accepts only `suppress_removals` and `notify_metadata_changes`; richer notification policy lives in `policy_json`, including ignored line patterns, repeated-change thresholds, and findings/entities/ports alert-class filters. Ignored line patterns are line-oriented and apply to textual fallback diffs. Alert-class filters are notification gates: findings covers structured finding changes, entities covers host/DNS/textual entity changes, and ports covers port plus certificate/TLS changes, even though the Project Monitoring dashboard can display those as finer groups. Additions and removals count as diffs by default, while metadata-only changes stay opt-in until classifier behavior is stable. If a baseline run is deleted from history, the cleanup path pauses the owned schedule, moves the watcher to `error`, sets `state_reason='baseline_deleted'`, and logs `WATCHER_BASELINE_DELETED` so operators do not keep firing against a missing baseline. Team-owned watchers pause with their team instead of moving to personal scope, and reactivating the team leaves them paused until a member resumes them.
 
 Watcher creation and deletion use one database transaction for the watcher row and its owned schedule row. A session can own up to `watchers.max_per_session` watchers, defaulting to 32. Multiple watchers can wrap the same command, but they still keep separate schedules, baselines, state, and fire audit rows. Update, pause, resume, and accept-baseline operations go through the watcher service so the watcher row and owned schedule stay in sync.
 
@@ -1048,7 +1063,7 @@ Watcher management is exposed through the browser Watchers modal, the terminal `
 
 The scheduler does not have a separate watcher timer. When a due row has `owner_kind='watcher'`, `scheduler.dispatch` claims the fire, launches the command through the same brokered run path as a normal schedule, records a pending watcher fire, and returns without waiting for the scan to finish. When the run finalizes, `services.watchers.finalize` claims that pending fire, compares the completed run to the watcher's baseline through the shared run-comparison helpers, updates watcher state, and queues `watcher_changed`, `watcher_error`, or `watcher_recovered` notifications. A non-empty diff moves the watcher to `changed`; an empty diff after `changed` moves it back to `ok` and can send `watcher_recovered`; an empty diff after `ok` stays quiet. Failed watcher runs do not replace the baseline, and five consecutive failures disable the owned schedule with `WATCHER_DISABLED_AFTER_ERRORS`.
 
-Diffs route through the shared `services.diff.classifiers` registry in priority order, with `services.watchers.classifiers` kept as compatibility exports. Persisted run findings compare by stable finding signature first, then command-shaped classifiers cover nmap ports, subdomain/host-list tools, and `openssl s_client` certificate fields. The textual classifier is the final fallback for generic output and is intentionally noisier on tools with non-deterministic ordering. Diff summaries store bounded added/removed/changed signal lists, carry `truncated=true` when source output or changed-signal lists were capped, include source line indexes when parsed records came from structured line events, and honor `suppress_removals` so removal-only churn can stay quiet.
+Diffs route through the shared `services.diff.classifiers` registry in priority order, with `services.watchers.classifiers` kept as compatibility exports. Persisted run findings compare by stable finding signature first, then command-shaped classifiers cover nmap ports, subdomain/host-list tools, and `openssl s_client` certificate fields. The textual classifier is the final fallback for generic output and is intentionally noisier on tools with non-deterministic ordering. Diff summaries store bounded added/removed/changed signal lists, carry `truncated=true` when source output or changed-signal lists were capped, include source line indexes when parsed records came from structured line events, and honor `suppress_removals` plus watcher ignored-line patterns so removal-only and known textual churn can stay quiet.
 
 ---
 
@@ -2096,12 +2111,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,710
+- behavior tests: 3,756
 - docs/inventory meta-tests: 42
-- `pytest`: 2088 (2051 behavior + 37 meta)
-- `vitest`: 1399
-- `playwright`: 265
-- total: 3,752
+- `pytest`: 2120 (2083 behavior + 37 meta)
+- `vitest`: 1412
+- `playwright`: 266
+- total: 3,798
 
 ### Testing Architecture
 

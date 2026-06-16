@@ -14,6 +14,11 @@ def watcher_payload(watcher: Watcher, *, schedule: Schedule | None = None) -> di
     payload = asdict(watcher)
     payload.pop("session_token", None)
     payload["options"] = dict(watcher.options)
+    payload["policy"] = {
+        "ignore_line_patterns": list(watcher.policy.get("ignore_line_patterns", [])),
+        "alert_after_repeated_changes": watcher.policy.get("alert_after_repeated_changes", 1),
+        "alert_signal_classes": list(watcher.policy.get("alert_signal_classes", [])),
+    }
     if schedule is not None:
         payload["schedule"] = schedule_payload(schedule)
     return payload

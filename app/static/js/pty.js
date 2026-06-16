@@ -805,7 +805,8 @@ function _ptySessionForOverlay(overlay) {
 
 function _ptyPanelForTab(tabId) {
   if (!tabId) return null;
-  if (typeof getTabPanel === 'function') return getTabPanel(tabId);
+  const getPanel = _ptyGlobalFunction('getTabPanel');
+  if (getPanel) return getPanel(tabId);
   return Array.from(document.querySelectorAll('.tab-panel'))
     .find(panel => panel.dataset && panel.dataset.id === String(tabId)) || null;
 }

@@ -45,13 +45,9 @@ if command -v npm >/dev/null 2>&1 && [ -d "$REPO_ROOT/node_modules" ]; then
     run_check "assets:check" npm --prefix "$REPO_ROOT" run assets:check
 fi
 
-# ESLint — check all tracked JS files that exist on disk
-js_files=$(find "$REPO_ROOT" -name '*.js' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
-if [ -n "$js_files" ]; then
-    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
-    run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
-        --config "$REPO_ROOT/.tooling/eslint.config.js" \
-        $js_files
+# ESLint — use the package script so local runs and the hook lint the same JS scope
+if command -v npm >/dev/null 2>&1; then
+    run_check "eslint" npm --prefix "$REPO_ROOT" run lint:js
 fi
 
 # npm audit — JS dependency CVEs (fail on high/critical only)

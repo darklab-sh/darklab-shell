@@ -5828,6 +5828,444 @@ class TestProjectRoutes:
         assert hidden_actor.status_code == 200
         assert hidden_actor.get_json()["events"] == []
 
+    def test_project_monitoring_route_returns_scoped_watchers_and_missing_run_state(self):
+        from core.helpers import get_log_session_id
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        session_id = "tok_project_monitoring_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Monitoring Case")
+        run_id = self._seed_run(session_id, "nmap -sV darklab.sh")
+
+        with db_connect() as conn:
+            watcher = watcher_service.create_watcher(
+                session_id,
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run-deleted",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id=run_id,
+                conn=conn,
+            )
+            conn.commit()
+
+        with mock.patch.object(project_routes.log, "info") as info_log:
+            resp = client.get(
+                f"/projects/{project['id']}/monitoring",
+                headers={"X-Session-ID": session_id},
+            )
+            summary_resp = client.get(
+                f"/projects/{project['id']}/monitoring/summary",
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["counts"]["changed"] == 1
+        assert payload["monitors"][0]["id"] == watcher.id
+        assert payload["monitors"][0]["dashboard_state"] == "changed"
+        assert payload["timeline"][0]["fire_kind"] == "changed"
+        assert payload["timeline"][0]["run_available"] is True
+        assert payload["timeline"][0]["baseline_run_available"] is False
+        assert payload["summary"]["changed_monitor_count"] == 1
+        assert payload["summary"]["failed_monitor_count"] == 0
+        assert payload["summary"]["highest_severity"] == "critical"
+        assert payload["summary"]["links"]["project_monitoring"] == f"/projects/{project['id']}/monitoring"
+        assert summary_resp.status_code == 200
+        summary_payload = summary_resp.get_json()
+        assert summary_payload["project"]["id"] == project["id"]
+        assert summary_payload["summary"] == payload["summary"]
+        viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_VIEWED",))
+        assert viewed.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "fire_limit": 8,
+            "monitor_count": 1,
+            "timeline_count": 1,
+            "changed_count": 1,
+            "failed_count": 0,
+            "highest_severity": "critical",
+        }
+        summary_viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_SUMMARY_VIEWED",))
+        assert summary_viewed.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "fire_limit": 8,
+            "changed_count": 1,
+            "failed_count": 0,
+            "highest_severity": "critical",
+            "top_change_count": 1,
+        }
+
+    def test_project_monitoring_route_keeps_deleted_current_run_state(self):
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        session_id = "tok_project_monitoring_deleted_current_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Monitoring Deleted Current")
+        suffix = uuid.uuid4().hex[:8]
+        baseline_run_id = self._seed_run(
+            session_id,
+            "nmap -sV darklab.sh",
+            run_id=f"run-monitoring-baseline-{suffix}",
+        )
+        deleted_run_id = f"run-monitoring-deleted-current-{suffix}"
+
+        with db_connect() as conn:
+            watcher = watcher_service.create_watcher(
+                session_id,
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id=baseline_run_id,
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=deleted_run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id=deleted_run_id,
+                conn=conn,
+            )
+            conn.commit()
+
+        resp = client.get(
+            f"/projects/{project['id']}/monitoring",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["timeline"][0]["id"] == fire.id
+        assert payload["timeline"][0]["run_available"] is False
+        assert payload["timeline"][0]["baseline_run_available"] is True
+        assert payload["timeline"][0]["run"] is None
+        assert payload["timeline"][0]["baseline_run"]["id"] == baseline_run_id
+        assert payload["monitors"][0]["latest_fire"]["id"] == fire.id
+        assert payload["monitors"][0]["latest_fire"]["run_available"] is False
+        assert payload["summary"]["top_changes"][0]["run_available"] is False
+        assert payload["summary"]["top_changes"][0]["baseline_run_available"] is True
+
+    def test_project_monitoring_route_scopes_target_filter_options(self):
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        session_id = "tok_project_monitoring_targets_" + uuid.uuid4().hex[:8]
+        other_session_id = "tok_project_monitoring_other_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        self._register_session_token(other_session_id)
+        project = self._create_project(client, session_id, name="Monitoring Targets")
+        suffix = uuid.uuid4().hex[:8]
+        visible_entity_id = f"ent_monitor_visible_{suffix}"
+
+        with db_connect() as conn:
+            watcher = watcher_service.create_watcher(
+                session_id,
+                command_text="nmap -sV visible.darklab.sh suppressed.darklab.sh foreign.darklab.sh",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            now = "2026-06-15T12:00:00+00:00"
+            for entity_id, owner, value, suppressed in (
+                (visible_entity_id, session_id, "visible.darklab.sh", 0),
+                (f"ent_monitor_suppressed_{suffix}", session_id, "suppressed.darklab.sh", 1),
+                (f"ent_monitor_foreign_{suffix}", other_session_id, "foreign.darklab.sh", 0),
+            ):
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                    "occurrence_count, suppressed, created) "
+                    "VALUES (?, ?, 'domain', ?, ?, ?, ?, 1, ?, ?)",
+                    (entity_id, owner, value, f"sig_{entity_id}", now, now, suppressed, now),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'atlas_entity', ?, 'manual', ?)",
+                    (f"plink_{entity_id}", project["id"], entity_id, now),
+                )
+            conn.commit()
+
+        resp = client.get(
+            f"/projects/{project['id']}/monitoring",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["monitors"][0]["id"] == watcher.id
+        assert payload["filter_options"]["targets"] == [{
+            "id": visible_entity_id,
+            "type": "domain",
+            "value": "visible.darklab.sh",
+        }]
+        assert [target["value"] for target in payload["monitors"][0]["linked_targets"]] == ["visible.darklab.sh"]
+
+    def test_project_monitoring_fire_ack_route_updates_fire_and_audits_metadata(self):
+        from core.helpers import get_log_session_id
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        session_id = "tok_project_monitoring_ack_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Monitoring Triage")
+        run_id = self._seed_run(session_id, "nmap -sV darklab.sh")
+
+        with db_connect() as conn:
+            watcher = watcher_service.create_watcher(
+                session_id,
+                command_text="nmap -sV darklab.sh",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=run_id,
+                diff_summary={"classifier": "ports", "added_port_count": 1},
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            conn.commit()
+
+        with mock.patch.object(project_routes.log, "info") as info_log:
+            resp = client.patch(
+                f"/projects/{project['id']}/monitoring/fires/{fire.id}",
+                headers={"X-Session-ID": session_id},
+                json={"ack_state": "expected", "ack_note": "Maintenance window"},
+            )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["fire"]["ack_state"] == "expected"
+        assert payload["fire"]["ack_note"] == "Maintenance window"
+        assert payload["fire"]["ack_by"] == session_id
+        assert payload["fire"]["ack_at"]
+        audit_rows = _audit_event_rows(target_id=watcher.id, event_type="watcher.ack")
+        assert len(audit_rows) == 1
+        assert audit_rows[0]["project_id"] == project["id"]
+        assert audit_rows[0]["details"]["fire_id"] == fire.id
+        assert audit_rows[0]["details"]["ack_state"] == "expected"
+        assert audit_rows[0]["details"]["note_chars"] == len("Maintenance window")
+        assert "Maintenance window" not in json.dumps(audit_rows[0]["details"])
+        updated_log = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_FIRE_ACK_UPDATED",))
+        assert updated_log.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "watcher_id": watcher.id,
+            "fire_id": fire.id,
+            "ack_state": "expected",
+            "note_chars": len("Maintenance window"),
+        }
+
+        with mock.patch.object(project_routes.log, "warning") as warning_log:
+            rejected = client.patch(
+                f"/projects/{project['id']}/monitoring/fires/{fire.id}",
+                headers={"X-Session-ID": session_id},
+                json={"ack_state": "invalid"},
+            )
+        assert rejected.status_code == 400
+        assert warning_log.call_args.args == ("PROJECT_MONITORING_FIRE_ACK_REJECTED",)
+        assert warning_log.call_args.kwargs["extra"]["status"] == 400
+        assert warning_log.call_args.kwargs["extra"]["fire_id"] == fire.id
+
+        with mock.patch.object(project_routes.log, "debug") as debug_log:
+            missing = client.patch(
+                f"/projects/{project['id']}/monitoring/fires/missing-fire",
+                headers={"X-Session-ID": session_id},
+                json={"ack_state": "expected"},
+            )
+        assert missing.status_code == 404
+        assert debug_log.call_args.args == ("PROJECT_MONITORING_FIRE_ACK_MISS",)
+        assert debug_log.call_args.kwargs["extra"]["fire_id"] == "missing-fire"
+
+    def test_project_monitoring_team_routes_enforce_view_and_triage_capabilities(self):
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        owner_token = "tok_project_monitoring_team_owner_" + uuid.uuid4().hex[:8]
+        viewer_token = "tok_project_monitoring_team_viewer_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_project_monitoring_team_operator_" + uuid.uuid4().hex[:8]
+        outsider_token = "tok_project_monitoring_team_outsider_" + uuid.uuid4().hex[:8]
+        team = self._create_team(client, owner_token, name="Monitoring Team")
+        team_id = team["id"]
+        self._join_team(
+            client,
+            owner_token,
+            team_id,
+            viewer_token,
+            role="viewer",
+            display_name="Monitoring Viewer",
+        )
+        operator_member = self._join_team(
+            client,
+            owner_token,
+            team_id,
+            operator_token,
+            role="operator",
+            display_name="Monitoring Operator",
+        )
+        self._register_session_token(outsider_token)
+        project = self._create_project(
+            client,
+            owner_token,
+            name="Team Monitoring",
+            headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        )
+        viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        outsider_headers = {"X-Session-ID": outsider_token, "X-Team-ID": team_id}
+        suffix = uuid.uuid4().hex[:8]
+        baseline_run_id = f"run_team_monitor_base_{suffix}"
+        current_run_id = f"run_team_monitor_current_{suffix}"
+
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, ?, 1)",
+                (
+                    baseline_run_id,
+                    owner_token,
+                    team_id,
+                    "nmap -sV team.darklab.sh",
+                    "2026-06-15T12:00:00+00:00",
+                    "2026-06-15T12:00:01+00:00",
+                    json.dumps(["80/tcp open http"]),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, ?, 2)",
+                (
+                    current_run_id,
+                    owner_token,
+                    team_id,
+                    "nmap -sV team.darklab.sh",
+                    "2026-06-15T12:05:00+00:00",
+                    "2026-06-15T12:05:01+00:00",
+                    json.dumps(["80/tcp open http", "443/tcp open https"]),
+                ),
+            )
+            watcher = watcher_service.create_watcher(
+                owner_token,
+                team_id=team_id,
+                command_text="nmap -sV team.darklab.sh",
+                baseline_run_id=baseline_run_id,
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=current_run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id=current_run_id,
+                conn=conn,
+            )
+            conn.commit()
+
+        view_resp = client.get(f"/projects/{project['id']}/monitoring", headers=viewer_headers)
+        summary_resp = client.get(f"/projects/{project['id']}/monitoring/summary", headers=viewer_headers)
+        outsider_resp = client.get(f"/projects/{project['id']}/monitoring", headers=outsider_headers)
+        viewer_ack = client.patch(
+            f"/projects/{project['id']}/monitoring/fires/{fire.id}",
+            headers=viewer_headers,
+            json={"ack_state": "expected", "ack_note": "Viewer note should be rejected"},
+        )
+        operator_ack = client.patch(
+            f"/projects/{project['id']}/monitoring/fires/{fire.id}",
+            headers=operator_headers,
+            json={"ack_state": "expected", "ack_note": "Maintenance window"},
+        )
+
+        assert view_resp.status_code == 200
+        assert view_resp.get_json()["monitors"][0]["id"] == watcher.id
+        assert summary_resp.status_code == 200
+        assert summary_resp.get_json()["summary"]["changed_monitor_count"] == 1
+        assert outsider_resp.status_code == 403
+        assert outsider_resp.get_json()["error"] == "team_forbidden"
+        assert viewer_ack.status_code == 403
+        assert viewer_ack.get_json()["error"] == "team_forbidden"
+        assert operator_ack.status_code == 200
+        assert operator_ack.get_json()["fire"]["ack_state"] == "expected"
+        with db_connect() as conn:
+            audit_row = conn.execute(
+                "SELECT team_id, actor_member_id, actor_role, actor_display_name, details "
+                "FROM audit_events WHERE event_type = 'watcher.ack' AND target_id = ?",
+                (watcher.id,),
+            ).fetchone()
+        assert audit_row is not None
+        assert audit_row["team_id"] == team_id
+        assert audit_row["actor_member_id"] == operator_member["id"]
+        assert audit_row["actor_role"] == "operator"
+        assert audit_row["actor_display_name"] == "Monitoring Operator"
+        audit_details = json.loads(audit_row["details"] or "{}")
+        assert audit_details["fire_id"] == fire.id
+        assert audit_details["ack_state"] == "expected"
+        assert audit_details["note_chars"] == len("Maintenance window")
+        assert "Maintenance window" not in json.dumps(audit_details)
+
     def test_project_activity_route_allows_team_viewer_for_team_project_only(self):
         from services.audit.models import AuditEventType
         from services.audit.recorder import record_event

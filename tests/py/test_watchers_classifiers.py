@@ -87,6 +87,16 @@ def test_textual_classifier_is_fallback_and_honors_suppress_removals():
     assert diff.summary["removed_line_count"] == 1
     assert diff.summary["suppressed_removed_line_count"] == 1
 
+    ignored = watcher_diff.diff_runs(
+        _run("run_base", "curl https://darklab.sh", ["alpha", "Date: Mon"]),
+        _run("run_current", "curl https://darklab.sh", ["alpha", "Date: Tue"]),
+        options={"ignore_line_patterns": ["Date:"]},
+    )
+
+    assert ignored.kind == "none"
+    assert ignored.summary["ignored_line_pattern_count"] == 1
+    assert ignored.summary["ignored_line_count"] == 2
+
 
 def test_ports_classifier_reports_added_changed_and_removed_ports():
     from services.runs import comparison as run_comparison
