@@ -7,7 +7,7 @@
       "owner": "core/config.js",
       "sources": ["*"],
       "reason": "Server-rendered app configuration is intentionally exposed on window for bootstrapping and runtime config refresh.",
-      "removal_target": "Keep as the server bootstrap boundary while migrating internal helper reads to explicit imports."
+      "removal_target": "Keep as the server bootstrap boundary for config data; remove only if templates pass config through a module bootstrap payload."
     },
     {
       "name": "PermData",
@@ -90,7 +90,7 @@
         "/static/js/features/workflows/workflows.js"
       ],
       "reason": "The lazy asset loader keeps the workflow catalog cache available before the Workflows module downloads; the module hydrates from the same cache when it loads.",
-      "removal_target": "Replace with an explicit Workflows bridge/cache module when the Workflows lazy placeholders are migrated."
+      "removal_target": "Replace with an explicit Workflows bridge/cache module if the lazy loader no longer needs a pre-module cache."
     },
     {
       "name": "acAccept",
@@ -105,7 +105,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -113,7 +113,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -121,7 +121,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -129,7 +129,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -153,7 +153,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -161,7 +161,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -169,7 +169,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -177,7 +177,7 @@
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",
       "sources": ["/static/js/autocomplete.js"],
-      "reason": "Keyboard handling still reads autocomplete selection helpers through the browser boundary during the ESM migration.",
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
@@ -193,7 +193,7 @@
       "purpose": "module_api_bridge",
       "owner": "features/autocomplete/suggestions.js",
       "sources": ["/static/js/features/autocomplete/suggestions.js"],
-      "reason": "Composer input still reads autocomplete matching through the browser boundary during the ESM migration.",
+      "reason": "Composer input reads autocomplete matching through the browser boundary while matching remains owned by the autocomplete feature module.",
       "removal_target": "Import autocomplete matching through a neutral autocomplete bridge."
     },
     {
@@ -201,7 +201,7 @@
       "purpose": "module_api_bridge",
       "owner": "features/autocomplete/suggestions.js",
       "sources": ["/static/js/features/autocomplete/suggestions.js"],
-      "reason": "Composer input still reads autocomplete matching through the browser boundary during the ESM migration.",
+      "reason": "Composer input reads autocomplete matching through the browser boundary while matching remains owned by the autocomplete feature module.",
       "removal_target": "Import autocomplete matching through a neutral autocomplete bridge."
     },
     {
@@ -217,7 +217,7 @@
       "purpose": "module_api_bridge",
       "owner": "export_html.js",
       "sources": ["/static/js/export_html.js"],
-      "reason": "Permalink and export helpers share HTML export utilities through a temporary browser bridge to avoid ESM cycles.",
+      "reason": "Permalink and export helpers share HTML export utilities through a browser bridge to avoid source-mode and page-owned import cycles.",
       "removal_target": "Move export helpers behind an acyclic module import and remove this browser publish."
     },
     {

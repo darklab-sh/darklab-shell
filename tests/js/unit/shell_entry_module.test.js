@@ -18,6 +18,22 @@ function importedBuildChunks(text) {
   return new Set([...text.matchAll(/["']\.\/(static-chunk-[^"']+\.js)["']/g)].map(match => match[1]))
 }
 
+const REPRESENTATIVE_LAZY_ENTRIES = [
+  '/static/js/features/atlas/atlas_overlay.js',
+  '/static/js/features/atlas/atlas_mobile.js',
+  '/static/js/features/history/history_run_details.js',
+  '/static/js/features/workflows/workflows.js',
+]
+
+const EAGER_SHELL_OWNER_SNIPPETS = [
+  'setRunnerHandlers({',
+  'setTabsHandlers({',
+  'setOutputHandlers({',
+  'setOutputModeHandlers({',
+  'addEventListener("storage"',
+  'addEventListener("pagehide"',
+]
+
 const SHELL_IDS = [
   'ac-dropdown',
   'atlas-surface',
@@ -404,16 +420,11 @@ describe('shell module entry', () => {
     expect(document.querySelectorAll('#ac-dropdown .ac-item')).toHaveLength(1)
   })
 
-  it('keeps bundle-mode lazy entries on shared chunks instead of re-running shell modules', () => {
+  it('keeps bundle-mode lazy entries on shared chunks without eager shell owner setup', () => {
     const manifest = JSON.parse(readFileSync(resolve(REPO_ROOT, 'app/static/build/manifest.json'), 'utf8'))
     const shellBundle = readBuildAsset(manifest.bundles['shell-bootstrap'].path)
     const shellChunks = importedBuildChunks(shellBundle)
-    const lazyEntries = [
-      '/static/js/features/atlas/atlas_overlay.js',
-      '/static/js/features/atlas/atlas_mobile.js',
-      '/static/js/features/history/history_run_details.js',
-      '/static/js/features/workflows/workflows.js',
-    ].map(source => ({
+    const lazyEntries = REPRESENTATIVE_LAZY_ENTRIES.map(source => ({
       source,
       text: readBuildAsset(manifest.static_assets[source].path),
     }))
@@ -424,12 +435,9 @@ describe('shell module entry', () => {
 
       expect(lazyChunks.size, source).toBeGreaterThan(0)
       expect(sharedChunks.length, source).toBeGreaterThan(0)
-      expect(text, source).not.toContain('setRunnerHandlers({')
-      expect(text, source).not.toContain('setTabsHandlers({')
-      expect(text, source).not.toContain('setOutputHandlers({')
-      expect(text, source).not.toContain('setOutputModeHandlers({')
-      expect(text, source).not.toContain('addEventListener("storage"')
-      expect(text, source).not.toContain('addEventListener("pagehide"')
+      EAGER_SHELL_OWNER_SNIPPETS.forEach(snippet => {
+        expect(text, `${source} should not contain ${snippet}`).not.toContain(snippet)
+      })
     }
 
     const atlasOverlayChunks = importedBuildChunks(lazyEntries[0].text)

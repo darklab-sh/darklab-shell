@@ -41,12 +41,12 @@ function moduleReport(report, source) {
   return module
 }
 
-describe('frontend compatibility global inventory', () => {
+describe('frontend browser global boundary inventory', () => {
   beforeAll(() => {
     runInventoryJson()
   }, 30_000)
 
-  const EXPECTED_GLOBAL_BUDGETS = Object.freeze({
+  const EXPECTED_BOUNDARY_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
       intentional_bootstrap: 2,
       lazy_placeholder: 68,
@@ -99,7 +99,7 @@ describe('frontend compatibility global inventory', () => {
     }))
   })
 
-  it('keeps lazy loader placeholders separate from generic compatibility exports', () => {
+  it('keeps lazy loader placeholders separate from unexpected window publishes', () => {
     const report = runInventoryJson()
     const lazyAssets = moduleReport(report, '/static/js/core/lazy_assets.js')
 
@@ -137,26 +137,26 @@ describe('frontend compatibility global inventory', () => {
     }
   }, 15_000)
 
-  it('pins compatibility-boundary budgets so global debt cannot grow silently', () => {
+  it('pins browser-boundary budgets so the global surface cannot grow silently', () => {
     const report = runInventoryJson()
 
     expect(report.summary.unresolved_app_bare_read_count).toBe(0)
     expect(report.summary.unused_allowlist_entry_count).toBe(0)
     expectPurposeBudgets(
       report.summary.window_publish_purposes,
-      EXPECTED_GLOBAL_BUDGETS.window_publish_purposes,
+      EXPECTED_BOUNDARY_BUDGETS.window_publish_purposes,
     )
     expectPurposeBudgets(
       report.summary.window_property_read_purposes,
-      EXPECTED_GLOBAL_BUDGETS.window_property_read_purposes,
+      EXPECTED_BOUNDARY_BUDGETS.window_property_read_purposes,
     )
     expectPurposeBudgets(
       report.summary.foreign_bare_read_purposes,
-      EXPECTED_GLOBAL_BUDGETS.foreign_bare_read_purposes,
+      EXPECTED_BOUNDARY_BUDGETS.foreign_bare_read_purposes,
     )
     expectPurposeBudgets(
       report.allowlist.purposes,
-      EXPECTED_GLOBAL_BUDGETS.allowlist_purposes,
+      EXPECTED_BOUNDARY_BUDGETS.allowlist_purposes,
     )
   })
 

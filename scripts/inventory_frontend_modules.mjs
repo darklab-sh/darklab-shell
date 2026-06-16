@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Inventory frontend global compatibility contracts in the ESM runtime.
+ * Inventory intentional frontend browser-global boundaries.
  *
  * The report focuses on app-level coupling: top-level names a file defines,
  * explicit window properties it publishes, and bare identifier reads that
@@ -33,13 +33,13 @@ const LAZY_ASSETS_SOURCE = '/static/js/core/lazy_assets.js';
 if (help) {
   console.log(`Usage: node scripts/inventory_frontend_modules.mjs [--json] [--check]
 
-Prints a per-file inventory of frontend compatibility-global coupling:
+Prints a per-file inventory of frontend browser-global boundaries:
   - top-level function/var/let/const/class names
   - explicit window.* properties published by the file, including helper publishers
   - explicit window.* property reads for app/vendor globals tracked by the allowlist
   - bare identifier reads that resolve to names published by another app file
-  - a purpose classification for known browser globals and compatibility bridges
-  - a coarse migration classification: pure leaf, consumer-only, tangled, or isolated
+  - a purpose classification for known browser globals and intentional bridges
+  - a coarse coupling classification: pure leaf, consumer-only, tangled, or isolated
 
 With --check, fails if an app-level bare read has no matching publish path.
 It also fails when a tracked app window publish/read is not covered by the
@@ -740,7 +740,7 @@ if (checkOnly && report.allowlist.unused_entries.length) {
 if (jsonOutput) {
   console.log(JSON.stringify(report, null, 2));
 } else if (checkOnly) {
-  console.log('Frontend inventory check passed: all app bare reads have publish paths and the allowlist is current.');
+  console.log('Frontend inventory check passed: all app bare reads have publish paths and the browser-boundary allowlist is current.');
 } else {
   printMarkdown(report);
 }

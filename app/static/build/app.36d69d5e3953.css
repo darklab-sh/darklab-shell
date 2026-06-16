@@ -10170,6 +10170,20 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 
 
 
+.project-monitoring-pill,
+.project-monitoring-fire-kind,
+.project-monitoring-severity,
+.project-monitoring-ack,
+.project-monitoring-policy-chip,
+.project-monitoring-rollup-note {
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+
+
 .project-monitoring-command {
   color: var(--fg);
   font-family: var(--font-mono);
@@ -10182,6 +10196,13 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 .project-monitoring-rollup {
   display: grid;
   gap: 7px;
+}
+
+
+
+.project-monitoring-rollup > .badge,
+.project-monitoring-rollup-counts {
+  justify-self: start;
 }
 
 

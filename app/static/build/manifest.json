@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.ede24ecb4baa.css",
-      "hash": "ede24ecb4baa52974ff43a96e24d6e024d9db87e426d7e0d322ba996f8fe8801",
+      "path": "/static/build/app.36d69d5e3953.css",
+      "hash": "36d69d5e3953e6d6b701bed7a1b22d7ffbda212de24de90847166f0479c7e7df",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -36,7 +36,7 @@
         "/static/css/welcome.css": "5cdb6be8622e40fd25261ce6eca5c40b0453e039333038aeef63e361d85b325f",
         "/static/css/shell-chrome.css": "04a9131c01be1c8555006a8df822969921c319569c8188973fa13da2b58ce12e",
         "/static/css/mobile.css": "081679f8720be4a712eb53921244277e1d5392f667d2727df0d632426bb5e266",
-        "/static/css/features/projects.css": "e8c2ce654b135869d888bb936631e7a946572d364a0d294e33896710057c4c90",
+        "/static/css/features/projects.css": "dcece6af8405e4e0b1268f191c350dae3a3747b4d70bbe50e52c62952b530748",
         "/static/css/features/atlas.css": "3eb83165fe37ea04c23ba7d29d317832ea29ed1a3b087134fe2505045bb96f26",
         "/static/css/features/atlas-mobile.css": "493f398b53a464a6027ed4b761b3e3174f2cf675d2913bfb2af6d1457aa11511",
         "/static/css/features/command-registry.css": "d45f7d3fa1709d60236f0c9932e63d8c8ac1d3df18387640773164dd2d8a5a54",

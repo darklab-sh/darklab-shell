@@ -2834,9 +2834,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `classifies intentional bootstrap and vendor globals from the allowlist` | Verifies the frontend inventory report marks bootstrap globals such as `APP_CONFIG` / `PermData` and classic vendor globals such as `AnsiUp` with their allowlisted purposes. |
-| `keeps lazy loader placeholders separate from generic compatibility exports` | Verifies lazy-loader placeholder globals are reported separately from ordinary compatibility exports. |
+| `keeps lazy loader placeholders separate from unexpected window publishes` | Verifies lazy-loader placeholder globals are reported separately from unexpected non-allowlisted window publishes. |
 | `passes check mode while reporting global purpose totals` | Verifies `--check` still passes with resolved app reads, reports purpose totals for publishes and reads, and fails if a new tracked `window.*` publish/read lacks an allowlist entry. |
-| `pins compatibility-boundary budgets so global debt cannot grow silently` | Verifies module bridge, test-hook, lazy-placeholder, and allowlist purpose counts stay explicit when compatibility boundaries change. |
+| `pins browser-boundary budgets so the global surface cannot grow silently` | Verifies module bridge, test-hook, lazy-placeholder, and allowlist purpose counts stay explicit when intentional browser boundaries change. |
 | `fails check mode when an allowlist entry no longer matches a boundary` | Verifies `--check` fails when a frontend globals allowlist entry no longer matches any current publish/read boundary. |
 
 #### `grep_output_suggestions.test.js`
@@ -3522,7 +3522,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `loads the source-mode shell graph and keeps cross-module bridges live` | Verifies that the native shell ES module entry imports successfully and preserves tab output, theme preference, and FAQ autocomplete bridge behavior. |
-| `keeps bundle-mode lazy entries on shared chunks instead of re-running shell modules` | Verifies that committed bundle-mode Atlas, History Run Details, and Workflows lazy entries import shared build chunks with the shell bootstrap instead of inlining eager shell bridge/listener setup again, and that Atlas desktop/mobile entries share the mobile bridge chunk. |
+| `keeps bundle-mode lazy entries on shared chunks without eager shell owner setup` | Verifies that committed bundle-mode Atlas, History Run Details, and Workflows lazy entries import shared build chunks with the shell bootstrap instead of inlining eager shell bridge/listener setup again, and that Atlas desktop/mobile entries share the mobile bridge chunk. |
 
 #### `state.test.js`
 
