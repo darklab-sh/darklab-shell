@@ -6,7 +6,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.2] — Unreleased
+## [2.2] — 2026-06-16
 
 ### Added
 
@@ -98,6 +98,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Frontend global inventory wording** — the inventory script, allowlist notes, docs, and asset test names now describe the post-migration browser-global guard as an intentional boundary contract instead of ongoing ESM migration scaffolding.
   - The allowlist keeps the same strict `assets:inventory:check` gate for unexpected `window.*` publishes/reads, while the bundle-mode shell entry test centralizes the eager owner-setup snippets it rejects.
   - **Validation:** focused frontend inventory and shell entry Vitest coverage plus `npm run assets:inventory:check` pass.
+
+- **Release checklist covers OpenAPI snapshots** — the release branch merge checklist now calls out regenerating `docs/api-v1-openapi.json` after an app version change so the checked-in contract keeps matching `/api/v1/openapi.json`.
+  - **Validation:** `python -m pytest -q tests/py/test_docs.py` passes.
 
 - **History compare split-view flake** — The Playwright split-pane scroll sync check now scopes its forced overflow to the active compare overlay, waits for both panes to be scrollable, drains pending animation frames, and then asserts the mirrored scroll position. This avoids a CI-only race where the right pane could still read as `0` after the test's synthetic scroll.
   - **Validation:** `npm run lint:js` and the focused History split-view Playwright case pass.
