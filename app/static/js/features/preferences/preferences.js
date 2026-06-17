@@ -751,6 +751,16 @@ function applyPromptUsernamePreference(username, persist = true) {
 }
 
 if (typeof window !== 'undefined') {
+  window.applyTimestampPreference = applyTimestampPreference;
+  window.applyLineNumberPreference = applyLineNumberPreference;
+  window.applyWelcomeIntroPreference = applyWelcomeIntroPreference;
+  window.applyShareRedactionDefaultPreference = applyShareRedactionDefaultPreference;
+  window.applyHudClockPreference = applyHudClockPreference;
+  window.applyCommandOutcomeSummariesPreference = applyCommandOutcomeSummariesPreference;
+  window.applyConstellationFullDayPreference = applyConstellationFullDayPreference;
+  window.applyCompareViewModePreference = applyCompareViewModePreference;
+  window.applyCompareContextPreference = applyCompareContextPreference;
+  window.applyPromptUsernamePreference = applyPromptUsernamePreference;
 }
 
 export {

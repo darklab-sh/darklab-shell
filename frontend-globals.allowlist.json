@@ -205,6 +205,86 @@
       "removal_target": "Import autocomplete matching through a neutral autocomplete bridge."
     },
     {
+      "name": "applyTimestampPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyLineNumberPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyWelcomeIntroPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyShareRedactionDefaultPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyHudClockPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyCommandOutcomeSummariesPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyConstellationFullDayPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyCompareViewModePreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyCompareContextPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyPromptUsernamePreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
       "name": "DarklabTeamScope",
       "purpose": "module_api_bridge",
       "owner": "features/team_scope.js",

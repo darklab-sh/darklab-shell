@@ -74,6 +74,17 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Frontend inventory allowlist covers the preference bridge** — the intentional browser-published preference apply helpers are now recorded in `frontend-globals.allowlist.json`, keeping the asset inventory gate aligned with the source and capture flows.
+  - **Validation:** `npm run assets:inventory:check` passes.
+
+- **Diagnostics stays readable on phones** — `/diag` now uses a single-column touch layout with stacked key/value rows, so health cards, storage rows, and classifier tools no longer squeeze into unreadable columns on mobile Safari-sized screens.
+  - **Validation:** focused mobile diagnostics Playwright coverage and CSS lint pass.
+
+- **UI screenshot capture covers the v2.2 Project workspace tabs** — the desktop and mobile screenshot packs now include dedicated Projects Monitoring, Activity, and Report scenes.
+  - **Why:** the capture pack already covered the Projects shell, but the new v2.2 workspace surfaces needed first-class visual-review frames before release.
+  - **What:** the capture helper can now choose `--asset-bundle-mode source|bundle`, and the shared capture setup waits on current app readiness signals instead of removed test-only globals.
+  - **Tests:** the added scenes remain steps inside the existing `desktop screenshot capture pack` and `mobile screenshot capture pack`, which are gated by `RUN_CAPTURE=1` and don't change the normal test totals. The committed asset bundles were regenerated after the browser theme compatibility helper was re-exposed.
+
 - **Official docs use current-state wording consistently** — README, FEATURES, ARCHITECTURE, CONFIGURATION, CONTRIBUTING, DECISIONS, DOC_STANDARDS, THEME, API/supporting docs, and the test guide now avoid roadmap-style wording in current behavior descriptions, while literal contract names such as `/api/v1`, `/v1/models`, migration filenames, log fields, and test identifiers stay intact.
   - Official docs also avoid naming temporary release-prep artifacts that are removed before the release is cut.
   - **Tests:** documentation drift coverage and markdown lint pass.

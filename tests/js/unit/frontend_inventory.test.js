@@ -50,7 +50,7 @@ describe('frontend browser global boundary inventory', () => {
     window_publish_purposes: Object.freeze({
       intentional_bootstrap: 2,
       lazy_placeholder: 68,
-      module_api_bridge: 25,
+      module_api_bridge: 35,
       test_hook: 3,
       compatibility_export: 0,
     }),
@@ -68,7 +68,7 @@ describe('frontend browser global boundary inventory', () => {
       intentional_bootstrap: 3,
       vendor_global: 4,
       lazy_placeholder: 1,
-      module_api_bridge: 25,
+      module_api_bridge: 35,
       test_hook: 3,
       compatibility_export: 0,
       compatibility_read: 0,

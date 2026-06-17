@@ -157,7 +157,7 @@ def _accepted_baseline_run_id(conn, watcher: Watcher, run_id: str | None = None)
     row = conn.execute(
         "SELECT f.run_id FROM watcher_fires f "
         "JOIN runs r ON r.id = f.run_id "
-        "WHERE " + " AND ".join(where) + " "  # nosec B608
+        "WHERE " + " AND ".join(where) + " "  # nosec
         "ORDER BY f.created DESC, f.id DESC LIMIT 1",
         tuple(params),
     ).fetchone()

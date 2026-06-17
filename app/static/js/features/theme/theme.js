@@ -321,6 +321,12 @@ function applyThemeSelection(themeName, persist = true) {
   }
 }
 
+const THEME_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+if (THEME_GLOBAL) {
+  THEME_GLOBAL.applyThemeSelection = applyThemeSelection;
+  THEME_GLOBAL.syncThemeSelectionControls = syncThemeSelectionControls;
+}
+
 export {
   _compareThemeEntries,
   _defaultThemeEntry,

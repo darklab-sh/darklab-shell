@@ -1387,15 +1387,11 @@ export async function freshHome(
     }
   }, { sessionToken: useCaptureSession ? CAPTURE_SESSION_TOKEN : '' })
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(
-    () => window.__sessionPreferencesLoadState === 'settled',
-    { timeout: 10_000 },
-  )
   await page.waitForFunction(() => {
     if (typeof applyThemeSelection !== 'function') return false
     const registry = window.ThemeRegistry
     return Boolean(registry && Array.isArray(registry.themes))
-  }, { timeout: 10_000 })
+  }, undefined, { timeout: 10_000 })
   if (themeName) {
     await page.waitForFunction((name) => {
       const registry = window.ThemeRegistry
@@ -1448,7 +1444,7 @@ export async function freshHome(
       await page.waitForTimeout(100)
     }
   } else {
-    await page.waitForFunction(() => Boolean(document.body?.dataset?.theme), { timeout: 10_000 })
+    await page.waitForFunction(() => Boolean(document.body?.dataset?.theme), undefined, { timeout: 10_000 })
   }
   await ensurePromptReady(page, { cancelWelcome })
   if (guardrailMode) {
@@ -1476,6 +1472,7 @@ export async function seedOutput(page, lines) {
 export async function waitForWorkflowsReady(page) {
   await page.waitForFunction(
     () => document.querySelectorAll('#rail-workflows-list > *').length > 0,
+    undefined,
     { timeout: 10_000 },
   )
 }

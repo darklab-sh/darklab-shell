@@ -17,9 +17,12 @@ function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
   if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')
   const slot = testInfo.project.name.match(/w\d+$/)?.[0]
-  if (!slot) throw new Error(`Cannot determine e2e server slot from ${testInfo.project.name}`)
-  const logName = readdirSync(logDir).find((name) => name.startsWith(`${slot}-`) && name.endsWith('.log'))
-  if (!logName) throw new Error(`Cannot find e2e server log for ${slot}`)
+  const logNames = readdirSync(logDir).filter((name) => name.endsWith('.log'))
+  const logName = slot
+    ? logNames.find((name) => name.startsWith(`${slot}-`))
+    : logNames.find((name) => name.startsWith(`${testInfo.project.name}-`))
+      || (logNames.length === 1 ? logNames[0] : '')
+  if (!logName) throw new Error(`Cannot find e2e server log for ${slot || testInfo.project.name}`)
   const log = readFileSync(join(logDir, logName), 'utf8')
   const dataDir = log.match(/^\[e2e-server\] data_dir=(.+)$/m)?.[1]
   if (!dataDir) throw new Error(`Cannot find data_dir in ${logName}`)
@@ -259,6 +262,58 @@ print(json.dumps({
   )
   if (result.status !== 0) {
     throw new Error(`Failed to seed project monitoring fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
+export function seedProjectActivityFixture(testInfo, { sessionId, projectId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+import hashlib
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id = sys.argv[1:4]
+event_id = "aud_capture_" + uuid.uuid4().hex[:16]
+session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+details = {"source": "capture", "review_state": "confirmed", "target": "capture.darklab.sh"}
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    conn.execute(
+        "INSERT INTO audit_events "
+        "(id, owner_session_hash, actor_session_hash, actor_session_label, actor_role, actor_display_name, "
+        "event_type, target_type, target_id, project_id, correlation_id, details_version, created, details) "
+        "VALUES (?, ?, ?, 'capture session', 'owner', 'Capture Reviewer', "
+        "'finding.review_change', 'finding', ?, ?, ?, 1, '2026-06-06T12:00:00+00:00', ?)",
+        (
+            event_id,
+            session_hash,
+            session_hash,
+            "finding_capture_" + uuid.uuid4().hex[:8],
+            project_id,
+            "corr_capture_" + uuid.uuid4().hex[:12],
+            json.dumps(details),
+        ),
+    )
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({"eventId": event_id}))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, projectId],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed project activity fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
   }
   return JSON.parse(result.stdout)
 }

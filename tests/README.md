@@ -240,7 +240,7 @@ Both demo specs also read from one named visual-history fixture in `tests/js/e2e
 
 ### UI Screenshot Capture
 
-Standalone Playwright specs that generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). Guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only via the wrapper:
+Standalone Playwright specs that generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). Guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only via the wrapper. The wrapper accepts `--asset-bundle-mode source|bundle` when a capture needs to compare local source assets with the committed release bundles.
 
 ```bash
 scripts/capture_ui_screenshots.sh
@@ -4367,7 +4367,7 @@ Desktop UI screenshot capture spec. Walks the desktop shell through a curated pa
 
 | Test | Description |
 | --- | --- |
-| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, Projects details/Monitoring/Activity/Report tabs, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
 
 #### `ui-capture.mobile.capture.js`
 
@@ -4375,7 +4375,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 | Test | Description |
 | --- | --- |
-| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, Projects details/Monitoring/Activity/Report tabs, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
 
 #### `ui.spec.js`
 
