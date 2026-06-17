@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,756
-- docs/inventory meta-tests: 42
-- `pytest`: 2120 (2083 behavior + 37 meta)
-- `vitest`: 1412
+- behavior tests: 3,759
+- docs/inventory meta-tests: 40
+- `pytest`: 2120 (2085 behavior + 35 meta)
+- `vitest`: 1413
 - `playwright`: 266
-- total: 3,798
+- total: 3,799
 
 This document is organized in two parts:
 
@@ -433,6 +433,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_darklab_cli_config_requires_explicit_http_scheme` | Verifies CLI API URLs fail clearly when no HTTP or HTTPS scheme is provided. |
 | `test_darklab_cli_run_requires_no_follow_for_json_start_payload` | Verifies `darklab run` requires `--no-follow --format json` for start-only JSON output and rejects incompatible follow/format pairs before starting a run. |
 | `test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors` | Verifies the CLI entry point can read active/current data, render table output, stream, start runs, show command help, and report API errors through a fake API client. |
+| `test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history` | Verifies the bundled CLI can talk to a live local Flask server with bearer auth, list filtered history, print saved output, and surface API errors. |
 | `test_darklab_cli_tail_text_does_not_double_space_output` | Verifies CLI text streaming normalizes SSE line endings without adding blank lines between output rows. |
 | `test_darklab_cli_tail_handles_keyboard_interrupt` | Verifies Ctrl+C while tailing a run exits cleanly without a traceback. |
 | `test_darklab_cli_run_follow_interrupt_reports_run_id` | Verifies Ctrl+C while `darklab run` follows output reports the run id and reattach command. |
@@ -508,7 +509,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPackagePresetCatalog.test_package_preset_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator package preset overrides log a warning and fall back to the shipped catalog. |
 | `TestPackagePresetCatalog.test_package_preset_loader_caps_display_lengths_and_default_labels` | Verifies package preset display text and default labels are bounded. |
 | `TestPackagePresetCatalog.test_package_preset_loader_rejects_too_many_presets` | Verifies package preset catalogs reject more entries than the configured catalog cap. |
-| `TestReportTemplateCatalog.test_default_report_template_sections_match_plan` | Verifies the shipped report template catalog keeps the planned report section order. |
+| `TestReportTemplateCatalog.test_default_report_template_sections_match_plan` | Verifies the shipped report template catalog keeps the configured report section order. |
 | `TestReportTemplateCatalog.test_report_template_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator report template overrides log a warning and fall back to the shipped catalog. |
 | `TestReportTemplateCatalog.test_report_draft_storage_handles_scope_and_conflicts` | Verifies report draft storage keeps personal/team drafts separate and rejects stale saves. |
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
@@ -697,7 +698,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestCommandKnowledgeSchema.test_knowledge_fields_is_union_of_list_and_scalar` | Verifies that `KNOWLEDGE_FIELDS` equals the union of the list and scalar field sets. |
 | `TestCommandKnowledgeSchema.test_knowledge_list_and_scalar_fields_are_disjoint` | Verifies that no field name appears in both the list and scalar sets. |
 | `TestCommandKnowledgeSchema.test_caps_are_positive_integers` | Verifies that `KNOWLEDGE_LIST_MAX_ITEMS` and `KNOWLEDGE_TEXT_MAX_CHARS` are positive integers. |
-| `TestCommandKnowledgeSchema.test_knowledge_is_in_known_command_fields` | Verifies that the `knowledge` key is already present in the known-command-fields set so Phase 1 normalizer additions will not trip the lint. |
+| `TestCommandKnowledgeSchema.test_knowledge_is_in_known_command_fields` | Verifies that the `knowledge` key is already present in the known-command-fields set so command normalizer additions do not trip the lint. |
 | `TestCommandKnowledgeSchema.test_known_command_fields_covers_all_normalizer_inputs` | Verifies that every top-level key consumed by `normalize_commands_registry_entry` is in the known-fields set. |
 | `TestCommandKnowledgeSchema.test_pipe_helper_known_fields_are_subset_of_command_fields` | Verifies that the pipe-helper known-fields set is a strict subset of the full command known-fields set. |
 | `TestCommandKnowledgeSchema.test_clean_command_entry_returns_empty` | Verifies that `check_unknown_command_fields` returns an empty list for a fully well-formed command entry. |
@@ -1094,7 +1095,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 #### `test_docs.py`
 
-Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, release-draft conventions, app configuration default coverage in `app/conf/config.yaml` plus `CONFIGURATION.md`, team-mode scope predicate safety, and Related Docs navigation coverage.
+Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, app configuration default coverage in `app/conf/config.yaml` plus `CONFIGURATION.md`, team-mode scope predicate safety, and Related Docs navigation coverage.
 
 | Test | Description |
 | --- | --- |
@@ -1128,13 +1129,11 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
 | `TestProjectStructureCoverage.test_structure_order_matches_git_file_listing` | Checks that the README.md `## Project Structure` tree follows `git ls-files --cached` order with parent directories inserted before children. |
 | `TestArchitectureRouteInventory.test_route_inventory_matches_flask_url_map` | Checks that ARCHITECTURE.md `## HTTP Route Inventory` lists the same method/route pairs registered in Flask's URL map, without enforcing documentation order. |
-| `TestReleaseDraftDocs.test_temporary_branch_artifacts_stay_out_of_official_docs` | Verifies temporary branch draft artifacts stay out of the official documentation map. |
-| `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
 | `TestOperatorConfigurationDocs.test_config_yaml_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in the checked-in `app/conf/config.yaml` reference. |
 | `TestOperatorConfigurationDocs.test_configuration_reference_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in `CONFIGURATION.md` `## Application Settings`. |
 | `TestTeamModeScopePredicates.test_direct_team_run_predicates_use_owner_scope_helpers` | Checks SQL-bearing app code for direct team-run predicates that combine `session_id = ?` with `team_id = ?`, so team-owned runs keep using shared owner-scope helpers. |
-| `TestRelatedDocsNavigation.test_related_docs_sections_list_project_markdown_files` | Checks that every `## Related Docs` section lists all tracked project Markdown files except release drafts and itself. |
-| `TestRelatedDocsNavigation.test_readme_documentation_map_lists_project_markdown_files` | Checks that README.md `## Documentation Map` lists all tracked project Markdown files except release drafts and README.md itself. |
+| `TestRelatedDocsNavigation.test_related_docs_sections_list_project_markdown_files` | Checks that every `## Related Docs` section lists all tracked project Markdown files except itself. |
+| `TestRelatedDocsNavigation.test_readme_documentation_map_lists_project_markdown_files` | Checks that README.md `## Documentation Map` lists all tracked project Markdown files except README.md itself. |
 
 #### `test_logging.py`
 
@@ -1379,6 +1378,7 @@ Generic JSON webhook notification channel delivery and payload-shape coverage.
 | `test_webhook_channel_rejects_dns_resolved_private_hosts` | Verifies webhook delivery rejects hostnames that resolve to private addresses. |
 | `test_webhook_channel_allows_explicit_private_host_allowlist` | Verifies the private-host allowlist can intentionally permit trusted internal webhook receivers. |
 | `test_webhook_channel_retries_timeout` | Verifies network timeouts are retryable webhook delivery failures. |
+| `test_webhook_channel_log_host_strips_url_userinfo` | Verifies notification HTTP DEBUG/WARN log extras strip URL userinfo from vault-backed webhook URLs. |
 | `test_run_complete_payload_exposes_command_root_without_full_command` | Verifies run-complete payloads include only command root, not full command arguments. |
 
 #### `test_output_search.py`
@@ -1415,7 +1415,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 
 | Test | Description |
 | --- | --- |
-| `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the Phase 6 backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
+| `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
 | `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
 | `test_postgres_watcher_monitoring_migration_backfills_legacy_rows` | Verifies the Postgres watcher-monitoring migration backfills legacy watcher Project ids and watcher-fire state/kind rows. |
@@ -2382,6 +2382,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `prompts before switching schedules or creating a new schedule with unsaved edits` | Verifies that dirty Schedule modal edits prompt before selecting another schedule or starting a new one. |
 | `creates watchers from a baseline run and renders diff audit rows` | Verifies the Watchers modal creates a watcher from a Run Details baseline, sends cadence/options payloads, renders comparison-style diff details, and shows fire audit run handoffs. |
 | `creates watchers that capture the first run as the baseline` | Verifies the Watchers modal can create a first-run watcher without a Run ID and shows the pending baseline state. |
+| `preselects a project when creating a monitor from Project Monitoring` | Verifies the Watchers modal opens with the requested Project selected, hides archived Projects, and sends the Project link when creating a first-run monitor. |
 | `pauses resumes fires and accepts watcher baselines from action buttons` | Verifies Watchers modal pause, resume, run-now, and accept-baseline actions call the right endpoints and confirmation flow. |
 | `does not let history outside-click dismissal close behind modal overlays` | Verifies that History drawer outside-click dismissal exempts modal overlays so stacked editors keep focus. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
@@ -2731,7 +2732,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | Test | Description |
 | --- | --- |
 | `app/templates/app_stylesheets.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the shared stylesheet include — currently emits no button-like elements; pins that state. |
-| `app/templates/diag.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator diagnostics page — currently emits no button-like elements, so the assertion short-circuits clean and pins that state (any future button added to `/diag` must go through a primitive or an allowlist entry). |
+| `app/templates/diag.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator diagnostics page — currently emits no button-like elements, so the assertion short-circuits clean and pins that state. Any button added to `/diag` must go through a primitive or an allowlist entry. |
 | `app/templates/diag_audit.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator audit-log viewer so its filter, pagination, and export controls keep using shared button primitives. |
 | `app/templates/index.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the main app template — the surface that owns the desktop rail, tab bar, terminal chrome, mobile hamburger/recents sheets, and the five app-level modals. The bulk of the exception fixture exists because of this file. |
 | `app/templates/permalink.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink viewer — the `toggle-ln` / `toggle-ts` / `copy-txt` / `perm-save-btn` row uses `.btn .btn-secondary .btn-compact` directly, and the `save-txt` / `save-html` / `save-pdf` entries inside the save menu are covered by the `[data-action^="save-"]` exception. |
@@ -2920,7 +2921,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `bulk add uses the project picker with the active project first` | Verifies the bulk add-to-project picker lists the active project first and posts selected run ids in one batch. |
 | `shows a fallback toast when history refresh fails after a successful bulk action` | Verifies a completed bulk action still tells the user to refresh when the post-action History reload fails. |
 | `bulk remove unlinks selected runs from every linked project without a picker` | Verifies bulk remove confirms once, skips the project picker, and posts batch unlink requests for every linked project represented by the selected runs. |
-| `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown future reasons. |
+| `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown rejection reasons. |
 | `only offers Atlas cleanup on run delete when there are removable candidates` | Verifies that run delete confirmations only show the optional Atlas cleanup checkbox when removable cleanup candidates exist. |
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
@@ -3174,7 +3175,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `maps dashboard status filters onto equivalent timeline fire kinds` | Verifies a quiet status filter keeps quiet monitor cards and no-change timeline events aligned. |
 | `renders monitoring metadata pills with badge primitives and semantic tones` | Verifies Project Monitoring status, severity, acknowledgement, fire-kind, and policy labels compose the shared badge primitive with semantic tone classes. |
 | `renders triage controls once and only for actionable timeline fires` | Verifies Project Monitoring keeps monitor-card latest fires read-only, renders a single timeline triage widget for changed fires, omits triage controls for no-change fires, and marks the timeline with the shared `.nice-scroll` primitive. |
-| `renders primitive-safe fallback action buttons without the shared button factory` | Verifies Project Monitoring fallback action buttons still compose the shared `.btn` role primitives when the shell button factory is unavailable. |
+| `requires the shared button factory for action buttons` | Verifies Project Monitoring fails clearly instead of rendering bare fallback buttons when the shared shell button factory is unavailable. |
 | `opens run details and compares available monitoring runs from action buttons` | Verifies Project Monitoring action buttons open Run Details and launch the shared comparison flow for available current/baseline runs. |
 | `confirms before accepting a watcher baseline from monitoring` | Verifies Accept baseline routes through the shared confirmation primitive, cancels without posting, and posts only after the operator confirms. |
 | `runs pause resume and run-now watcher actions from monitoring cards` | Verifies Project Monitoring pause, resume, and run-now actions send the expected watcher requests and surface action failures safely. |
@@ -4461,7 +4462,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](../docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](../docs/api.md) - headless API and bundled CLI usage guide

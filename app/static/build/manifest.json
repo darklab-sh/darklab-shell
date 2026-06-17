@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.36d69d5e3953.css",
-      "hash": "36d69d5e3953e6d6b701bed7a1b22d7ffbda212de24de90847166f0479c7e7df",
+      "path": "/static/build/app.f7f7004dc444.css",
+      "hash": "f7f7004dc444a5893699f40bac062614c04f9bf655d3e2d6e21db5543e8ccb78",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -36,7 +36,7 @@
         "/static/css/welcome.css": "5cdb6be8622e40fd25261ce6eca5c40b0453e039333038aeef63e361d85b325f",
         "/static/css/shell-chrome.css": "04a9131c01be1c8555006a8df822969921c319569c8188973fa13da2b58ce12e",
         "/static/css/mobile.css": "081679f8720be4a712eb53921244277e1d5392f667d2727df0d632426bb5e266",
-        "/static/css/features/projects.css": "dcece6af8405e4e0b1268f191c350dae3a3747b4d70bbe50e52c62952b530748",
+        "/static/css/features/projects.css": "2449afff9dbb85c6a4db9643219fcddf55b550ebe4e0c62b9bbc7ee20919182b",
         "/static/css/features/atlas.css": "3eb83165fe37ea04c23ba7d29d317832ea29ed1a3b087134fe2505045bb96f26",
         "/static/css/features/atlas-mobile.css": "493f398b53a464a6027ed4b761b3e3174f2cf675d2913bfb2af6d1457aa11511",
         "/static/css/features/command-registry.css": "d45f7d3fa1709d60236f0c9932e63d8c8ac1d3df18387640773164dd2d8a5a54",
@@ -568,8 +568,8 @@
       "hash": "c7b6c0a90095cb406649a8e789c22a09e595eb9a8f6ed238d0081f860e4c49d5"
     },
     "/static/js/features/projects/project_monitoring.js": {
-      "path": "/static/build/static-project-monitoring.31d992e3715b.js",
-      "hash": "da7c42cac1e1eb3c44305efd2909d05bfa9f026f995d4a10018a800441015077"
+      "path": "/static/build/static-project-monitoring.e24c18556e71.js",
+      "hash": "f0f887017942f85f242f816030257442baf2fa13fd72bb2ef600bf1d6f84a4f4"
     },
     "/static/js/features/projects/project_navigation.js": {
       "path": "/static/build/static-project-navigation.9115881ceb49.js",
@@ -660,8 +660,8 @@
       "hash": "63b068fa1d8379806d205c926393157884cd736e9f482cd29007a492f484951e"
     },
     "/static/js/features/watchers/watchers_modal.js": {
-      "path": "/static/build/static-watchers-modal.e0aa5b3f1986.js",
-      "hash": "44d8c637c737ef4a93a769aed037bd66392f06ce13901c57d54b346bf0385624"
+      "path": "/static/build/static-watchers-modal.fddb7102cddf.js",
+      "hash": "cee09ecc580afe179cfdad209e5d6c883894c056621e2a5882de91af652de507"
     },
     "/static/js/features/workflows/workflows.js": {
       "path": "/static/build/static-workflows.f94fc407146d.js",

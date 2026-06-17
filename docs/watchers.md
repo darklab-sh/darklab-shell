@@ -20,7 +20,7 @@ Each watcher stores:
 - bounded diff details from the last completed check
 - recent fire audit rows
 
-Watchers belong to the active personal or team scope. Anonymous browser sessions cannot create watchers because the worker needs a durable `tok_` token after the browser closes, and token revocation must still stop future personal fires. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
+Watchers belong to the active personal or team scope. Anonymous browser sessions cannot create watchers because the worker needs a durable `tok_` token after the browser closes, and token revocation must still stop later personal fires. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
 Archived teams pause their team-owned watchers. Reactivating a team restores access, but archive-paused watchers stay paused until someone resumes them.
 
 Project-linked watchers appear in that Project's **Monitoring** tab. A watcher can be assigned to a Project directly, or it can infer the Project from a baseline run when that run has exactly one same-scope Project link. Ambiguous, unlinked, or cross-scope baseline links leave the watcher unassigned. Deleting a Project clears watcher membership instead of deleting the watcher.
@@ -48,11 +48,14 @@ The browser pre-fills the baseline run and command. If you prefer to paste a run
 From the bundled CLI:
 
 ```bash
-darklab watch create --first-run --every hourly -- nmap -sV darklab.sh
-darklab watch create run_123 --every hourly
+darklab watch create --first-run --every hourly --project prj_123 -- nmap -sV darklab.sh
+darklab watch create run_123 --every hourly --project prj_123
 darklab watch create run_123 --cron "*/15 * * * *" --label "HTTP drift"
+darklab watch create run_123 --every hourly --alert-after-repeated-changes 3 --alert-signal-class ports
 darklab watch create run_123 --every daily -- curl -I https://darklab.sh
 ```
+
+The Watchers modal has the same Project selector, and the Project Monitoring tab's **New monitor** action opens the modal with the current project already selected. Use `darklab watch set-project wtr_123 prj_123` to move an existing watcher into a Project Monitoring tab, or `darklab watch set-project wtr_123 --clear` to remove the project link.
 
 If you do not pass a command after `--`, the watcher uses the baseline run's command. If you do pass a command after `--`, that command becomes the watched command while the chosen baseline still provides the comparison point.
 
@@ -71,7 +74,7 @@ The baseline run is the point every new watcher fire compares against.
 - **Accept baseline** promotes the latest watcher fire, or a selected run id, to become the new baseline.
 - If the baseline run is deleted from History, the watcher moves to `error`, records `state_reason='baseline_deleted'`, and pauses its owned schedule.
 
-Accepting a baseline is useful when a change is expected. For example, if a new open port is valid, accept the changed run so future watcher checks compare against the new normal.
+Accepting a baseline is useful when a change is expected. For example, if a new open port is valid, accept the changed run so later watcher checks compare against the new normal.
 
 ---
 
@@ -119,6 +122,14 @@ Watcher notification policy tunes when changed notifications are sent:
 - `ignore_line_patterns` accepts up to 20 unique strings, each 120 characters or less. These patterns only apply to the textual fallback classifier, where they are matched against individual output lines before the fallback diff is built.
 - `alert_after_repeated_changes` is an integer from 1 to 10. Values above 1 keep detected changes visible in the dashboard but suppress `watcher_changed` notification fan-out until the repeated-change threshold is reached.
 - `alert_signal_classes` accepts `findings`, `entities`, and `ports`. Empty means all signal classes can notify. Findings covers structured findings, Entities covers host/DNS/textual entity changes, and Ports covers open-port plus certificate/TLS changes.
+
+The bundled CLI exposes the same policy fields. Add `--ignore-line-pattern` and `--alert-signal-class` more than once when a watcher needs several values, use `--alert-after-repeated-changes N` for repeated-change gating, and use `darklab watch set-policy` to replace policy lists or clear them later:
+
+```bash
+darklab watch set-policy wtr_123 --ignore-line-pattern "^Host is up" --alert-after-repeated-changes 3
+darklab watch set-policy wtr_123 --alert-signal-class findings --alert-signal-class ports
+darklab watch set-policy wtr_123 --clear-ignore-line-patterns --clear-alert-signal-classes
+```
 
 The textual fallback is intentionally more sensitive than the structured classifiers. It is useful for generic commands, but tools with unstable ordering or timestamps may be noisier until they get a dedicated classifier.
 
@@ -170,6 +181,9 @@ darklab watch list
 darklab watch info wtr_123
 darklab watch pause wtr_123
 darklab watch resume wtr_123
+darklab watch set-project wtr_123 prj_123
+darklab watch set-project wtr_123 --clear
+darklab watch set-policy wtr_123 --alert-after-repeated-changes 3
 darklab watch run wtr_123
 darklab watch fires wtr_123
 darklab watch accept wtr_123
@@ -205,7 +219,7 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide

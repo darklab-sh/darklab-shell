@@ -10117,7 +10117,14 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 .project-monitoring-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
+  grid-template-columns: 1fr;
+}
+
+
+
+.project-monitoring-card-grid {
+  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 
@@ -10147,6 +10154,10 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   border: 1px solid var(--theme-chrome-border);
   border-radius: 8px;
   background: var(--theme-chrome-row-bg);
+}
+
+.project-monitoring-card {
+  align-content: start;
 }
 
 
@@ -10273,6 +10284,14 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 .project-monitoring-root.is-mobile .project-monitoring-grid,
 .project-monitoring-timeline-row.is-mobile {
   grid-template-columns: 1fr;
+}
+
+
+
+@media (max-width: 1040px) {
+  .project-monitoring-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 

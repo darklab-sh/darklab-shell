@@ -159,7 +159,7 @@ If SQLite grows quickly, first check whether retention is set correctly. Then ch
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
 - [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts

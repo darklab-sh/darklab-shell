@@ -849,6 +849,75 @@ describe('app helpers', () => {
     expect(detail.textContent).toContain('pending baseline')
   })
 
+  it('preselects a project when creating a monitor from Project Monitoring', async () => {
+    let watcher = null
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url.startsWith('/projects?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [
+              { id: 'prj_1', name: 'External perimeter', status: 'active' },
+              { id: 'prj_archived', name: 'Old project', status: 'archived' },
+            ],
+          }),
+        }
+      }
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers: watcher ? [watcher] : [] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return { ok: true, json: async () => ({ cron_expr: '0 * * * *', timezone: 'UTC', next_fires: [] }) }
+      }
+      if (url === '/watchers' && options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        watcher = {
+          id: 'wtr_project',
+          label: body.label,
+          project_id: body.project_id,
+          command_text: body.command,
+          baseline_run_id: '',
+          last_run_id: '',
+          state: 'ok',
+          options: body.options,
+          policy: body.policy,
+          last_diff_summary: {},
+          schedule: {
+            id: 'sch_project',
+            cadence_preset: 'hourly',
+            cron_expr: '0 * * * *',
+            timezone: 'UTC',
+            enabled: true,
+          },
+        }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      if (url.startsWith('/watchers/wtr_project/fires')) {
+        return { ok: true, json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const { _bindWatchersModal, openWatchersModal } = loadWatchersModalTestFns({ apiFetch, showToast })
+    _bindWatchersModal()
+
+    await openWatchersModal({ projectId: 'prj_1', newWatcher: true })
+    await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
+    expect(document.getElementById('watchers-project-input').value).toBe('prj_1')
+    expect(document.getElementById('watchers-project-input').textContent).not.toContain('Old project')
+    document.getElementById('watchers-label-input').value = 'Project monitor'
+    document.getElementById('watchers-command-input').value = 'httpx darklab.sh'
+    document.getElementById('watchers-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_mode: 'first_run',
+      project_id: 'prj_1',
+      command: 'httpx darklab.sh',
+    })
+  })
+
   it('pauses resumes fires and accepts watcher baselines from action buttons', async () => {
     let watcher = {
       id: 'wtr_actions',

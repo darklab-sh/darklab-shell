@@ -52,6 +52,7 @@ const WATCHERS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
 let _watchersState = {
   watchers: [],
+  projects: [],
   selectedId: '',
   draft: null,
   mode: 'view',
@@ -197,6 +198,7 @@ function _watcherDraftFromWatcher(watcher = null, baselineRun = null) {
   return {
     id: watcher?.id || '',
     label: String(watcher?.label || '').trim(),
+    project_id: String(watcher?.project_id || baselineRun?.project_id || '').trim(),
     baseline_mode: baselineMode,
     baseline_run_id: baselineId,
     command_text: command,
@@ -420,6 +422,7 @@ function _normalizeWatcherComparable(data = {}) {
   const policy = _normalizeWatcherPolicyDraft(data);
   return {
     label: String(data.label || '').trim(),
+    project_id: String(data.project_id || '').trim(),
     baseline_run_id: String(data.baseline_run_id || '').trim(),
     baseline_mode: String(data.baseline_mode || (data.baseline_run_id ? 'existing_run' : 'first_run')).trim(),
     command: String(data.command ?? data.command_text ?? '').trim(),
@@ -457,6 +460,7 @@ function _watcherNewDraftHasMeaningfulInput(draft) {
   const data = _normalizeWatcherComparable(draft);
   return !!(
     data.label
+    || data.project_id
     || data.baseline_run_id
     || data.baseline_mode !== 'first_run'
     || data.command
@@ -644,6 +648,30 @@ function _watcherTimezoneSelect(value) {
   return select;
 }
 
+function _watcherProjectSelect(value) {
+  const selectedValue = String(value || '').trim();
+  const select = document.createElement('select');
+  select.id = 'watchers-project-input';
+  select.className = 'form-select watchers-select';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = 'No project';
+  select.appendChild(none);
+  (_watchersState.projects || []).forEach((project) => {
+    const projectId = String(project?.id || '').trim();
+    if (!projectId || String(project?.status || 'active') === 'archived') return;
+    const option = document.createElement('option');
+    option.value = projectId;
+    option.textContent = String(project?.name || project?.slug || projectId);
+    if (projectId === selectedValue) option.selected = true;
+    select.appendChild(option);
+  });
+  select.value = selectedValue && [...select.options].some(option => option.value === selectedValue)
+    ? selectedValue
+    : '';
+  return select;
+}
+
 function _setWatcherCadencePreset(value) {
   document.querySelectorAll('.watchers-cadence-btn').forEach((btn) => {
     const active = btn.dataset.watcherPreset === value;
@@ -747,13 +775,17 @@ function _renderWatcherForm(parent, watcher) {
   commandInput.spellcheck = false;
   commandInput.placeholder = 'Command to run for the first baseline and future checks';
   const timezoneInput = _watcherTimezoneSelect(draft.timezone || _watcherDefaultTimezone());
+  const projectInput = _watcherProjectSelect(draft.project_id || '');
   const cronInput = _watcherInput(draft.cron_expr || WATCHERS_DEFAULT_CRON, {
     id: 'watchers-cron-input',
     autocomplete: 'off',
     required: 'required',
   });
 
-  form.appendChild(_watcherFormField('Label', labelInput));
+  form.append(
+    _watcherFormField('Label', labelInput),
+    _watcherFormField('Project', projectInput),
+  );
   const baselineMode = document.createElement('div');
   baselineMode.className = 'watchers-field watchers-cadence-field';
   const baselineModeLabel = document.createElement('span');
@@ -943,6 +975,7 @@ function _collectWatcherDraft(form = document.getElementById('watchers-form')) {
   const baselineMode = root.querySelector?.('.watchers-baseline-mode-btn.is-active')?.dataset.watcherBaselineMode || 'first_run';
   return {
     label: String(root.querySelector?.('#watchers-label-input')?.value || '').trim(),
+    project_id: String(root.querySelector?.('#watchers-project-input')?.value || '').trim(),
     baseline_mode: baselineMode,
     baseline_run_id: baselineMode === 'existing_run'
       ? String(root.querySelector?.('#watchers-baseline-input')?.value || '').trim()
@@ -970,6 +1003,7 @@ function _syncWatcherDraftFromForm() {
   _watchersState.draft = {
     id: _watchersState.draft?.id || _watchersState.selectedId || '',
     label: data.label,
+    project_id: data.project_id,
     baseline_mode: data.baseline_mode,
     baseline_run_id: data.baseline_run_id,
     command_text: data.command,
@@ -1415,10 +1449,21 @@ async function _loadWatcherFires(watcherId, { offset = 0 } = {}) {
   }
 }
 
-async function refreshWatchersModal({ selectId = '', baselineRun = null } = {}) {
+async function _loadWatcherProjects() {
+  try {
+    const data = await _watcherJson('/projects?include_archived=1&include_counts=0&limit=100&offset=0', { cache: 'no-store' });
+    _watchersState.projects = Array.isArray(data.projects) ? data.projects : [];
+  } catch (err) {
+    _watchersState.projects = [];
+    _watcherClientError('failed to load watcher project choices', err);
+  }
+}
+
+async function refreshWatchersModal({ selectId = '', baselineRun = null, projectId = '', newWatcher = false } = {}) {
   _watchersState.loading = true;
   _renderWatchersModal();
   try {
+    await _loadWatcherProjects();
     const data = await _watcherJson('/watchers', { cache: 'no-store' });
     _watchersState.watchers = Array.isArray(data.watchers) ? data.watchers : [];
     _watcherEmitUiEvent('app:watchers-rendered', { items: _watchersState.watchers.slice() });
@@ -1432,10 +1477,11 @@ async function refreshWatchersModal({ selectId = '', baselineRun = null } = {}) 
       _watchersState.missingWatcherId = requestedId;
       _watchersState.cleanDraft = null;
       _watchersState.formDirty = false;
-    } else if (baselineRun) {
+    } else if (baselineRun || projectId || newWatcher) {
       _watchersState.mode = 'new';
       _watchersState.selectedId = '';
       _watchersState.draft = _watcherDraftFromWatcher(null, baselineRun);
+      _watchersState.draft.project_id = String(projectId || _watchersState.draft.project_id || '').trim();
       _watchersState.cleanDraft = null;
       _watchersState.formDirty = false;
     } else {
@@ -1468,13 +1514,18 @@ async function openWatchersModal(options = {}) {
       ? { id: options.baselineRunId, command: options.command || '' }
       : null
   );
-  _watchersState.mode = baselineRun ? 'new' : 'view';
+  const projectId = String(options.projectId || options.project_id || '').trim();
+  const newWatcher = !!options.newWatcher || !!projectId;
+  _watchersState.mode = baselineRun || newWatcher ? 'new' : 'view';
   _watchersState.selectedId = String(options.watcherId || '');
-  _watchersState.draft = baselineRun ? _watcherDraftFromWatcher(null, baselineRun) : null;
+  _watchersState.draft = baselineRun || newWatcher ? _watcherDraftFromWatcher(null, baselineRun) : null;
+  if (_watchersState.draft && projectId) _watchersState.draft.project_id = projectId;
   _watchersState.formDirty = false;
   await refreshWatchersModal({
     selectId: options.watcherId || '',
     baselineRun,
+    projectId,
+    newWatcher,
   });
 }
 

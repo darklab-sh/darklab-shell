@@ -31,23 +31,19 @@ Part 4 — ARCHITECTURE.md HTTP route inventory:
   grouped by feature rather than app registration order, so this check enforces
   coverage only, not ordering.
 
-Part 5 — temporary release draft files:
-  Version branches can carry paired draft artifacts while the release is being
-  prepared, but official docs must not link to those transient files.
-
-Part 6 — operator configuration docs:
+Part 5 — operator configuration docs:
   Operator-facing defaults from app/config.py's load_config() defaults must
   be represented in the checked-in app/conf/config.yaml reference and the
   CONFIGURATION.md "## Application Settings" table.
 
-Part 7 — team-mode scope predicates:
+Part 6 — team-mode scope predicates:
   Team-visible run queries must use the shared owner-scope predicates instead
   of directly combining a caller's session token with a team id.
 
-Part 8 — related-doc navigation:
+Part 7 — related-doc navigation:
   Every "## Related Docs" section must link to every tracked project Markdown
-  file except release drafts and itself. README.md's "## Documentation Map"
-  follows the same inventory.
+  file except itself. README.md's "## Documentation Map" follows the same
+  inventory.
 """
 
 import ast
@@ -74,7 +70,6 @@ _THEME = _REPO_ROOT / "THEME.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
 _ASSET_MANIFEST = _REPO_ROOT / "app" / "static" / "build" / "manifest.json"
-_RELEASE_DRAFTS_DIR = _REPO_ROOT / "docs" / "release-drafts"
 
 _DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
     r"\b(?:runs|r)\.session_id\s*=\s*\?.{0,240}\b(?:runs|r)\.team_id\s*=\s*\?"
@@ -1261,60 +1256,7 @@ class TestArchitectureRouteInventory:
         )
 
 
-# ── Part 5: release-draft docs ───────────────────────────────────────────────
-
-class TestReleaseDraftDocs:
-    """Release branches can keep temporary MR/release-note drafts in-repo
-    without making them part of the official documentation map."""
-
-    def test_temporary_branch_artifacts_stay_out_of_official_docs(self):
-        if not _RELEASE_DRAFTS_DIR.exists():
-            pytest.skip("No release draft directory in this checkout")
-
-        official_docs = [
-            _README,
-            _CONTRIBUTING,
-            _DOC_STANDARDS,
-            _TESTS_README,
-            _ARCHITECTURE,
-            _CONFIGURATION,
-            _FEATURES,
-            _THEME,
-        ]
-        offenders = [
-            _markdown_path_for(path)
-            for path in official_docs
-            if "docs/release-drafts/" in path.read_text()
-        ]
-        assert not offenders, "Official docs must not reference temporary release draft files: " + ", ".join(offenders)
-
-    def test_release_drafts_are_paired_by_version(self):
-        if not _RELEASE_DRAFTS_DIR.exists():
-            pytest.skip("No release draft directory in this checkout")
-
-        drafts = sorted(path.name for path in _RELEASE_DRAFTS_DIR.glob("v*.md"))
-        versions: dict[str, set[str]] = {}
-        malformed = []
-        for filename in drafts:
-            match = re.match(r"^(v\d+\.\d+)-(merge-request|release-notes)\.md$", filename)
-            if not match:
-                malformed.append(filename)
-                continue
-            versions.setdefault(match.group(1), set()).add(match.group(2))
-
-        missing = [
-            f"  {version}: expected merge-request and release-notes drafts, found {sorted(kinds)}"
-            for version, kinds in sorted(versions.items())
-            if kinds != {"merge-request", "release-notes"}
-        ]
-        assert not malformed and not missing, (
-            "Release draft files must be paired as "
-            "vX.Y-merge-request.md and vX.Y-release-notes.md:\n"
-            + "\n".join([*(f"  malformed: {name}" for name in malformed), *missing])
-        )
-
-
-# ── Part 6: operator configuration docs ──────────────────────────────────────
+# ── Part 5: operator configuration docs ──────────────────────────────────────
 
 class TestOperatorConfigurationDocs:
     """Operator-facing config defaults must stay represented in both the
@@ -1339,7 +1281,7 @@ class TestOperatorConfigurationDocs:
         )
 
 
-# ── Part 7: team-mode scope predicates ───────────────────────────────────────
+# ── Part 6: team-mode scope predicates ───────────────────────────────────────
 
 class TestTeamModeScopePredicates:
     def test_direct_team_run_predicates_use_owner_scope_helpers(self):
@@ -1362,7 +1304,7 @@ class TestTeamModeScopePredicates:
         )
 
 
-# ── Part 8: related-doc navigation ───────────────────────────────────────────
+# ── Part 7: related-doc navigation ───────────────────────────────────────────
 
 class TestRelatedDocsNavigation:
     def test_related_docs_sections_list_project_markdown_files(self):
@@ -1390,7 +1332,7 @@ class TestRelatedDocsNavigation:
                 if not missing and not extra:
                     issues.append(
                         f"{path} Related Docs order drift. Keep links in git ls-files order, "
-                        "excluding release drafts and the current file."
+                        "excluding the current file."
                     )
         assert not issues, "\n\n".join(issues)
 
@@ -1400,5 +1342,5 @@ class TestRelatedDocsNavigation:
         links = _documentation_map_links(_README)
         assert links == expected, (
             "README.md '## Documentation Map' drift. Keep links in git ls-files "
-            "order, excluding release drafts and README.md itself."
+            "order, excluding README.md itself."
         )

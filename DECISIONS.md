@@ -73,7 +73,7 @@ Redis Streams were chosen for production because darklab_shell already relies on
 
 The app still includes a single-process in-memory broker fallback for local development, but production live reattachment expects Redis. That split is intentional: local development should stay easy to start, while Docker/Gunicorn deployments need one shared broker so active run state, stream replay, and process control behave consistently no matter which worker handles the next request.
 
-The old request-owned `POST /run` execution route was removed instead of kept as a compatibility layer. The app is pre-release, and maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made future active-run features more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is saved to normal run history.
+The old request-owned `POST /run` execution route was removed instead of kept as a compatibility layer. Maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made active-run behavior more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is saved to normal run history.
 
 ### Multi-worker Process Killing via Redis
 
@@ -237,7 +237,7 @@ Normal schedules and watcher-owned schedules share the physical `schedules` tabl
 
 The firing policy is deliberately conservative:
 
-- schedules require durable `tok_` sessions so revocation can stop future work
+- schedules require durable `tok_` sessions so revocation can stop later fires
 - strict five-field cron and a five-minute minimum custom interval prevent accidental rapid loops
 - missed fires are coalesced on worker startup instead of replaying every skipped interval
 - overlap policy is stored as `skip` and enforced by recording an audit row instead of starting another copy while the previous scheduled run is still active
@@ -519,7 +519,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 - [FEATURES.md](FEATURES.md) - full per-feature reference
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide

@@ -1215,7 +1215,7 @@ Relative paths are resolved from `app/conf`. The app reloads the catalog when th
 - [FEATURES.md](FEATURES.md) - full per-feature reference
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide

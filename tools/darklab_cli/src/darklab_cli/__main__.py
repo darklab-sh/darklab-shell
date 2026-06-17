@@ -21,6 +21,8 @@ COMPLETION_SHELLS = ("bash", "zsh", "fish")
 COMPLETION_INSTALL_SHELLS = ("auto", *COMPLETION_SHELLS)
 NOTIFICATION_CHANNEL_KIND_CHOICES = ("webhook", "slack", "discord", "telegram", "pushover", "email")
 TEAM_ROLE_CHOICES = ("owner", "admin", "operator", "viewer")
+WATCHER_POLICY_SIGNAL_CLASS_CHOICES = ("findings", "entities", "ports")
+HISTORY_TYPE_CHOICES = ("all", "runs", "runs_external", "runs_builtin", "external", "builtin")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -122,7 +124,7 @@ def _parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Start a non-interactive command run.")
     run.add_argument("run_command")
     run.add_argument("--project", dest="project_id")
-    run.add_argument("--link-project", dest="link_project", help="Project name to resolve and link after completion.")
+    run.add_argument("--link-project", dest="link_project", help="Project name to resolve before starting the run.")
     run.add_argument("--wait", action="store_true", help="Wait for the run to finish instead of streaming output.")
     run.add_argument(
         "--wait-timeout",
@@ -149,6 +151,13 @@ def _parser() -> argparse.ArgumentParser:
 
     history = sub.add_parser("history", help="List completed run history.")
     history.add_argument("--project", dest="project_id")
+    history.add_argument(
+        "--type",
+        dest="history_type",
+        choices=HISTORY_TYPE_CHOICES,
+        default="all",
+        help="Filter run type: all, runs, runs_external/external, or runs_builtin/builtin.",
+    )
     history.add_argument("--since")
     history.add_argument("--until")
     history.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
@@ -337,8 +346,10 @@ def _parser() -> argparse.ArgumentParser:
         help="Create a watcher from a baseline run or from its first run.",
         usage=(
             "darklab watch create [--first-run] (--cron CRON | --every PRESET) "
-            "[--label LABEL] [--timezone TIMEZONE] [--disabled] "
-            "[--suppress-removals] [--notify-metadata-changes] [--format {text,json}] "
+            "[--label LABEL] [--project PROJECT_ID] [--timezone TIMEZONE] [--disabled] "
+            "[--suppress-removals] [--notify-metadata-changes] "
+            "[--ignore-line-pattern PATTERN] [--alert-after-repeated-changes N] "
+            "[--alert-signal-class {findings,entities,ports}] [--format {text,json}] "
             "[baseline_run_id] [-- COMMAND]"
         ),
         description=(
@@ -360,10 +371,31 @@ def _parser() -> argparse.ArgumentParser:
     watch_create.add_argument("--cron")
     watch_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     watch_create.add_argument("--label")
+    watch_create.add_argument("--project", dest="project_id", help="Project id to show this watcher in Project Monitoring.")
     watch_create.add_argument("--timezone")
     watch_create.add_argument("--disabled", action="store_true", help="Create the watcher paused.")
     watch_create.add_argument("--suppress-removals", action="store_true", help="Ignore removal-only diffs.")
     watch_create.add_argument("--notify-metadata-changes", action="store_true", help="Treat metadata-only changes as diffs.")
+    watch_create.add_argument(
+        "--ignore-line-pattern",
+        action="append",
+        default=[],
+        help="Textual fallback line pattern to ignore; repeat for multiple patterns.",
+    )
+    watch_create.add_argument(
+        "--alert-after-repeated-changes",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Send changed notifications only after N repeated changes; 1-10, default 1.",
+    )
+    watch_create.add_argument(
+        "--alert-signal-class",
+        choices=WATCHER_POLICY_SIGNAL_CLASS_CHOICES,
+        action="append",
+        default=[],
+        help="Signal class allowed to send changed notifications; repeat for multiple classes.",
+    )
     watch_create.add_argument("--format", choices=("text", "json"), default="text")
     watch_create.add_argument("watch_argv", nargs=argparse.REMAINDER, metavar="[baseline_run_id] [-- COMMAND]")
 
@@ -391,6 +423,45 @@ def _parser() -> argparse.ArgumentParser:
     watch_accept.add_argument("watcher_id")
     watch_accept.add_argument("--run-id", help="Specific completed watcher run to accept instead of the latest fire.")
     watch_accept.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_set_project = watch_sub.add_parser("set-project", help="Assign or clear a watcher's Project Monitoring link.")
+    watch_set_project.add_argument("watcher_id")
+    watch_set_project.add_argument("project_id", nargs="?", help="Project id to assign.")
+    watch_set_project.add_argument("--clear", action="store_true", help="Clear the watcher project link.")
+    watch_set_project.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_set_policy = watch_sub.add_parser("set-policy", help="Update watcher noise and notification policy.")
+    watch_set_policy.add_argument("watcher_id")
+    watch_set_policy.add_argument(
+        "--ignore-line-pattern",
+        action="append",
+        default=[],
+        help="Replace ignored textual fallback patterns; repeat for multiple patterns.",
+    )
+    watch_set_policy.add_argument(
+        "--clear-ignore-line-patterns",
+        action="store_true",
+        help="Clear ignored textual fallback patterns.",
+    )
+    watch_set_policy.add_argument(
+        "--alert-after-repeated-changes",
+        type=int,
+        metavar="N",
+        help="Send changed notifications only after N repeated changes; 1-10.",
+    )
+    watch_set_policy.add_argument(
+        "--alert-signal-class",
+        choices=WATCHER_POLICY_SIGNAL_CLASS_CHOICES,
+        action="append",
+        default=[],
+        help="Replace signal classes allowed to send changed notifications; repeat for multiple classes.",
+    )
+    watch_set_policy.add_argument(
+        "--clear-alert-signal-classes",
+        action="store_true",
+        help="Allow all signal classes to send changed notifications.",
+    )
+    watch_set_policy.add_argument("--format", choices=("text", "json"), default="text")
 
     watch_fires = watch_sub.add_parser("fires", help="List watcher fire audit rows.")
     watch_fires.add_argument("watcher_id")
@@ -779,7 +850,7 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "cancel":
             return _print_payload(client.request("POST", f"/runs/{args.run_id}/cancel"), args.format)
         case "history":
-            payload = client.request("GET", "/history", params=_page_params(args))
+            payload = client.request("GET", "/history", params=_history_params(args))
             return _print_collection(
                 payload,
                 "runs",
@@ -1141,6 +1212,8 @@ def _watch_create_argv(args: argparse.Namespace) -> list[str]:
         parts.extend(["--every", str(args.every)])
     if args.label:
         parts.extend(["--label", str(args.label)])
+    if getattr(args, "project_id", None):
+        parts.extend(["--project", str(args.project_id)])
     if args.timezone:
         parts.extend(["--timezone", str(args.timezone)])
     if args.disabled:
@@ -1149,6 +1222,12 @@ def _watch_create_argv(args: argparse.Namespace) -> list[str]:
         parts.append("--suppress-removals")
     if args.notify_metadata_changes:
         parts.append("--notify-metadata-changes")
+    for pattern in getattr(args, "ignore_line_pattern", []) or []:
+        parts.extend(["--ignore-line-pattern", str(pattern)])
+    if getattr(args, "alert_after_repeated_changes", 1) != 1:
+        parts.extend(["--alert-after-repeated-changes", str(args.alert_after_repeated_changes)])
+    for signal_class in getattr(args, "alert_signal_class", []) or []:
+        parts.extend(["--alert-signal-class", str(signal_class)])
     if args.format != "text":
         parts.extend(["--format", str(args.format)])
     parts.extend(list(args.watch_argv or []))
@@ -1172,10 +1251,14 @@ def _watch_create_args(argv: list[str]) -> argparse.Namespace:
     cadence.add_argument("--cron")
     cadence.add_argument("--every", metavar="PRESET")
     parser.add_argument("--label")
+    parser.add_argument("--project", dest="project_id")
     parser.add_argument("--timezone")
     parser.add_argument("--disabled", action="store_true")
     parser.add_argument("--suppress-removals", action="store_true")
     parser.add_argument("--notify-metadata-changes", action="store_true")
+    parser.add_argument("--ignore-line-pattern", action="append", default=[])
+    parser.add_argument("--alert-after-repeated-changes", type=int, default=1)
+    parser.add_argument("--alert-signal-class", choices=WATCHER_POLICY_SIGNAL_CLASS_CHOICES, action="append", default=[])
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("baseline_run_id", nargs="?")
 
@@ -1307,6 +1390,35 @@ def _format_bool_options(options: Any) -> str:
     return ", ".join(enabled) if enabled else "default"
 
 
+def _watcher_policy_from_values(
+    *,
+    ignore_line_patterns: list[str],
+    alert_after_repeated_changes: int,
+    alert_signal_classes: list[str],
+) -> dict[str, Any]:
+    return {
+        "ignore_line_patterns": [str(item) for item in ignore_line_patterns],
+        "alert_after_repeated_changes": int(alert_after_repeated_changes),
+        "alert_signal_classes": [str(item) for item in alert_signal_classes],
+    }
+
+
+def _format_watcher_policy(policy: Any) -> str:
+    if not isinstance(policy, dict):
+        return ""
+    patterns = [str(item) for item in policy.get("ignore_line_patterns") or []]
+    repeated = int(policy.get("alert_after_repeated_changes") or 1)
+    classes = [str(item) for item in policy.get("alert_signal_classes") or []]
+    parts: list[str] = []
+    if patterns:
+        parts.append("ignore-line-patterns: " + ", ".join(patterns))
+    if repeated != 1:
+        parts.append(f"alert-after-repeated-changes: {repeated}")
+    if classes:
+        parts.append("alert-signal-classes: " + ", ".join(classes))
+    return "; ".join(parts) if parts else "default"
+
+
 def _print_recent_fire_table(
     fires: list[Any],
     *,
@@ -1351,7 +1463,7 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
                 payload,
                 "watchers",
                 args.format,
-                fields=("id", "state", "baseline_run_id", "label", "command_text"),
+                fields=("id", "state", "project_id", "baseline_run_id", "label", "command_text"),
             )
         case "create":
             create_args = _watch_create_args(_watch_create_argv(args))
@@ -1363,12 +1475,18 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
                 "cron_expr": create_args.cron,
                 "cadence_preset": create_args.every,
                 "label": create_args.label,
+                "project_id": create_args.project_id,
                 "timezone": create_args.timezone,
                 "enabled": not create_args.disabled,
                 "options": {
                     "suppress_removals": bool(create_args.suppress_removals),
                     "notify_metadata_changes": bool(create_args.notify_metadata_changes),
                 },
+                "policy": _watcher_policy_from_values(
+                    ignore_line_patterns=list(create_args.ignore_line_pattern or []),
+                    alert_after_repeated_changes=create_args.alert_after_repeated_changes,
+                    alert_signal_classes=list(create_args.alert_signal_class or []),
+                ),
             }
             if create_args.command_override:
                 command = str(create_args.command_override or "").strip()
@@ -1388,7 +1506,7 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
             )
             return _print_watcher(payload, args.format)
         case "resume":
-            payload = client.request("PATCH", f"/watchers/{args.watcher_id}", body={"state": "ok"})
+            payload = client.request("PATCH", f"/watchers/{args.watcher_id}", body={"resume": True})
             return _print_watcher(payload, args.format)
         case "delete":
             return _print_payload(client.request("DELETE", f"/watchers/{args.watcher_id}"), args.format)
@@ -1400,13 +1518,60 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
                 client.request("POST", f"/watchers/{args.watcher_id}/accept-baseline", body=body),
                 args.format,
             )
+        case "set-project":
+            project_id = "" if args.clear else str(args.project_id or "").strip()
+            if not args.clear and not project_id:
+                raise DarklabCliError("watch set-project needs a project id, or use --clear.")
+            payload = client.request("PATCH", f"/watchers/{args.watcher_id}", body={"project_id": project_id})
+            return _print_watcher(payload, args.format)
+        case "set-policy":
+            if args.clear_ignore_line_patterns and args.ignore_line_pattern:
+                raise DarklabCliError("watch set-policy cannot combine --clear-ignore-line-patterns with --ignore-line-pattern.")
+            if args.clear_alert_signal_classes and args.alert_signal_class:
+                raise DarklabCliError("watch set-policy cannot combine --clear-alert-signal-classes with --alert-signal-class.")
+            has_policy_change = any((
+                args.clear_ignore_line_patterns,
+                bool(args.ignore_line_pattern),
+                args.alert_after_repeated_changes is not None,
+                bool(args.alert_signal_class),
+                args.clear_alert_signal_classes,
+            ))
+            if not has_policy_change:
+                raise DarklabCliError("watch set-policy needs at least one policy flag.")
+            current_payload = client.request("GET", f"/watchers/{args.watcher_id}")
+            watcher = current_payload.get("watcher") if isinstance(current_payload, dict) else {}
+            current_policy = watcher.get("policy") if isinstance(watcher, dict) else {}
+            if not isinstance(current_policy, dict):
+                current_policy = {}
+            ignore_line_patterns = list(current_policy.get("ignore_line_patterns") or [])
+            if args.clear_ignore_line_patterns:
+                ignore_line_patterns = []
+            elif args.ignore_line_pattern:
+                ignore_line_patterns = list(args.ignore_line_pattern)
+            alert_after_repeated_changes = (
+                args.alert_after_repeated_changes
+                if args.alert_after_repeated_changes is not None
+                else int(current_policy.get("alert_after_repeated_changes") or 1)
+            )
+            alert_signal_classes = list(current_policy.get("alert_signal_classes") or [])
+            if args.clear_alert_signal_classes:
+                alert_signal_classes = []
+            elif args.alert_signal_class:
+                alert_signal_classes = list(args.alert_signal_class)
+            policy = _watcher_policy_from_values(
+                ignore_line_patterns=ignore_line_patterns,
+                alert_after_repeated_changes=alert_after_repeated_changes,
+                alert_signal_classes=alert_signal_classes,
+            )
+            payload = client.request("PATCH", f"/watchers/{args.watcher_id}", body={"policy": policy})
+            return _print_watcher(payload, args.format)
         case "fires":
             payload = client.request("GET", f"/watchers/{args.watcher_id}/fires", params=_page_window_params(args))
             return _print_collection(
                 payload,
                 "fires",
                 args.format,
-                fields=("created", "diff_kind", "state_at_fire", "run_id"),
+                fields=("created", "fire_kind", "state_reason", "ack_state", "diff_kind", "state_at_fire", "run_id"),
             )
     return die("unknown watch command")
 
@@ -1416,7 +1581,7 @@ def _print_watcher(payload: dict[str, Any], output_format: str) -> int:
         return _print_payload(payload, "json")
     watcher = payload.get("watcher") if isinstance(payload, dict) else {}
     if isinstance(watcher, dict):
-        _print_table([watcher], ("id", "state", "baseline_run_id", "last_run_id", "label", "command_text"))
+        _print_table([watcher], ("id", "state", "project_id", "baseline_run_id", "last_run_id", "label", "command_text"))
     return 0
 
 
@@ -1449,6 +1614,7 @@ def _print_watcher_info(payload: dict[str, Any], fires_payload: dict[str, Any], 
     _print_detail_section("Watcher", (
         ("ID", watcher.get("id")),
         ("Label", watcher.get("label") or "(none)"),
+        ("Project", watcher.get("project_id") or "(none)"),
         ("Status", _watcher_status(watcher)),
         ("Created", _format_schedule_time(watcher.get("created"), timezone_name)),
         ("Updated", _format_schedule_time(watcher.get("updated"), timezone_name)),
@@ -1470,11 +1636,12 @@ def _print_watcher_info(payload: dict[str, Any], fires_payload: dict[str, Any], 
         ("Changed streak", watcher.get("consecutive_changed")),
         ("Failures", watcher.get("consecutive_failures")),
         ("Options", _format_bool_options(watcher.get("options"))),
+        ("Policy", _format_watcher_policy(watcher.get("policy"))),
         ("Last error", watcher.get("last_error")),
     ))
     _print_recent_fire_table(
         fires,
-        fields=("created", "diff_kind", "state_at_fire", "baseline_run_id", "run_id"),
+        fields=("created", "fire_kind", "state_reason", "ack_state", "diff_kind", "state_at_fire", "baseline_run_id", "run_id"),
         time_field="created",
         timezone_name=timezone_name,
     )
@@ -1844,6 +2011,20 @@ def _page_params(args: argparse.Namespace) -> dict[str, Any]:
         "limit": getattr(args, "limit", None),
         "offset": getattr(args, "offset", None),
     }
+
+
+def _history_params(args: argparse.Namespace) -> dict[str, Any]:
+    params = _page_params(args)
+    history_type = str(getattr(args, "history_type", "") or "").strip().lower()
+    run_kind = {
+        "external": "external",
+        "runs_external": "external",
+        "builtin": "builtin",
+        "runs_builtin": "builtin",
+    }.get(history_type, "")
+    if run_kind:
+        params["run_kind"] = run_kind
+    return params
 
 
 def _structured_selector_params(args: argparse.Namespace) -> dict[str, Any]:

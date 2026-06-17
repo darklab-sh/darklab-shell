@@ -281,6 +281,7 @@ describe('project monitoring controller', () => {
     expect(container.textContent).toContain('All signals')
     expect(container.textContent).toContain('Critical')
     expect(container.textContent).toContain('New open port 443/tcp https')
+    expect(container.querySelector('.project-monitoring-card-grid')).not.toBeNull()
     const disabledCompare = [...container.querySelectorAll('[data-project-monitoring-action="compare"]')]
       .find(button => button.dataset.baselineRunId === '')
     expect(disabledCompare.disabled).toBe(true)
@@ -409,7 +410,7 @@ describe('project monitoring controller', () => {
     expect(container.querySelector('.project-monitoring-timeline')?.classList.contains('nice-scroll')).toBe(true)
   })
 
-  it('renders primitive-safe fallback action buttons without the shared button factory', async () => {
+  it('requires the shared button factory for action buttons', async () => {
     const monitoringApi = loadMonitoringModule()
     const projectWorkspaceRequest = vi.fn(async () => apiResponse(monitoringPayload))
     const controller = monitoringApi.createProjectMonitoringController(
@@ -418,14 +419,8 @@ describe('project monitoring controller', () => {
 
     await controller.load('prj_1', { render: false })
     const container = document.createElement('div')
-    controller.renderMonitoring(container, 'prj_1')
-
-    const buttons = [...container.querySelectorAll('button[data-project-monitoring-action]')]
-    expect(buttons.length).toBeGreaterThan(0)
-    expect(buttons.every(button => button.classList.contains('btn'))).toBe(true)
-    expect(buttons.every(button => button.classList.contains('btn-compact'))).toBe(true)
-    expect(buttons.every(button => ['btn-primary', 'btn-secondary', 'btn-ghost', 'btn-destructive']
-      .some(role => button.classList.contains(role)))).toBe(true)
+    expect(() => controller.renderMonitoring(container, 'prj_1'))
+      .toThrow('Project Monitoring requires a shared project button factory.')
   })
 
   it('opens run details and compares available monitoring runs from action buttons', async () => {
@@ -453,6 +448,10 @@ describe('project monitoring controller', () => {
     const settings = container.querySelector('[data-project-monitoring-action="settings"][data-watcher-id="wtr_1"]')
     await controller.handleClick({ target: settings, preventDefault: vi.fn(), stopPropagation: vi.fn() })
     expect(globalThis.openWatchersModal).toHaveBeenCalledWith({ watcherId: 'wtr_1' })
+
+    const newMonitor = container.querySelector('[data-project-monitoring-action="new-monitor"]')
+    await controller.handleClick({ target: newMonitor, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+    expect(globalThis.openWatchersModal).toHaveBeenCalledWith({ projectId: 'prj_1', newWatcher: true })
   })
 
   it('confirms before accepting a watcher baseline from monitoring', async () => {

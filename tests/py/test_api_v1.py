@@ -3,6 +3,8 @@ import json
 import sqlite3
 import stat
 import sys
+import threading
+import urllib.request
 import uuid
 from dataclasses import fields
 from importlib import import_module
@@ -17,6 +19,7 @@ import core.process as process
 from core.database import DB_PATH
 from services.scheduler.models import CADENCE_PRESETS, Schedule
 from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
+from werkzeug.serving import make_server
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -28,6 +31,28 @@ if str(CLI_SRC) not in sys.path:
 def get_client():
     shell_app.app.config["TESTING"] = True
     return shell_app.app.test_client()
+
+
+class _LiveCliServer:
+    def __init__(self) -> None:
+        self._server = make_server("127.0.0.1", 0, shell_app.app, threaded=True)
+        host, port = self._server.server_address[:2]
+        self.base_url = f"http://{host}:{port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+
+
+def _live_session_token(base_url: str) -> str:
+    with urllib.request.urlopen(f"{base_url}/session/token/generate", timeout=5) as resp:  # nosec B310 - local test server
+        payload = json.loads(resp.read().decode("utf-8"))
+    return str(payload["session_token"])
 
 
 def _token(client):
@@ -3076,6 +3101,7 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "id": "wtr_cli",
         "state": "ok",
         "state_reason": "",
+        "project_id": "prj_cli",
         "baseline_run_id": "run_base",
         "last_run_id": "",
         "last_diff_summary": {
@@ -3085,6 +3111,11 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "label": "Hourly Watch",
         "command_text": "nmap -sV darklab.sh",
         "options": {"suppress_removals": True, "notify_metadata_changes": False},
+        "policy": {
+            "ignore_line_patterns": ["^Host is up"],
+            "alert_after_repeated_changes": 2,
+            "alert_signal_classes": ["ports"],
+        },
         "consecutive_no_change": 2,
         "consecutive_changed": 1,
         "consecutive_failures": 0,
@@ -3118,12 +3149,14 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                     "cron_expr": None,
                     "cadence_preset": "hourly",
                     "label": "Hourly Watch",
+                    "project_id": body.get("project_id"),
                     "timezone": None,
                     "enabled": True,
                     "options": {
                         "suppress_removals": bool(body.get("command")),
                         "notify_metadata_changes": False,
                     },
+                    "policy": body.get("policy"),
                 }
                 if body.get("command"):
                     expected_body["command"] = "nmap -sV darklab.sh"
@@ -3136,6 +3169,17 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                 return {"watcher": watcher}
             if path == "/watchers/wtr_cli" and method == "PATCH":
                 assert body is not None
+                if "project_id" in body:
+                    return {"watcher": {**watcher, "project_id": body["project_id"]}}
+                if "policy" in body:
+                    assert body["policy"] == {
+                        "ignore_line_patterns": ["^Host is up", "^RTT jitter"],
+                        "alert_after_repeated_changes": 3,
+                        "alert_signal_classes": ["findings", "ports"],
+                    }
+                    return {"watcher": {**watcher, "policy": body["policy"]}}
+                if body.get("resume") is True:
+                    return {"watcher": {**watcher, "state": "ok"}}
                 state = "paused" if body.get("state") == "paused" else "ok"
                 return {"watcher": {**watcher, "state": state}}
             if path == "/watchers/wtr_cli/run-now":
@@ -3149,6 +3193,9 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                 return {
                     "fires": [{
                         "created": "2026-05-20T00:00:00+00:00",
+                        "fire_kind": "changed",
+                        "state_reason": "diff_detected",
+                        "ack_state": "new",
                         "diff_kind": "textual",
                         "state_at_fire": "changed",
                         "run_id": "run_fire",
@@ -3172,7 +3219,15 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "hourly",
         "--label",
         "Hourly Watch",
+        "--project",
+        "prj_cli",
         "--suppress-removals",
+        "--ignore-line-pattern",
+        "^Host is up",
+        "--alert-after-repeated-changes",
+        "2",
+        "--alert-signal-class",
+        "ports",
         "--",
         "nmap",
         "-sV",
@@ -3203,9 +3258,15 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert "Cadence" in info_output
     assert "Health" in info_output
     assert "Recent Fires" in info_output
+    assert "prj_cli" in info_output
     assert "2026-05-20 00:00:00 UTC" in info_output
+    assert "diff_detected" in info_output
+    assert "new" in info_output
     assert "nmap -sV darklab.sh" in info_output
     assert "suppress-removals" in info_output
+    assert "ignore-line-patterns: ^Host is up" in info_output
+    assert "alert-after-repeated-changes: 2" in info_output
+    assert "alert-signal-classes: ports" in info_output
     assert cli_main.main(["watch", "pause", "wtr_cli"]) == 0
     assert "paused" in capsys.readouterr().out
     assert cli_main.main(["watch", "resume", "wtr_cli"]) == 0
@@ -3213,9 +3274,31 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert cli_main.main(["watch", "run", "wtr_cli"]) == 0
     assert "fire: fired" in capsys.readouterr().out
     assert cli_main.main(["watch", "fires", "wtr_cli", "--limit", "5"]) == 0
-    assert "textual" in capsys.readouterr().out
+    fires_output = capsys.readouterr().out
+    assert "textual" in fires_output
+    assert "changed" in fires_output
+    assert "diff_detected" in fires_output
+    assert "new" in fires_output
     assert cli_main.main(["watch", "accept", "wtr_cli", "--run-id", "run_fire"]) == 0
     assert "run_fire" in capsys.readouterr().out
+    assert cli_main.main(["watch", "set-project", "wtr_cli", "--clear"]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
+    assert cli_main.main([
+        "watch",
+        "set-policy",
+        "wtr_cli",
+        "--ignore-line-pattern",
+        "^Host is up",
+        "--ignore-line-pattern",
+        "^RTT jitter",
+        "--alert-after-repeated-changes",
+        "3",
+        "--alert-signal-class",
+        "findings",
+        "--alert-signal-class",
+        "ports",
+    ]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "delete", "wtr_cli", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
@@ -3232,6 +3315,9 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "/watchers/wtr_cli/run-now",
         "/watchers/wtr_cli/fires",
         "/watchers/wtr_cli/accept-baseline",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli",
         "/watchers/wtr_cli",
     ]
 
@@ -3928,6 +4014,31 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                     "has_more": False,
                 }
             if path == "/history":
+                if params and params.get("run_kind"):
+                    assert params == {
+                        "project_id": None,
+                        "since": None,
+                        "until": None,
+                        "limit": 50,
+                        "offset": 0,
+                        "run_kind": "external",
+                    }
+                    return {
+                        "runs": [{
+                            "id": "run_external",
+                            "status": "succeeded",
+                            "exit_code": 0,
+                            "finished": "2026-05-19T00:00:03+00:00",
+                            "command": "nmap darklab.sh",
+                        }],
+                    }
+                assert params == {
+                    "project_id": None,
+                    "since": None,
+                    "until": None,
+                    "limit": 50,
+                    "offset": 0,
+                }
                 return {
                     "runs": [
                         {
@@ -4068,6 +4179,8 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     ndjson_lines = capsys.readouterr().out.splitlines()
     assert json.loads(ndjson_lines[0])["id"] == "run_old"
     assert json.loads(ndjson_lines[1])["id"] == "run_cli"
+    assert cli_main.main(["history", "--type", "runs_external"]) == 0
+    assert "run_external" in capsys.readouterr().out
     assert cli_main.main(["grep", "needle", "--context", "1"]) == 0
     assert "run_cli:2: needle here" in capsys.readouterr().out
     assert cli_main.main(["output", "run_cli"]) == 0
@@ -4111,6 +4224,42 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "fnd_cli" in finding_output
     assert cli_main.main(["project", "missing"]) == 1
     assert "not_found: missing" in capsys.readouterr().err
+
+
+def test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    shell_app.app.config["TESTING"] = True
+    server = _LiveCliServer()
+    server.start()
+    try:
+        token = _live_session_token(server.base_url)
+        run_id = _seed_run(
+            token,
+            run_id=f"live_cli_{uuid.uuid4().hex[:12]}",
+            command="echo live-cli",
+            output="live cli ok",
+        )
+
+        monkeypatch.setenv("DARKLAB_API_URL", server.base_url)
+        monkeypatch.setenv("DARKLAB_TOKEN", token)
+        monkeypatch.delenv("DARKLAB_TEAM", raising=False)
+
+        assert cli_main.main(["whoami", "--format", "json"]) == 0
+        whoami = json.loads(capsys.readouterr().out)
+        assert whoami["token_created"]
+        assert whoami["last_seen_at"]
+
+        assert cli_main.main(["history", "--type", "external", "--format", "json"]) == 0
+        history = json.loads(capsys.readouterr().out)
+        assert any(run["id"] == run_id and run["command"] == "echo live-cli" for run in history["runs"])
+
+        assert cli_main.main(["output", run_id]) == 0
+        assert capsys.readouterr().out == "live cli ok\n"
+
+        assert cli_main.main(["show", f"missing_{run_id}"]) == 1
+        assert "not_found: Run not found." in capsys.readouterr().err
+    finally:
+        server.stop()
 
 
 def test_darklab_cli_tail_text_does_not_double_space_output(capsys):

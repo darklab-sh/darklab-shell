@@ -311,13 +311,10 @@ let exportedDarklabProjectMonitoring = null;
       if (typeof ctx.makeProjectButton === 'function') {
         return ctx.makeProjectButton(label, 'monitoring-action', projectId, normalizedRole);
       }
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `btn btn-${normalizedRole} btn-compact`;
-      button.dataset.projectAction = 'monitoring-action';
-      button.dataset.projectId = String(projectId || '');
-      button.textContent = label;
-      return button;
+      if (typeof ctx.makeButton === 'function') {
+        return ctx.makeButton(label, 'monitoring-action', projectId, normalizedRole);
+      }
+      throw new Error('Project Monitoring requires a shared project button factory.');
     }
 
     function statePill(state) {
@@ -651,7 +648,12 @@ let exportedDarklabProjectMonitoring = null;
       monitors.className = 'project-monitoring-section';
       const heading = document.createElement('h3');
       heading.className = mobile ? 'project-mobile-section-heading' : 'project-explorer-section-heading';
-      heading.textContent = 'Monitors';
+      const headingText = document.createElement('span');
+      headingText.textContent = 'Monitors';
+      const newMonitor = makeActionButton('New monitor', projectId, 'primary');
+      newMonitor.dataset.projectMonitoringAction = 'new-monitor';
+      newMonitor.dataset.projectId = String(projectId || '');
+      heading.append(headingText, newMonitor);
       const list = document.createElement('div');
       list.className = 'project-monitoring-grid';
       const filteredMonitors = st.monitors.filter(monitor => matchesMonitor(monitor, st.filters || {}));
@@ -674,7 +676,7 @@ let exportedDarklabProjectMonitoring = null;
           groupHeading.className = 'project-monitoring-group-heading';
           groupHeading.textContent = String(items[0]?.monitor_group?.label || 'Custom commands');
           const groupList = document.createElement('div');
-          groupList.className = 'project-monitoring-grid';
+          groupList.className = 'project-monitoring-grid project-monitoring-card-grid';
           items.forEach(monitor => groupList.appendChild(renderMonitor(projectId, monitor, { mobile })));
           group.append(groupHeading, groupList);
           list.appendChild(group);
@@ -815,6 +817,15 @@ let exportedDarklabProjectMonitoring = null;
       return true;
     }
 
+    async function openNewMonitor(projectId) {
+      const open = typeof global.openWatchersModal === 'function'
+        ? global.openWatchersModal
+        : (typeof globalThis.openWatchersModal === 'function' ? globalThis.openWatchersModal : null);
+      if (!open) return false;
+      await open({ projectId: String(projectId || ''), newWatcher: true });
+      return true;
+    }
+
     async function updateAck(projectId, fireId, ackState, note) {
       await monitoringRequest(
         `/projects/${encodeURIComponent(projectId)}/monitoring/fires/${encodeURIComponent(fireId)}`,
@@ -877,6 +888,12 @@ let exportedDarklabProjectMonitoring = null;
         }
         if (name === 'settings') {
           if (!await openWatcherSettings(action.dataset.watcherId)) {
+            ctx.setProjectWorkspaceMessage?.('Watcher settings are unavailable.', { error: true });
+          }
+          return true;
+        }
+        if (name === 'new-monitor') {
+          if (!await openNewMonitor(projectId)) {
             ctx.setProjectWorkspaceMessage?.('Watcher settings are unavailable.', { error: true });
           }
           return true;

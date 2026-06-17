@@ -41,7 +41,9 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Project Monitoring summary route has no consumer yet.**
+  - `GET /projects/<id>/monitoring/summary` and `get_project_monitoring_summary` ship a digest-ready payload, but no browser, CLI, or notification worker consumes it yet.
+  - Keep it documented as forward API surface if the attack-surface digest work is still planned; otherwise remove or hide it until a digest producer lands.
 
 ---
 
@@ -57,6 +59,9 @@ These are possible future improvements, split by whether they look worth carryin
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
 - **Package re-import preview/apply.**
   - Worth scoping once package handoff archives are used regularly. It should reuse the Atlas import preview/apply pattern and the package manifest import hints before it writes project data.
+- **Project Monitoring CLI surface.**
+  - Possible future `darklab monitoring <project_id>` and `darklab monitoring ack <project_id> <fire_id> --state STATE [--note NOTE]` commands could expose the Project Monitoring dashboard, rollups, and fire triage flow without opening the browser.
+  - Keep this lower priority than watcher creation, Project assignment, policy controls, and baseline acceptance, which are already available through `darklab watch`.
 - **Revisit PTY transport after real usage.**
   - The current Redis-brokered SSE plus POST endpoints keep deployment simple, but WebSockets may be worth it if latency, throughput, or bidirectional control becomes a real limitation.
 - **Split `pty.js` and `pty_service.py` if PTY work grows again.**

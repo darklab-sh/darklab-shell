@@ -557,7 +557,7 @@ Client-visible error codes include `session_required`, `file_required`,
 
 ### Project Monitoring Route Contract
 
-`services.projects.monitoring` builds the Project Monitoring payload used by the browser Monitoring tab and the lightweight summary route. It scopes rows through the same personal/team owner helpers as the rest of Projects, then selects watchers whose `project_id` matches the requested project. Ordinary user schedules are not mixed in because they do not have watcher baselines, diff state, or fire classifications.
+`services.projects.monitoring` builds the Project Monitoring payload used by the browser Monitoring tab and the lightweight summary route. It scopes rows through the same personal/team owner helpers as the rest of Projects, then selects watchers whose `project_id` matches the requested project. The Monitoring tab can open the shared Watchers modal with the current project preselected, and the modal plus `darklab watch` can assign or clear that project link. Ordinary user schedules are not mixed in because they do not have watcher baselines, diff state, or fire classifications.
 
 `GET /projects/<project_id>/monitoring` accepts `fire_limit`, clamped from 1 to 25 and defaulting to 8. The payload contains the project row, status `counts`, a digest-ready `summary`, `quiet_no_change_threshold`, grouped `monitors`, a chronological `timeline`, and `filter_options`. Each monitor is the normal watcher payload plus the resolved baseline/last run refs, `dashboard_state`, derived `monitor_group`, `linked_targets`, `current_triage_state`, `current_triage_fire`, recent fires, and latest fire. Dashboard state is derived from watcher state and counters: failed and changed states stay explicit, paused stays paused, quiet is a display label for `ok` watchers with enough repeated no-change fires, and active means `ok` but not quiet.
 
@@ -994,7 +994,7 @@ Line events can also carry `noise_kind` (`progress`, `status`, or `boilerplate`)
 plus an optional `noise_reason`. Noise metadata is separate from
 finding/warning/error signals: a line that already carries a signal stays useful
 output even when its role looks progress-like. The Python and browser helpers
-share the same rule, so future derived surfaces can ask whether a line is
+share the same rule, so derived surfaces can ask whether a line is
 background chatter without relying on CSS classes. The server-side signal
 classifier assigns the metadata for known scanner chatter such as ffuf progress,
 masscan rates, ProjectDiscovery banners/status lines, and nuclei status lines.
@@ -1059,7 +1059,7 @@ Watcher storage is split between `watchers` for current state and `watcher_fires
 
 Watcher creation and deletion use one database transaction for the watcher row and its owned schedule row. A session can own up to `watchers.max_per_session` watchers, defaulting to 32. Multiple watchers can wrap the same command, but they still keep separate schedules, baselines, state, and fire audit rows. Update, pause, resume, and accept-baseline operations go through the watcher service so the watcher row and owned schedule stay in sync.
 
-Watcher management is exposed through the browser Watchers modal, the terminal `watch` built-in, `/api/v1/watchers`, and the bundled `darklab watch` CLI. All four paths use the same service layer, baseline-completion checks, command validation, schedule ownership rules, and paged fire audit rows.
+Watcher management is exposed through the browser Watchers modal, the terminal `watch` built-in, `/api/v1/watchers`, and the bundled `darklab watch` CLI. The browser modal and bundled CLI can set project membership directly, while the service can still infer a project from a uniquely project-linked baseline run. All four paths use the same service layer, baseline-completion checks, command validation, schedule ownership rules, and paged fire audit rows.
 
 The scheduler does not have a separate watcher timer. When a due row has `owner_kind='watcher'`, `scheduler.dispatch` claims the fire, launches the command through the same brokered run path as a normal schedule, records a pending watcher fire, and returns without waiting for the scan to finish. When the run finalizes, `services.watchers.finalize` claims that pending fire, compares the completed run to the watcher's baseline through the shared run-comparison helpers, updates watcher state, and queues `watcher_changed`, `watcher_error`, or `watcher_recovered` notifications. A non-empty diff moves the watcher to `changed`; an empty diff after `changed` moves it back to `ok` and can send `watcher_recovered`; an empty diff after `ok` stays quiet. Failed watcher runs do not replace the baseline, and five consecutive failures disable the owned schedule with `WATCHER_DISABLED_AFTER_ERRORS`.
 
@@ -2111,12 +2111,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,756
-- docs/inventory meta-tests: 42
-- `pytest`: 2120 (2083 behavior + 37 meta)
-- `vitest`: 1412
+- behavior tests: 3,759
+- docs/inventory meta-tests: 40
+- `pytest`: 2120 (2085 behavior + 35 meta)
+- `vitest`: 1413
 - `playwright`: 266
-- total: 3,798
+- total: 3,799
 
 ### Testing Architecture
 
@@ -2154,7 +2154,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [FEATURES.md](FEATURES.md) - full per-feature reference
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](TODO.md) - backlog items, research notes, and known issues
 - [Atlas and Entity Model →  → Export Schema](#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
